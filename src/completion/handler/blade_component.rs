@@ -19,9 +19,8 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
-use crate::blade::component_tags::{
-    TagContext, TagCursor, TagKind, kebab_case, tag_context_at, view_names_for_component_tag,
-};
+use crate::blade::component_names::view_names_for_component_tag;
+use crate::blade::component_tags::{TagContext, TagCursor, TagKind, kebab_case, tag_context_at};
 use crate::blade::signature;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::types::Visibility;
@@ -91,7 +90,7 @@ impl Backend {
                     .collect();
                 let views: Vec<String> = discovery.views.keys().cloned().collect();
                 let anonymous = self.anonymous_component_namespaces();
-                for name in crate::blade::component_tags::component_tag_names(&views, &anonymous) {
+                for name in crate::blade::component_names::component_tag_names(&views, &anonymous) {
                     // A template whose name a class already answers to is
                     // that class's view, not a component of its own.
                     if !discovery.components.contains_key(&name) {

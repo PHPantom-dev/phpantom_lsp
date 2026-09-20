@@ -13,95 +13,12 @@
 use std::sync::Arc;
 
 use crate::common::{
-    apply_edits, create_test_backend, extract_edits, lsp_pos_to_offset, resolve_action,
+    apply_edits, create_test_backend, extract_edit_text, extract_edits, find_actions,
+    get_code_actions_at, inject_phpstan_diag_with_data, lsp_pos_to_offset, resolve_action,
 };
 use tower_lsp::lsp_types::*;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
-
-/// Helper: send a code action request at the given line/character and
-/// return the list of code actions.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
-
-/// Find all "Make ..." code actions from a list of actions.
-fn find_visibility_actions(actions: &[CodeActionOrCommand]) -> Vec<&CodeAction> {
-    actions
-        .iter()
-        .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Make ") => Some(ca),
-            _ => None,
-        })
-        .collect()
-}
-
-/// Extract the replacement text from a resolved code action's workspace edit.
-fn extract_edit_text(action: &CodeAction) -> String {
-    let edit = action.edit.as_ref().expect("action should have an edit");
-    let changes = edit.changes.as_ref().expect("edit should have changes");
-    let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-    assert_eq!(edits.len(), 1, "expected exactly one text edit");
-    edits[0].new_text.clone()
-}
-
-fn line_col_to_offset(content: &str, line: u32, col: u32) -> usize {
-    lsp_pos_to_offset(content, Position::new(line, col))
-}
-
-/// Inject a PHPStan diagnostic into the backend's cache and return it.
-fn inject_phpstan_diag(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    line: u32,
-    message: &str,
-    identifier: &str,
-) -> Diagnostic {
-    let diag = Diagnostic {
-        range: Range {
-            start: Position::new(line, 0),
-            end: Position::new(line, 80),
-        },
-        severity: Some(DiagnosticSeverity::ERROR),
-        code: Some(NumberOrString::String(identifier.to_string())),
-        source: Some("PHPStan".to_string()),
-        message: message.to_string(),
-        data: Some(serde_json::json!({ "ignorable": false })),
-        ..Default::default()
-    };
-    {
-        let mut cache = backend.phpstan_last_diags().lock();
-        cache.entry(uri.to_string()).or_default().push(diag.clone());
-    }
-    diag
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Basic functionality (no parent, no PHPStan)
@@ -118,8 +35,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -138,8 +55,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     let make_protected = vis_actions
         .iter()
@@ -165,8 +82,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     let make_private = vis_actions
         .iter()
@@ -188,8 +105,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -208,8 +125,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -228,8 +145,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -248,8 +165,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -272,8 +189,8 @@ class User {
     backend.update_ast(uri, content);
 
     // Cursor on `private` of promoted $name param (line 3).
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -294,8 +211,8 @@ class User {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let vis_actions = find_actions(&actions, "Make ");
 
     let make_public = vis_actions
         .iter()
@@ -313,8 +230,7 @@ class User {
     // method-level `public`.
     let range = &edits[0].range;
     let keyword_in_source =
-        &content[line_col_to_offset(content, range.start.line, range.start.character)
-            ..line_col_to_offset(content, range.end.line, range.end.character)];
+        &content[lsp_pos_to_offset(content, range.start)..lsp_pos_to_offset(content, range.end)];
     assert_eq!(keyword_in_source, "private");
 }
 
@@ -329,8 +245,8 @@ interface Renderable {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     // Interfaces only have public methods, but the action still offers alternatives.
     assert_eq!(vis_actions.len(), 2);
@@ -347,8 +263,8 @@ trait Loggable {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -375,8 +291,8 @@ enum Color {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
 }
@@ -394,8 +310,8 @@ class User {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 4, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 4, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -412,8 +328,8 @@ function globalFn(): void {}
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 1, 4);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 1, 4);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert!(vis_actions.is_empty());
 }
@@ -429,8 +345,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert!(vis_actions.is_empty());
 }
@@ -446,8 +362,8 @@ enum Status {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert!(vis_actions.is_empty());
 }
@@ -463,8 +379,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 14);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 14);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
 }
@@ -480,8 +396,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 21);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 21);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
 }
@@ -499,8 +415,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 3, 10);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 10);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 0);
 }
@@ -516,8 +432,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -540,8 +456,8 @@ class Foo {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
     let make_private = vis_actions
         .iter()
         .find(|a| a.title == "Make private")
@@ -585,8 +501,8 @@ class Child extends Base {
     backend.update_ast(uri, content);
 
     // Cursor on the `private` keyword of Child::foo (line 5).
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1, "should only offer Make public");
     assert_eq!(vis_actions[0].title, "Make public");
@@ -606,8 +522,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -629,8 +545,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -652,8 +568,8 @@ class Child extends Base {
 
     // Current is public, parent requires public — neither protected nor
     // private should be offered.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(
         vis_actions.len(),
@@ -674,8 +590,8 @@ class Standalone {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     // No parent → all alternatives offered.
     assert_eq!(vis_actions.len(), 2);
@@ -698,8 +614,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -721,8 +637,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -742,8 +658,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     let resolved = resolve_action(&backend, uri, content, vis_actions[0]);
@@ -776,8 +692,8 @@ class Child extends Base {
     backend.update_ast(uri, content);
 
     // `childOnly` is not in the parent — all alternatives should be offered.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
     let titles: Vec<&str> = vis_actions.iter().map(|a| a.title.as_str()).collect();
@@ -803,16 +719,17 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private method Child::foo() overriding public method Base::foo() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1, "parent filtering leaves only public");
     let action = vis_actions[0];
@@ -839,16 +756,17 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private method Child::foo() overriding protected method Base::foo() should be protected or public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 2);
 
@@ -883,16 +801,17 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let diag = inject_phpstan_diag(
+    let diag = inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private property Child::$name overriding public property Base::$name should also be public.",
         "property.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -920,16 +839,17 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private method Child::foo() overriding public method Base::foo() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
     assert_eq!(vis_actions.len(), 1);
 
     let resolved = resolve_action(&backend, uri, content, vis_actions[0]);
@@ -958,8 +878,8 @@ class Child extends Base {
     backend.update_ast(uri, content);
 
     // No PHPStan diagnostic injected.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     for action in &vis_actions {
         assert_eq!(
@@ -1013,10 +933,10 @@ class Child extends Base {
         cache.entry(uri.to_string()).or_default().push(diag.clone());
     }
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
 
     // There should be a fix-visibility action.
-    let vis_actions = find_visibility_actions(&actions);
+    let vis_actions = find_actions(&actions, "Make ");
     assert!(
         !vis_actions.is_empty(),
         "should offer fix-visibility action"
@@ -1054,8 +974,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -1085,8 +1005,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -1107,8 +1027,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     let resolved = resolve_action(&backend, uri, content, vis_actions[0]);
     let edits = extract_edits(&resolved);
@@ -1142,31 +1062,33 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         6,
         "Private method Child::foo() overriding public method Base::foo() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         7,
         "Private method Child::bar() overriding protected method Base::bar() should be protected or public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
     // Line 6 (foo): only "Make public"
-    let actions_foo = get_code_actions(&backend, uri, content, 6, 10);
-    let vis_foo = find_visibility_actions(&actions_foo);
+    let actions_foo = get_code_actions_at(&backend, uri, content, 6, 10);
+    let vis_foo = find_actions(&actions_foo, "Make ");
     assert_eq!(vis_foo.len(), 1);
     assert_eq!(vis_foo[0].title, "Make public");
     assert_eq!(vis_foo[0].kind, Some(CodeActionKind::QUICKFIX));
 
     // Line 7 (bar): "Make protected" (preferred) and "Make public"
-    let actions_bar = get_code_actions(&backend, uri, content, 7, 10);
-    let vis_bar = find_visibility_actions(&actions_bar);
+    let actions_bar = get_code_actions_at(&backend, uri, content, 7, 10);
+    let vis_bar = find_actions(&actions_bar, "Make ");
     assert_eq!(vis_bar.len(), 2);
     let make_prot = vis_bar
         .iter()
@@ -1192,8 +1114,8 @@ class Child extends Base {
 "#;
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 8, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 8, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -1220,17 +1142,18 @@ class Child extends Base {
 
     // PHPStan reports the error on the #[Override] line (line 5),
     // NOT the method signature line (line 6).
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private method Child::handle() overriding public method Base::handle() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
     // Cursor on the attribute line where the squiggle is.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(
         vis_actions.len(),
@@ -1283,19 +1206,20 @@ class Child extends Base {
     backend.update_ast(uri, content);
 
     // PHPStan diagnostic is on the attribute line (line 5).
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         5,
         "Private method Child::handle() overriding public method Base::handle() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
     // But the user places their cursor on the method signature line (line 6).
     // The action should still fire (visibility keyword is there), but the
     // PHPStan diagnostic is on a different line so it may not be found.
-    let actions = get_code_actions(&backend, uri, content, 6, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1, "should still offer Make public");
     assert_eq!(vis_actions[0].title, "Make public");
@@ -1333,17 +1257,18 @@ class Child extends Base {
     // Currently PHPStan reports on the first attribute line (line 5),
     // but if it moves to the signature line (line 7) in the future,
     // the action should still find and attach it.
-    inject_phpstan_diag(
+    inject_phpstan_diag_with_data(
         &backend,
         uri,
         7,
         "Private method Child::handle() overriding public method Base::handle() should also be public.",
         "method.visibility",
+        Some(serde_json::json!({ "ignorable": false })),
     );
 
     // Cursor on the signature line.
-    let actions = get_code_actions(&backend, uri, content, 7, 6);
-    let vis_actions = find_visibility_actions(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 6);
+    let vis_actions = find_actions(&actions, "Make ");
 
     assert_eq!(vis_actions.len(), 1);
     assert_eq!(vis_actions[0].title, "Make public");
@@ -1355,8 +1280,8 @@ class Child extends Base {
 
     // Also verify from the first attribute line — cursor there should
     // still find the diagnostic on the signature line.
-    let actions2 = get_code_actions(&backend, uri, content, 5, 6);
-    let vis_actions2 = find_visibility_actions(&actions2);
+    let actions2 = get_code_actions_at(&backend, uri, content, 5, 6);
+    let vis_actions2 = find_actions(&actions2, "Make ");
 
     assert_eq!(vis_actions2.len(), 1);
     assert!(

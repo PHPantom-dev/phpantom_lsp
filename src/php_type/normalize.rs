@@ -294,12 +294,7 @@ impl PhpType {
             }
         }
 
-        let mut index = 0;
-        flattened.retain(|_| {
-            let retain = keep[index];
-            index += 1;
-            retain
-        });
+        crate::util::retain_by_mask(&mut flattened, &keep);
 
         match flattened.len() {
             0 => PhpType::never(),
@@ -906,13 +901,8 @@ pub(crate) fn absorb_non_empty_refinements(types: &mut Vec<PhpType>) -> bool {
         })
         .collect();
 
-    let mut index = 0;
     let before = types.len();
-    types.retain(|_| {
-        let retain = keep[index];
-        index += 1;
-        retain
-    });
+    crate::util::retain_by_mask(types, &keep);
     changed |= types.len() != before;
     changed
 }
@@ -1043,10 +1033,5 @@ pub(crate) fn absorb_scalar_refinements(types: &mut Vec<PhpType>) {
         };
     }
 
-    let mut index = 0;
-    types.retain(|_| {
-        let retain = keep[index];
-        index += 1;
-        retain
-    });
+    crate::util::retain_by_mask(types, &keep);
 }

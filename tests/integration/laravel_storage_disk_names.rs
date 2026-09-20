@@ -1,6 +1,6 @@
 //! End-to-end coverage for Laravel storage disk names backed by config keys.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, position_after};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -20,19 +20,6 @@ return [
     ],
 ];
 "#;
-
-fn position_after(content: &str, unique_prefix: &str) -> Position {
-    let offset = content
-        .find(unique_prefix)
-        .unwrap_or_else(|| panic!("missing `{unique_prefix}`"))
-        + unique_prefix.len();
-    let before = &content[..offset];
-    let line = before.bytes().filter(|byte| *byte == b'\n').count() as u32;
-    let character = before
-        .rsplit_once('\n')
-        .map_or(before.len(), |(_, tail)| tail.len()) as u32;
-    Position::new(line, character)
-}
 
 async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
     let (backend, dir) = create_psr4_workspace(
@@ -60,28 +47,7 @@ async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
 }
 
 async fn completion_labels(backend: &Backend, uri: &Url, position: Position) -> Vec<String> {
-    let response = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .expect("completion request should succeed");
-
-    match response {
-        Some(CompletionResponse::Array(items)) => {
-            items.into_iter().map(|item| item.label).collect()
-        }
-        Some(CompletionResponse::List(list)) => {
-            list.items.into_iter().map(|item| item.label).collect()
-        }
-        None => Vec::new(),
-    }
+    complete_labels_at_opened(backend, uri, position.line, position.character).await
 }
 
 fn definition_location(response: GotoDefinitionResponse) -> Location {

@@ -5,14 +5,12 @@
 //! the name was declared on.  The same applies to `to_route()`,
 //! `signedRoute()`, and `temporarySignedRoute()`.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, open_php_file, position_after,
+    response_labels,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const ROUTES: &str = "\
 <?php
@@ -31,71 +29,22 @@ Route::apiResource('categories', CategoryController::class)
     ->parameters(['categories' => 'slug']);
 ";
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-/// Position of the cursor immediately after the first occurrence of `needle`.
-fn position_after(content: &str, needle: &str) -> Position {
-    let idx = content.find(needle).expect("needle not found") + needle.len();
-    let mut line = 0u32;
-    let mut character = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i == idx {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-    Position { line, character }
-}
-
-fn completion_labels(response: Option<CompletionResponse>) -> Vec<String> {
-    match response {
-        Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-        Some(CompletionResponse::List(list)) => list.items.into_iter().map(|i| i.label).collect(),
-        None => Vec::new(),
-    }
-}
-
 /// Open a workspace holding `ROUTES` plus a consumer file, and complete at the
 /// first position after `needle` in the consumer.
 async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
-    let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+    let (backend, _dir, _routes_uri) = create_initialized_psr4_workspace(
+        LARAVEL_SRC_COMPOSER,
         &[("routes/web.php", ROUTES), ("src/Runner.php", consumer)],
-    );
-    backend.initialized(InitializedParams {}).await;
+        "routes/web.php",
+    )
+    .await;
 
-    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php"))
-        .unwrap()
-        .to_string();
-    open(&backend, &routes_uri, ROUTES).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open(&backend, &uri, consumer).await;
+    let uri = open_php_file(&backend, "src/Runner.php").await;
 
     let result = backend
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(&uri).unwrap(),
-                },
+                text_document: TextDocumentIdentifier { uri },
                 position: position_after(consumer, needle),
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
@@ -104,7 +53,7 @@ async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
         })
         .await
         .unwrap();
-    completion_labels(result)
+    response_labels(result)
 }
 
 fn consumer(body: &str) -> String {

@@ -43,6 +43,7 @@ use crate::class_loader_memo;
 use crate::composer;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
+use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 use crate::types::{ClassInfo, FacadeAccessor, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
@@ -251,7 +252,7 @@ impl Backend {
         // Add any Laravel macros registered on this class.  Gated on a cheap
         // atomic so the hot loader path is untouched when no macros exist.
         loaded = self.inject_laravel_macros(loaded);
-        // Add the `$pivot` attribute when this class is a many-to-many target.
+        // Add pivot accessors when this class is a many-to-many target.
         loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
     }
@@ -272,8 +273,8 @@ impl Backend {
         crate::virtual_members::laravel::inject_macros(&index, class)
     }
 
-    /// Add the Eloquent `$pivot` attribute to `class` when it is the target of
-    /// a many-to-many relationship somewhere in the project.
+    /// Add Eloquent pivot accessors to `class` when it is the target of a
+    /// many-to-many relationship somewhere in the project.
     ///
     /// The reverse index is rebuilt lazily when a pivot-bearing file has
     /// changed (`laravel_pivots_dirty`), then a cheap atomic gates the lock so
@@ -1476,6 +1477,46 @@ impl Backend {
         }
     }
 
+    /// Build a [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
+    /// for `cursor_offset` in a file.
+    ///
+    /// Fills the fields every request handler repeats: this backend and
+    /// its resolved-class cache, no forward-walker scope, and a cursor
+    /// that is neither inside a static method nor preserving `static`.
+    /// The handful of callers that differ override just those fields
+    /// with struct-update syntax, e.g. a diagnostic pass that already
+    /// knows whether the span sits in a static method:
+    ///
+    /// ```text
+    /// ResolutionCtx {
+    ///     is_in_static_method: symbol_map.is_in_static_method(span.start),
+    ///     ..self.resolution_ctx_at(current_class, classes, content, span.start, loaders)
+    /// }
+    /// ```
+    pub(crate) fn resolution_ctx_at<'a>(
+        &'a self,
+        current_class: Option<&'a ClassInfo>,
+        all_classes: &'a [Arc<ClassInfo>],
+        content: &'a str,
+        cursor_offset: u32,
+        loaders: CtxLoaders<'a>,
+    ) -> ResolutionCtx<'a> {
+        ResolutionCtx {
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader: loaders.class_loader,
+            backend: Some(self),
+            laravel_macro_this_resolver: loaders.laravel_macro_this_resolver,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: loaders.function_loader,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        }
+    }
+
     /// Return a function-loader closure bound to a [`FileContext`].
     ///
     /// This is the convenience wrapper for the common case where the
@@ -1525,7 +1566,6 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
         use crate::class_lookup::find_class_at_offset;
-        use crate::type_engine::resolver::ResolutionCtx;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
@@ -1547,20 +1587,17 @@ impl Backend {
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
@@ -1576,6 +1613,41 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
         self.constant_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Bundle the four cross-file resolvers a diagnostic collector hands
+    /// the type engine: function and constant lookup for `ctx`, plus the
+    /// Laravel config and translation resolvers.
+    ///
+    /// Bind the result to a local and call
+    /// [`LendsLoaders::loaders`](crate::type_engine::resolver::LendsLoaders::loaders)
+    /// for the [`Loaders`](crate::type_engine::resolver::Loaders) itself,
+    /// which borrows from it.
+    pub(crate) fn diagnostic_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a {
+        self.diagnostic_loaders_over(self.function_loader(ctx), self.constant_loader(ctx))
+    }
+
+    /// [`diagnostic_loaders`](Self::diagnostic_loaders), for a caller
+    /// that already holds the function and constant loaders and only
+    /// needs the two Laravel resolvers added.
+    pub(crate) fn diagnostic_loaders_over<'a, F, C>(
+        &'a self,
+        function_loader: F,
+        constant_loader: C,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a
+    where
+        F: Fn(&str, u32) -> Option<crate::types::FunctionInfo> + 'a,
+        C: Fn(&str, u32) -> Option<Option<String>> + 'a,
+    {
+        crate::type_engine::resolver::OwnedLoaders::new(
+            function_loader,
+            constant_loader,
+            move |key: &str| self.resolve_config_type(key),
+            move |key: &str| self.resolve_trans_type(key),
+        )
     }
 
     /// Return a constant-value-loader closure from individual file-context

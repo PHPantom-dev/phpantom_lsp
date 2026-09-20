@@ -57,6 +57,10 @@ impl Backend {
             }
         };
 
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
+
         let file_use_map: HashMap<String, String> = self.file_use_map(uri);
         // Every span considered below overlaps the request range, so the
         // namespace block covering its start is the right one for all of
@@ -98,32 +102,15 @@ impl Backend {
                         None => continue,
                     };
 
-                    // Find the full call expression range including arguments.
-                    let call_site = symbol_map
-                        .call_sites
-                        .iter()
-                        .find(|cs| cs.args_start > span.start && cs.args_start <= span.end + 2);
-
-                    let (call_range, args_text) = match call_site {
-                        Some(cs) => {
-                            // The call range spans from the function name start
-                            // to the closing paren of the argument list.
-                            let range = offset_range_to_lsp_range(
-                                content,
-                                span.start as usize,
-                                cs.args_end as usize,
-                            );
-                            let args = extract_arguments(content, cs.args_start, cs.args_end);
-                            (range, args)
-                        }
-                        None => {
-                            // No call site found — can't replace without
-                            // knowing the argument list boundaries.
-                            continue;
-                        }
-                    };
-
-                    let Some(range) = call_range else {
+                    // The call range spans from the function name start to
+                    // the closing paren of the argument list.
+                    let Some((range, args_text)) = replacement_target(
+                        &symbol_map,
+                        content,
+                        span.start,
+                        span.end,
+                        span.start as usize,
+                    ) else {
                         continue;
                     };
 
@@ -146,7 +133,7 @@ impl Backend {
 
                     // Resolve the subject to find the method's replacement template.
                     let base_class = resolve_subject_to_class(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         *is_static,
                         &file_ctx,
                         span.start,
@@ -171,41 +158,22 @@ impl Backend {
                             None => continue,
                         };
 
-                    let call_site = symbol_map
-                        .call_sites
-                        .iter()
-                        .find(|cs| cs.args_start > span.start && cs.args_start <= span.end + 2);
-
-                    let (call_range, args_text) = match call_site {
-                        Some(cs) => {
-                            let args = extract_arguments(content, cs.args_start, cs.args_end);
-
-                            // When the template contains %class%, the
-                            // expanded replacement already includes the
-                            // subject expression, so the edit range must
-                            // cover the full `$subject->method(...)`, not
-                            // just `method(...)`.
-                            let range_start = if replacement_template.contains("%class%") {
-                                find_subject_start(content, span.start as usize, *is_static)
-                            } else {
-                                span.start as usize
-                            };
-
-                            let range = offset_range_to_lsp_range(
-                                content,
-                                range_start,
-                                cs.args_end as usize,
-                            );
-                            (range, args)
-                        }
-                        None => continue,
+                    // When the template contains %class%, the expanded
+                    // replacement already includes the subject expression,
+                    // so the edit range must cover the full
+                    // `$subject->method(...)`, not just `method(...)`.
+                    let range_start = if replacement_template.contains("%class%") {
+                        find_subject_start(content, span.start as usize, *is_static)
+                    } else {
+                        span.start as usize
                     };
-
-                    let Some(range) = call_range else {
+                    let Some((range, args_text)) =
+                        replacement_target(&symbol_map, content, span.start, span.end, range_start)
+                    else {
                         continue;
                     };
 
-                    let subject = Some(subject_text.as_str(content).trim().to_string());
+                    let subject = Some(subject_text.as_str(source).trim().to_string());
                     let replacement =
                         expand_template(&replacement_template, &args_text, subject.as_deref());
 
@@ -220,6 +188,33 @@ impl Backend {
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// The source range a deprecated call's replacement takes the place of,
+/// and the argument texts the template expands with.
+///
+/// `range_start` is where the replacement begins: the member name for a
+/// call whose template only rewrites the method, and the start of the
+/// whole `$subject->method(...)` when the template names `%class%` and so
+/// writes the subject itself. `None` when no call site covers the span,
+/// which leaves the argument list's boundaries unknown and nothing safe
+/// to replace.
+fn replacement_target(
+    symbol_map: &crate::symbol_map::SymbolMap,
+    content: &str,
+    span_start: u32,
+    span_end: u32,
+    range_start: usize,
+) -> Option<(Range, Vec<String>)> {
+    let call_site = symbol_map
+        .call_sites
+        .iter()
+        .find(|cs| cs.args_start > span_start && cs.args_start <= span_end + 2)?;
+    let range = offset_range_to_lsp_range(content, range_start, call_site.args_end as usize)?;
+    Some((
+        range,
+        extract_arguments(content, call_site.args_start, call_site.args_end),
+    ))
+}
 
 /// Emit a single code action that replaces `range` with `replacement`.
 fn emit_action(

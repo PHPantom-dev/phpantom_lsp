@@ -30,7 +30,7 @@ use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ResolvedCallableTarget;
 
@@ -367,14 +367,9 @@ impl Backend {
                             }
                         };
 
-                    let config_resolver = |key: &str| self.resolve_config_type(key);
-                    let trans_resolver = |key: &str| self.resolve_trans_type(key);
-                    let loaders = Loaders {
-                        function_loader: Some(&function_loader_cl),
-                        constant_loader: Some(&constant_loader_cl),
-                        config_resolver: Some(&config_resolver),
-                        trans_resolver: Some(&trans_resolver),
-                    };
+                    let owned_loaders =
+                        self.diagnostic_loaders_over(&function_loader_cl, &constant_loader_cl);
+                    let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
                         var_name: "",

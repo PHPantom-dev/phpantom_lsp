@@ -913,6 +913,53 @@ lengths where it shows.
 
 ---
 
+## P56. Folding array shapes across branches costs superlinear time
+
+**Impact: Low · Complexity: Medium**
+
+`join_shapes` keeps a variable at one tracked shape no matter how many
+branches write to it, which is what stops a merge from having to compare
+a variant per branch pairwise. The fold itself is not free, though:
+`join_shape_entries` builds a fresh `Vec<ShapeEntry>` and interns a new
+shape on every merge, so a variable that gains a key per branch pays for
+hashing a shape whose entry count grows with the branch count. The work
+is quadratic in the number of conditional writes.
+
+Measured on a release build, over a generated function assigning a
+distinct array shape under each of N sequential `if`s:
+
+| N writes | analyse wall clock |
+| -------- | ------------------ |
+| 400      | 0.30s              |
+| 800      | 0.90s              |
+| 1200     | 2.10s              |
+
+Doubling the writes roughly triples the time, and the same file with the
+shapes left un-merged (each write pushing its own alternative instead)
+runs in half of that, so folding is the more expensive of the two
+strategies at these sizes. It is still the right default: the variant-per-
+branch alternative grows the *type* without bound, which costs every
+later consumer rather than just the merge. What is missing is the cheap
+exit that would make the fold linear in the common case:
+
+1. **Skip the rebuild when nothing changes.** Most merges join a shape
+   with one whose keys it already covers, and the result is the existing
+   shape. Comparing entry lists before allocating would return the
+   interned handle unchanged rather than rebuilding and re-hashing it.
+
+2. **Fold in place along a chain of merges.** A run of merges against the
+   same variable rebuilds the accumulator from scratch each time. Joining
+   into a reusable buffer and interning once at the end of the run would
+   drop the repeated hashing.
+
+**Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
+in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
+`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+does not reach the sizes where this shows; generated code and long
+procedural report builders do.
+
+---
+
 ## P50. Cache the top-level scope for `global` keyword resolution
 
 **Impact: Low-Medium · Complexity: High**
@@ -1080,3 +1127,62 @@ through a separate flag, so the cached value has to carry both.
 `type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
 path) and `narrowed_by_rewalk` in
 `type_engine/variable/rhs_resolution/mod.rs`.
+
+---
+
+## P55. Every edit re-reads every member-reference candidate file
+
+**Impact: Medium-High · Complexity: Medium-High**
+
+`reindex_references_for_symbol_maps_batch` and
+`evict_reference_index_uri` both call
+`MemberRefCounts::invalidate_locations_all`, so any reparse marks the
+exact locations of *every* cached member declaration stale, not just the
+ones the edited file contributed to. The count side is invalidated far
+more selectively: `member_contributions` compares each file's old and
+new per-member contribution and only the members whose contribution
+actually changed become `count_stale`, which is what lets an edit that
+touches no access recompute nothing.
+
+Locations are blanket-invalidated because a receiver's type can change
+without changing any indexed member name or count (the
+`Order $value` → `Buyer $value` case), and a clickable lens must never
+point at a range the edit moved. But the consequence is that the
+declaration CodeLens path re-queues every public member of the open file
+on every keystroke, and `member_declaration_references_batch` then calls
+`reference_file_content_arc` for each candidate file. That falls through
+to `get_file_content_arc`, which is an uncached
+`std::fs::read_to_string` for any file not open in the editor. On a
+large application a common member name (`handle`, `get`, `name`) is a
+candidate in thousands of files, so a typing pause costs thousands of
+file reads even though the expensive part, the per-file
+`ResolvedMemberFile` semantic layer, is still warm and reused.
+
+### Fix
+
+Two independent halves, either of which helps on its own:
+
+1. **Narrow the invalidation.** Split the blanket call into the two
+   causes it currently conflates. Offsets only shift in the files that
+   were reparsed, so a location cache entry needs invalidating when one
+   of its own locations names a rebuilt URI. The receiver-type case
+   belongs where the type change is already detected: `update_ast`
+   clears `resolved_members` when `any_signature_changed ||
+   any_function_changed`, and the location cache should be invalidated
+   from the same branch. Check what that flag covers before relying on
+   it — a docblock-only `@return` edit changes receiver types too, and
+   serving a stale clickable location is worse than the current cost.
+
+2. **Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
+   already packs the resolved receiver atoms per symbol-span index; it
+   does not carry the LSP `Range` for the access, which is the only
+   other thing `scan_file` needs the file's text for. Storing the range
+   alongside the targets (16 bytes per access) would let a warm
+   candidate file be filtered without reading it at all.
+
+**Where to look:** `invalidate_locations_all` and
+`member_declaration_references` in `reference_counts.rs`,
+`reindex_references_for_symbol_maps_batch` and `ResolvedMemberFile` in
+`reference_index.rs`, `member_declaration_references_batch` in
+`references/members.rs`, and `get_file_content_arc` in
+`backend/file_access.rs`.

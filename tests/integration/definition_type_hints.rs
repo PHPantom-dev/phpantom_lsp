@@ -8,29 +8,10 @@
 //!
 //! This covers todo item #22 (type hints in code) and #23 (docblock types).
 
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
+use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Send a go-to-definition request and return the result.
-async fn goto_definition(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Option<GotoDefinitionResponse> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    backend.goto_definition(params).await.unwrap()
-}
 
 /// Assert that a definition response points to a given URI and line.
 fn assert_location(response: GotoDefinitionResponse, expected_uri: &Url, expected_line: u32) {
@@ -76,19 +57,6 @@ fn assert_location_path_ends_with(
     }
 }
 
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // §1  Parameter type hints — clicking on the TYPE NAME (not $variable)
 // ═══════════════════════════════════════════════════════════════════════════
@@ -109,10 +77,10 @@ async fn test_goto_definition_parameter_type_hint_same_file() {
         "    }\n",                                      // 6
         "}\n",                                          // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Request" on line 5 (the type hint, not $req)
-    let result = goto_definition(&backend, &uri, 5, 31).await;
+    let result = goto_definition_at(&backend, &uri, 5, 31).await;
     assert!(result.is_some(), "Should resolve parameter type hint");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -132,10 +100,10 @@ async fn test_goto_definition_nullable_parameter_type_hint() {
         "    }\n",                                       // 6
         "}\n",                                           // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Request" in "?Request" on line 5 (after the ?)
-    let result = goto_definition(&backend, &uri, 5, 33).await;
+    let result = goto_definition_at(&backend, &uri, 5, 33).await;
     assert!(
         result.is_some(),
         "Should resolve nullable parameter type hint"
@@ -157,10 +125,10 @@ async fn test_goto_definition_union_parameter_first_type() {
         "    }\n",                                                     // 5
         "}\n",                                                         // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Reader" in "Reader|Stream" on line 4
-    let result = goto_definition(&backend, &uri, 4, 32).await;
+    let result = goto_definition_at(&backend, &uri, 4, 32).await;
     assert!(
         result.is_some(),
         "Should resolve first type in union parameter"
@@ -182,10 +150,10 @@ async fn test_goto_definition_union_parameter_second_type() {
         "    }\n",                                                     // 5
         "}\n",                                                         // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Stream" in "Reader|Stream" on line 4
-    let result = goto_definition(&backend, &uri, 4, 40).await;
+    let result = goto_definition_at(&backend, &uri, 4, 40).await;
     assert!(
         result.is_some(),
         "Should resolve second type in union parameter"
@@ -206,12 +174,12 @@ async fn test_goto_definition_type_hint_skips_class_in_comment() {
         "class AdminUser { public function grantPermission(): void {} }\n", // 3
         "function handle(User|AdminUser $u): void {}\n",                    // 4
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "AdminUser" in "User|AdminUser" on line 4
     // "function handle(User|AdminUser $u): void {}"
     //  f=0..e=7 ' '=8 h=9..e=14 '('=15 U=16..r=19 '|'=20 A=21
-    let result = goto_definition(&backend, &uri, 4, 21).await;
+    let result = goto_definition_at(&backend, &uri, 4, 21).await;
     assert!(
         result.is_some(),
         "Should resolve AdminUser from union type hint"
@@ -237,10 +205,10 @@ async fn test_goto_definition_intersection_parameter_type() {
         "    }\n",                                                          // 5
         "}\n",                                                              // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Countable" in "Countable&Stringable" on line 4
-    let result = goto_definition(&backend, &uri, 4, 31).await;
+    let result = goto_definition_at(&backend, &uri, 4, 31).await;
     assert!(
         result.is_some(),
         "Should resolve first type in intersection parameter"
@@ -248,7 +216,7 @@ async fn test_goto_definition_intersection_parameter_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Stringable" in "Countable&Stringable" on line 4
-    let result2 = goto_definition(&backend, &uri, 4, 42).await;
+    let result2 = goto_definition_at(&backend, &uri, 4, 42).await;
     assert!(
         result2.is_some(),
         "Should resolve second type in intersection parameter"
@@ -274,10 +242,10 @@ async fn test_goto_definition_return_type_hint_same_file() {
         "    }\n",                                              // 5
         "}\n",                                                  // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Response" in the return type on line 3
-    let result = goto_definition(&backend, &uri, 3, 35).await;
+    let result = goto_definition_at(&backend, &uri, 3, 35).await;
     assert!(result.is_some(), "Should resolve return type hint");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -296,10 +264,10 @@ async fn test_goto_definition_nullable_return_type() {
         "    }\n",                                              // 5
         "}\n",                                                  // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Response" in "?Response" on line 3
-    let result = goto_definition(&backend, &uri, 3, 36).await;
+    let result = goto_definition_at(&backend, &uri, 3, 36).await;
     assert!(result.is_some(), "Should resolve nullable return type hint");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -319,10 +287,10 @@ async fn test_goto_definition_union_return_type_hint() {
         "    }\n",                                                   // 6
         "}\n",                                                       // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Response" in "Response|Error" on line 4
-    let result = goto_definition(&backend, &uri, 4, 35).await;
+    let result = goto_definition_at(&backend, &uri, 4, 35).await;
     assert!(
         result.is_some(),
         "Should resolve first type in union return type"
@@ -330,7 +298,7 @@ async fn test_goto_definition_union_return_type_hint() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Error" in "Response|Error" on line 4
-    let result2 = goto_definition(&backend, &uri, 4, 44).await;
+    let result2 = goto_definition_at(&backend, &uri, 4, 44).await;
     assert!(
         result2.is_some(),
         "Should resolve second type in union return type"
@@ -356,10 +324,10 @@ async fn test_goto_definition_property_type_hint() {
         "    private UserRepository $repo;\n",          // 5
         "}\n",                                          // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "UserRepository" on line 5
-    let result = goto_definition(&backend, &uri, 5, 16).await;
+    let result = goto_definition_at(&backend, &uri, 5, 16).await;
     assert!(result.is_some(), "Should resolve property type hint");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -378,10 +346,10 @@ async fn test_goto_definition_nullable_property_type_hint() {
         "    private ?Logger $logger;\n",       // 5
         "}\n",                                  // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Logger" in "?Logger" on line 5
-    let result = goto_definition(&backend, &uri, 5, 15).await;
+    let result = goto_definition_at(&backend, &uri, 5, 15).await;
     assert!(
         result.is_some(),
         "Should resolve nullable property type hint"
@@ -403,10 +371,10 @@ async fn test_goto_definition_union_property_type_hint() {
         "    public HtmlString|string $content;\n",  // 5
         "}\n",                                       // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "HtmlString" in "HtmlString|string" on line 5
-    let result = goto_definition(&backend, &uri, 5, 16).await;
+    let result = goto_definition_at(&backend, &uri, 5, 16).await;
     assert!(
         result.is_some(),
         "Should resolve first type in union property"
@@ -432,10 +400,10 @@ async fn test_goto_definition_promoted_parameter_type_hint() {
         "    ) {}\n",                                         // 5
         "}\n",                                                // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Config" on line 4
-    let result = goto_definition(&backend, &uri, 4, 29).await;
+    let result = goto_definition_at(&backend, &uri, 4, 29).await;
     assert!(
         result.is_some(),
         "Should resolve promoted constructor parameter type hint"
@@ -460,10 +428,10 @@ async fn test_goto_definition_standalone_function_parameter_type() {
         "function greet(User $user): void {\n", // 4
         "}\n",                                  // 5
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" on line 4
-    let result = goto_definition(&backend, &uri, 4, 17).await;
+    let result = goto_definition_at(&backend, &uri, 4, 17).await;
     assert!(
         result.is_some(),
         "Should resolve standalone function parameter type hint"
@@ -485,10 +453,10 @@ async fn test_goto_definition_standalone_function_return_type() {
         "    return new User();\n",        // 5
         "}\n",                             // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in return type on line 4
-    let result = goto_definition(&backend, &uri, 4, 25).await;
+    let result = goto_definition_at(&backend, &uri, 4, 25).await;
     assert!(
         result.is_some(),
         "Should resolve standalone function return type hint"
@@ -536,12 +504,12 @@ async fn test_goto_definition_type_hint_cross_file_psr4() {
         "    }\n",                                        // 7
         "}\n",                                            // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" on line 6 (parameter type hint)
     // "    public function show(User $user): void {"
     //  0   4      11       19  23 '('=24 U=25
-    let result = goto_definition(&backend, &uri, 6, 26).await;
+    let result = goto_definition_at(&backend, &uri, 6, 26).await;
     assert!(
         result.is_some(),
         "Should resolve parameter type hint via PSR-4"
@@ -585,10 +553,10 @@ async fn test_goto_definition_return_type_hint_cross_file_psr4() {
         "    }\n",                                 // 7
         "}\n",                                     // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in return type on line 6
-    let result = goto_definition(&backend, &uri, 6, 35).await;
+    let result = goto_definition_at(&backend, &uri, 6, 35).await;
     assert!(
         result.is_some(),
         "Should resolve return type hint via PSR-4"
@@ -631,10 +599,10 @@ async fn test_goto_definition_property_type_hint_cross_file_psr4() {
         "    private UserRepository $repo;\n",      // 6
         "}\n",                                      // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "UserRepository" on line 6
-    let result = goto_definition(&backend, &uri, 6, 18).await;
+    let result = goto_definition_at(&backend, &uri, 6, 18).await;
     assert!(
         result.is_some(),
         "Should resolve property type hint via PSR-4"
@@ -662,10 +630,10 @@ async fn test_goto_definition_catch_exception_type() {
         "    }\n",                                        // 7
         "}\n",                                            // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "CustomException" on line 5
-    let result = goto_definition(&backend, &uri, 5, 22).await;
+    let result = goto_definition_at(&backend, &uri, 5, 22).await;
     assert!(
         result.is_some(),
         "Should resolve exception type in catch block"
@@ -690,10 +658,10 @@ async fn test_goto_definition_multi_catch_type() {
         "    }\n",                                                        // 8
         "}\n",                                                            // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "NotFoundException" on line 6
-    let result = goto_definition(&backend, &uri, 6, 22).await;
+    let result = goto_definition_at(&backend, &uri, 6, 22).await;
     assert!(
         result.is_some(),
         "Should resolve first exception type in multi-catch"
@@ -701,7 +669,7 @@ async fn test_goto_definition_multi_catch_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "ValidationException" on line 6
-    let result2 = goto_definition(&backend, &uri, 6, 40).await;
+    let result2 = goto_definition_at(&backend, &uri, 6, 40).await;
     assert!(
         result2.is_some(),
         "Should resolve second exception type in multi-catch"
@@ -726,10 +694,10 @@ async fn test_goto_definition_extends_clause() {
         "class User extends BaseModel {\n",      // 4
         "}\n",                                   // 5
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "BaseModel" in "extends BaseModel" on line 4
-    let result = goto_definition(&backend, &uri, 4, 22).await;
+    let result = goto_definition_at(&backend, &uri, 4, 22).await;
     assert!(
         result.is_some(),
         "Should resolve parent class in extends clause"
@@ -751,10 +719,10 @@ async fn test_goto_definition_implements_clause() {
         "    public function serialize(): string { return ''; }\n", // 5
         "}\n",                                                      // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Serializable" in "implements Serializable" on line 4
-    let result = goto_definition(&backend, &uri, 4, 26).await;
+    let result = goto_definition_at(&backend, &uri, 4, 26).await;
     assert!(
         result.is_some(),
         "Should resolve interface in implements clause"
@@ -782,10 +750,10 @@ async fn test_goto_definition_new_expression() {
         "    }\n",                             // 7
         "}\n",                                 // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "new User()" on line 6
-    let result = goto_definition(&backend, &uri, 6, 20).await;
+    let result = goto_definition_at(&backend, &uri, 6, 20).await;
     assert!(result.is_some(), "Should resolve class name after new");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -812,10 +780,10 @@ async fn test_goto_definition_docblock_param_type() {
         "    }\n",                                  // 9
         "}\n",                                      // 10
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Request" in "@param Request" on line 6
-    let result = goto_definition(&backend, &uri, 6, 16).await;
+    let result = goto_definition_at(&backend, &uri, 6, 16).await;
     assert!(
         result.is_some(),
         "Should resolve class name in @param docblock"
@@ -841,10 +809,10 @@ async fn test_goto_definition_docblock_return_type() {
         "    }\n",                        // 9
         "}\n",                            // 10
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "@return User" on line 6
-    let result = goto_definition(&backend, &uri, 6, 16).await;
+    let result = goto_definition_at(&backend, &uri, 6, 16).await;
     assert!(
         result.is_some(),
         "Should resolve class name in @return docblock"
@@ -869,10 +837,10 @@ async fn test_goto_definition_docblock_generic_inner_type() {
         "    }\n",                                           // 8
         "}\n",                                               // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Collection" in "@return Collection<User>" on line 5
-    let result = goto_definition(&backend, &uri, 5, 18).await;
+    let result = goto_definition_at(&backend, &uri, 5, 18).await;
     assert!(
         result.is_some(),
         "Should resolve outer generic class in docblock"
@@ -880,7 +848,7 @@ async fn test_goto_definition_docblock_generic_inner_type() {
     assert_location(result.unwrap(), &uri, 2);
 
     // Cursor on "User" inside angle brackets on line 5
-    let result2 = goto_definition(&backend, &uri, 5, 30).await;
+    let result2 = goto_definition_at(&backend, &uri, 5, 30).await;
     assert!(
         result2.is_some(),
         "Should resolve inner generic type in docblock"
@@ -907,11 +875,11 @@ async fn test_goto_definition_docblock_generic_wildcard_after_multibyte() {
         "    }\n",                             // 9
         "}\n",                                 // 10
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User", which sits after both the multibyte `é` and the
     // `*` wildcard on line 6.
-    let result = goto_definition(&backend, &uri, 6, 29).await;
+    let result = goto_definition_at(&backend, &uri, 6, 29).await;
     assert!(
         result.is_some(),
         "Should resolve a generic argument that follows a multibyte name and a `*` wildcard"
@@ -935,10 +903,10 @@ async fn test_goto_definition_docblock_throws_type() {
         "    }\n",                                          // 7
         "}\n",                                              // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "NotFoundException" in "@throws NotFoundException" on line 4
-    let result = goto_definition(&backend, &uri, 4, 20).await;
+    let result = goto_definition_at(&backend, &uri, 4, 20).await;
     assert!(
         result.is_some(),
         "Should resolve exception class in @throws docblock"
@@ -961,10 +929,10 @@ async fn test_goto_definition_docblock_var_type() {
         "    private $logger;\n",               // 6
         "}\n",                                  // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Logger" in "@var Logger" on line 5
-    let result = goto_definition(&backend, &uri, 5, 15).await;
+    let result = goto_definition_at(&backend, &uri, 5, 15).await;
     assert!(
         result.is_some(),
         "Should resolve class name in @var docblock"
@@ -989,10 +957,10 @@ async fn test_goto_definition_docblock_union_type() {
         "    }\n",                                 // 8
         "}\n",                                     // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "@param User|Admin" on line 5
-    let result = goto_definition(&backend, &uri, 5, 16).await;
+    let result = goto_definition_at(&backend, &uri, 5, 16).await;
     assert!(
         result.is_some(),
         "Should resolve first type in docblock union"
@@ -1000,7 +968,7 @@ async fn test_goto_definition_docblock_union_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Admin" in "@param User|Admin" on line 5
-    let result2 = goto_definition(&backend, &uri, 5, 22).await;
+    let result2 = goto_definition_at(&backend, &uri, 5, 22).await;
     assert!(
         result2.is_some(),
         "Should resolve second type in docblock union"
@@ -1047,10 +1015,10 @@ async fn test_goto_definition_docblock_type_cross_file_psr4() {
         "    }\n",                        // 10
         "}\n",                            // 11
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "@return User" on line 7
-    let result = goto_definition(&backend, &uri, 7, 16).await;
+    let result = goto_definition_at(&backend, &uri, 7, 16).await;
     assert!(
         result.is_some(),
         "Should resolve docblock type via PSR-4 cross-file"
@@ -1073,10 +1041,10 @@ async fn test_goto_definition_docblock_extends_type() {
         "class UserCollection extends Collection {\n", // 6
         "}\n",                                         // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Collection" in "@extends Collection<User>" on line 4
-    let result = goto_definition(&backend, &uri, 4, 14).await;
+    let result = goto_definition_at(&backend, &uri, 4, 14).await;
     assert!(
         result.is_some(),
         "Should resolve class in @extends docblock"
@@ -1084,7 +1052,7 @@ async fn test_goto_definition_docblock_extends_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "User" inside angle brackets on line 4
-    let result2 = goto_definition(&backend, &uri, 4, 26).await;
+    let result2 = goto_definition_at(&backend, &uri, 4, 26).await;
     assert!(
         result2.is_some(),
         "Should resolve generic param type in @extends docblock"
@@ -1113,10 +1081,10 @@ async fn test_goto_definition_inline_var_annotation_type() {
         "    }\n",                             // 8
         "}\n",                                 // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "/** @var User $user */" on line 6
-    let result = goto_definition(&backend, &uri, 6, 20).await;
+    let result = goto_definition_at(&backend, &uri, 6, 20).await;
     assert!(
         result.is_some(),
         "Should resolve class name in inline @var annotation"
@@ -1141,10 +1109,10 @@ async fn test_goto_definition_scalar_type_returns_none() {
         "    }\n",                                           // 3
         "}\n",                                               // 4
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "string" on line 2
-    let result = goto_definition(&backend, &uri, 2, 30).await;
+    let result = goto_definition_at(&backend, &uri, 2, 30).await;
     assert!(
         result.is_none(),
         "Scalar type hints should not resolve to any definition"
@@ -1163,10 +1131,10 @@ async fn test_goto_definition_void_return_type_returns_none() {
         "    }\n",                             // 3
         "}\n",                                 // 4
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "void" on line 2
-    let result = goto_definition(&backend, &uri, 2, 30).await;
+    let result = goto_definition_at(&backend, &uri, 2, 30).await;
     assert!(
         result.is_none(),
         "void type hint should not resolve to any definition"
@@ -1191,10 +1159,10 @@ async fn test_goto_definition_use_trait_statement() {
         "    use HasTimestamps;\n",               // 5
         "}\n",                                    // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "HasTimestamps" in "use HasTimestamps;" on line 5
-    let result = goto_definition(&backend, &uri, 5, 10).await;
+    let result = goto_definition_at(&backend, &uri, 5, 10).await;
     assert!(
         result.is_some(),
         "Should resolve trait name in use statement"
@@ -1220,10 +1188,10 @@ async fn test_goto_definition_dnf_type() {
         "    }\n",                                                              // 5
         "}\n",                                                                  // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Countable" inside "(Countable&Stringable)|null" on line 4
-    let result = goto_definition(&backend, &uri, 4, 33).await;
+    let result = goto_definition_at(&backend, &uri, 4, 33).await;
     assert!(
         result.is_some(),
         "Should resolve first type in DNF expression"
@@ -1231,7 +1199,7 @@ async fn test_goto_definition_dnf_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Stringable" inside "(Countable&Stringable)|null" on line 4
-    let result2 = goto_definition(&backend, &uri, 4, 44).await;
+    let result2 = goto_definition_at(&backend, &uri, 4, 44).await;
     assert!(
         result2.is_some(),
         "Should resolve second type in DNF expression"
@@ -1259,10 +1227,10 @@ async fn test_goto_definition_docblock_mixin_type() {
         "class Model {\n",                        // 7
         "}\n",                                    // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "QueryBuilder" in "@mixin QueryBuilder" on line 5
-    let result = goto_definition(&backend, &uri, 5, 14).await;
+    let result = goto_definition_at(&backend, &uri, 5, 14).await;
     assert!(result.is_some(), "Should resolve class in @mixin docblock");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -1283,10 +1251,10 @@ async fn test_goto_definition_docblock_property_type() {
         "class User {\n",                  // 7
         "}\n",                             // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Address" in "@property Address $address" on line 5
-    let result = goto_definition(&backend, &uri, 5, 17).await;
+    let result = goto_definition_at(&backend, &uri, 5, 17).await;
     assert!(
         result.is_some(),
         "Should resolve class in @property docblock"
@@ -1314,10 +1282,10 @@ async fn test_goto_definition_docblock_nullable_type() {
         "    }\n",                               // 7
         "}\n",                                   // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "@return ?User" on line 4 (after the ?)
-    let result = goto_definition(&backend, &uri, 4, 17).await;
+    let result = goto_definition_at(&backend, &uri, 4, 17).await;
     assert!(result.is_some(), "Should resolve class after ? in docblock");
     assert_location(result.unwrap(), &uri, 1);
 }
@@ -1338,12 +1306,12 @@ async fn test_goto_definition_docblock_array_generic_value_type() {
         "    }\n",                               // 7
         "}\n",                                   // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "array<int, User>" on line 4
     // "     * @return array<int, User>"
     //  0123456789012345678901234567890
-    let result = goto_definition(&backend, &uri, 4, 27).await;
+    let result = goto_definition_at(&backend, &uri, 4, 27).await;
     assert!(
         result.is_some(),
         "Should resolve value type in array generic docblock"
@@ -1369,10 +1337,10 @@ async fn test_goto_definition_second_implements_interface() {
         "    public function cache(): void {}\n",                   // 5
         "}\n",                                                      // 6
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Loggable" in "implements Loggable, Cacheable" on line 3
-    let result = goto_definition(&backend, &uri, 3, 27).await;
+    let result = goto_definition_at(&backend, &uri, 3, 27).await;
     assert!(
         result.is_some(),
         "Should resolve first interface in implements list"
@@ -1380,7 +1348,7 @@ async fn test_goto_definition_second_implements_interface() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Cacheable" in "implements Loggable, Cacheable" on line 3
-    let result2 = goto_definition(&backend, &uri, 3, 39).await;
+    let result2 = goto_definition_at(&backend, &uri, 3, 39).await;
     assert!(
         result2.is_some(),
         "Should resolve second interface in implements list"
@@ -1407,10 +1375,10 @@ async fn test_goto_definition_closure_parameter_type() {
         "    }\n",                                 // 6
         "}\n",                                     // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "function (User $user)" on line 4
-    let result = goto_definition(&backend, &uri, 4, 26).await;
+    let result = goto_definition_at(&backend, &uri, 4, 26).await;
     assert!(
         result.is_some(),
         "Should resolve type hint in closure parameter"
@@ -1434,10 +1402,10 @@ async fn test_goto_definition_closure_return_type() {
         "    }\n",                               // 7
         "}\n",                                   // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in "function (): User" on line 4
-    let result = goto_definition(&backend, &uri, 4, 30).await;
+    let result = goto_definition_at(&backend, &uri, 4, 30).await;
     assert!(
         result.is_some(),
         "Should resolve return type hint in closure"
@@ -1464,10 +1432,10 @@ async fn test_goto_definition_docblock_callable_return_type() {
         "    private $supplier;\n",                        // 6
         "}\n",                                             // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Pencil" in `\Closure(): Pencil` on line 5
-    let result = goto_definition(&backend, &uri, 5, 29).await;
+    let result = goto_definition_at(&backend, &uri, 5, 29).await;
     assert!(
         result.is_some(),
         "Should resolve Pencil in callable return type"
@@ -1494,10 +1462,10 @@ async fn test_goto_definition_docblock_callable_param_type() {
         "    private $handler;\n",                                // 9
         "}\n",                                                    // 10
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Request" inside `callable(Request)` on line 8
-    let result = goto_definition(&backend, &uri, 8, 24).await;
+    let result = goto_definition_at(&backend, &uri, 8, 24).await;
     assert!(
         result.is_some(),
         "Should resolve Request in callable param type"
@@ -1505,7 +1473,7 @@ async fn test_goto_definition_docblock_callable_param_type() {
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Response" in the callable return type on line 8
-    let result = goto_definition(&backend, &uri, 8, 34).await;
+    let result = goto_definition_at(&backend, &uri, 8, 34).await;
     assert!(
         result.is_some(),
         "Should resolve Response in callable return type"
@@ -1528,10 +1496,10 @@ async fn test_goto_definition_docblock_callable_base_type() {
         "    public function run($cb) {}\n",              // 6
         "}\n",                                            // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Result" in callable return type on line 5
-    let result = goto_definition(&backend, &uri, 5, 35).await;
+    let result = goto_definition_at(&backend, &uri, 5, 35).await;
     assert!(
         result.is_some(),
         "Should resolve Result in callable return type"
@@ -1554,20 +1522,20 @@ async fn test_goto_definition_docblock_callable_multiple_params() {
         "    private $boot;\n",                                     // 6
         "}\n",                                                      // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Config" on line 5
-    let result = goto_definition(&backend, &uri, 5, 24).await;
+    let result = goto_definition_at(&backend, &uri, 5, 24).await;
     assert!(result.is_some(), "Should resolve Config in callable param");
     assert_location(result.unwrap(), &uri, 1);
 
     // Cursor on "Logger" on line 5
-    let result = goto_definition(&backend, &uri, 5, 32).await;
+    let result = goto_definition_at(&backend, &uri, 5, 32).await;
     assert!(result.is_some(), "Should resolve Logger in callable param");
     assert_location(result.unwrap(), &uri, 2);
 
     // Cursor on "Output" on line 5
-    let result = goto_definition(&backend, &uri, 5, 41).await;
+    let result = goto_definition_at(&backend, &uri, 5, 41).await;
     assert!(
         result.is_some(),
         "Should resolve Output in callable return type"
@@ -1590,10 +1558,10 @@ async fn test_goto_definition_docblock_return_callable_type() {
         "    public function getUserFactory() {}\n", // 6
         "}\n",                                       // 7
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "User" in `callable(): User` on line 4
-    let result = goto_definition(&backend, &uri, 4, 27).await;
+    let result = goto_definition_at(&backend, &uri, 4, 27).await;
     assert!(
         result.is_some(),
         "Should resolve User in callable return type of @return"
@@ -1614,10 +1582,10 @@ async fn test_goto_definition_docblock_callable_no_return_type() {
         "    public function listen($listener) {}\n",    // 4
         "}\n",                                           // 5
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "Event" in `callable(Event)` on line 3
-    let result = goto_definition(&backend, &uri, 3, 28).await;
+    let result = goto_definition_at(&backend, &uri, 3, 28).await;
     assert!(
         result.is_some(),
         "Should resolve Event in callable param type without return type"

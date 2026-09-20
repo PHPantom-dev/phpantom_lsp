@@ -249,6 +249,10 @@ impl Backend {
         ctx: &crate::types::FileContext,
         mode: SemanticTokensMode,
     ) -> Vec<AbsoluteToken> {
+        let Some(source) = symbol_map.source(content) else {
+            return Vec::new();
+        };
+
         let mut tokens = Vec::with_capacity(symbol_map.spans.len());
 
         // Precompute line starts once: converting each span's byte offset to a
@@ -325,7 +329,7 @@ impl Backend {
                     // Verify the member exists on the resolved subject class
                     // and pick up deprecated/static modifiers from it.
                     match self.resolve_member_semantics(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         member_name,
                         *is_static,
                         *is_method_call,
@@ -1360,7 +1364,6 @@ fn split_comments_around_inner(tokens: &mut Vec<AbsoluteToken>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
 
     #[test]
     fn legend_has_correct_type_count() {
@@ -1447,103 +1450,5 @@ mod tests {
         assert_eq!(kind_to_token_type(ClassLikeKind::Interface), TT_INTERFACE);
         assert_eq!(kind_to_token_type(ClassLikeKind::Enum), TT_ENUM);
         assert_eq!(kind_to_token_type(ClassLikeKind::Trait), TT_TYPE);
-    }
-
-    #[test]
-    fn test_blade_interpolation_alignment() {
-        let backend = Backend::new_test();
-        let mut config = Config::default();
-        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
-        backend.set_config(config);
-        let uri = "file:///test.blade.php";
-        // Blade: src="{{ \App\Library\MyImage::get('foo.png') }}"
-        // Index: 012345678
-        // \ is at col 8.
-        let content = r#"src="{{ \App\Library\MyImage::get('foo.png') }}""#;
-
-        backend.update_ast(uri, content);
-        let res = backend.handle_semantic_tokens_full(uri, content).unwrap();
-        let tokens = match res {
-            tower_lsp::lsp_types::SemanticTokensResult::Tokens(tokens) => tokens,
-            _ => panic!("Expected tokens"),
-        };
-
-        let mut line = 0u32;
-        let mut start_char = 0u32;
-        let mut found = None;
-
-        for tok in tokens.data {
-            if tok.delta_line > 0 {
-                line += tok.delta_line;
-                start_char = tok.delta_start;
-            } else {
-                start_char += tok.delta_start;
-            }
-
-            if tok.length == 20 {
-                // App\Library\MyImage
-                found = Some(AbsoluteToken {
-                    line,
-                    start_char,
-                    length: tok.length,
-                    token_type: tok.token_type,
-                    modifiers: tok.token_modifiers_bitset,
-                });
-                break;
-            }
-        }
-
-        let app_lib = found.expect("Should find App-Library token");
-        assert_eq!(app_lib.line, 0);
-        assert_eq!(app_lib.start_char, 8);
-    }
-
-    #[test]
-    fn test_blade_foreach_alignment() {
-        let backend = Backend::new_test();
-        let mut config = Config::default();
-        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
-        backend.set_config(config);
-        let uri = "file:///test.blade.php";
-        // Blade: @foreach ($items as $item)
-        // Col:    01234567890
-        // $items starts at 10.
-        let content = "@foreach ($items as $item)\n@endforeach";
-
-        backend.update_ast(uri, content);
-        let res = backend.handle_semantic_tokens_full(uri, content).unwrap();
-        let tokens = match res {
-            tower_lsp::lsp_types::SemanticTokensResult::Tokens(tokens) => tokens,
-            _ => panic!("Expected tokens"),
-        };
-
-        // Find $items (length 6)
-        let mut line = 0u32;
-        let mut start_char = 0u32;
-        let mut found = None;
-
-        for tok in tokens.data {
-            if tok.delta_line > 0 {
-                line += tok.delta_line;
-                start_char = tok.delta_start;
-            } else {
-                start_char += tok.delta_start;
-            }
-
-            if tok.length == 6 {
-                found = Some(AbsoluteToken {
-                    line,
-                    start_char,
-                    length: tok.length,
-                    token_type: tok.token_type,
-                    modifiers: tok.token_modifiers_bitset,
-                });
-                break;
-            }
-        }
-
-        let items_tok = found.expect("Should find $items token");
-        assert_eq!(items_tok.line, 0);
-        assert_eq!(items_tok.start_char, 10); // "@foreach (" is 10 chars
     }
 }

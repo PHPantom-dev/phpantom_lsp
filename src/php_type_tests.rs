@@ -804,6 +804,7 @@ fn shape_entries_non_shape_returns_none() {
 fn is_array_shape_test() {
     assert!(PhpType::parse("array{name: string}").is_array_shape());
     assert!(PhpType::parse("?array{name: string}").is_array_shape());
+    assert!(PhpType::parse("array{name: string}|null").is_array_shape());
     assert!(!PhpType::parse("array<int>").is_array_shape());
     assert!(!PhpType::parse("object{name: string}").is_array_shape());
 }
@@ -884,6 +885,16 @@ fn join_shapes_nullable_side_makes_join_nullable() {
         a.join_shapes(&b),
         Some(PhpType::parse("?array{a: int, b?: string}"))
     );
+}
+
+#[test]
+fn join_shapes_union_with_null_does_not_accumulate_variants() {
+    let mut joined = PhpType::parse("array{a: int}|null");
+    let b = PhpType::parse("array{a: int, b: string}|null");
+    for _ in 0..100 {
+        joined = joined.join_shapes(&b).unwrap();
+    }
+    assert_eq!(joined, PhpType::parse("?array{a: int, b?: string}"));
 }
 
 #[test]
@@ -2138,7 +2149,14 @@ fn top_level_class_names_union_with_null() {
 
 #[test]
 fn top_level_class_names_scalar_excluded() {
+    assert!(PhpType::parse("string").top_level_class_names().is_empty());
     let names = PhpType::parse("string|int").top_level_class_names();
+    assert!(names.is_empty());
+}
+
+#[test]
+fn top_level_class_names_void_excluded() {
+    let names = PhpType::parse("void").top_level_class_names();
     assert!(names.is_empty());
 }
 

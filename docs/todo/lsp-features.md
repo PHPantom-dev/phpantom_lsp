@@ -570,3 +570,36 @@ that could.
 (`namespace_merge_conflict`, `build_namespace_prefix_rename_edit`,
 `collect_merge_move_ops`), `src/rename/class.rs` (the import-adding
 rule to mirror).
+
+## F23. Rename a class through its YAML/XML occurrences
+
+**Impact: Medium · Complexity: Medium**
+
+A fully-qualified class name in a YAML or XML file is found by Find
+References and counted by the declaration CodeLens, but rename leaves
+it alone: `find_references_inner` drops resource locations in
+`ReferenceSearchMode::Rename`. Renaming the class therefore leaves the
+config pointing at a name that no longer exists, and `move` reports the
+leftover through its residual scan rather than fixing it.
+
+The blocker is that the text at such an occurrence is not always the
+PHP spelling of the name. A YAML double-quoted scalar writes
+`"App\\Handler\\Run"`, so the span covers doubled separators; an XML
+attribute may carry entity references. Rename plans a single
+replacement string per location and verifies each range spells a whole
+PHP name token before emitting anything, so an escaped occurrence both
+fails verification (dropping the *entire* rename, including its PHP
+edits, which is what the current exclusion prevents) and would be
+rewritten with single separators, corrupting the document's quoting.
+
+What is needed is a per-occurrence replacement: the scanner already
+knows the raw text it normalised, so it can record how the name was
+escaped and let the rename re-escape the replacement the same way,
+with verification asking for "a name token in this document's
+escaping" rather than a bare PHP one.
+
+**Where to look:** `src/resource_navigation.rs` (`scan_symbols`,
+`normalize_fqn`), `src/references/dispatch.rs`
+(`find_references_inner`), `src/rename/validate.rs`
+(`Expected`, `is_name_token`), `src/rename/class.rs`
+(`build_class_move_edit`).

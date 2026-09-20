@@ -27,7 +27,7 @@
 //!   `extract_from_*` helpers)
 
 pub(crate) mod docblock;
-mod extraction;
+pub(crate) mod extraction;
 pub(crate) mod laravel_resources;
 
 use crate::atom::Atom;
@@ -177,6 +177,32 @@ impl DocblockMemberRef {
     }
 }
 
+/// Text a [`SymbolMap`]'s offsets are known to index into.
+///
+/// A map records byte offsets into whatever content it was extracted
+/// from.  Slicing them against a *different* revision of the same file
+/// reads unrelated bytes, and runs off the end as soon as the other
+/// revision is shorter — which panics, taking the whole worker thread
+/// with it.  The two revisions are easy to mix up: the map for a Blade
+/// template describes the virtual PHP it lowers to rather than the
+/// template's own bytes, and a map cached per URI outlives the buffer it
+/// was built from.
+///
+/// `MappedSource` is the proof that a map and a string belong together.
+/// It can only be obtained from [`SymbolMap::source`], which checks the
+/// pairing, so a consumer that holds one cannot be holding the wrong
+/// text.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MappedSource<'a>(&'a str);
+
+impl<'a> MappedSource<'a> {
+    /// The source text itself, for the parts of a consumer that need a
+    /// plain `&str`.
+    pub(crate) fn text(self) -> &'a str {
+        self.0
+    }
+}
+
 /// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.
 ///
 /// Most subjects are a verbatim slice of the source (a plain variable,
@@ -215,9 +241,14 @@ impl SubjectText {
         Self::Owned(text.into_boxed_str())
     }
 
-    pub(crate) fn as_str<'a>(&'a self, content: &'a str) -> &'a str {
+    /// The subject text, slicing the source the owning map was extracted
+    /// from for the `Range` case.
+    ///
+    /// Taking a [`MappedSource`] rather than a bare `&str` is what keeps
+    /// the offsets and the text in step: see the type's documentation.
+    pub(crate) fn as_str<'a>(&'a self, source: MappedSource<'a>) -> &'a str {
         match self {
-            Self::Range { start, end } => &content[*start as usize..*end as usize],
+            Self::Range { start, end } => &source.text()[*start as usize..*end as usize],
             Self::Owned(s) => s,
         }
     }
@@ -1132,6 +1163,17 @@ impl SymbolMap {
     /// vanishingly small gain.
     pub fn matches_source(&self, content: &str) -> bool {
         u32::try_from(content.len()).is_ok_and(|len| len == self.source_len)
+    }
+
+    /// Pair this map with the content its offsets index into, or `None`
+    /// when `content` is a different revision (see [`MappedSource`]).
+    ///
+    /// A consumer that cannot produce the matching text has nothing
+    /// trustworthy to say about the file and should skip it rather than
+    /// slice a span against text it does not describe.
+    pub(crate) fn source<'a>(&self, content: &'a str) -> Option<MappedSource<'a>> {
+        self.matches_source(content)
+            .then_some(MappedSource(content))
     }
 
     /// Indices into [`Self::spans`] for member accesses named `name`.

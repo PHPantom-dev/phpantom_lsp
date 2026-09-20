@@ -1,7 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
-    create_test_backend_with_stubs,
+    create_test_backend_with_stubs, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -12,27 +12,6 @@ use tower_lsp::lsp_types::*;
 static ITERATOR_STUB: &str = "<?php\ninterface Iterator { public function next(): void; }\n";
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
-
-/// Open a file, run full slow diagnostics (which activates the diagnostic
-/// scope cache and the forward walker), then filter to unknown_member
-/// diagnostics only.  This exercises the forward walker's diagnostic path
-/// instead of the backward scanner.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    // Keep only unknown_member diagnostics (the code we're testing).
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

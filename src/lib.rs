@@ -247,7 +247,8 @@ mod document_links;
 mod document_symbols;
 pub mod fix;
 mod folding;
-mod formatting;
+pub mod format_cli;
+pub mod formatting;
 mod highlight;
 mod hover;
 mod indexing;
@@ -263,6 +264,7 @@ mod mago;
 mod mem_audit;
 pub mod move_cli;
 pub(crate) mod names;
+mod parallel;
 mod parser;
 pub(crate) mod phar;
 pub mod php_type;
@@ -276,6 +278,7 @@ mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+mod resource_navigation;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;
@@ -729,8 +732,8 @@ pub struct Backend {
     /// when the index holds at least one macro, so the hot class-load path
     /// skips the lock entirely for the common (no-macro) case.
     pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
-    /// Reverse index mapping a related-model FQN to the pivot type exposed on
-    /// its `$pivot` attribute when reached through a many-to-many relationship.
+    /// Reverse index mapping a related-model FQN to the pivot accessors exposed
+    /// when it is reached through a many-to-many relationship.
     /// Built lazily (and rebuilt when a pivot-bearing file changes) and
     /// consulted at class load; see [`virtual_members::laravel::pivots`].
     pub(crate) laravel_pivots: Arc<RwLock<virtual_members::laravel::LaravelPivotIndex>>,
@@ -887,6 +890,11 @@ pub struct Backend {
     /// the rename response includes a `RenameFile` operation alongside the
     /// text edits so the file is renamed to match the new class name.
     pub(crate) supports_file_rename: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports file creation in workspace edits
+    /// (`workspace.workspaceEdit.resourceOperations` includes `create`).
+    /// The code actions that create a file (extract interface, create a
+    /// missing view) are only offered when it does.
+    pub(crate) supports_file_create: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports server-initiated work-done progress.
     ///
     /// Set during `initialize` based on the client's
@@ -923,6 +931,12 @@ pub struct Backend {
     /// this, editors keep showing tokens computed from the pre-edit
     /// symbol map until the next unrelated request.
     pub(crate) supports_semantic_tokens_refresh: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports `workspace/codeLens/refresh`.
+    ///
+    /// Exact member-reference locations are computed outside the CodeLens
+    /// request.  Supporting clients re-pull once that bounded cache is warm,
+    /// avoiding a burst of lazy resolve requests for every declaration.
+    pub(crate) supports_code_lens_refresh: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
@@ -931,7 +945,7 @@ pub struct Backend {
     /// without a refresh the editor keeps the hints it pulled before they
     /// were ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Reference counts for member declarations, feeding the inlay hints.
+    /// Exact member references shared by declaration inlay hints and lenses.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -947,7 +961,11 @@ pub struct Backend {
     /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
-    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    ///
+    /// Shared rather than owned: every request against a template reads
+    /// this text, and a template's virtual PHP is several times the size
+    /// of the template itself.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
@@ -966,12 +984,13 @@ pub struct Backend {
     /// symbol map recorded a candidate site ever get an entry.
     pub(crate) typed_receiver_view_spans_cache:
         Arc<RwLock<HashMap<String, crate::blade::typed_receiver::TypedReceiverSpans>>>,
-    /// Whether the workspace directory has been fully scanned for PHP files.
+    /// Whether the workspace directory has been fully scanned for PHP and
+    /// resource files.
     ///
-    /// Set to `true` after the first Phase 2 walk in `ensure_workspace_indexed`.
-    /// Subsequent calls still re-walk the directory to discover newly created
-    /// files, but the flag lets us log the difference between initial and
-    /// refresh scans.
+    /// Set to `true` after the initial `ensure_workspace_indexed` pass.
+    /// Per-symbol consumers reuse that index, watched-file notifications
+    /// update it incrementally, and an explicit reference search may refresh
+    /// it once to discover filesystem changes the editor did not report.
     pub(crate) workspace_indexed: Arc<std::sync::atomic::AtomicBool>,
     /// Serializes whole-workspace indexing so a foreground request does not
     /// duplicate the background full-index parse.
@@ -1190,6 +1209,7 @@ impl Backend {
 
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1197,6 +1217,7 @@ impl Backend {
             registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1303,6 +1324,9 @@ impl Backend {
             mago_analyze_tool: ExternalToolWorker::new(),
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            // Tests drive the backend without an `initialize` round-trip; a
+            // real client advertises this capability there.
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
@@ -1310,6 +1334,7 @@ impl Backend {
             registered_watcher_state: Arc::new(RwLock::new(None)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             member_ref_counts: reference_counts::new_member_ref_counts(),
             init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1455,6 +1480,13 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php_arc(uri)
+            .map(|php| String::clone(&php))
+    }
+
+    /// [`Self::blade_virtual_php`] without the copy, for the request paths
+    /// that only need to read the text.
+    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         self.blade_virtual_content.read().get(uri).cloned()
     }
 
@@ -1758,9 +1790,19 @@ impl Backend {
     /// access; this only restores the lightweight discovery indexes.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
-    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+    ///
+    /// Returns whether any *class declaration* was dropped, handed to a
+    /// surviving file, or discovered — i.e. whether class resolution could
+    /// now answer differently.  A batch of declaration-free files (a
+    /// generated cache artifact, a routes or config file) returns `false`,
+    /// and the caller can keep the resolved-class caches it would
+    /// otherwise have to drop.
+    pub(crate) fn reindex_files_batch(
+        &self,
+        changes: &[(String, PathBuf, FileChangeType)],
+    ) -> bool {
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         // Index values are stored under either the editor URI or the
@@ -1788,6 +1830,7 @@ impl Backend {
         // These FQNs no longer resolve, and the promoted ones resolve
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
+        let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1861,6 +1904,7 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
+            classes_changed |= !classes.is_empty();
             self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
                     decls.note_discovered(&fqn, uri_str.clone());
@@ -1886,6 +1930,7 @@ impl Backend {
         // `auth()` or a real global class that shadows a Laravel facade alias.
         // Re-evaluate only maps that recorded one of those dormant candidates.
         self.refresh_all_published_laravel_candidates();
+        classes_changed
     }
 
     /// Create a shallow clone of this `Backend` that shares every
@@ -1963,6 +2008,7 @@ impl Backend {
             mago_analyze_tool: self.mago_analyze_tool.clone(),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
+            supports_file_create: Arc::clone(&self.supports_file_create),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
@@ -1970,6 +2016,7 @@ impl Backend {
             registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
+            supports_code_lens_refresh: Arc::clone(&self.supports_code_lens_refresh),
             supports_inlay_hint_refresh: Arc::clone(&self.supports_inlay_hint_refresh),
             member_ref_counts: Arc::clone(&self.member_ref_counts),
             init_complete: Arc::clone(&self.init_complete),
@@ -2103,188 +2150,5 @@ impl Backend {
         self.stub_constant_index
             .write()
             .retain(|name, source| !stubs::is_stub_constant_removed(source, name, version));
-    }
-
-    /// Check whether a URI refers to a Blade template file.
-    /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
-    pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
-    }
-
-    /// Translate a position from an original Blade file to the virtual PHP file.
-    pub(crate) fn translate_blade_to_php(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.blade_to_php(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade file.
-    pub(crate) fn translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.php_to_blade(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade
-    /// file, or `None` when the position lies in the injected prologue.
-    ///
-    /// Use this instead of [`Self::translate_php_to_blade`] wherever the
-    /// result becomes a text edit or a range the editor navigates to: the
-    /// prologue has no template text behind it, and clamping a prologue
-    /// position to `0:0` produces an edit at the very start of the template.
-    pub(crate) fn try_translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
-            Some(map) => map.try_php_to_blade(pos),
-            None => Some(pos),
-        }
-    }
-
-    /// Translate a range from virtual PHP coordinates back to original Blade
-    /// coordinates, dropping it when either end lies in the prologue.
-    pub(crate) fn try_translate_blade_range(
-        &self,
-        uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> Option<tower_lsp::lsp_types::Range> {
-        Some(tower_lsp::lsp_types::Range {
-            start: self.try_translate_php_to_blade(uri, range.start)?,
-            end: self.try_translate_php_to_blade(uri, range.end)?,
-        })
-    }
-
-    /// Translate one completion item's edit ranges from virtual PHP
-    /// coordinates back to Blade, dropping the item if any range falls in
-    /// the injected prologue.
-    fn translate_completion_item(
-        &self,
-        uri: &str,
-        mut item: tower_lsp::lsp_types::CompletionItem,
-    ) -> Option<tower_lsp::lsp_types::CompletionItem> {
-        use tower_lsp::lsp_types::CompletionTextEdit;
-
-        if let Some(edit) = item.text_edit.take() {
-            item.text_edit = Some(match edit {
-                CompletionTextEdit::Edit(mut e) => {
-                    e.range = self.try_translate_blade_range(uri, e.range)?;
-                    CompletionTextEdit::Edit(e)
-                }
-                CompletionTextEdit::InsertAndReplace(mut e) => {
-                    e.insert = self.try_translate_blade_range(uri, e.insert)?;
-                    e.replace = self.try_translate_blade_range(uri, e.replace)?;
-                    CompletionTextEdit::InsertAndReplace(e)
-                }
-            });
-        }
-
-        if let Some(edits) = item.additional_text_edits.take() {
-            let mut translated = Vec::with_capacity(edits.len());
-            for mut e in edits {
-                e.range = self.try_translate_blade_range(uri, e.range)?;
-                translated.push(e);
-            }
-            item.additional_text_edits = Some(translated);
-        }
-
-        Some(item)
-    }
-
-    /// Translate every completion item in a response from virtual PHP
-    /// coordinates back to Blade, dropping items whose edits target the
-    /// preprocessor's injected prologue rather than clamping them to the
-    /// start of the template.
-    pub(crate) fn translate_completion_response(
-        &self,
-        uri: &str,
-        response: tower_lsp::lsp_types::CompletionResponse,
-    ) -> tower_lsp::lsp_types::CompletionResponse {
-        use tower_lsp::lsp_types::{CompletionList, CompletionResponse};
-
-        match response {
-            CompletionResponse::Array(items) => CompletionResponse::Array(
-                items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            ),
-            CompletionResponse::List(list) => CompletionResponse::List(CompletionList {
-                is_incomplete: list.is_incomplete,
-                items: list
-                    .items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            }),
-        }
-    }
-
-    /// Translate a location from virtual PHP coordinates back to original Blade
-    /// coordinates if the location points into a Blade file.
-    pub(crate) fn translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> tower_lsp::lsp_types::Location {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
-            location.range.end = self.translate_php_to_blade(&uri_str, location.range.end);
-        }
-        location
-    }
-
-    /// Like [`Self::translate_location`], but drops a Blade location whose
-    /// range falls inside the preprocessor's prologue.
-    pub(crate) fn try_translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> Option<tower_lsp::lsp_types::Location> {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range = self.try_translate_blade_range(&uri_str, location.range)?;
-        }
-        Some(location)
-    }
-
-    /// Move a file's edits from the virtual PHP they were planned against
-    /// back into the file's own coordinates, dropping the ones that target
-    /// a template's injected prologue.
-    ///
-    /// A no-op for every file that is not a template.  A template is
-    /// planned against the virtual PHP it lowers to, because that is what
-    /// its symbol map describes, but the editor applies the edits to the
-    /// template; the prologue holds declarations no template line stands
-    /// behind, so an edit landing there has no position to be applied at.
-    pub(crate) fn translate_template_edits(
-        &self,
-        uri: &str,
-        edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
-    ) {
-        if !self.is_blade_file(uri) {
-            return;
-        }
-        edits.retain_mut(
-            |edit| match self.try_translate_blade_range(uri, edit.range) {
-                Some(range) => {
-                    edit.range = range;
-                    true
-                }
-                None => false,
-            },
-        );
     }
 }

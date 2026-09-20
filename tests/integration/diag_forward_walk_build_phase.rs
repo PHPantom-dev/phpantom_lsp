@@ -1,22 +1,4 @@
-use crate::common::create_test_backend;
-use tower_lsp::lsp_types::*;
-
-/// Run full slow diagnostics and return only `unknown_member` diagnostics.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
+use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Build-phase scope cache: no stale reads during forward walk

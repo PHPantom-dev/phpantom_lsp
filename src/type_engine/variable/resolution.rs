@@ -75,6 +75,19 @@ thread_local! {
     /// of `(variable, offset)` questions get asked hundreds of times.
     static VAR_TYPE_MEMO: RefCell<Option<HashMap<VarQueryKey, Vec<ResolvedType>>>> =
         const { RefCell::new(None) };
+
+    #[cfg(test)]
+    static TEST_SCOPE_CACHE_HITS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_scope_cache_hits() {
+    TEST_SCOPE_CACHE_HITS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_scope_cache_hits() -> usize {
+    TEST_SCOPE_CACHE_HITS.with(std::cell::Cell::get)
 }
 
 /// What identifies one "what is the type of `$var` here?" question: the
@@ -113,33 +126,15 @@ fn var_query_key(
     )
 }
 
-/// RAII guard that clears [`VAR_TYPE_MEMO`] when the pass that installed
-/// it ends.  Nested activation is a no-op, so an inner pass cannot
-/// discard the entries an outer one is still relying on.
-pub(crate) struct VarTypeMemoGuard {
-    owns: bool,
-}
-
-impl Drop for VarTypeMemoGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            VAR_TYPE_MEMO.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the variable-type memo for the current thread.
+/// The guard [`with_var_type_memo`] hands back. Nested activation is a
+/// no-op, so an inner pass cannot discard the entries an outer one is
+/// still relying on.
+pub(crate) type VarTypeMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<VarQueryKey, Vec<ResolvedType>>>;
+
 pub(crate) fn with_var_type_memo() -> VarTypeMemoGuard {
-    let already_active = VAR_TYPE_MEMO.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return VarTypeMemoGuard { owns: false };
-    }
-    VAR_TYPE_MEMO.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    VarTypeMemoGuard { owns: true }
+    crate::type_engine::activate_memo(&VAR_TYPE_MEMO)
 }
 
 /// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
@@ -309,6 +304,8 @@ pub(crate) fn resolve_variable_types(
         };
         if let Some(types) = super::forward_walk::lookup_diagnostic_scope(&prefixed, cursor_offset)
         {
+            #[cfg(test)]
+            TEST_SCOPE_CACHE_HITS.with(|count| count.set(count.get() + 1));
             return types;
         }
         // Variable not in the forward-walked scope — fall through to
@@ -635,9 +632,10 @@ fn check_param_list(
         let docblock_type =
             docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
                 .or_else(|| {
-                    // Try extracting from docblock text directly.
-                    find_method_docblock_text(content, method_start_offset)
-                        .and_then(|doc| docblock::extract_param_raw_type(&doc, pname))
+                    content
+                        .get(..method_start_offset)
+                        .and_then(extract_preceding_docblock)
+                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
                 });
 
         let effective =
@@ -649,18 +647,6 @@ fn check_param_list(
         return native_type;
     }
     None
-}
-
-/// Extract the raw docblock text preceding a method/function.
-fn find_method_docblock_text(content: &str, method_start: usize) -> Option<String> {
-    let before = content.get(..method_start)?;
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let doc_end = trimmed.len();
-    let doc_start = trimmed.rfind("/**")?;
-    Some(trimmed[doc_start..doc_end].to_string())
 }
 
 /// Check if the cursor is on a catch variable binding and return its type.
@@ -2746,12 +2732,8 @@ fn try_resolve_static_method_params<'a>(
         _ => return None,
     };
 
-    let class_name = match static_call.class {
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        _ => return None,
-    };
+    let class_name =
+        crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)?;
 
     let cls = (ctx.class_loader)(&class_name)?;
     let method_info = cls.get_method(method_name)?;
@@ -2771,12 +2753,7 @@ fn try_resolve_constructor_params<'a>(
     &'a ArgumentList<'a>,
     OutParamCallee,
 )> {
-    let class_name = match inst.class {
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        _ => return None,
-    };
+    let class_name = crate::class_lookup::class_expression_name(inst.class, ctx.current_class)?;
 
     let args = inst.argument_list.as_ref()?;
     let cls = (ctx.class_loader)(&class_name)?;

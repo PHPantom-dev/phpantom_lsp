@@ -4,41 +4,10 @@
 //! clicking on a property access like `$profile->name` should jump to the
 //! property key inside the docblock annotation that defines the shape.
 
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{create_test_backend, goto_definition_at, open_php};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-async fn goto_definition(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Option<GotoDefinitionResponse> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    backend.goto_definition(params).await.unwrap()
-}
 
 fn assert_location(response: GotoDefinitionResponse, expected_uri: &Url, expected_line: u32) {
     match response {
@@ -88,10 +57,10 @@ async fn test_gtd_object_shape_return_type_property() {
         "    }\n",                                               // 15
         "}\n",                                                   // 16
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$data->name` on line 13
-    let result = goto_definition(&backend, &uri, 13, 15).await;
+    let result = goto_definition_at(&backend, &uri, 13, 15).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'name'"
@@ -100,7 +69,7 @@ async fn test_gtd_object_shape_return_type_property() {
     assert_location(result.unwrap(), &uri, 3);
 
     // Cursor on "age" in `$data->age` on line 14
-    let result = goto_definition(&backend, &uri, 14, 15).await;
+    let result = goto_definition_at(&backend, &uri, 14, 15).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'age'"
@@ -130,10 +99,10 @@ async fn test_gtd_object_shape_inline_var_annotation() {
         "}\n",                                                             // 8
         "function getUnknownValue(): mixed { return null; }\n",            // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "title" in `$item->title` on line 5
-    let result = goto_definition(&backend, &uri, 5, 15).await;
+    let result = goto_definition_at(&backend, &uri, 5, 15).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'title' from inline @var"
@@ -141,7 +110,7 @@ async fn test_gtd_object_shape_inline_var_annotation() {
     assert_location(result.unwrap(), &uri, 3);
 
     // Cursor on "score" in `$item->score` on line 6
-    let result = goto_definition(&backend, &uri, 6, 15).await;
+    let result = goto_definition_at(&backend, &uri, 6, 15).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'score' from inline @var"
@@ -170,10 +139,10 @@ async fn test_gtd_object_shape_param_annotation() {
         "    }\n",                                                 // 8
         "}\n",                                                     // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "host" in `$config->host` on line 6
-    let result = goto_definition(&backend, &uri, 6, 18).await;
+    let result = goto_definition_at(&backend, &uri, 6, 18).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'host' from @param"
@@ -181,7 +150,7 @@ async fn test_gtd_object_shape_param_annotation() {
     assert_location(result.unwrap(), &uri, 3);
 
     // Cursor on "port" in `$config->port` on line 7
-    let result = goto_definition(&backend, &uri, 7, 18).await;
+    let result = goto_definition_at(&backend, &uri, 7, 18).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'port' from @param"
@@ -217,10 +186,10 @@ async fn test_gtd_object_shape_property_with_class_type() {
         "    }\n",                                                       // 13
         "}\n",                                                           // 14
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "tool" in `$kit->tool` on line 11
-    let result = goto_definition(&backend, &uri, 11, 14).await;
+    let result = goto_definition_at(&backend, &uri, 11, 14).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'tool'"
@@ -228,7 +197,7 @@ async fn test_gtd_object_shape_property_with_class_type() {
     assert_location(result.unwrap(), &uri, 4);
 
     // Cursor on "label" in `$kit->label` on line 12
-    let result = goto_definition(&backend, &uri, 12, 14).await;
+    let result = goto_definition_at(&backend, &uri, 12, 14).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'label'"
@@ -260,9 +229,9 @@ async fn test_gtd_nullable_object_shape() {
         "    }\n",                                                 // 11
         "}\n",                                                     // 12
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
-    let result = goto_definition(&backend, &uri, 10, 18).await;
+    let result = goto_definition_at(&backend, &uri, 10, 18).await;
     assert!(
         result.is_some(),
         "Should resolve property 'id' on nullable object shape"
@@ -295,10 +264,10 @@ async fn test_gtd_object_shape_optional_property() {
         "    }\n",                                                      // 12
         "}\n",                                                          // 13
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "required" on line 10
-    let result = goto_definition(&backend, &uri, 10, 14).await;
+    let result = goto_definition_at(&backend, &uri, 10, 14).await;
     assert!(
         result.is_some(),
         "Should resolve required object shape property"
@@ -306,7 +275,7 @@ async fn test_gtd_object_shape_optional_property() {
     assert_location(result.unwrap(), &uri, 3);
 
     // Cursor on "optional" on line 11
-    let result = goto_definition(&backend, &uri, 11, 14).await;
+    let result = goto_definition_at(&backend, &uri, 11, 14).await;
     assert!(
         result.is_some(),
         "Should resolve optional object shape property"
@@ -335,10 +304,10 @@ async fn test_gtd_object_shape_class_property_var() {
         "    }\n",                                           // 7
         "}\n",                                               // 8
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "host" in `$this->config->host` on line 5
-    let result = goto_definition(&backend, &uri, 5, 23).await;
+    let result = goto_definition_at(&backend, &uri, 5, 23).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'host' from class property @var"
@@ -346,7 +315,7 @@ async fn test_gtd_object_shape_class_property_var() {
     assert_location(result.unwrap(), &uri, 2);
 
     // Cursor on "port" in `$this->config->port` on line 6
-    let result = goto_definition(&backend, &uri, 6, 23).await;
+    let result = goto_definition_at(&backend, &uri, 6, 23).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'port' from class property @var"
@@ -381,11 +350,11 @@ async fn test_gtd_object_shape_closest_match() {
         "    }\n",                                                    // 13
         "}\n",                                                        // 14
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$b->name` on line 12 — should prefer line 6
     // (the closest `object{name: …}` before the cursor).
-    let result = goto_definition(&backend, &uri, 12, 13).await;
+    let result = goto_definition_at(&backend, &uri, 12, 13).await;
     assert!(
         result.is_some(),
         "Should resolve 'name' to closest object shape"
@@ -418,10 +387,10 @@ async fn test_gtd_nested_object_shape_first_level() {
         "    }\n",                                                                    // 12
         "}\n",                                                                        // 13
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "data" in `$result->data` on line 10
-    let result = goto_definition(&backend, &uri, 10, 18).await;
+    let result = goto_definition_at(&backend, &uri, 10, 18).await;
     assert!(
         result.is_some(),
         "Should resolve 'data' in nested object shape"
@@ -429,7 +398,7 @@ async fn test_gtd_nested_object_shape_first_level() {
     assert_location(result.unwrap(), &uri, 3);
 
     // Cursor on "meta" in `$result->meta` on line 11
-    let result = goto_definition(&backend, &uri, 11, 18).await;
+    let result = goto_definition_at(&backend, &uri, 11, 18).await;
     assert!(
         result.is_some(),
         "Should resolve 'meta' in nested object shape"
@@ -458,10 +427,10 @@ async fn test_gtd_object_shape_this_method_return() {
         "    public function getProfile(): object { return (object) []; }\n", // 8
         "}\n",                                                                // 9
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "name" in `$profile->name` on line 4
-    let result = goto_definition(&backend, &uri, 4, 19).await;
+    let result = goto_definition_at(&backend, &uri, 4, 19).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'name' from $this->getProfile()"
@@ -469,7 +438,7 @@ async fn test_gtd_object_shape_this_method_return() {
     assert_location(result.unwrap(), &uri, 7);
 
     // Cursor on "age" in `$profile->age` on line 5
-    let result = goto_definition(&backend, &uri, 5, 19).await;
+    let result = goto_definition_at(&backend, &uri, 5, 19).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'age' from $this->getProfile()"
@@ -499,10 +468,10 @@ async fn test_gtd_object_shape_chain_first_property() {
         "    public function getResult(): object { return (object) []; }\n",           // 11
         "}\n",                                                                         // 12
     );
-    open_file(&backend, &uri, text).await;
+    open_php(&backend, &uri, text).await;
 
     // Cursor on "tool" in `$result->tool` on line 7
-    let result = goto_definition(&backend, &uri, 7, 18).await;
+    let result = goto_definition_at(&backend, &uri, 7, 18).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'tool' from $this->getResult()"
@@ -510,7 +479,7 @@ async fn test_gtd_object_shape_chain_first_property() {
     assert_location(result.unwrap(), &uri, 10);
 
     // Cursor on "meta" in `$result->meta` on line 8
-    let result = goto_definition(&backend, &uri, 8, 18).await;
+    let result = goto_definition_at(&backend, &uri, 8, 18).await;
     assert!(
         result.is_some(),
         "Should resolve object shape property 'meta' from $this->getResult()"

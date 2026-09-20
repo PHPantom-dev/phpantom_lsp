@@ -6,7 +6,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{
+        complete_labels_at_opened_with_trigger, create_test_backend, hover_text_at, open_document,
+        open_php,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -33,16 +36,7 @@ class Carbon {
             ("file:///app/Models/BlogAuthor.php", BLOG_AUTHOR_PHP),
             ("file:///vendor/Carbon.php", CARBON_PHP),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(backend, &Url::parse(uri).unwrap(), text).await;
         }
     }
 
@@ -86,105 +80,17 @@ echo e( config('app.name') ); echo e( date('Y') );
 
     async fn open_blade(backend: &phpantom_lsp::Backend) -> String {
         let uri = "file:///resources/views/email.blade.php";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: BLADE_TEMPLATE.to_string(),
-                },
-            })
-            .await;
+        open_document(backend, &Url::parse(uri).unwrap(), "blade", BLADE_TEMPLATE).await;
         uri.to_string()
     }
 
     async fn open_php_equivalent(backend: &phpantom_lsp::Backend) -> String {
         let uri = "file:///equivalent.php";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: PHP_EQUIVALENT.to_string(),
-                },
-            })
-            .await;
+        open_php(backend, &Url::parse(uri).unwrap(), PHP_EQUIVALENT).await;
         uri.to_string()
     }
 
-    // ── Helper: hover at a position and return the hover text ───────────
-
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &str,
-        line: u32,
-        col: u32,
-    ) -> Option<String> {
-        let params = HoverParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position: Position {
-                    line,
-                    character: col,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-        };
-        let result = backend.hover(params).await.unwrap()?;
-        match result.contents {
-            HoverContents::Markup(m) => Some(m.value),
-            HoverContents::Scalar(MarkedString::String(s)) => Some(s),
-            HoverContents::Scalar(MarkedString::LanguageString(ls)) => Some(ls.value),
-            HoverContents::Array(arr) => Some(
-                arr.into_iter()
-                    .map(|m| match m {
-                        MarkedString::String(s) => s,
-                        MarkedString::LanguageString(ls) => ls.value,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            ),
-        }
-    }
-
     // ── Helper: completion labels at a position ─────────────────────────
-
-    async fn completion_labels(
-        backend: &phpantom_lsp::Backend,
-        uri: &str,
-        line: u32,
-        col: u32,
-    ) -> Vec<String> {
-        let params = CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: Url::parse(uri).unwrap(),
-                },
-                position: Position {
-                    line,
-                    character: col,
-                },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: Some(CompletionContext {
-                trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                trigger_character: Some(">".to_string()),
-            }),
-        };
-        let result = backend.completion(params).await.unwrap();
-        match result {
-            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
-            Some(CompletionResponse::List(list)) => {
-                list.items.into_iter().map(|i| i.label).collect()
-            }
-            None => vec![],
-        }
-    }
 
     // ── Helper: GTD returns something ───────────────────────────────────
 
@@ -222,7 +128,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri = open_php_equivalent(&backend).await;
         // "$author" in "echo e( $author->name );" — line 6, col 8
-        let text = hover_text(&backend, &uri, 6, 8).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 6, 8).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogAuthor")),
             "PHP: hover on $author should mention BlogAuthor, got: {:?}",
@@ -236,7 +142,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri = open_blade(&backend).await;
         // "$author" in "<p>{{ $author->name }}</p>" — line 11, col 10
-        let text = hover_text(&backend, &uri, 11, 10).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 11, 10).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogAuthor")),
             "Blade: hover on $author should mention BlogAuthor, got: {:?}",
@@ -254,18 +160,16 @@ echo e( config('app.name') ); echo e( date('Y') );
         let uri_str = "file:///equiv_completion.php";
         let text =
             "<?php\n/**\n * @var \\App\\Models\\BlogAuthor $author\n */\necho e( $author-> );";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri_str).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &Url::parse(uri_str).unwrap(), text).await;
         // "echo e( $author-> );" — line 4, col 17
-        let labels = completion_labels(&backend, uri_str, 4, 17).await;
+        let labels = complete_labels_at_opened_with_trigger(
+            &backend,
+            &Url::parse(uri_str).unwrap(),
+            4,
+            17,
+            ">",
+        )
+        .await;
         assert!(
             labels.iter().any(|l| l == "name"),
             "PHP: $author-> should offer 'name', got: {:?}",
@@ -279,18 +183,16 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri_str = "file:///resources/views/comp.blade.php";
         let text = "@php\n/**\n * @var \\App\\Models\\BlogAuthor $author\n */\n@endphp\n\n<p>{{ $author-> }}</p>";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(uri_str).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &Url::parse(uri_str).unwrap(), "blade", text).await;
         // "<p>{{ $author-> }}</p>" — line 6, col 15
-        let labels = completion_labels(&backend, uri_str, 6, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(
+            &backend,
+            &Url::parse(uri_str).unwrap(),
+            6,
+            15,
+            ">",
+        )
+        .await;
         assert!(
             labels.iter().any(|l| l == "name"),
             "Blade: $author-> should offer 'name', got: {:?}",
@@ -328,7 +230,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri = open_php_equivalent(&backend).await;
         // "$post" in "echo e( $post->getTitle() );" — line 7, col 8
-        let text = hover_text(&backend, &uri, 7, 8).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 7, 8).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogPost")),
             "PHP: hover on $post should mention BlogPost, got: {:?}",
@@ -342,7 +244,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         open_scaffolding(&backend).await;
         let uri = open_blade(&backend).await;
         // "$post" in "<h3>{{ $post->getTitle() }}</h3>" — line 12, col 11
-        let text = hover_text(&backend, &uri, 12, 11).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 12, 11).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogPost")),
             "Blade: hover on $post should mention BlogPost, got: {:?}",
@@ -381,7 +283,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         let uri = open_php_equivalent(&backend).await;
         // "diffForHumans" in "echo e( $post->created_at->diffForHumans() );"
         // line 9, col 27
-        let text = hover_text(&backend, &uri, 9, 27).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 9, 27).await;
         assert!(
             text.as_ref()
                 .is_some_and(|t| t.contains("diffForHumans") || t.contains("string")),
@@ -397,7 +299,7 @@ echo e( config('app.name') ); echo e( date('Y') );
         let uri = open_blade(&backend).await;
         // "diffForHumans" in "<p>{{ $post->created_at->diffForHumans() }}</p>"
         // line 14, col 30
-        let text = hover_text(&backend, &uri, 14, 30).await;
+        let text = hover_text_at(&backend, &Url::parse(&uri).unwrap(), 14, 30).await;
         assert!(
             text.as_ref()
                 .is_some_and(|t| t.contains("diffForHumans") || t.contains("string")),
@@ -437,16 +339,7 @@ class BlogAuthor {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         let php_uri = "file:///foreach_test.php";
@@ -456,19 +349,10 @@ foreach ($users->active()->byName() as $user) {
     echo $user->name;
 }
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(php_uri).unwrap(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &Url::parse(php_uri).unwrap(), php_text).await;
 
         // Hover on $user (line 3, col 9)
-        let text = hover_text(&backend, php_uri, 3, 9).await;
+        let text = hover_text_at(&backend, &Url::parse(php_uri).unwrap(), 3, 9).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogAuthor")),
             "PHP: hover on $user in foreach should show BlogAuthor, got: {:?}",
@@ -486,16 +370,7 @@ foreach ($users->active()->byName() as $user) {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         let blade_uri = "file:///views/users.blade.php";
@@ -509,19 +384,16 @@ foreach ($users->active()->byName() as $user) {
     <p>{{ $user->name }}</p>
 @endforeach
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(blade_uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(
+            &backend,
+            &Url::parse(blade_uri).unwrap(),
+            "blade",
+            blade_text,
+        )
+        .await;
 
         // Hover on $user (line 7: "    <p>{{ $user->name }}</p>")
-        let text = hover_text(&backend, blade_uri, 7, 14).await;
+        let text = hover_text_at(&backend, &Url::parse(blade_uri).unwrap(), 7, 14).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogAuthor")),
             "Blade: hover on $user in foreach should show BlogAuthor, got: {:?}",
@@ -539,16 +411,7 @@ foreach ($users->active()->byName() as $user) {
                 AUTHOR_COLLECTION_PHP,
             ),
         ] {
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri: Url::parse(uri).unwrap(),
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: text.to_string(),
-                    },
-                })
-                .await;
+            open_php(&backend, &Url::parse(uri).unwrap(), text).await;
         }
 
         // This matches the exact real index.blade.php
@@ -590,20 +453,17 @@ foreach ($users->active()->byName() as $user) {
     @endif
 @endsection
 "#;
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: Url::parse(blade_uri).unwrap(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(
+            &backend,
+            &Url::parse(blade_uri).unwrap(),
+            "blade",
+            blade_text,
+        )
+        .await;
 
         // Hover on $user on line 24 ("                    <td>{{ $user->name }}</td>")
         // $user starts at col 28
-        let text = hover_text(&backend, blade_uri, 24, 30).await;
+        let text = hover_text_at(&backend, &Url::parse(blade_uri).unwrap(), 24, 30).await;
         assert!(
             text.as_ref().is_some_and(|t| t.contains("BlogAuthor")),
             "Blade(real file): hover on $user should show BlogAuthor, got: {:?}",

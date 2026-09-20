@@ -146,6 +146,31 @@ pub(crate) fn find_class_by_name<'a>(
     }
 }
 
+/// The class a class-position expression names, as written.
+///
+/// Covers the four spellings a `Foo::bar()`, `new Foo`, `Foo::CONST`, or
+/// `Foo::$prop` can put on the left: a name, `self`, `static`, and
+/// `parent`. `self` and `static` answer with the current class (late
+/// static binding is settled by the caller, which knows whether the call
+/// forwards it), and `parent` with its parent, or `None` when it has
+/// none.
+///
+/// Every other expression kind (a variable holding a class-string, a call)
+/// needs resolution this cannot do and yields `None`; a caller that
+/// handles one matches it before reaching here.
+pub(crate) fn class_expression_name(
+    expr: &mago_syntax::cst::Expression<'_>,
+    current_class: &ClassInfo,
+) -> Option<String> {
+    use mago_syntax::cst::Expression;
+    match expr {
+        Expression::Identifier(ident) => Some(crate::atom::bytes_to_str(ident.value()).to_string()),
+        Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
+        Expression::Parent(_) => current_class.parent_class.map(|a| a.to_string()),
+        _ => None,
+    }
+}
+
 /// Returns `true` if `s` is one of the PHP keywords that refer to the
 /// *current* class (not the parent): `self`, `static`, or `$this`.
 ///

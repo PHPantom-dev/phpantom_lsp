@@ -10,44 +10,10 @@
 //! The last test covers the binding machinery the rest of them rest on: which
 //! alternative of a union `@param` a `@template` binds from.
 
-use crate::common::create_test_backend_with_full_stubs;
-use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
-
-/// The resolved type of the variable assigned on `line` (0-based), read off
-/// the hover response.
-fn assigned_type(backend: &Backend, uri: &str, content: &str, line: u32) -> String {
-    backend.update_ast(uri, content);
-    let hover = backend
-        .handle_hover(uri, content, Position { line, character: 6 })
-        .unwrap_or_else(|| panic!("no hover on line {line}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("Expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no assignment in hover on line {line}: {}", markup.value))
-}
+use crate::common::{assert_assigned_types, create_test_backend_with_full_stubs, type_at_marker};
 
 /// Assert the type of each assignment in `content`, keyed by the variable it
 /// assigns to. Line numbers are found by scanning for `$name = `.
-fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
-    let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///array_func_generics.php";
-    for (var, want) in expected {
-        let needle = format!("{var} = ");
-        let line = content
-            .lines()
-            .position(|l| l.trim_start().starts_with(&needle))
-            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
-            as u32;
-        let got = assigned_type(&backend, uri, content, line);
-        assert_eq!(&got, want, "{var}");
-    }
-}
-
 /// The key-reading builtins report the input's *key* type. The stubs spell
 /// these out as `int[]|string[]` and `string|int|null`, which then fails
 /// against a declared `array<string>` on the wrong branch.
@@ -794,30 +760,6 @@ function probe(array $rows, array $byName, array $lines): void {
             ("$zipped", "list<string>"),
         ],
     );
-}
-
-/// The type reported for the variable right after a `/*NAME*/` marker.
-fn type_at_marker(backend: &Backend, uri: &str, content: &str, marker: &str) -> String {
-    let needle = format!("/*{marker}*/$");
-    let (line, character) = content
-        .lines()
-        .enumerate()
-        .find_map(|(i, l)| {
-            l.find(&needle)
-                .map(|c| (i as u32, (c + needle.len()) as u32))
-        })
-        .unwrap_or_else(|| panic!("marker {marker} not found in the fixture"));
-    let hover = backend
-        .handle_hover(uri, content, Position { line, character })
-        .unwrap_or_else(|| panic!("no hover at marker {marker}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("Expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no type in hover at marker {marker}: {}", markup.value))
 }
 
 /// A callback parameter is bound from one element of the array it is handed,

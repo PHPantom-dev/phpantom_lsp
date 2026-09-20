@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::multi_file_edit;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
@@ -83,6 +84,15 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<PrepareRenameResponse> {
+        // A YAML/XML occurrence is not a rename site.  Its text may be the
+        // escaped `App\\Handler` form the document's quoting requires
+        // rather than the PHP spelling, so nothing here can plan the edit
+        // that replaces it, and the PHP occurrences are reached from the
+        // declaration instead.
+        if crate::resource_navigation::is_resource_document(uri) {
+            return None;
+        }
+
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
         // The range below is built from this span's byte offsets, and the
@@ -149,6 +159,15 @@ impl Backend {
         position: Position,
         new_name: &str,
     ) -> RenameOutcome {
+        // A YAML/XML occurrence is not a rename site.  Its text may be the
+        // escaped `App\\Handler` form the document's quoting requires
+        // rather than the PHP spelling, so nothing here can plan the edit
+        // that replaces it, and the PHP occurrences are reached from the
+        // declaration instead.
+        if crate::resource_navigation::is_resource_document(uri) {
+            return Ok(None);
+        }
+
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
             return Ok(None);
         };
@@ -346,11 +365,7 @@ impl Backend {
         }
         changes.retain(|_, edits| !edits.is_empty());
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
+        Ok(Some(multi_file_edit(changes)))
     }
 
     /// Extract the renameable symbol name and its source range.

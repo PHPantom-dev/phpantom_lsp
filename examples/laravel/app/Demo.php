@@ -112,7 +112,7 @@ class Demo
         $bakery->headbaker->getName(); // HasOne (lower-case)       → Baker
         $bakery->MasterRecipe;         // BelongsToMany (mixed)     → Collection<BakeryRecipe>
 
-        // $pivot attribute — attached to models that are the *target* of a
+        // Pivot accessors are attached to models that are the *target* of a
         // many-to-many relationship (belongsToMany/morphToMany). BakeryRecipe
         // is the target of Bakery::masterRecipe(), which declares a custom
         // pivot via ->using(RecipeIngredient::class), so its $pivot is typed as
@@ -121,6 +121,16 @@ class Demo
         $bakery->masterRecipe->first()->pivot;                      // custom pivot → RecipeIngredient
         $bakery->masterRecipe->first()->pivot->getQuantityLabel(); // pivot method → string
         // Hover over masterRecipe() also lists the ->withPivot() columns.
+
+        // ->as('ingredient') renames the accessor, so the same pivot arrives as
+        // $ingredient rather than $pivot. Bakery::seasonalRecipes() configures
+        // it in the body and repeats it in the annotation's fourth generic
+        // (BelongsToMany<Related, $this, Pivot, 'accessor'>); either alone is
+        // enough. BakeryRecipe is the target of both relationships, so it
+        // carries both accessors.
+        $bakery->seasonalRecipes->first()->ingredient;                      // renamed pivot → RecipeIngredient
+        $bakery->seasonalRecipes->first()->ingredient->getQuantityLabel(); // pivot method  → string
+        // Hover over seasonalRecipes() also names the accessor it configures.
 
         // BelongsTo relationship property + method call with covariant $this
         $post = new BlogPost();

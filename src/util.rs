@@ -367,6 +367,21 @@ pub(crate) fn collect_php_files(
     result
 }
 
+/// Drop the entries `keep` marks `false`, in place.
+///
+/// `keep` is indexed the same as `items`, which is what a pairwise pass
+/// over the whole list produces. `Vec::retain` cannot see the index it is
+/// at, so a counter walks alongside it.
+pub(crate) fn retain_by_mask<T>(items: &mut Vec<T>, keep: &[bool]) {
+    debug_assert_eq!(items.len(), keep.len());
+    let mut index = 0;
+    items.retain(|_| {
+        let retain = keep.get(index).copied().unwrap_or(true);
+        index += 1;
+        retain
+    });
+}
+
 /// Extract the short (unqualified) class name from a potentially
 /// fully-qualified name.
 ///

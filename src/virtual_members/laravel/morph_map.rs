@@ -31,6 +31,8 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
+use super::file_contributions::{Contribution, FileContributions};
+use super::helpers::string_literal_at;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
 
@@ -74,9 +76,8 @@ pub(crate) struct MorphMapScan {
     pub enforced: bool,
 }
 
-impl MorphMapScan {
-    /// Whether the file contributes nothing at all to the index.
-    pub(crate) fn is_empty(&self) -> bool {
+impl Contribution for MorphMapScan {
+    fn is_empty(&self) -> bool {
         self.entries.is_empty() && self.table_keyed.is_empty() && !self.enforced
     }
 }
@@ -196,7 +197,7 @@ fn collect_map_argument(
                 let Some(target_fqn) = class_constant_fqn(kv.value, resolved, content) else {
                     continue;
                 };
-                let Some((alias, alias_offset)) = string_literal_content(kv.key, content) else {
+                let Some((alias, alias_offset)) = string_literal_at(kv.key, content) else {
                     continue;
                 };
                 scan.entries.push(MorphMapEntry {
@@ -251,27 +252,13 @@ fn class_constant_fqn(
                 .or_else(|| (!raw.is_empty()).then(|| raw.trim_start_matches('\\').to_string()))
         }
         Expression::Literal(Literal::String(_)) => {
-            let (raw, _) = string_literal_content(expr, content)?;
+            let (raw, _) = string_literal_at(expr, content)?;
             let fqn = raw.replace("\\\\", "\\");
             let fqn = fqn.trim_start_matches('\\');
             (!fqn.is_empty()).then(|| fqn.to_string())
         }
         _ => None,
     }
-}
-
-/// The content of a non-interpolated string literal plus the byte offset of
-/// that content (just inside the opening quote).
-fn string_literal_content<'c>(expr: &Expression<'_>, content: &'c str) -> Option<(&'c str, u32)> {
-    let Expression::Literal(Literal::String(s)) = expr else {
-        return None;
-    };
-    let start = s.span.start.offset + 1;
-    let end = s.span.end.offset - 1;
-    if start >= end || end as usize > content.len() {
-        return None;
-    }
-    Some((&content[start as usize..end as usize], start))
 }
 
 /// Where a morph alias was registered, and what it maps to.
@@ -289,12 +276,12 @@ pub(crate) struct MorphTarget {
 /// Project-wide index of Laravel morph-map registrations.
 ///
 /// Stored on [`Backend`](crate::Backend) and built for Laravel projects after
-/// indexing.  `by_uri` is the source of truth (one entry per contributing file,
+/// indexing.  `files` is the source of truth (one entry per contributing file,
 /// so an edit to a file can replace just that file's registrations); `aliases`
 /// and `by_fqn` are the derived lookup maps.
 #[derive(Default)]
 pub(crate) struct LaravelMorphMapIndex {
-    by_uri: HashMap<String, MorphMapScan>,
+    pub(crate) files: FileContributions<MorphMapScan>,
     /// Alias → mapped model, merged across every contributing file.
     aliases: HashMap<String, MorphTarget>,
     /// Whether any provider called `enforceMorphMap()` / `requireMorphMap()`,
@@ -303,18 +290,6 @@ pub(crate) struct LaravelMorphMapIndex {
 }
 
 impl LaravelMorphMapIndex {
-    /// Replace the registrations contributed by `uri`.  Passing an empty scan
-    /// removes the file's contributions.  Call [`Self::rebuild`] afterwards to
-    /// refresh the derived maps (deferred so a bulk build rebuilds once rather
-    /// than per file).
-    pub(crate) fn set_file(&mut self, uri: String, scan: MorphMapScan) {
-        if scan.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, scan);
-        }
-    }
-
     /// Rebuild the derived lookup maps from the per-file scans.
     ///
     /// A duplicate alias keeps the first registration seen.  Laravel's own
@@ -325,7 +300,7 @@ impl LaravelMorphMapIndex {
         let mut aliases: HashMap<String, MorphTarget> = HashMap::new();
         let mut enforced = false;
 
-        for (uri, scan) in self.by_uri.iter() {
+        for (uri, scan) in self.files.iter() {
             enforced |= scan.enforced;
             for entry in &scan.entries {
                 aliases
@@ -340,11 +315,6 @@ impl LaravelMorphMapIndex {
 
         self.aliases = aliases;
         self.enforced = enforced;
-    }
-
-    /// Whether `uri` currently contributes any registrations.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
     }
 
     /// The model an alias maps to, if registered.

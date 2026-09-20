@@ -18,7 +18,6 @@
 
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
-use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
@@ -60,6 +59,30 @@ fn find_assignment_at_cursor(
 ) -> Option<AssignmentInfo> {
     for stmt in statements {
         if let Some(info) = find_assignment_in_statement(stmt, cursor, content) {
+            return Some(info);
+        }
+    }
+    None
+}
+
+/// Find the assignment at `cursor` inside whichever of a class-like's
+/// methods contains it.
+///
+/// `own_span` gates the walk to class-likes the cursor is actually
+/// inside, since a class declared later in the same file is otherwise
+/// still visited and its (non-matching) methods scanned for nothing.
+fn find_assignment_in_class_like<'a>(
+    own_span: mago_span::Span,
+    members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
+    cursor: u32,
+    content: &str,
+) -> Option<AssignmentInfo> {
+    if cursor < own_span.start.offset || cursor > own_span.end.offset {
+        return None;
+    }
+    let block = crate::util::find_enclosing_method_block_in_members(members, cursor)?;
+    for s in block.statements.iter() {
+        if let Some(info) = find_assignment_in_statement(s, cursor, content) {
             return Some(info);
         }
     }
@@ -137,67 +160,13 @@ fn find_assignment_in_statement(
             None
         }
         Statement::Class(class) => {
-            let span = class.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                for member in class.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let MethodBody::Concrete(block) = &method.body
-                    {
-                        let block_span = block.span();
-                        if cursor >= block_span.start.offset && cursor <= block_span.end.offset {
-                            for s in block.statements.iter() {
-                                if let Some(info) = find_assignment_in_statement(s, cursor, content)
-                                {
-                                    return Some(info);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            None
+            find_assignment_in_class_like(class.span(), class.members.iter(), cursor, content)
         }
         Statement::Trait(tr) => {
-            let span = tr.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                for member in tr.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let MethodBody::Concrete(block) = &method.body
-                    {
-                        let block_span = block.span();
-                        if cursor >= block_span.start.offset && cursor <= block_span.end.offset {
-                            for s in block.statements.iter() {
-                                if let Some(info) = find_assignment_in_statement(s, cursor, content)
-                                {
-                                    return Some(info);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            None
+            find_assignment_in_class_like(tr.span(), tr.members.iter(), cursor, content)
         }
         Statement::Enum(en) => {
-            let span = en.span();
-            if cursor >= span.start.offset && cursor <= span.end.offset {
-                for member in en.members.iter() {
-                    if let ClassLikeMember::Method(method) = member
-                        && let MethodBody::Concrete(block) = &method.body
-                    {
-                        let block_span = block.span();
-                        if cursor >= block_span.start.offset && cursor <= block_span.end.offset {
-                            for s in block.statements.iter() {
-                                if let Some(info) = find_assignment_in_statement(s, cursor, content)
-                                {
-                                    return Some(info);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            None
+            find_assignment_in_class_like(en.span(), en.members.iter(), cursor, content)
         }
         Statement::Interface(_) => None,
         Statement::Block(block) => {
@@ -729,33 +698,17 @@ impl Backend {
             if (*offset as usize) < info.stmt_end {
                 continue;
             }
-            let start = *offset as usize;
-            let end = start + info.var_name.len();
-
-            // Verify the text at this offset matches the variable name.
-            if end > content.len() || content[start..end] != info.var_name {
-                continue;
+            if let Some(edit) = crate::code_actions::occurrence_replacement_edit(
+                content,
+                *offset as usize,
+                &info.var_name,
+                &replacement,
+            ) {
+                edits.push(edit);
             }
-
-            let start_pos = offset_to_position(content, start);
-            let end_pos = offset_to_position(content, end);
-            edits.push(TextEdit {
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-                new_text: replacement.clone(),
-            });
         }
 
-        // Sort edits by position (document order) for determinism.
-        edits.sort_by(|a, b| {
-            a.range
-                .start
-                .line
-                .cmp(&b.range.start.line)
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        crate::code_actions::sort_edits_by_position(&mut edits);
 
         Some(crate::code_actions::single_file_edit(doc_uri, edits))
     }
@@ -766,6 +719,7 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_fixtures::apply_edits;
 
     /// Helper: given PHP source with a cursor marker `/*|*/`, run the
     /// inline variable action and return the resulting edits (if offered).
@@ -828,28 +782,6 @@ mod tests {
         let parsed_uri = Url::parse(uri).unwrap();
         let edits = changes.get(&parsed_uri)?;
         Some(edits.clone())
-    }
-
-    /// Apply TextEdits to content (edits are assumed to be non-overlapping
-    /// and will be applied from bottom to top to preserve positions).
-    fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
-        let mut result = content.to_string();
-        // Sort edits in reverse document order so earlier edits don't
-        // shift positions of later ones.
-        let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-        sorted.sort_by(|a, b| {
-            b.range
-                .start
-                .line
-                .cmp(&a.range.start.line)
-                .then(b.range.start.character.cmp(&a.range.start.character))
-        });
-        for edit in sorted {
-            let start = position_to_byte_offset(&result, edit.range.start);
-            let end = position_to_byte_offset(&result, edit.range.end);
-            result.replace_range(start..end, &edit.new_text);
-        }
-        result
     }
 
     // ── Basic inline ────────────────────────────────────────────────

@@ -46,7 +46,7 @@ pub(crate) fn skip_block_comment(bytes: &[u8], pos: usize) -> usize {
         }
         i += 1;
     }
-    i
+    bytes.len()
 }
 
 /// Skip backward past a string literal ending at position `end` (which
@@ -74,6 +74,28 @@ pub(crate) fn skip_string_backward(chars: &[char], end: usize, q: char) -> usize
         j -= 1;
     }
     0
+}
+
+/// Whether `b` can appear in a PHP identifier (`[A-Za-z0-9_]`).
+///
+/// Not `\` or Unicode-aware: identifiers this project scans backward
+/// from a cursor are always the tail of a `$variable` or bare word, never
+/// a qualified name.
+pub(crate) fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Walk `bytes` backward from `pos`, stopping at the first byte that is
+/// not an identifier character, and return that stopping offset.
+///
+/// Used to find where the identifier under (or just before) the cursor
+/// starts, e.g. completing `$obj->get|` or a bare partial keyword.
+pub(crate) fn scan_ident_backward(bytes: &[u8], pos: usize) -> usize {
+    let mut i = pos.min(bytes.len());
+    while i > 0 && is_ident_byte(bytes[i - 1]) {
+        i -= 1;
+    }
+    i
 }
 
 /// Remove surrounding single or double quotes from a PHP string literal.
@@ -350,16 +372,41 @@ pub(crate) fn find_matching_forward(
     open: u8,
     close: u8,
 ) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-    if open_pos >= len || bytes[open_pos] != open {
+    find_matching_forward_bytes(text.as_bytes(), open_pos, open, close)
+}
+
+/// [`find_matching_forward`] over a byte slice, for scanners that already
+/// work on bytes.
+pub(crate) fn find_matching_forward_bytes(
+    bytes: &[u8],
+    open_pos: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    if open_pos >= bytes.len() || bytes[open_pos] != open {
         return None;
     }
-    let mut depth = 1u32;
-    let mut pos = open_pos + 1;
+    find_unmatched_close_bytes(bytes, open_pos + 1, open, close)
+}
+
+/// Find the first `close` that is not matched by an `open` at or after
+/// `from`: the delimiter that ends the scope `from` sits in.
+///
+/// `None` when the scope runs to the end of `bytes`. Like
+/// [`find_matching_forward`], string literals and both styles of PHP
+/// comment are skipped, so a delimiter inside one does not end the scope.
+pub(crate) fn find_unmatched_close_bytes(
+    bytes: &[u8],
+    from: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let len = bytes.len();
+    let mut depth = 0u32;
+    let mut pos = from;
     let mut in_single = false;
     let mut in_double = false;
-    while pos < len && depth > 0 {
+    while pos < len {
         let b = bytes[pos];
         if in_single {
             if b == b'\\' {
@@ -379,10 +426,10 @@ pub(crate) fn find_matching_forward(
                 b'"' => in_double = true,
                 b if b == open => depth += 1,
                 b if b == close => {
-                    depth -= 1;
                     if depth == 0 {
                         return Some(pos);
                     }
+                    depth -= 1;
                 }
                 b'/' if pos + 1 < len => {
                     if bytes[pos + 1] == b'/' {
@@ -661,6 +708,34 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
         }
     }
     None
+}
+
+/// The first line a statement may be inserted on, after the file's
+/// header.
+///
+/// PHP requires `declare(strict_types=1)` to be the file's very first
+/// statement, so a `namespace` or a `use` written between `<?php` and a
+/// `declare` is a fatal error rather than a formatting quibble. The
+/// answer is therefore the line after the opening tag and any `declare`
+/// that follows it; blank lines in between are stepped over, and anything
+/// else ends the header.
+pub(crate) fn header_insert_line(content: &str) -> u32 {
+    let mut insert_line = 0u32;
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<?php")
+            || trimmed.starts_with("declare(")
+            || trimmed.starts_with("declare (")
+        {
+            insert_line = (i + 1) as u32;
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        break;
+    }
+    insert_line
 }
 
 /// Whether the file declares a namespace.  An unqualified name in a file

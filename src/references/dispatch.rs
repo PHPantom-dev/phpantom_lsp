@@ -27,6 +27,29 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        // Refresh once for the user command so files created without a
+        // watcher event remain discoverable. The per-symbol scanners below
+        // only wait for/reuse that completed index.
+        self.ensure_workspace_indexed_for_request();
+        self.find_references_inner(
+            uri,
+            content,
+            position,
+            include_declaration,
+            ReferenceSearchMode::References,
+        )
+    }
+
+    /// Resolve declaration annotations against the completed index without
+    /// turning every CodeLens item into another workspace refresh.
+    pub(crate) fn find_references_from_workspace_index(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        self.ensure_workspace_index_ready_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -45,6 +68,7 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
+        self.ensure_workspace_indexed_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -81,7 +105,7 @@ impl Backend {
                 sym.kind,
                 sym.start
             );
-            let locations = self.dispatch_symbol_references(
+            let mut locations = self.dispatch_symbol_references(
                 &sym.kind,
                 uri,
                 content,
@@ -89,6 +113,20 @@ impl Backend {
                 include_declaration,
                 mode,
             );
+            // A YAML/XML occurrence is a reference the user can be shown,
+            // but not one an edit can be planned against: its text may be
+            // the escaped `App\\Handler` form the document's own quoting
+            // requires, which is neither the PHP spelling of the name nor
+            // something a PHP-shaped replacement can be written over.
+            // Rename verifies every location before emitting any edit and
+            // drops the whole rename when one fails, so leaving these in
+            // makes a single escaped name in any config file silently turn
+            // the class rename into a no-op.
+            if mode == ReferenceSearchMode::Rename {
+                locations.retain(|location| {
+                    !crate::resource_navigation::is_resource_document(location.uri.as_str())
+                });
+            }
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
                 sym.kind,
@@ -199,11 +237,15 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
+                let Some(source) = self.symbol_map_source(uri, content) else {
+                    return Vec::new();
+                };
+
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
                 let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text.as_str(content),
+                    subject_text.as_str(source),
                     *is_static,
                     span_start,
                     member_name,
@@ -220,7 +262,7 @@ impl Backend {
                         .reference_file_content(uri)
                         .map(|file_content| {
                             self.resolve_subject_to_fqns(
-                                subject_text.as_str(&file_content),
+                                subject_text.as_str(source),
                                 *is_static,
                                 &self.file_context(uri),
                                 span_start,

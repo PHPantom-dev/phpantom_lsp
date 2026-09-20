@@ -8,15 +8,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace};
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{
-        "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
-    }"#;
 
     const PROVIDERS_PHP: &str =
         "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
@@ -61,7 +56,7 @@ class Post
     /// `Blade::if()`, with `page.blade.php` holding `template`.
     async fn start(template: &str) -> (Backend, tempfile::TempDir, Url) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            LARAVEL_APP_COMPOSER,
             &[
                 ("bootstrap/providers.php", PROVIDERS_PHP),
                 ("app/Providers/AppServiceProvider.php", PROVIDER),

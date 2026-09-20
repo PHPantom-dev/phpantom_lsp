@@ -16,6 +16,8 @@ use std::collections::{HashMap, HashSet};
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
+use super::helpers::make_tagged_diagnostic;
+
 use crate::Backend;
 use crate::atom::bytes_to_str;
 use crate::diagnostics::undefined_variables::{
@@ -369,17 +371,13 @@ fn check_scope(
 
             let message = format!("Unused variable '{}'", var_name);
 
-            ctx.diagnostics.push(Diagnostic {
+            ctx.diagnostics.push(make_tagged_diagnostic(
                 range,
-                severity: Some(DiagnosticSeverity::HINT),
-                code: Some(NumberOrString::String(UNUSED_VARIABLE_CODE.to_string())),
-                code_description: None,
-                source: Some("phpantom".to_string()),
+                DiagnosticSeverity::HINT,
+                UNUSED_VARIABLE_CODE,
                 message,
-                related_information: None,
-                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-                data: None,
-            });
+                Some(DiagnosticTag::UNNECESSARY),
+            ));
         }
     }
 }
@@ -448,17 +446,13 @@ fn check_catch_frame(
             None => continue,
         };
 
-        ctx.diagnostics.push(Diagnostic {
+        ctx.diagnostics.push(make_tagged_diagnostic(
             range,
-            severity: Some(DiagnosticSeverity::HINT),
-            code: Some(NumberOrString::String(UNUSED_VARIABLE_CODE.to_string())),
-            code_description: None,
-            source: Some("phpantom".to_string()),
-            message: format!("Unused variable '{}'", var_name),
-            related_information: None,
-            tags: Some(vec![DiagnosticTag::UNNECESSARY]),
-            data: None,
-        });
+            DiagnosticSeverity::HINT,
+            UNUSED_VARIABLE_CODE,
+            format!("Unused variable '{}'", var_name),
+            Some(DiagnosticTag::UNNECESSARY),
+        ));
     }
 }
 

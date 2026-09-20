@@ -10,10 +10,12 @@
 //! stack of open blocks; this turns what it finds into reports anchored on
 //! the offending directive in the Blade source.
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp::lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::blade::balance::{self, Imbalance};
+
+use super::blade_imbalance::{BlockImbalance, report_block_imbalances};
 
 /// A closing directive that closes something other than the block it sits
 /// in.
@@ -22,6 +24,45 @@ const MISMATCHED_CODE: &str = "mismatched_blade_directive";
 const UNEXPECTED_CODE: &str = "unexpected_blade_directive";
 /// A block the template never closes.
 const UNCLOSED_CODE: &str = "unclosed_blade_directive";
+
+impl BlockImbalance for Imbalance {
+    fn span(&self) -> &std::ops::Range<usize> {
+        Imbalance::span(self)
+    }
+
+    fn code_and_message<F: Fn(&std::ops::Range<usize>) -> u32>(
+        &self,
+        line_of: F,
+    ) -> (&'static str, String) {
+        match self {
+            Imbalance::Mismatched {
+                found,
+                expected,
+                opener,
+                opener_span,
+                ..
+            } => {
+                let line = line_of(opener_span);
+                (
+                    MISMATCHED_CODE,
+                    format!(
+                        "Expected @{expected} to close the @{opener} on line {line}, found @{found}"
+                    ),
+                )
+            }
+            Imbalance::Unexpected { found, opener, .. } => (
+                UNEXPECTED_CODE,
+                format!("@{found} closes nothing: no @{opener} is open here"),
+            ),
+            Imbalance::Unclosed {
+                opener, expected, ..
+            } => (
+                UNCLOSED_CODE,
+                format!("@{opener} is never closed: this block needs a matching @{expected}"),
+            ),
+        }
+    }
+}
 
 impl Backend {
     /// Check that the block directives of the template at `uri` pair up.
@@ -39,44 +80,7 @@ impl Backend {
         let Some(source) = self.get_file_content_arc(uri) else {
             return;
         };
-        let range_of = |span: &std::ops::Range<usize>| {
-            crate::text_position::byte_range_to_lsp_range(&source, span.start, span.end)
-        };
 
-        for imbalance in balance::check(&source) {
-            let (code, message) = match &imbalance {
-                Imbalance::Mismatched {
-                    found,
-                    expected,
-                    opener,
-                    opener_span,
-                    ..
-                } => {
-                    let line = range_of(opener_span).start.line + 1;
-                    (
-                        MISMATCHED_CODE,
-                        format!(
-                            "Expected @{expected} to close the @{opener} on line {line}, found @{found}"
-                        ),
-                    )
-                }
-                Imbalance::Unexpected { found, opener, .. } => (
-                    UNEXPECTED_CODE,
-                    format!("@{found} closes nothing: no @{opener} is open here"),
-                ),
-                Imbalance::Unclosed {
-                    opener, expected, ..
-                } => (
-                    UNCLOSED_CODE,
-                    format!("@{opener} is never closed: this block needs a matching @{expected}"),
-                ),
-            };
-            out.push(super::helpers::make_diagnostic(
-                range_of(imbalance.span()),
-                DiagnosticSeverity::ERROR,
-                code,
-                message,
-            ));
-        }
+        report_block_imbalances(&source, balance::check(&source), out);
     }
 }

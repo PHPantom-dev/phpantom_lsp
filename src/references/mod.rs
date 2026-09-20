@@ -36,6 +36,7 @@ mod functions;
 mod members;
 mod variables;
 
+pub(crate) use members::MemberDeclarationReferenceQuery;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -67,7 +68,7 @@ impl Backend {
     /// vendor directory or the internal stub scheme.  All four cross-file
     /// reference scanners use this to restrict results to user code.
     pub(crate) fn user_file_symbol_maps(&self) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         self.user_file_symbol_maps_matching(None)
     }
 
@@ -85,7 +86,7 @@ impl Backend {
         &self,
         keys: &[ReferenceIndexKey],
     ) -> Vec<(String, Arc<SymbolMap>)> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         let candidate_uris = self.reference_candidate_uris_for_keys(keys);
         self.user_file_symbol_maps_matching(candidate_uris.as_ref())
     }
@@ -124,19 +125,15 @@ impl Backend {
     }
 
     pub(super) fn reference_file_content(&self, uri: &str) -> Option<String> {
-        if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
-        {
-            return Some(content.clone());
-        }
-        self.get_file_content(uri)
+        self.reference_file_content_arc(uri)
+            .map(|content| String::clone(&content))
     }
 
     pub(super) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
         if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
+            && let Some(content) = self.blade_virtual_php_arc(uri)
         {
-            return Some(Arc::new(content.clone()));
+            return Some(content);
         }
         self.get_file_content_arc(uri)
     }
@@ -213,6 +210,20 @@ pub(super) fn is_laravel_builder_static_entrypoint(method_name: &str) -> bool {
 /// PHP method names are case-insensitive, so `__CONSTRUCT` matches too.
 pub(super) fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
+}
+
+/// Put the locations a Find References answer carries into the order an
+/// editor lists them: by file, then by position within it, with exact
+/// duplicates collapsed.
+pub(super) fn sort_locations_for_references(locations: &mut Vec<Location>) {
+    locations.sort_by(|a, b| {
+        a.uri
+            .as_str()
+            .cmp(b.uri.as_str())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+            .then(a.range.start.character.cmp(&b.range.start.character))
+    });
+    locations.dedup();
 }
 
 /// Check whether a resolved class name matches the target FQN.
@@ -316,9 +327,42 @@ pub(crate) fn collect_php_files_gitignore(
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
 ) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+        if filters.is_php_file(path) {
+            result.push(path.to_path_buf());
+        }
+    });
+    result
+}
+
+/// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
+/// index in one `.gitignore`-aware walk.
+pub(crate) fn collect_workspace_index_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let mut php_files = Vec::new();
+    let mut resource_files = Vec::new();
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+        if filters.is_php_file(path) {
+            php_files.push(path.to_path_buf());
+        } else if crate::resource_navigation::is_resource_path(path) {
+            resource_files.push(path.to_path_buf());
+        }
+    });
+    (php_files, resource_files)
+}
+
+fn visit_workspace_files_gitignore(
+    root: &Path,
+    vendor_dir_paths: &[PathBuf],
+    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    mut visit: impl FnMut(&Path),
+) {
     use ignore::WalkBuilder;
 
-    let mut result = Vec::new();
     let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
     let filter_excludes = std::sync::Arc::clone(filters);
 
@@ -346,12 +390,10 @@ pub(crate) fn collect_php_files_gitignore(
 
     for entry in walker.flatten() {
         let path = entry.path();
-        if path.is_file() && filters.is_php_file(path) {
-            result.push(path.to_path_buf());
+        if path.is_file() {
+            visit(path);
         }
     }
-
-    result
 }
 
 /// Push a location only if it is not already present (deduplication).

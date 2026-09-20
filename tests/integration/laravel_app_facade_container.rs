@@ -11,8 +11,7 @@
 //! `Application::make()`/`makeWith()` declarations to recover the narrowed
 //! type.
 
-use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{create_psr4_workspace, hover_text, open_php_str};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -136,26 +135,6 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: Url::parse(uri).unwrap(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
-
 /// Run the consumer through hover on the `$x` usage line, and assert its
 /// resolved type contains `CurrencyHelper`.
 fn assert_resolves_to_currency_helper(backend: &phpantom_lsp::Backend, consumer: &str) {
@@ -194,7 +173,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_resolves_to_currency_helper(&backend, consumer);
 }
 
@@ -214,7 +193,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_resolves_to_currency_helper(&backend, consumer);
 }
 
@@ -258,7 +237,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_chained_format_resolves(&backend, consumer);
 }
 
@@ -277,7 +256,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_chained_format_resolves(&backend, consumer);
 }
 
@@ -299,7 +278,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_chained_format_resolves(&backend, consumer);
 }
 
@@ -319,6 +298,6 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     assert_resolves_to_currency_helper(&backend, consumer);
 }

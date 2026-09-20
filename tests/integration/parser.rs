@@ -218,6 +218,47 @@ async fn test_parse_php_method_parameter_info() {
     assert!(extras.is_variadic);
 }
 
+/// A method's `@param` tags merge the same way a standalone function's
+/// do: a description per named parameter, and — for a tag that omits its
+/// variable name (common in phpstorm-stubs-style docs) — a positional
+/// fallback once the name-based pass leaves a parameter unenriched.
+#[tokio::test]
+async fn test_parse_php_method_param_docblock_positional_fallback_and_description() {
+    let backend = create_test_backend();
+    let php = concat!(
+        "<?php\n",
+        "class Collection {\n",
+        "    /**\n",
+        "     * @param mixed $items The initial items.\n",
+        "     * @param callable(mixed): bool\n",
+        "     */\n",
+        "    function filter($items, $callback): array {}\n",
+        "}\n",
+    );
+
+    let classes = backend.parse_php(php);
+    assert_eq!(classes.len(), 1);
+
+    let method = &classes[0].methods[0];
+    assert_eq!(method.parameters.len(), 2);
+
+    let items = &method.parameters[0];
+    assert_eq!(items.name, "$items");
+    assert_eq!(
+        items.description.as_deref(),
+        Some("The initial items."),
+        "a method parameter's @param description should merge, same as a function's"
+    );
+
+    let callback = &method.parameters[1];
+    assert_eq!(callback.name, "$callback");
+    assert_eq!(
+        callback.type_hint_str().as_deref(),
+        Some("callable(mixed): bool"),
+        "an unnamed @param tag should match $callback by position"
+    );
+}
+
 #[tokio::test]
 async fn test_parse_php_property_with_default_value() {
     let backend = create_test_backend();

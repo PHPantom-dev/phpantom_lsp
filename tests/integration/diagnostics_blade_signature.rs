@@ -5,17 +5,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{
+        LARAVEL_APP_COMPOSER, USER_MODEL_STUB, create_psr4_workspace, open_document,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
-    const COMPOSER: &str = r#"{
-        "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
-    }"#;
-
-    const USER_CLASS: &str =
-        "<?php\nnamespace App\\Models;\nclass User { public string $email = ''; }\n";
     const ADMIN_CLASS: &str =
         "<?php\nnamespace App\\Models;\nclass Admin extends User { public string $role = ''; }\n";
 
@@ -37,26 +32,17 @@ mod tests {
         relative: &str,
     ) -> Vec<(String, String)> {
         let mut files = vec![
-            ("app/Models/User.php", USER_CLASS),
+            ("app/Models/User.php", USER_MODEL_STUB),
             ("app/Models/Admin.php", ADMIN_CLASS),
         ];
         files.extend_from_slice(templates);
-        let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+        let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &files);
         backend.initialized(InitializedParams {}).await;
 
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.clone(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, "blade", &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
         let mut diags = Vec::new();

@@ -282,7 +282,7 @@ impl Backend {
 
         let content_to_parse = self
             .record_blade_virtual_php(uri, content)
-            .unwrap_or_else(|| content.to_string());
+            .unwrap_or_else(|| Arc::new(content.to_string()));
 
         self.laravel_string_key_cache
             .write()
@@ -403,7 +403,7 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<String> {
+    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<Arc<String>> {
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -430,9 +430,10 @@ impl Backend {
         self.blade_source_maps
             .write()
             .insert(uri.to_string(), source_map);
+        let virtual_php = Arc::new(virtual_php);
         self.blade_virtual_content
             .write()
-            .insert(uri.to_string(), virtual_php.clone());
+            .insert(uri.to_string(), Arc::clone(&virtual_php));
         Some(virtual_php)
     }
 
@@ -459,7 +460,7 @@ impl Backend {
         } else {
             None
         };
-        let content = preprocessed.as_deref().unwrap_or(content);
+        let content = preprocessed.as_ref().map_or(content, |php| php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
@@ -520,7 +521,7 @@ impl Backend {
 
         // Invalidate the reverse pivot index when a background-indexed file
         // declares a many-to-many relationship, so its target models pick up
-        // `$pivot` on the next class load.
+        // its pivot accessors on the next class load.
         if !self
             .laravel_pivots_dirty
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -617,22 +618,7 @@ impl Backend {
                                 Statement::Use(use_stmt) => {
                                     Self::extract_use_items(&use_stmt.items, &mut use_map);
                                 }
-                                Statement::Class(_)
-                                | Statement::Interface(_)
-                                | Statement::Trait(_)
-                                | Statement::Enum(_)
-                                // Class-likes declared inside conditional /
-                                // control-flow blocks (e.g. Doctrine's
-                                // `ServiceEntityRepository` version guard) —
-                                // the extractor descends into the bodies.
-                                | Statement::If(_)
-                                | Statement::Block(_)
-                                | Statement::Try(_)
-                                | Statement::Switch(_)
-                                | Statement::While(_)
-                                | Statement::DoWhile(_)
-                                | Statement::For(_)
-                                | Statement::Foreach(_) => {
+                                inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
                                         std::iter::once(inner),
                                         &mut block_classes,
@@ -667,21 +653,7 @@ impl Backend {
                             classes_with_ns.push((cls, block_ns.clone()));
                         }
                     }
-                    Statement::Class(_)
-                    | Statement::Interface(_)
-                    | Statement::Trait(_)
-                    | Statement::Enum(_)
-                    // Class-likes declared inside top-level conditional /
-                    // control-flow blocks — the extractor descends into the
-                    // bodies (and still collects anonymous classes within).
-                    | Statement::If(_)
-                    | Statement::Block(_)
-                    | Statement::Try(_)
-                    | Statement::Switch(_)
-                    | Statement::While(_)
-                    | Statement::DoWhile(_)
-                    | Statement::For(_)
-                    | Statement::Foreach(_) => {
+                    statement if Self::is_classlike_extraction_candidate(statement) => {
                         // A template whose `$this` is bound wraps its body
                         // in a method rather than a function, which buries
                         // the template's own imports just the same (see the
@@ -1437,6 +1409,10 @@ impl Backend {
 
         if structural_changed {
             self.member_completion_cache.lock().clear();
+            // Exact member targets in other files may depend on the return or
+            // property type that changed here. Rebuild those files lazily;
+            // the edited file itself is evicted by reference reindexing below.
+            self.clear_resolved_member_files();
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
@@ -2630,11 +2606,11 @@ mod tests {
         );
     }
 
-    /// A `belongsToMany` body with `->using(...)` and `->withPivot(...)`
-    /// must populate `belongs_to_many_pivots`, with the pivot class resolved
-    /// to an FQN.
+    /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
+    /// `->withPivot(...)` must populate `belongs_to_many_pivots`, with the
+    /// pivot class resolved to an FQN.
     #[test]
-    fn parses_pivot_using_and_columns_from_relationship_body() {
+    fn parses_pivot_accessor_using_and_columns_from_relationship_body() {
         let backend = Backend::new_test();
         let uri = "file:///app/Models/User.php";
         let content = "<?php
@@ -2644,7 +2620,7 @@ use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
 class User extends Model {
     /** @return BelongsToMany<Role, $this> */
     public function roles(): BelongsToMany {
-        return $this->belongsToMany(Role::class)->using(RoleUser::class)->withPivot('expires_at', 'active');
+        return $this->belongsToMany(Role::class)->as('participation')->using(RoleUser::class)->withPivot('expires_at', 'active');
     }
 }
 ";
@@ -2661,11 +2637,43 @@ class User extends Model {
         assert_eq!(pivots.len(), 1, "one pivot relation, got: {pivots:?}");
         assert_eq!(pivots[0].method, "roles");
         assert_eq!(
+            pivots[0].accessor,
+            crate::types::PivotAccessor::Custom(crate::atom::atom("participation"))
+        );
+        assert_eq!(
             pivots[0].using.as_deref(),
             Some("App\\Models\\RoleUser"),
             "using() class should be resolved to an FQN"
         );
         assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
+    }
+
+    #[test]
+    fn marks_dynamic_pivot_accessor_as_unknown() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Models/User.php";
+        let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(string $accessor): BelongsToMany {
+        return $this->belongsToMany(Role::class)->as($accessor);
+    }
+}
+";
+        backend.update_ast(uri, content);
+        let classes = backend.symbols.uri_classes_index.read();
+        let user = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "User"))
+            .expect("User class should be indexed");
+        let pivot = user
+            .laravel()
+            .and_then(|laravel| laravel.belongs_to_many_pivots.first())
+            .expect("dynamic as() should still record pivot metadata");
+        assert_eq!(pivot.accessor, crate::types::PivotAccessor::Unknown);
     }
 
     /// A background/workspace parse batch must not clobber the state of a

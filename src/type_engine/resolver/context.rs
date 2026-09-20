@@ -38,20 +38,7 @@ thread_local! {
 }
 
 /// RAII guard that clears the thread-local chain cache on drop.
-pub(crate) struct ChainCacheGuard {
-    /// `true` when this guard owns the cache (outermost activation).
-    owns: bool,
-}
-
-impl Drop for ChainCacheGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            CHAIN_CACHE.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
+pub(crate) type ChainCacheGuard = crate::type_engine::MemoGuard<HashMap<String, Vec<ResolvedType>>>;
 
 /// Activate the thread-local chain resolution cache.
 ///
@@ -61,14 +48,7 @@ impl Drop for ChainCacheGuard {
 ///
 /// Nested activations are no-ops — the outermost guard owns the cache.
 pub(crate) fn with_chain_resolution_cache() -> ChainCacheGuard {
-    let already_active = CHAIN_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return ChainCacheGuard { owns: false };
-    }
-    CHAIN_CACHE.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    ChainCacheGuard { owns: true }
+    crate::type_engine::activate_memo(&CHAIN_CACHE)
 }
 
 /// Puts back the chain cache [`with_isolated_chain_cache`] set aside.
@@ -165,6 +145,62 @@ impl<'a> Loaders<'a> {
     }
 }
 
+/// Anything that owns the closures a [`Loaders`] borrows and can lend
+/// one out.
+///
+/// The closures a diagnostic collector passes down capture the
+/// `Backend`, which makes them unnameable, so a factory cannot return a
+/// `Loaders` directly: the references inside it would outlive the
+/// temporaries they point at. A caller binds one of these to a local
+/// instead and calls [`LendsLoaders::loaders`] on it.
+/// [`crate::Backend::diagnostic_loaders`] is the usual way to get one.
+pub(crate) trait LendsLoaders {
+    /// Borrow the owned closures as a [`Loaders`].
+    fn loaders(&self) -> Loaders<'_>;
+}
+
+/// The four closures a [`Loaders`] borrows, held by value.
+pub(crate) struct OwnedLoaders<F, C, G, T> {
+    function_loader: F,
+    constant_loader: C,
+    config_resolver: G,
+    trans_resolver: T,
+}
+
+impl<F, C, G, T> OwnedLoaders<F, C, G, T> {
+    /// Bundle four already-built loaders.
+    pub(crate) fn new(
+        function_loader: F,
+        constant_loader: C,
+        config_resolver: G,
+        trans_resolver: T,
+    ) -> Self {
+        Self {
+            function_loader,
+            constant_loader,
+            config_resolver,
+            trans_resolver,
+        }
+    }
+}
+
+impl<F, C, G, T> LendsLoaders for OwnedLoaders<F, C, G, T>
+where
+    F: Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
+    C: Fn(&str, u32) -> Option<Option<String>>,
+    G: Fn(&str) -> Option<crate::php_type::PhpType>,
+    T: Fn(&str) -> Option<crate::php_type::PhpType>,
+{
+    fn loaders(&self) -> Loaders<'_> {
+        Loaders {
+            function_loader: Some(&self.function_loader),
+            constant_loader: Some(&self.constant_loader),
+            config_resolver: Some(&self.config_resolver),
+            trans_resolver: Some(&self.trans_resolver),
+        }
+    }
+}
+
 /// Bundles the context needed by [`super::resolve_target_classes`] and
 /// the functions it delegates to, avoiding an unwieldy multi-parameter
 /// signature. Also used directly by
@@ -221,6 +257,48 @@ pub(crate) struct ResolutionCtx<'a> {
     /// a macro closure produces `$this` — preserving polymorphism and
     /// generics that the general resolver would flatten.
     pub preserve_static: bool,
+}
+
+/// The cross-file loader closures a [`ResolutionCtx`] carries.
+///
+/// They are built at the call site rather than inside
+/// [`Backend::resolution_ctx_at`](crate::Backend::resolution_ctx_at):
+/// each borrows the file context it resolves names against, and the
+/// Laravel macro resolver borrows the class loader in turn, so they
+/// have to outlive the context they are handed to.
+pub(crate) struct CtxLoaders<'a> {
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub function_loader: FunctionLoaderFn<'a>,
+    pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
+}
+
+impl<'a> CtxLoaders<'a> {
+    /// The full trio, as a request handler with a file context builds
+    /// them.
+    pub(crate) fn new(
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
+        laravel_macro_this_resolver: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        Self {
+            class_loader,
+            function_loader: Some(function_loader),
+            laravel_macro_this_resolver: Some(laravel_macro_this_resolver),
+        }
+    }
+
+    /// Without a Laravel macro `$this` resolver, for the paths that
+    /// cannot reach a macro closure body.
+    pub(crate) fn without_macro_this(
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
+    ) -> Self {
+        Self {
+            class_loader,
+            function_loader: Some(function_loader),
+            laravel_macro_this_resolver: None,
+        }
+    }
 }
 
 /// Bundles the common parameters threaded through variable-type resolution.
