@@ -257,6 +257,12 @@ check(
     ($query = \App\Models\BlogAuthor::query())->has('posts.author', '>=', 1, 'and', fn ($related) => $related->active()) === $query
 );
 
+$namedCallbackModels = [];
+\App\Models\BlogAuthor::query()->has(callback: function ($query) use (&$namedCallbackModels) {
+    $namedCallbackModels[] = get_class($query->active()->getModel());
+}, relation: 'posts.author');
+check('Reordered named relation arguments preserve the callback model', $namedCallbackModels === [\App\Models\BlogAuthor::class]);
+
 // Check both callback invocations without executing the eager-load SQL.
 $callbackClasses = [];
 $query = \App\Models\BlogAuthor::withWhereHas('posts', function ($related) use (&$callbackClasses) {

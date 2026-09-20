@@ -247,27 +247,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L57. Bind named relation callback arguments before inference
-
-**Impact: Medium · Complexity: Medium**
-
-`Team::has(relation: 'stocks.warehouse', callback: …)` types the callback
-correctly, but putting `callback:` first loses the relation and produces
-`Builder<string>` in the assertion fixture. Positional callbacks in the
-fifth argument already work; the missing step is binding named arguments,
-not assuming the first supplied expression names the relation.
-
-**Reproducer:** The reordered `has(callback: …, relation: …)` assertion
-in `relations()` in `tests/phpstan_nsrt/laravel-builder-relations.php`.
-
-**Where to change:** Relation overrides in
-`type_engine/variable/forward_walk/callable_inference.rs` currently receive
-the first literal argument from `extract_first_arg_string_fw`. Use the
-shared argument binder to locate both the relation and the actual callback
-parameter, consistently in the cursor and diagnostics walks. Cover static
-and instance calls, arrow functions, omitted defaults, and closures in an
-unrelated argument so the override does not attach to the wrong closure.
-
 #### L58. Infer morph constraint callbacks from candidate models
 
 **Impact: Medium · Complexity: Medium-High**

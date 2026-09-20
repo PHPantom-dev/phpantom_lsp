@@ -808,7 +808,7 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 /// Check whether `method_name` is a relation-query method (e.g.
 /// `whereHas`, `orWhereHas`, `whereDoesntHave`, etc.) and the receiver
 /// is an Eloquent model or `Builder<Model>`.  If so, resolve the
-/// relation chain from the first argument string and return
+/// relation chain from the bound relation string and return
 /// the final related model’s builder as the closure parameter type.
 ///
 /// Returns `None` when the override does not apply (not a relation-query
@@ -818,14 +818,14 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 fn try_relation_query_override(
     receivers: &[ResolvedType],
     method_name: &str,
-    first_arg_text: Option<&str>,
+    relation_name: Option<&str>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
     if !RELATION_QUERY_METHODS.contains(&method_name) {
         return None;
     }
 
-    let relation_name = first_arg_text?;
+    let relation_name = relation_name?;
     if relation_name.is_empty() {
         return None;
     }
@@ -1009,10 +1009,10 @@ fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
 pub(in crate::type_engine) fn try_relation_query_override_pub(
     receivers: &[ResolvedType],
     method_name: &str,
-    first_arg_text: Option<&str>,
+    relation_name: Option<&str>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
-    try_relation_query_override(receivers, method_name, first_arg_text, class_loader)
+    try_relation_query_override(receivers, method_name, relation_name, class_loader)
 }
 
 pub(in crate::type_engine) fn build_receiver_self_type_pub(

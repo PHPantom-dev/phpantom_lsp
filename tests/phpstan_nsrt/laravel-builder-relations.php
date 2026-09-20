@@ -298,6 +298,21 @@ namespace BuilderRelationAudit {
         });
     }
 
+
+    class CustomArguments extends Team {
+        /**
+         * @param \Closure(Warehouse): void $operator
+         * @param \Closure(Builder<Stock>): void $callback
+         */
+        public static function has($relation, $operator = null, $count = 1, $boolean = 'and', ?\Closure $callback = null) {}
+    }
+
+    function unrelatedArgument(): void {
+        CustomArguments::has('stocks', operator: function ($value) {
+            assertType('BuilderRelationAudit\Warehouse', $value);
+        });
+    }
+
     function relations(): void {
         Team::whereHas('stocks', function ($query) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $query);
@@ -331,7 +346,7 @@ namespace BuilderRelationAudit {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
         });
         Team::has(callback: function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query); // SKIP: relation argument must currently come first
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
         }, relation: 'stocks.warehouse');
         Stock::whereHas('team', function ($query) {
             assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);

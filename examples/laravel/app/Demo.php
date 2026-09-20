@@ -482,6 +482,9 @@ class Demo
         // receive the final related model's builder too.
         BlogAuthor::has('posts.author', '>=', 1, 'and', fn ($q) => $q->active()); // → Builder<BlogAuthor>
 
+        // Named arguments may put the callback before the relation.
+        BlogAuthor::has(callback: fn ($q) => $q->active(), relation: 'posts.author'); // → Builder<BlogAuthor>
+
         // The related model chooses the builder, including with a bare hint.
         Bakery::whereHas('baguettes', function (Builder $q) {
             $q->stale();                     // → LoafBuilder<Loaf>

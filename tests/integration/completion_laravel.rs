@@ -221,6 +221,12 @@ class Builder {
      */
     public function has($relation, $operator = '>=', $count = 1, $boolean = 'and', ?\\Closure $callback = null) { return $this; }
     /**
+     * @param \\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TModel>): mixed $column
+     * @return $this
+     */
+    public function whereRelation($relation, $column, $operator = null, $value = null) { return $this; }
+
+    /**
      * @param  string  $relation
      * @param  (\\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TModel>): mixed)|null  $callback
      * @return static
@@ -14878,6 +14884,12 @@ class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
         "Stock::query()->whereHas('warehouse', function ($q) { BODY });",
         "Team::query()->where('id', 1)->whereHas('stocks.warehouse', function ($q) { BODY });",
         "Team::whereHas('stocks.warehouse', function (Builder $q) { BODY });",
+        "Team::has(callback: function ($q) { BODY }, relation: 'stocks.warehouse');",
+        "Team::has(callback: fn ($q) => BODY, relation: 'stocks.warehouse');",
+        "Team::query()->has(callback: fn ($q) => BODY, relation: 'stocks.warehouse');",
+        "Team::query()?->whereHas(callback: function ($q) { BODY }, relation: 'stocks.warehouse');",
+        "Stock::whereHas(callback: function (Builder $q) { BODY }, relation: 'warehouse');",
+        "Team::whereRelation(column: fn ($q) => BODY, relation: 'stocks.warehouse');",
     ] {
         let header = "<?php namespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Builder;\n";
         let content = format!("{header}{}", call.replace("BODY", "$q->"));
