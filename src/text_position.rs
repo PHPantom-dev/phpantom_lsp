@@ -279,6 +279,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn utf16_col_of_ascii_line_is_the_byte_offset() {
+        assert_eq!(
+            byte_offset_to_utf16_col("new _PHPStan_foo\\SomeClass()", 4),
+            4
+        );
+        assert_eq!(
+            byte_offset_to_utf16_col("new _PHPStan_foo\\SomeClass()", 25),
+            25
+        );
+    }
+
+    #[test]
+    fn utf16_col_counts_a_multibyte_char_once() {
+        // "é" is 2 bytes in UTF-8 but 1 UTF-16 code unit.
+        assert_eq!(byte_offset_to_utf16_col("é_PHPStan_test\\Cls", 2), 1);
+    }
+
+    #[test]
     fn line_index_matches_offset_to_position() {
         // Include multi-byte (é = 2 bytes / 1 UTF-16 unit) and an emoji
         // (🎉 = 4 bytes / 2 UTF-16 units) to exercise the column math.

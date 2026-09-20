@@ -968,14 +968,6 @@ impl LanguageServer for Backend {
             coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
         }
 
-        // Clean up Blade preprocessor state for the closed file.
-        if self.is_blade_file(&uri) {
-            self.blade_virtual_content.write().remove(&uri);
-            self.blade_source_maps.write().remove(&uri);
-            self.blade_uris.write().remove(&uri);
-            self.blade_injected_vars.write().remove(&uri);
-        }
-
         if crate::resource_navigation::is_resource_document(&uri) {
             if let Some(content) = self.get_file_content(&uri) {
                 self.update_resource_symbol_index(&uri, &content);

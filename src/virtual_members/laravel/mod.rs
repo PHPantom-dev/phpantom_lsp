@@ -115,6 +115,7 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+pub(crate) mod file_contributions;
 mod folio;
 pub(crate) mod gates;
 pub(crate) mod helpers;

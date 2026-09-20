@@ -28,7 +28,7 @@ use crate::atom::bytes_to_str;
 use crate::types::ResolvedType;
 
 use super::ScopeState;
-use super::scope_state::ForwardWalkCtx;
+use super::walk_ctx::ForwardWalkCtx;
 
 /// How deep to look for `static` declarations and their assignments.
 ///

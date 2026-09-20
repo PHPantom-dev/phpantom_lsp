@@ -22,6 +22,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
+use crate::util::short_name;
 
 use super::helpers::{
     FileDiagnosticContext, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
@@ -432,9 +433,4 @@ fn is_throwable_inner(
     }
 
     false
-}
-
-/// Extract the short name from a potentially namespaced class name.
-fn short_name(name: &str) -> &str {
-    name.rsplit('\\').next().unwrap_or(name)
 }

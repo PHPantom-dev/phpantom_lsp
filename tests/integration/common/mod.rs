@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod lsp_transport;
+
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::fs;
@@ -68,7 +70,7 @@ fn response_items(response: Option<CompletionResponse>) -> Option<Vec<Completion
     }
 }
 
-fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
+pub fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
     items.into_iter().map(|item| item.label).collect()
 }
 

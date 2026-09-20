@@ -543,6 +543,33 @@ mod tests {
         }
     }
 
+    /// A template's lowered PHP and source map are recorded for every
+    /// indexed template, not only the open ones, so a watched deletion has
+    /// to drop them the way `did_close` does.
+    #[test]
+    fn deleting_a_template_drops_its_lowered_php_and_source_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("resources/views/welcome.blade.php");
+        let url = Url::from_file_path(&template).unwrap();
+        let uri = url.to_string();
+
+        let backend = Backend::new_test();
+        backend.update_ast(&uri, "<div>{{ $name }}</div>\n");
+        assert!(backend.blade_virtual_content.read().contains_key(&uri));
+        assert!(backend.blade_source_maps.read().contains_key(&uri));
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: url,
+                typ: FileChangeType::DELETED,
+            }],
+        };
+        backend.apply_watched_file_changes(&params, dir.path());
+
+        assert!(!backend.blade_virtual_content.read().contains_key(&uri));
+        assert!(!backend.blade_source_maps.read().contains_key(&uri));
+    }
+
     /// A running Laravel application compiles Blade templates into
     /// storage/framework/views and rewrites the bootstrap/cache manifests
     /// on every request it serves; those events must not reach the

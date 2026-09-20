@@ -3,12 +3,11 @@ mod tests {
     use phpantom_lsp::Backend;
     use tower_lsp::lsp_types::*;
 
+    use crate::common::collect_diagnostics_with;
+
     /// Helper: parse a file and collect unknown-class diagnostics.
-    fn collect(backend: &Backend, uri: &str, content: &str) -> Vec<Diagnostic> {
-        backend.update_ast(uri, content);
-        let mut out = Vec::new();
-        backend.collect_unknown_class_diagnostics(uri, content, &mut out);
-        out
+    fn collect(backend: &Backend, content: &str) -> Vec<Diagnostic> {
+        collect_diagnostics_with(backend, content, Backend::collect_unknown_class_diagnostics)
     }
 
     /// PHP class names are case-insensitive (B25): `new stdclass()` and
@@ -20,13 +19,12 @@ mod tests {
         stubs.insert("stdClass", "<?php class stdClass {}");
         let backend = Backend::new_test_with_stubs(stubs);
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 $a = new stdclass();
 $b = new STDCLASS();
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "Expected no unknown-class diagnostics for differently-cased stdClass, got: {:?}",
@@ -65,7 +63,6 @@ class Panel {
         );
 
         // Open a file that uses the vendor class via a use-import.
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App\Providers;
 
@@ -79,7 +76,7 @@ class MyProvider {
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         let unknown_class_diags: Vec<_> = diags
             .iter()
             .filter(|d| d.message.contains("not found"))
@@ -100,10 +97,9 @@ class MyProvider {
     #[test]
     fn flags_unknown_class_in_new_expression() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nnew UnknownThing();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("UnknownThing")),
             "expected diagnostic for UnknownThing, got: {:?}",
@@ -114,10 +110,9 @@ class MyProvider {
     #[test]
     fn flags_unknown_class_in_type_hint() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nfunction foo(MissingClass $x): void {}\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("MissingClass")),
             "expected diagnostic for MissingClass, got: {:?}",
@@ -128,10 +123,9 @@ class MyProvider {
     #[test]
     fn flags_unknown_fqn_class() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnew \\Some\\Missing\\FqnClass();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags
                 .iter()
@@ -146,10 +140,9 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_local_class() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nclass Foo {}\n\nnew Foo();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Foo")),
             "should not flag local class Foo, got: {:?}",
@@ -171,10 +164,9 @@ class MyProvider {
             idx.insert("Illuminate\\Http\\Request".to_string(), dep_uri.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nuse Illuminate\\Http\\Request;\n\nnew Request();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Request")),
             "should not flag imported class Request, got: {:?}",
@@ -185,7 +177,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_self_static_parent() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -197,7 +188,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| {
                 d.message.contains("'self'")
@@ -219,10 +210,9 @@ class MyProvider {
             "<?php\nclass Exception {\n    public function getMessage(): string {}\n}\n",
         );
         let backend = Backend::new_test_with_stubs(stubs);
-        let uri = "file:///test.php";
         let content = "<?php\nnew \\Exception();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Exception")),
             "should not flag stub class Exception, got: {:?}",
@@ -243,10 +233,9 @@ class MyProvider {
             idx.insert("App\\Helper".to_string(), uri_dep.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nnew Helper();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Helper")),
             "should not flag same-namespace class Helper, got: {:?}",
@@ -259,10 +248,9 @@ class MyProvider {
     #[test]
     fn diagnostic_has_warning_severity() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nnew Ghost();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
             .find(|d| d.message.contains("Ghost"))
@@ -273,10 +261,9 @@ class MyProvider {
     #[test]
     fn diagnostic_has_code_and_source() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nnew Ghost();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
             .find(|d| d.message.contains("Ghost"))
@@ -291,13 +278,12 @@ class MyProvider {
     #[test]
     fn diagnostic_range_covers_class_name() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         // "<?php\nnamespace App;\n\nnew Ghost();\n"
         //  line 3: "new Ghost();"
         //  "new " = 4 chars, "Ghost" starts at col 4, ends at col 9
         let content = "<?php\nnamespace App;\n\nnew Ghost();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         let ghost_diag = diags
             .iter()
             .find(|d| d.message.contains("Ghost"))
@@ -324,10 +310,9 @@ class MyProvider {
             idx.insert("GlobalHelper".to_string(), uri_dep.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = "<?php\nnew GlobalHelper();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("GlobalHelper")),
             "should not flag global class without namespace, got: {:?}",
@@ -340,7 +325,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_template_parameter() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -358,7 +342,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("TValue")),
             "should not flag @template param TValue, got: {:?}",
@@ -374,7 +358,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_method_level_template() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -389,7 +372,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("'T'")),
             "should not flag method-level @template param T, got: {:?}",
@@ -400,7 +383,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_method_tag_inline_template() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -411,7 +393,7 @@ class MyProvider {
             "class Box {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("TVal")),
             "should not flag a @method tag's own inline template param, got: {:?}",
@@ -424,10 +406,9 @@ class MyProvider {
     #[test]
     fn flags_multiple_unknown_classes() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\nnamespace App;\n\nnew Alpha();\nnew Beta();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("Alpha")),
             "expected diagnostic for Alpha"
@@ -443,7 +424,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_phpstan_type_alias() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -461,7 +441,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("UserData")),
             "should not flag @phpstan-type alias UserData, got: {:?}",
@@ -495,7 +475,6 @@ class MyProvider {
             idx.insert("Lib\\Scoring".to_string(), dep_uri.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -511,7 +490,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Score")),
             "should not flag @phpstan-import-type alias Score, got: {:?}",
@@ -543,7 +522,6 @@ class MyProvider {
             idx.insert("Lib\\Scoring".to_string(), dep_uri.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -559,7 +537,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Score")),
             "should not flag two-space @phpstan-import-type alias Score, got: {:?}",
@@ -570,7 +548,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_type_alias_with_covariant_generic_param() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App\\Resource;\n",
@@ -584,7 +561,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("ColumnSchema")),
             "should not flag @phpstan-type alias ColumnSchema used with covariant keyword, got: {:?}",
@@ -597,7 +574,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_attribute_class() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -606,7 +582,7 @@ class MyProvider {
             "function oldFunction(): void {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("JetBrains")),
             "should not flag attribute class, got: {:?}",
@@ -617,7 +593,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_attribute_on_method() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -628,7 +603,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags
                 .iter()
@@ -643,7 +618,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_tag_in_description_text() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -663,7 +637,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("suggestions")),
             "should not flag 'suggestions' from description text, got: {:?}",
@@ -679,7 +653,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_emdash_after_tag_in_description() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -692,7 +665,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains('\u{2014}')),
             "should not flag em-dash from description text, got: {:?}",
@@ -703,7 +676,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_string_literal_in_conditional_return() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -720,7 +692,7 @@ class MyProvider {
             "class Marker {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("\"foo\"")),
             "should not flag string literal '\"foo\"' as unknown class, got: {:?}",
@@ -731,7 +703,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_single_quoted_literal_in_conditional_return() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -748,7 +719,7 @@ class MyProvider {
             "class Marker {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("'bar'")),
             "should not flag single-quoted literal as unknown class, got: {:?}",
@@ -759,7 +730,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_numeric_literal_in_conditional_return() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -776,7 +746,7 @@ class MyProvider {
             "class FullList {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("0")),
             "should not flag numeric literal as unknown class, got: {:?}",
@@ -787,7 +757,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_covariant_variance_annotation() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -806,7 +775,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("covariant")),
             "should not flag 'covariant array' as unknown class, got: {:?}",
@@ -817,7 +786,6 @@ class MyProvider {
     #[test]
     fn no_diagnostic_for_contravariant_variance_annotation() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -833,7 +801,7 @@ class MyProvider {
             "class Consumer {}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("contravariant")),
             "should not flag 'contravariant Handler' as unknown class, got: {:?}",
@@ -844,7 +812,6 @@ class MyProvider {
     #[test]
     fn no_false_positive_for_by_reference_param() {
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -855,7 +822,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("$data")),
             "by-reference @param &$data must not be flagged as unknown class, got: {:?}",
@@ -869,7 +836,6 @@ class MyProvider {
         // is a ConstantAccess in the parser, not a class reference.  It must
         // not produce an "unknown class" diagnostic.
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App\\Console;\n",
@@ -879,7 +845,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("PHPStan")),
             "namespaced constant \\PHPStan\\PHP_VERSION_ID must not be flagged as unknown class, got: {:?}",
@@ -893,7 +859,6 @@ class MyProvider {
         // `Relation<TRelatedModel, *, *>`) must not cause the entire
         // type string to be reported as an unknown class.
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace App;\n",
@@ -909,7 +874,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         // The `Relation` class is defined locally — no diagnostic expected.
         // Before the fix, the entire `Relation<string, *, *>|string` was
         // emitted as a single ClassReference and flagged as unknown.
@@ -925,7 +890,6 @@ class MyProvider {
         // `int-mask<A|B>` / `int-mask-of<A>` name the int constants that make
         // up a bitmask, not classes.
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "\n",
@@ -943,7 +907,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "int-mask members are int constants, not classes, got: {:?}",
@@ -971,10 +935,9 @@ class MyProvider {
             idx.insert("Carbon\\Carbon".to_string(), uri_dep.to_string());
         }
 
-        let uri = "file:///test.php";
         let content = "<?php\n\nfunction () {\n    return Carbon::now();\n};\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("Carbon")),
             "expected unknown-class diagnostic for Carbon even when Carbon\\Carbon is in uri_classes_index, got: {:?}",
@@ -987,10 +950,9 @@ class MyProvider {
         // In a file without a namespace, an unresolved class name should
         // still produce a diagnostic.
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\n\nnew Request();\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("Request")),
             "expected unknown-class diagnostic for Request in no-namespace file, got: {:?}",
@@ -1003,10 +965,9 @@ class MyProvider {
         // Reproduces issue #59: `Carbon::now()` in a file without a
         // namespace should emit a diagnostic for unresolved `Carbon`.
         let backend = Backend::new_test();
-        let uri = "file:///test.php";
         let content = "<?php\n\nfunction () {\n    return Carbon::now();\n};\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.iter().any(|d| d.message.contains("Carbon")),
             "expected unknown-class diagnostic for Carbon in no-namespace file, got: {:?}",
@@ -1029,11 +990,10 @@ class MyProvider {
             idx.insert("Carbon\\Carbon".to_string(), uri_dep.to_string());
         }
 
-        let uri = "file:///test.php";
         let content =
             "<?php\n\nuse Carbon\\Carbon;\n\nfunction () {\n    return Carbon::now();\n};\n";
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Carbon")),
             "should not flag imported Carbon class, got: {:?}",
@@ -1066,7 +1026,6 @@ class MyProvider {
             );
         }
 
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace Project\\CatalogIndex\\Controllers;\n\n",
@@ -1081,7 +1040,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags
                 .iter()
@@ -1113,7 +1072,6 @@ class MyProvider {
             idx.insert("Mockery".to_string(), dep_uri);
         }
 
-        let uri = "file:///test.php";
         let content = concat!(
             "<?php\n",
             "namespace Tests\\Feature;\n",
@@ -1127,7 +1085,7 @@ class MyProvider {
             "}\n",
         );
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             !diags.iter().any(|d| d.message.contains("Mockery")),
             "should not flag Mockery resolved via fqn_uri_index lazy load, got: {:?}",
@@ -1142,7 +1100,6 @@ class MyProvider {
     fn no_unknown_class_for_an_unmodelled_pseudo_type_spelling() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1154,7 +1111,7 @@ namespace App;
 function takesPseudoTypes($callback, $value) { return 1; }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "pseudo-type spellings must not be reported as missing classes, got: {:?}",
@@ -1170,14 +1127,13 @@ function takesPseudoTypes($callback, $value) { return 1; }
     fn a_phpdoc_only_pseudo_type_written_as_a_native_hint_is_reported() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 function takesResource(resource $value): void {}
 function takesInteger(integer $value): void {}
 function givesNumber(): number { return 1; }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         let messages: Vec<&String> = diags.iter().map(|d| &d.message).collect();
         assert_eq!(diags.len(), 3, "got {messages:?}");
         for name in ["resource", "integer", "number"] {
@@ -1194,7 +1150,6 @@ function givesNumber(): number { return 1; }
     fn native_type_hints_are_not_reported() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 function f(int $a, float $b, string $c, bool $d, array $e, object $g, callable $h): void {}
 function g(iterable $a, mixed $b, null|int $c, false|int $d, true|int $e): void {}
@@ -1206,7 +1161,7 @@ class Holder {
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "got {:?}",
@@ -1220,7 +1175,6 @@ class Holder {
     fn no_false_positive_for_unquoted_array_key_in_string_interpolation() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1234,7 +1188,7 @@ class Report
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "unquoted array keys in string interpolation must not be flagged, got: {:?}",
@@ -1248,7 +1202,6 @@ class Report
     fn no_false_positive_for_dollar_brace_string_interpolation() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1262,7 +1215,7 @@ class Report
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "a ${{}} interpolation must not be flagged, got: {:?}",
@@ -1276,7 +1229,6 @@ class Report
     fn no_false_positive_for_see_naming_suggestion() {
         let backend = Backend::new_test_with_stubs(std::collections::HashMap::new());
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1292,7 +1244,7 @@ class Widget
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "a @see naming suggestion must not be flagged, got: {:?}",
@@ -1308,7 +1260,6 @@ class Widget
     fn a_negated_fully_qualified_class_exists_guard_protects_the_code_after_it() {
         let backend = Backend::new_test();
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1325,7 +1276,7 @@ class Consumer
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "the guarded use must not be flagged, got: {:?}",
@@ -1340,7 +1291,6 @@ class Consumer
     fn a_brace_in_a_comment_does_not_cut_a_guard_short() {
         let backend = Backend::new_test();
 
-        let uri = "file:///test.php";
         let content = r#"<?php
 namespace App;
 
@@ -1359,7 +1309,7 @@ class Consumer
 }
 "#;
 
-        let diags = collect(&backend, uri, content);
+        let diags = collect(&backend, content);
         assert!(
             diags.is_empty(),
             "the guarded use must not be flagged, got: {:?}",

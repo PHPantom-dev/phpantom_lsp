@@ -24,10 +24,7 @@
 
 use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
-use tower_lsp::{LspService, Server};
-
-use phpantom_lsp::{Backend, LSP_CONCURRENCY};
+use crate::common::lsp_transport::serve_backend;
 
 /// How long the client withholds its refresh response.  The hazard window
 /// opened once the server abandoned the request, which happened after the
@@ -35,101 +32,18 @@ use phpantom_lsp::{Backend, LSP_CONCURRENCY};
 /// must outlast that.
 const RESPONSE_DELAY: Duration = Duration::from_secs(11);
 
-/// Frame a JSON-RPC message with the LSP `Content-Length` header.
-fn frame(value: serde_json::Value) -> Vec<u8> {
-    let body = serde_json::to_vec(&value).unwrap();
-    let mut out = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    out.extend_from_slice(&body);
-    out
-}
-
-/// Try to parse one `Content-Length`-framed JSON message from `buf`.
-fn try_parse_frame(buf: &[u8]) -> Option<(serde_json::Value, usize)> {
-    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let header = std::str::from_utf8(&buf[..header_end]).ok()?;
-    let len: usize = header
-        .lines()
-        .find_map(|l| l.strip_prefix("Content-Length: "))?
-        .trim()
-        .parse()
-        .ok()?;
-    let body_start = header_end + 4;
-    let body_end = body_start + len;
-    if buf.len() < body_end {
-        return None;
-    }
-    let value = serde_json::from_slice(&buf[body_start..body_end]).ok()?;
-    Some((value, body_end))
-}
-
-/// Send one framed message, naming the server's death if the pipe is
-/// already gone — the serve-loop panic under test kills the transport, so
-/// the next write is often where a regression first shows up.
-async fn send(stream: &mut DuplexStream, what: &str, value: serde_json::Value) {
-    stream
-        .write_all(&frame(value))
-        .await
-        .unwrap_or_else(|e| panic!("the server was gone before {what} could be sent: {e}"));
-}
-
-/// Read framed messages until `pred` accepts one, returning it.  Panics
-/// naming `what` if the server closes the stream first — which is exactly
-/// what the serve-loop panic under test looks like from the client side.
-async fn read_until(
-    stream: &mut DuplexStream,
-    buf: &mut Vec<u8>,
-    what: &str,
-    mut pred: impl FnMut(&serde_json::Value) -> bool,
-) -> serde_json::Value {
-    let mut chunk = [0u8; 4096];
-    loop {
-        while let Some((msg, consumed)) = try_parse_frame(buf) {
-            buf.drain(..consumed);
-            if pred(&msg) {
-                return msg;
-            }
-        }
-        let n = stream
-            .read(&mut chunk)
-            .await
-            .unwrap_or_else(|e| panic!("server closed the stream before {what} arrived: {e}"));
-        assert!(n > 0, "server closed the stream before {what} arrived");
-        buf.extend_from_slice(&chunk[..n]);
-    }
-}
-
 /// A refresh response arriving long after the server stopped waiting for
 /// it must not bring the server down.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn late_refresh_response_does_not_kill_the_server() {
-    let (service, socket) = LspService::build(Backend::new).finish();
-    let (mut client, server) = tokio::io::duplex(1 << 16);
-    let (server_read, server_write) = tokio::io::split(server);
-    tokio::spawn(
-        Server::new(server_read, server_write, socket)
-            .concurrency_level(LSP_CONCURRENCY)
-            .serve(service),
-    );
-    let mut buf: Vec<u8> = Vec::new();
+    let mut client = serve_backend();
 
     // Initialize in pull-diagnostic mode (the `diagnostic` capability is
     // what makes the server ask for refreshes) with no workspace, so no
     // indexing competes with the test.
-    let init = serde_json::json!({
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {
-            "capabilities": { "textDocument": { "diagnostic": {} } }
-        }
-    });
-    send(&mut client, "initialize", init).await;
-    read_until(&mut client, &mut buf, "the initialize response", |msg| {
-        msg.get("id").and_then(|v| v.as_i64()) == Some(1)
-    })
-    .await;
-    let initialized = serde_json::json!({
-        "jsonrpc": "2.0", "method": "initialized", "params": {}
-    });
-    send(&mut client, "initialized", initialized).await;
+    client
+        .initialize(serde_json::json!({ "textDocument": { "diagnostic": {} } }))
+        .await;
 
     // Opening and closing a file makes the server request a diagnostic
     // refresh (closing always does in pull mode, to clear the file's
@@ -141,16 +55,16 @@ async fn late_refresh_response_does_not_kill_the_server() {
             "text": "<?php\nuse Foo\\Bar;\n"
         }}
     });
-    send(&mut client, "didOpen", did_open).await;
+    client.send("didOpen", did_open).await;
     let did_close = serde_json::json!({
         "jsonrpc": "2.0", "method": "textDocument/didClose",
         "params": { "textDocument": { "uri": "file:///t.php" } }
     });
-    send(&mut client, "didClose", did_close).await;
+    client.send("didClose", did_close).await;
 
     let refresh = tokio::time::timeout(
         Duration::from_secs(30),
-        read_until(&mut client, &mut buf, "the refresh request", |msg| {
+        client.read_until("the refresh request", |msg| {
             msg.get("method").and_then(|m| m.as_str()) == Some("workspace/diagnostic/refresh")
         }),
     )
@@ -164,7 +78,7 @@ async fn late_refresh_response_does_not_kill_the_server() {
     let response = serde_json::json!({
         "jsonrpc": "2.0", "id": refresh_id, "result": null
     });
-    send(&mut client, "the refresh response", response).await;
+    client.send("the refresh response", response).await;
 
     // Give a would-be panic time to tear the serve loop down, then check
     // the server is still there: an ordinary request must get an answer.
@@ -172,13 +86,8 @@ async fn late_refresh_response_does_not_kill_the_server() {
     let shutdown = serde_json::json!({
         "jsonrpc": "2.0", "id": 99, "method": "shutdown", "params": null
     });
-    send(&mut client, "shutdown", shutdown).await;
-    tokio::time::timeout(
-        Duration::from_secs(10),
-        read_until(&mut client, &mut buf, "the shutdown response", |msg| {
-            msg.get("method").is_none() && msg.get("id").and_then(|v| v.as_i64()) == Some(99)
-        }),
-    )
-    .await
-    .expect("the server should still answer after the late refresh response");
+    client.send("shutdown", shutdown).await;
+    tokio::time::timeout(Duration::from_secs(10), client.wait_for_id(99))
+        .await
+        .expect("the server should still answer after the late refresh response");
 }

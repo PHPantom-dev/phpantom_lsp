@@ -46,7 +46,7 @@ async fn find_references(
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
     let mut index = backend.laravel_macros.write();
-    index.set_file(
+    index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );

@@ -35,6 +35,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
+use super::file_contributions::{Contribution, FileContributions};
 use super::helpers::string_literal_at;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -98,9 +99,8 @@ pub(crate) struct GateScan {
     pub before_callback: bool,
 }
 
-impl GateScan {
-    /// Whether the file contributes nothing at all to the index.
-    pub(crate) fn is_empty(&self) -> bool {
+impl Contribution for GateScan {
+    fn is_empty(&self) -> bool {
         self.definitions.is_empty() && self.policies.is_empty() && !self.before_callback
     }
 }
@@ -387,18 +387,18 @@ pub(crate) struct GateAbilityTarget {
 /// Project-wide index of Laravel gate definitions and policy registrations.
 ///
 /// Stored on [`Backend`](crate::Backend) and built for Laravel projects after
-/// indexing.  `by_uri` is the source of truth (one entry per contributing
+/// indexing.  `files` is the source of truth (one entry per contributing
 /// file, so an edit can replace just that file's registrations); the rest are
 /// derived lookup maps.
 #[derive(Default)]
 pub(crate) struct LaravelGateIndex {
-    by_uri: HashMap<String, GateScan>,
+    pub(crate) files: FileContributions<GateScan>,
     /// Ability name → where `Gate::define()` declared it.
     abilities: HashMap<String, GateAbilityTarget>,
     /// Model FQN → the FQN of the policy registered for it.
     policies: HashMap<String, String>,
     /// Whether a project file registers a `Gate::before()` callback.  Derived
-    /// from `by_uri` by [`Self::rebuild`]; a vendor package's own callback
+    /// from `files` by [`Self::rebuild`]; a vendor package's own callback
     /// governs that package's checks, not the application's.
     project_before_callback: bool,
     /// Whether `composer.json` lists a package that authorizes from a runtime
@@ -408,17 +408,6 @@ pub(crate) struct LaravelGateIndex {
 }
 
 impl LaravelGateIndex {
-    /// Replace the registrations contributed by `uri`.  Passing an empty scan
-    /// removes the file's contributions.  Call [`Self::rebuild`] afterwards
-    /// (deferred so a bulk build rebuilds once rather than per file).
-    pub(crate) fn set_file(&mut self, uri: String, scan: GateScan) {
-        if scan.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, scan);
-        }
-    }
-
     /// Rebuild the derived lookup maps from the per-file scans.
     ///
     /// A duplicate keeps the first registration seen: scan order across files
@@ -429,7 +418,7 @@ impl LaravelGateIndex {
         let mut policies: HashMap<String, String> = HashMap::new();
         let mut project_before_callback = false;
 
-        for (uri, scan) in self.by_uri.iter() {
+        for (uri, scan) in self.files.iter() {
             project_before_callback |= scan.before_callback && !uri.contains("/vendor/");
             for definition in &scan.definitions {
                 abilities
@@ -450,11 +439,6 @@ impl LaravelGateIndex {
         self.abilities = abilities;
         self.policies = policies;
         self.project_before_callback = project_before_callback;
-    }
-
-    /// Whether `uri` currently contributes any registrations.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
     }
 
     /// Record whether `composer.json` lists a runtime-permission package.

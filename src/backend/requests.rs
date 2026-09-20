@@ -68,6 +68,14 @@ impl Backend {
         // instead of a poorer answer for the identical code.
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
+        // Parse the document at most once per request.  The type engine
+        // reaches the AST through `with_parsed_program` from many places
+        // (variable resolution, closures, property narrowing, …); without
+        // the cache each of those re-parses the whole file, so a hover or
+        // completion that resolves a few expressions parses it several
+        // times over while diagnostics parse it once.
+        let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&content));
+
         crate::util::catch_panic_unwind_safe(handler_name, uri, pos, || f(&content, pos))
     }
 

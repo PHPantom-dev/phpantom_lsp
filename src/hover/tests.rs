@@ -525,7 +525,7 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     backend.update_ast(uri, provider);
     {
         let mut index = backend.laravel_gates.write();
-        index.set_file(
+        index.files.set_file(
             uri.to_string(),
             crate::virtual_members::laravel::scan_gate_registrations(provider),
         );

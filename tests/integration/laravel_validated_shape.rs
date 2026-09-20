@@ -5,8 +5,10 @@
 //! shape rather than plain `array`.  These tests drive it through hover and
 //! completion, the two surfaces a user actually sees it on.
 
-use crate::common::{FORM_REQUEST_STUB, create_psr4_workspace, hover_text_at, split_cursor};
-use tower_lsp::LanguageServer;
+use crate::common::{
+    FORM_REQUEST_STUB, complete_labels_at_opened, create_psr4_workspace, hover_text_at, open_php,
+    split_cursor,
+};
 use tower_lsp::lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
@@ -250,26 +252,7 @@ async fn hover_text(content: &str) -> String {
 /// Open `content` (cursor marked `§`) and return the completion labels there.
 async fn complete_labels(content: &str) -> Vec<String> {
     let (backend, _dir, uri, position) = open_at_cursor(content).await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    };
-    items.into_iter().map(|i| i.label).collect()
+    complete_labels_at_opened(&backend, &uri, position.line, position.character).await
 }
 
 async fn open_at_cursor(
@@ -282,16 +265,7 @@ async fn open_at_cursor(
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
     let uri = Url::from_file_path(dir.path().join("src/PostController.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: stripped.clone(),
-            },
-        })
-        .await;
+    open_php(&backend, &uri, &stripped).await;
 
     (backend, dir, uri, position)
 }
