@@ -263,6 +263,42 @@ $namedCallbackModels = [];
 }, relation: 'posts.author');
 check('Reordered named relation arguments preserve the callback model', $namedCallbackModels === [\App\Models\BlogAuthor::class]);
 
+$relationName = 'headBaker';
+foreach (['whereHas', 'orWhereRelation', 'whereDoesntHaveRelation', 'orWhereDoesntHaveRelation'] as $method) {
+    foreach ([$relationName, (new \App\Models\Bakery())->headBaker()] as $relationArgument) {
+        $seen = [];
+        \App\Models\Bakery::$method($relationArgument, function ($query) use (&$seen) {
+            $seen[] = [get_class($query->active()), get_class($query->getModel())];
+        });
+        check("$method accepts a relation name or object with the custom builder", $seen === [[\App\Models\BakerBuilder::class, \App\Models\Baker::class]]);
+    }
+}
+foreach (['headBaker', 'baguettes'] as $relationArgument) {
+    $seen = [];
+    $query = \App\Models\Bakery::withWhereHas($relationArgument, function ($query) use (&$seen) {
+        $seen[] = [get_class($query->where('id', '>', 0)), get_class($query->getModel())];
+    });
+    $query->getEagerLoads()[$relationArgument]((new \App\Models\Bakery())->$relationArgument());
+    $isBaker = $relationArgument === 'headBaker';
+    $expectedModel = $isBaker ? \App\Models\Baker::class : \App\Models\Loaf::class;
+    check('Every alternative relation name supplies its builder and relation', $seen === [
+        [$isBaker ? \App\Models\BakerBuilder::class : \App\Models\LoafBuilder::class, $expectedModel],
+        [$isBaker ? \Illuminate\Database\Eloquent\Relations\HasOne::class : \Illuminate\Database\Eloquent\Relations\HasMany::class, $expectedModel],
+    ]);
+}
+$seen = [];
+$query = \App\Models\Bakery::query()->with(callback: function (\Illuminate\Database\Eloquent\Relations\Relation $query) use (&$seen) {
+    $seen[] = [get_class($query->where('active', true)), get_class($query->getModel()), is_string($query->getModel()->getName())];
+}, relations: $relationName);
+check('Direct eager constraints are deferred until eager loading', $seen === []);
+$query->getEagerLoads()[$relationName]((new \App\Models\Bakery())->headBaker());
+check('Named direct eager callbacks retain their relation and model', $seen === [[\Illuminate\Database\Eloquent\Relations\HasOne::class, \App\Models\Baker::class, true]]);
+$seen = [];
+\App\Models\Review::whereHasMorph((new \App\Models\Review())->reviewable(), \App\Models\Loaf::class, function ($query, $type) use (&$seen) {
+    $seen[] = [get_class($query->stale()), $type];
+});
+check('Morph relation objects retain candidate builders and the type string', $seen === [[\App\Models\LoafBuilder::class, \App\Models\Loaf::class]]);
+
 // Check both callback invocations without executing the eager-load SQL.
 $callbackClasses = [];
 $query = \App\Models\BlogAuthor::withWhereHas('posts', function ($related) use (&$callbackClasses) {

@@ -504,6 +504,30 @@ class Demo
         });
     }
 
+    public function eloquentRelationArguments(bool $includeBaker): void
+    {
+        $name = 'headBaker';
+        $bakery = new Bakery();
+        Bakery::whereHas($name, fn ($q) => $q->active());                 // → BakerBuilder<Baker>
+        Bakery::whereHas($bakery->headBaker(), fn ($q) => $q->active());  // → BakerBuilder<Baker>
+        Bakery::orWhereRelation($name, fn ($q) => $q->active());
+        Bakery::whereDoesntHaveRelation($bakery->headBaker(), fn ($q) => $q->active());
+        Bakery::orWhereDoesntHaveRelation(column: fn ($q) => $q->active(), relation: $name);
+
+        // Each possible name contributes its builder and eager relation.
+        $relation = $includeBaker ? 'headBaker' : 'baguettes';
+        Bakery::withWhereHas($relation, fn ($q) => $q->where('id', '>', 0));
+
+        // Direct eager callbacks receive a relation and retain its related model.
+        Bakery::query()->with(callback: function (Relation $q) {
+            $q->where('active', true)->getModel()->getName();             // → string (Baker::getName())
+        }, relations: $name);                                            // → HasOne<Baker, Bakery>
+
+        Review::whereHasMorph((new Review())->reviewable(), Loaf::class, function ($q, $type) {
+            $q->stale();                                                 // → LoafBuilder<Loaf>
+            echo $type;                                                 // → string
+        });
+    }
 
     // ── Laravel Config & Env Navigation ─────────────────────────────────────
 

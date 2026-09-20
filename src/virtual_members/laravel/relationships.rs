@@ -16,14 +16,9 @@ use crate::util::{short_name, strip_fqn_prefix};
 
 use super::helpers::{camel_to_snake, snake_to_camel};
 
-/// Methods on `Builder` / `QueriesRelationships` that accept a relation
-/// name string as the first argument and a closure typed as
-/// `Closure(Builder<TRelatedModel>): mixed` as the second argument
-/// (or at the listed position).
-///
-/// When one of these methods is detected, the closure parameter
-/// inference overrides `TModel` with the related model resolved from
-/// the relation name string.
+/// Eloquent query methods whose constraint receiver depends on a relation
+/// argument. Argument binding locates each method's relation and callback;
+/// callable inference refines the builder, eager relation, or both.
 pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "has",
     "orHas",
@@ -31,11 +26,15 @@ pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "orDoesntHave",
     "whereHas",
     "orWhereHas",
+    "with",
     "withWhereHas",
     "withWhereRelation",
     "whereDoesntHave",
     "orWhereDoesntHave",
     "whereRelation",
+    "orWhereRelation",
+    "whereDoesntHaveRelation",
+    "orWhereDoesntHaveRelation",
     "hasMorph",
     "doesntHaveMorph",
     "whereHasMorph",

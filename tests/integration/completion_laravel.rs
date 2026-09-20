@@ -15042,6 +15042,73 @@ async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
 }
 
 #[tokio::test]
+async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///relation-arguments.php").unwrap();
+    for call in [
+        "Stock::whereHas($name, fn ($argumentQuery) => BODY);",
+        "Stock::query()?->whereHas(callback: function (Builder $argumentQuery) { BODY }, relation: $name);",
+        "Stock::whereHas($stock->team(), function ($argumentQuery) { BODY });",
+        "Stock::query()->whereHas(callback: fn ($argumentQuery) => BODY, relation: $stock->team());",
+        "Stock::orWhereRelation($name, fn ($argumentQuery) => BODY);",
+        "Stock::whereDoesntHaveRelation($stock->team(), function (Builder $argumentQuery) { BODY });",
+        "Stock::orWhereDoesntHaveRelation(column: fn ($argumentQuery) => BODY, relation: $name);",
+        "TeamComment::whereHasMorph($comment->commentable(), Team::class, function ($argumentQuery, $type) { BODY });",
+        "TeamComment::query()->whereHasMorph(callback: fn ($argumentQuery) => BODY, relation: $comment->commentable(), types: '*');",
+        "Stock::withWhereHas($name, function (Builder|Relation $argumentQuery) { BODY });",
+        "Stock::query()->withWhereRelation(column: fn ($argumentQuery) => BODY, relation: $name);",
+        "Stock::query()->with($name, function (Relation $argumentQuery) { BODY });",
+        "Stock::query()?->with(callback: fn ($argumentQuery) => BODY, relations: $name);",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; $name = 'team'; $stock = new Stock(); $comment = new TeamComment(); {call} }}"
+        );
+        let content = source.replace("BODY", "$argumentQuery->where('id', 1)->firstOrFail()->");
+        let position = crate::common::position_after(
+            &content,
+            "$argumentQuery->where('id', 1)->firstOrFail()->",
+        );
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"teamName"), "{call}: {methods:?}");
+        assert!(
+            !methods.contains(&"warehouseName"),
+            "{call}: unrelated model leaked"
+        );
+        let body = if call.contains("fn (") {
+            "$argumentQuery->where('id', 1)->firstOrFail()->teamName()"
+        } else {
+            "$argumentQuery->where('id', 1)->firstOrFail()->teamName();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "firstOrFail()->teamName()",
+            "firstOrFail()->missingRelationArgumentMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("missingRelationArgumentMethod")
+        );
+    }
+}
+
+#[tokio::test]
 async fn test_where_has_closure_resolves_to_related_model() {
     // Brand::whereHas('orders', function ($q) { $q-> })
     //   => $q should be Builder<Order> (the related model), not Builder<Brand>.

@@ -544,6 +544,11 @@ fn infer_relation_callback_params(
     } else {
         "callback"
     };
+    let relation_name = if method_name == "with" {
+        "relations"
+    } else {
+        "relation"
+    };
     let argument = argument_list.arguments.iter().nth(arg_idx)?.value();
     for receiver in receivers {
         let Some(class) = receiver.class_info.as_ref() else {
@@ -565,7 +570,7 @@ fn infer_relation_callback_params(
                 .position(|p| p.name.trim_start_matches('$') == name)
         };
         let (Some(relation_idx), Some(callback_idx)) =
-            (param_index("relation"), param_index(callback_name))
+            (param_index(relation_name), param_index(callback_name))
         else {
             continue;
         };
@@ -573,21 +578,18 @@ fn infer_relation_callback_params(
         if bound[callback_idx].is_none_or(|callback| callback.span() != argument.span()) {
             continue;
         }
-        let Expression::Literal(mago_syntax::cst::literal::Literal::String(relation)) =
-            bound[relation_idx]?
-        else {
-            return None;
-        };
+        let relation = bound[relation_idx]?;
+        let scope_resolver =
+            |name: &str| scope.locals.get(&atom(name)).cloned().unwrap_or_default();
+        let var_ctx = ctx.var_ctx_for_with_scope(
+            "$__infer",
+            relation.span().start.offset,
+            &scope_resolver,
+            Some(scope.proofs()),
+        );
+        let relation_type = super::super::resolution::resolve_arg_raw_type(relation, &var_ctx)?;
         let candidates = if method_name.contains("Morph") {
             let types = bound[param_index("types")?]?;
-            let scope_resolver =
-                |name: &str| scope.locals.get(&atom(name)).cloned().unwrap_or_default();
-            let var_ctx = ctx.var_ctx_for_with_scope(
-                "$__infer",
-                types.span().start.offset,
-                &scope_resolver,
-                Some(scope.proofs()),
-            );
             Some(
                 super::super::resolution::resolve_arg_raw_type(types, &var_ctx)
                     .unwrap_or_else(PhpType::mixed),
@@ -598,9 +600,9 @@ fn infer_relation_callback_params(
         let mut inferred = super::super::closure_resolution::try_relation_query_override_pub(
             receivers,
             method_name,
-            relation.value.map(bytes_to_str),
+            &relation_type,
             candidates.as_ref(),
-            ctx.class_loader,
+            &var_ctx.as_resolution_ctx(),
         )?;
         // Refine the query parameter without losing Laravel's second morph
         // callback parameter (the candidate's class-string).

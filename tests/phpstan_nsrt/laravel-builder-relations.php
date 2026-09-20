@@ -34,6 +34,8 @@ namespace Illuminate\Database\Eloquent {
         /** @return Builder<static> */
         public static function query() {}
         /** @return Builder<static> */
+        public static function with($relations) {}
+        /** @return Builder<static> */
         public function newQuery() {}
         /** @return Builder<static> */
         public function newQueryWithoutScopes() {}
@@ -115,7 +117,35 @@ namespace Illuminate\Database\Eloquent {
 
         /** @return $this */
         public function withWhereRelation($relation, $column, $operator = null, $value = null) { return $this; }
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\Relation<TRelatedModel, *, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function orWhereRelation($relation, $column, $operator = null, $value = null) { return $this; }
 
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\Relation<TRelatedModel, *, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function whereDoesntHaveRelation($relation, $column, $operator = null, $value = null) { return $this; }
+
+        /**
+         * @template TRelatedModel of Model
+         * @param Relations\Relation<TRelatedModel, *, *>|string $relation
+         * @param (\Closure(Builder<TRelatedModel>): mixed)|string $column
+         * @return $this
+         */
+        public function orWhereDoesntHaveRelation($relation, $column, $operator = null, $value = null) { return $this; }
+
+        /**
+         * @param (\Closure(Relations\Relation<*, *, *>): mixed)|null $callback
+         * @return $this
+         */
+        public function with($relations, $callback = null) { return $this; }
 
         /**
          * @template TRelatedModel of Model
@@ -339,7 +369,6 @@ namespace BuilderRelationAudit {
         });
     }
 
-
     class CustomArguments extends Team {
         /**
          * @param \Closure(Warehouse): void $operator
@@ -403,6 +432,93 @@ namespace BuilderRelationAudit {
         });
         Stock::whereHas('team', function (Warehouse $query) {
             assertType('BuilderRelationAudit\Warehouse', $query);
+        });
+    }
+
+    /** @param 'team'|'warehouse' $relation */
+    function relationNameArguments(string $relation): void {
+        $name = 'team';
+        Stock::whereHas($name, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::whereHas($relation, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
+        Stock::withWhereHas($name, function (Builder|Relation $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+        });
+    }
+    /**
+     * @template TParent of Model
+     * @template TRelated of Model
+     * @extends BelongsTo<TRelated, TParent>
+     */
+    class ReorderedRelation extends BelongsTo {}
+    /** @extends BelongsTo<Team, Stock> */
+    class FixedTeamRelation extends BelongsTo {}
+
+    /**
+     * @param ReorderedRelation<Stock, Team> $reordered
+     * @param Relation<Team, Stock, mixed> $base
+     * @param BelongsTo<Team|Warehouse, Stock> $union
+     */
+    function customRelationArguments(ReorderedRelation $reordered, FixedTeamRelation $fixed, Relation $base, BelongsTo $union): void {
+        Stock::whereHas($reordered, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::whereHas($fixed, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::whereHas($base, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::whereHas($union, function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+        });
+    }
+
+    function relationObjectArguments(Stock $stock, TeamComment $comment): void {
+        Stock::whereHas($stock->team(), function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        TeamComment::whereHasMorph($comment->commentable(), Warehouse::class, function ($query, $type) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
+            assertType('string', $type);
+        });
+    }
+
+    /** @param 'team'|'warehouse' $relation */
+    function eagerRelationNames(string $relation, string $unknown): void {
+        Stock::withWhereHas($relation, function (Builder|Relation $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query);
+        });
+        Stock::query()->with(callback: function (Relation $query) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query);
+        }, relations: $relation);
+        $name = 'stocks.warehouse:id';
+        Team::query()->with($name, function (Relation $query) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query->orderBy('id'));
+        });
+        Stock::query()->with($unknown, function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\Relation<mixed, mixed, mixed>', $query);
+        });
+        Stock::whereHas($unknown, function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $query);
+        });
+    }
+
+    function relationShortcutCallbacks(): void {
+        Stock::orWhereRelation('team', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::whereDoesntHaveRelation('team', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::orWhereDoesntHaveRelation('team', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::query()->with('team', function ($query) {
+            assertType('Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
         });
     }
 
