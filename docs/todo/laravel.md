@@ -247,36 +247,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
-
-**Impact: Medium · Complexity: Medium-High**
-
-Two areas where the PHPStan Laravel extensions have moved past what we
-mirror, and where we have machinery that has not been checked against
-them:
-
-- **A custom builder surviving the chain.** We read
-  `newEloquentBuilder()` (`virtual_members/laravel/model_extraction.rs`)
-  and inject the builder, but it is not established that
-  `Team::query()->where(…)->orderBy(…)` stays on `TeamBuilder` rather than
-  degrading to `Builder<Team>` at the first inherited call, nor that
-  static calls on the model and instance calls on the builder agree about
-  what comes back.
-- **Relation-constraint closure parameters.** We type closures for the
-  `whereHas` family (`type_engine/variable/closure_resolution.rs`,
-  `forward_walk/callable_inference.rs`). Unverified: dotted relation paths
-  (`whereHas('stocks.warehouse', …)` should type the closure for
-  `Warehouse`'s builder, resolving each segment against the model the
-  previous one named), the `*Morph` variants' union of candidate builders
-  plus their `$type` parameter, `withWhereHas` receiving both a builder
-  and the relation, and closures in non-leading argument positions
-  (`has('stocks', '>=', 1, 'and', fn ($q) => …)`).
-
-**Where to change:** Write the assertion cases first — the existing
-`tests/integration/completion_laravel.rs` conventions cover both areas —
-and file what actually fails. Splitting this into concrete items once the
-gaps are known is preferable to a broad rewrite of either subsystem.
-
 #### L45. `*_count` properties are offered on every relationship
 
 **Impact: Low-Medium · Complexity: High**

@@ -9861,3 +9861,45 @@ async fn test_short_extends_arg_right_aligns_when_collecting_implements() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+#[tokio::test]
+async fn generic_union_keeps_each_instantiation_through_members() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///generic-union-members.php").unwrap();
+    let source = r#"<?php
+class LeftValue { public function leftOnly(): void {} public function label(): string { return ''; } }
+class RightValue { public function rightOnly(): void {} public function label(): string { return ''; } }
+/** @template T */
+class ValueBox {
+    /** @var T */
+    public $value;
+    /** @return T */
+    public function get() {}
+}
+/** @param ValueBox<LeftValue>|ValueBox<RightValue> $box */
+function demonstrate(ValueBox $box): void { BODY }
+"#;
+    for expression in ["$box->get()->", "$box->value->"] {
+        let content = source.replace("BODY", expression);
+        let position = crate::common::position_after(&content, expression);
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        for name in ["leftOnly", "rightOnly", "label"] {
+            assert!(
+                crate::common::method_names(&items).contains(&name),
+                "{expression}: missing {name}, got {:?}",
+                crate::common::method_names(&items)
+            );
+        }
+        for (method, expected) in [("label", 0), ("missingUnionMethod", 1)] {
+            let content = source.replace("BODY", &format!("{expression}{method}();"));
+            let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+                &backend,
+                uri.as_str(),
+                &content,
+            );
+            assert_eq!(diagnostics.len(), expected, "{expression}: {diagnostics:?}");
+        }
+    }
+}

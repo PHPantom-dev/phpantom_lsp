@@ -17,6 +17,9 @@
 //! properties have their template parameter references replaced with the
 //! concrete types.
 
+mod ancestor;
+pub(crate) use ancestor::extract_generic_arg_from_ancestor;
+
 pub mod enrichment;
 pub mod generics;
 pub mod traits;

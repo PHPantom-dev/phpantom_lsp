@@ -52,6 +52,12 @@ class Bakery extends Model
     /** @return HasOne<Baker, $this> */
     public function headBaker(): mixed { return $this->hasOne(Baker::class); }
 
+    /** @return BakerRelation<$this, Baker> */
+    public function leadBaker(): BakerRelation
+    {
+        return new BakerRelation((new Baker())->newQuery(), $this, 'bakers.bakery_id', 'id');
+    }
+
     /** @return BelongsToMany<BakeryRecipe, $this> */
     public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class)->using(RecipeIngredient::class)->withPivot('quantity', 'unit'); }
 

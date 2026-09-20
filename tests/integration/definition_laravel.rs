@@ -4373,3 +4373,63 @@ async fn test_goto_definition_blade_each_directive() {
         target_uri
     );
 }
+
+#[tokio::test]
+async fn test_relation_argument_callback_navigates_to_custom_builder() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = crate::common::create_test_backend();
+    let uri = Url::parse("file:///relation-argument-definition.php").unwrap();
+    let expected = crate::common::position_after(fixture, "public function active");
+    for relation in ["$name", "$stock->team()"] {
+        let content = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ $name = 'team'; $stock = new Stock(); Stock::whereHas({relation}, fn ($resolved) => $resolved->active()); }}"
+        );
+        open_php(&backend, &uri, &content).await;
+        let position = crate::common::position_after(&content, "$resolved->act");
+        let result = goto_definition_at(&backend, &uri, position.line, position.character).await;
+        let locations = crate::common::definition_locations(result);
+        assert_eq!(locations.len(), 1, "{relation}: {locations:?}");
+        assert_eq!(locations[0].uri, uri);
+        assert_eq!(
+            locations[0].range.start.line, expected.line,
+            "{relation}: {locations:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn relation_context_callbacks_navigate_to_their_declared_members() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = crate::common::create_test_backend();
+    let uri = Url::parse("file:///relation-context-definition.php").unwrap();
+    for (call, member, declaration) in [
+        (
+            "SpecialStock::whereHas('custom', fn ($q) => $q->active());",
+            "$q->act",
+            "public function active",
+        ),
+        (
+            "OwnCallback::whereHas('team', fn ($q) => $q->warehouseName());",
+            "$q->warehouseNa",
+            "public function warehouseName",
+        ),
+        (
+            "Stock::with(['team' => fn ($q) => $q->getModel()->teamName()]);",
+            "getModel()->teamNa",
+            "public function teamName",
+        ),
+    ] {
+        let content = format!("{fixture}\nnamespace BuilderRelationAudit {{ {call} }}");
+        open_php(&backend, &uri, &content).await;
+        let position = crate::common::position_after(&content, member);
+        let expected = crate::common::position_after(fixture, declaration);
+        let result = goto_definition_at(&backend, &uri, position.line, position.character).await;
+        let locations = crate::common::definition_locations(result);
+        assert_eq!(locations.len(), 1, "{call}: {locations:?}");
+        assert_eq!(locations[0].uri, uri);
+        assert_eq!(
+            locations[0].range.start.line, expected.line,
+            "{call}: {locations:?}"
+        );
+    }
+}

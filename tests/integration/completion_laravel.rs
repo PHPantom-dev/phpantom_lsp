@@ -214,6 +214,19 @@ class Builder {
     /** @return string */
     public function toSql(): string { return ''; }
     /**
+     * @template TRelatedModel of \\Illuminate\\Database\\Eloquent\\Model
+     * @param  \\Illuminate\\Database\\Eloquent\\Relations\\Relation<TRelatedModel, *, *>|string  $relation
+     * @param  (\\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TRelatedModel>): mixed)|null  $callback
+     * @return $this
+     */
+    public function has($relation, $operator = '>=', $count = 1, $boolean = 'and', ?\\Closure $callback = null) { return $this; }
+    /**
+     * @param \\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TModel>): mixed $column
+     * @return $this
+     */
+    public function whereRelation($relation, $column, $operator = null, $value = null) { return $this; }
+
+    /**
      * @param  string  $relation
      * @param  (\\Closure(\\Illuminate\\Database\\Eloquent\\Builder<TModel>): mixed)|null  $callback
      * @return static
@@ -2461,6 +2474,83 @@ class User extends Model {
         hover_text.contains("User") && !hover_text.contains("TModel"),
         "hover on $user after a custom-builder chain should be User, got: {hover_text}"
     );
+}
+
+/// Exercise the custom builder after inherited and query-builder mixin calls,
+/// through both the model's static forwarding and an instance query.
+#[tokio::test]
+async fn test_builder_audit_custom_chain_completion() {
+    for generics in [
+        "",
+        "/** @template TModel of Model\n * @extends Builder<TModel> */",
+    ] {
+        let builder = format!(
+            "<?php namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Builder;
+use Illuminate\\Database\\Eloquent\\Model;
+{generics}
+class TeamBuilder extends Builder {{
+    /** @return $this */
+    public function active() {{ return $this; }}
+}}"
+        );
+        let model = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class Team extends Model {
+    public function newEloquentBuilder($query): TeamBuilder { return new TeamBuilder(); }
+    public function teamName(): string { return ''; }
+}"#;
+        let (backend, dir) = make_workspace(&[
+            ("src/Models/TeamBuilder.php", &builder),
+            ("src/Models/Team.php", model),
+        ]);
+        for chain in [
+            "Team::query()->where('active', true)->orderBy('id')",
+            "Team::where('active', true)->orderBy('id')",
+            "Team::active()->whereIn('id', [1])->lockForUpdate()",
+            "(new Team())->newQuery()->where('active', true)->orderBy('id')",
+            "(new Team())->newModelQuery()->orderBy('id')",
+            "(new Team())->newQueryWithoutScopes()->active()",
+        ] {
+            let content = format!(
+                "<?php namespace App\\Models;\n$query = {chain};\n$query->active();\n$query->"
+            );
+            let position = crate::common::position_after(&content, "\n$query->active();\n$query->");
+            let items = complete_at(
+                &backend,
+                &dir,
+                "audit.php",
+                &content,
+                position.line,
+                position.character,
+            )
+            .await;
+            let methods = method_names(&items);
+            for expected in ["active", "where", "orderBy", "whereIn", "firstOrFail"] {
+                assert!(
+                    methods.contains(&expected),
+                    "{generics}: {chain} lost {expected}: {methods:?}"
+                );
+            }
+
+            let content =
+                format!("<?php namespace App\\Models;\n$model = {chain}->firstOrFail();\n$model->");
+            let position = crate::common::position_after(&content, "$model->");
+            let items = complete_at(
+                &backend,
+                &dir,
+                "audit.php",
+                &content,
+                position.line,
+                position.character,
+            )
+            .await;
+            assert!(
+                method_names(&items).contains(&"teamName"),
+                "{chain} lost its model"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -14733,6 +14823,291 @@ class User extends Model {
 
 // ─── whereHas / whereDoesntHave closure param from relation chain ───────────
 
+/// Completion and the diagnostics walk must agree on the final dotted segment,
+/// including arrow functions and callbacks after the comparison arguments.
+#[tokio::test]
+async fn test_builder_audit_relation_callback_consumers() {
+    let model = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+class Team extends Model {
+    public function newEloquentBuilder($query): TeamBuilder { return new TeamBuilder(); }
+    /** @return HasMany<Stock, $this> */
+    public function stocks(): HasMany {}
+    public function scopeTeamOnly(Builder $query): void {}
+}"#;
+    let stock = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+class Stock extends Model {
+    /** @return BelongsTo<Warehouse, $this> */
+    public function warehouse(): BelongsTo {}
+    public function scopeStockOnly(Builder $query): void {}
+}"#;
+    let warehouse = r#"<?php namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+class Warehouse extends Model {
+    public function newEloquentBuilder($query): WarehouseBuilder { return new WarehouseBuilder(); }
+    public function scopeWarehouseOnly(Builder $query): void {}
+    public function warehouseName(): string { return ''; }
+}"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/Team.php", model),
+        ("src/Models/Stock.php", stock),
+        ("src/Models/Warehouse.php", warehouse),
+        (
+            "src/Models/TeamBuilder.php",
+            r#"<?php namespace App\Models;
+class TeamBuilder extends \Illuminate\Database\Eloquent\Builder {}"#,
+        ),
+        (
+            "src/Models/WarehouseBuilder.php",
+            r#"<?php namespace App\Models;
+/**
+ * @template TModel of \Illuminate\Database\Eloquent\Model
+ * @extends \Illuminate\Database\Eloquent\Builder<TModel>
+ */
+class WarehouseBuilder extends \Illuminate\Database\Eloquent\Builder {
+    /** @return $this */
+    public function warehouseCustom() { return $this; }
+}"#,
+        ),
+    ]);
+    for call in [
+        "Team::whereHas('stocks.warehouse', function ($q) { BODY });",
+        "Team::whereHas('stocks.warehouse', fn ($q) => BODY);",
+        "Team::has('stocks.warehouse', '>=', 1, 'and', function ($q) { BODY });",
+        "Team::has('stocks.warehouse', '>=', 1, 'and', fn ($q) => BODY);",
+        "Stock::query()->whereHas('warehouse', function ($q) { BODY });",
+        "Team::query()->where('id', 1)->whereHas('stocks.warehouse', function ($q) { BODY });",
+        "Team::whereHas('stocks.warehouse', function (Builder $q) { BODY });",
+        "Team::has(callback: function ($q) { BODY }, relation: 'stocks.warehouse');",
+        "Team::has(callback: fn ($q) => BODY, relation: 'stocks.warehouse');",
+        "Team::query()->has(callback: fn ($q) => BODY, relation: 'stocks.warehouse');",
+        "Team::query()?->whereHas(callback: function ($q) { BODY }, relation: 'stocks.warehouse');",
+        "Stock::whereHas(callback: function (Builder $q) { BODY }, relation: 'warehouse');",
+        "Team::whereRelation(column: fn ($q) => BODY, relation: 'stocks.warehouse');",
+    ] {
+        let header = "<?php namespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Builder;\n";
+        let content = format!("{header}{}", call.replace("BODY", "$q->"));
+        let position = crate::common::position_after(&content, "$q->");
+        let items = complete_at(
+            &backend,
+            &dir,
+            "audit.php",
+            &content,
+            position.line,
+            position.character,
+        )
+        .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"warehouseOnly"), "{call}: {methods:?}");
+        assert!(methods.contains(&"warehouseCustom"), "{call}: {methods:?}");
+        assert!(
+            !methods.contains(&"stockOnly"),
+            "{call}: intermediate model leaked"
+        );
+        assert!(!methods.contains(&"teamOnly"), "{call}: outer model leaked");
+
+        let body = if call.contains("fn (") {
+            "$q->warehouseCustom()->warehouseOnly()->firstOrFail()->warehouseName()"
+        } else {
+            "$q->warehouseCustom()->warehouseOnly()->firstOrFail()->warehouseName();"
+        };
+        let content = format!("{header}{}", call.replace("BODY", body));
+        let uri = Url::from_file_path(dir.path().join("audit.php")).unwrap();
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+
+        let content = content.replace("warehouseName()", "missingWarehouseMethod()");
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingWarehouseMethod"));
+    }
+}
+
+#[tokio::test]
+async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///morph-callbacks.php").unwrap();
+    for call in [
+        "Comment::whereHasMorph('commentable', Team::class, function ($morphQuery, $type) { BODY });",
+        "Comment::hasMorph('commentable', Team::class, '>=', 1, 'and', fn ($morphQuery, $type) => BODY);",
+        "Comment::doesntHaveMorph(callback: function ($morphQuery, $type) { BODY }, types: Team::class, relation: 'commentable');",
+        "Comment::query()->orWhereHasMorph('commentable', $candidate, fn ($morphQuery, $type) => BODY);",
+        "Comment::query()?->whereDoesntHaveMorph('commentable', [Team::class], function (Builder $morphQuery) { BODY });",
+        "Comment::orWhereDoesntHaveMorph('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "Comment::whereMorphRelation(column: fn ($morphQuery) => BODY, relation: 'commentable', types: Team::class);",
+        "Comment::orWhereMorphRelation('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "Comment::whereMorphDoesntHaveRelation('commentable', Team::class, function ($morphQuery) { BODY });",
+        "Comment::orWhereMorphDoesntHaveRelation('commentable', Team::class, fn ($morphQuery) => BODY);",
+        "TeamComment::whereHasMorph('commentable', '*', fn ($morphQuery) => BODY);",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; $candidate = Team::class; {call} }}"
+        );
+        let content = source.replace("BODY", "$morphQuery->");
+        let position = crate::common::position_after(&content, "$morphQuery->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"active"), "{call}: {methods:?}");
+        assert!(methods.contains(&"where"), "{call}: {methods:?}");
+        let body = if call.contains("fn (") {
+            "$morphQuery->active()->getModel()->stocks()"
+        } else {
+            "$morphQuery->active()->getModel()->stocks();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "getModel()->stocks()",
+            "getModel()->missingMorphModelMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingMorphModelMethod"));
+    }
+}
+
+#[tokio::test]
+async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///eager-callbacks.php").unwrap();
+    for call in [
+        "Stock::withWhereHas('team', fn ($eagerQuery) => BODY);",
+        "Stock::query()->withWhereHas(callback: function (Builder|Relation $eagerQuery) { BODY }, relation: 'team');",
+        "Team::withWhereHas('stocks.team:id', fn ($eagerQuery) => BODY);",
+        "Stock::withWhereRelation('team', function (Builder|Relation $eagerQuery) { BODY });",
+        "Stock::query()?->withWhereRelation(column: fn ($eagerQuery) => BODY, relation: 'team');",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; {call} }}"
+        );
+        let content = source.replace("BODY", "$eagerQuery->where('id', 1)->");
+        let position = crate::common::position_after(&content, "$eagerQuery->where('id', 1)->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"active"), "{call}: {methods:?}");
+        assert!(methods.contains(&"where"), "{call}: {methods:?}");
+        let body = if call.contains("fn (") {
+            "$eagerQuery->where('id', 1)->firstOrFail()->teamName()"
+        } else {
+            "$eagerQuery->where('id', 1)->firstOrFail()->teamName();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "firstOrFail()->teamName()",
+            "firstOrFail()->missingEagerModelMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingEagerModelMethod"));
+    }
+}
+
+#[tokio::test]
+async fn test_relation_callback_arguments_reach_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///relation-arguments.php").unwrap();
+    for call in [
+        "Stock::whereHas($name, fn ($argumentQuery) => BODY);",
+        "Stock::query()?->whereHas(callback: function (Builder $argumentQuery) { BODY }, relation: $name);",
+        "Stock::whereHas($stock->team(), function ($argumentQuery) { BODY });",
+        "Stock::query()->whereHas(callback: fn ($argumentQuery) => BODY, relation: $stock->team());",
+        "Stock::orWhereRelation($name, fn ($argumentQuery) => BODY);",
+        "Stock::whereDoesntHaveRelation($stock->team(), function (Builder $argumentQuery) { BODY });",
+        "Stock::orWhereDoesntHaveRelation(column: fn ($argumentQuery) => BODY, relation: $name);",
+        "TeamComment::whereHasMorph($comment->commentable(), Team::class, function ($argumentQuery, $type) { BODY });",
+        "TeamComment::query()->whereHasMorph(callback: fn ($argumentQuery) => BODY, relation: $comment->commentable(), types: '*');",
+        "Stock::withWhereHas($name, function (Builder|Relation $argumentQuery) { BODY });",
+        "Stock::query()->withWhereRelation(column: fn ($argumentQuery) => BODY, relation: $name);",
+        "Stock::query()->with($name, function (Relation $argumentQuery) { BODY });",
+        "Stock::query()?->with(callback: fn ($argumentQuery) => BODY, relations: $name);",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; $name = 'team'; $stock = new Stock(); $comment = new TeamComment(); {call} }}"
+        );
+        let content = source.replace("BODY", "$argumentQuery->where('id', 1)->firstOrFail()->");
+        let position = crate::common::position_after(
+            &content,
+            "$argumentQuery->where('id', 1)->firstOrFail()->",
+        );
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"teamName"), "{call}: {methods:?}");
+        assert!(
+            !methods.contains(&"warehouseName"),
+            "{call}: unrelated model leaked"
+        );
+        let body = if call.contains("fn (") {
+            "$argumentQuery->where('id', 1)->firstOrFail()->teamName()"
+        } else {
+            "$argumentQuery->where('id', 1)->firstOrFail()->teamName();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "firstOrFail()->teamName()",
+            "firstOrFail()->missingRelationArgumentMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("missingRelationArgumentMethod")
+        );
+    }
+}
+
 #[tokio::test]
 async fn test_where_has_closure_resolves_to_related_model() {
     // Brand::whereHas('orders', function ($q) { $q-> })
@@ -15444,4 +15819,201 @@ class MPFilterTest {
         "Should NOT offer 'status' when partial is 'na', got: {:?}",
         labels
     );
+}
+
+#[tokio::test]
+async fn test_relation_callback_context_reaches_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///relation-context.php").unwrap();
+    for (call, expected, direct) in [
+        (
+            "SpecialStock::whereHas('custom', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('fixed', function ($contextQuery) { BODY });",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('either', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('relationUnion', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$builderUnion->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$modelUnion->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$generic->whereHas('target', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "$reordered->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "OwnCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "TraitCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "AliasedCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "Stock::WHEREHAS('team', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::query()->WhereHas('team', function ($contextQuery) { BODY });",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::with(['team' => fn ($contextQuery) => BODY]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::query()?->WITH(relations: ['team' => function (Relation $contextQuery) { BODY }]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Team::with(['stocks' => ['warehouse' => fn ($contextQuery) => BODY]]);",
+            &["warehouseName"][..],
+            false,
+        ),
+        (
+            "Team::query()->with(array('stocks.warehouse' => function ($contextQuery) { BODY }));",
+            &["warehouseName"][..],
+            false,
+        ),
+        (
+            "Stock::with((['team' => fn ($contextQuery) => BODY]));",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::with(['team' => (function ($contextQuery) { BODY })]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "$builderUnion->with(['team' => fn ($contextQuery) => BODY]);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+    ] {
+        let source = format!(
+            r#"{fixture}
+namespace BuilderRelationAudit {{
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Relations\Relation;
+    /**
+     * @param Builder<Stock>|Builder<OtherStock> $builderUnion
+     * @param GenericStock<Team> $generic
+     * @param ReorderedBuilder<string, Stock> $reordered
+     */
+    function contextCalls(Builder $builderUnion, Stock|OtherStock $modelUnion, GenericStock $generic, ReorderedBuilder $reordered): void {{ {call} }}
+}}
+"#
+        );
+        let receiver = if direct {
+            "$contextQuery->"
+        } else {
+            "$contextQuery->getModel()->"
+        };
+        let content = source.replace("BODY", receiver);
+        let position = crate::common::position_after(&content, receiver);
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        for name in expected {
+            assert!(
+                methods.contains(name),
+                "{call}: missing {name}, got {methods:?}"
+            );
+        }
+        let valid = if direct {
+            "$contextQuery->warehouseName()"
+        } else {
+            "$contextQuery->getModel()"
+        };
+        for (expression, errors) in [(valid, 0), ("$contextQuery->missingContextMethod()", 1)] {
+            let body = if call.contains("fn (") {
+                expression.to_string()
+            } else {
+                format!("{expression};")
+            };
+            let content = source.replace("BODY", &body);
+            let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+                &backend,
+                uri.as_str(),
+                &content,
+            );
+            assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
+            if errors != 0 {
+                assert!(diagnostics[0].message.contains("missingContextMethod"));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_dynamic_callback_calls_preserve_explicit_parameter_types() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///dynamic-callbacks.php").unwrap();
+    for call in [
+        "$callable(function (Item $item) { BODY });",
+        "$object->{$method}(function (Item $item) { BODY });",
+        "$object?->{$method}(function (Item $item) { BODY });",
+        "Item::{$method}(function (Item $item) { BODY });",
+    ] {
+        let source = format!(
+            "<?php class Item {{ public function label(): string {{ return ''; }} }}\nfunction run(object $object, callable $callable, string $method): void {{ {call} }}"
+        );
+        let content = source.replace("BODY", "$item->");
+        let position = crate::common::position_after(&content, "$item->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        assert!(method_names(&items).contains(&"label"), "{call}: {items:?}");
+        for (body, errors) in [("$item->label();", 0), ("$item->missing();", 1)] {
+            let content = source.replace("BODY", body);
+            let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+                &backend,
+                uri.as_str(),
+                &content,
+            );
+            assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
+            if errors != 0 {
+                assert!(diagnostics[0].message.contains("missing"));
+            }
+        }
+    }
 }

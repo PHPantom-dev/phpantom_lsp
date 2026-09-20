@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
-use mago_syntax::cst::argument::Argument;
-use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
@@ -85,7 +83,6 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
     method_name: &str,
     arg_idx: usize,
     argument_list: &ArgumentList<'_>,
-    first_arg_text: Option<&str>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
@@ -109,11 +106,13 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
 
     // For relation-query methods (whereHas, etc.), override the closure
     // parameter type with Builder<RelatedModel>.
-    if let Some(override_params) = super::super::closure_resolution::try_relation_query_override_pub(
-        &receiver_classes,
+    if let Some(override_params) = infer_relation_callback_params(
+        &resolved_types,
         method_name,
-        first_arg_text,
-        ctx.class_loader,
+        arg_idx,
+        argument_list,
+        scope,
+        ctx,
     ) {
         return override_params;
     }
@@ -336,7 +335,6 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     method_name: &str,
     arg_idx: usize,
     argument_list: &ArgumentList<'_>,
-    first_arg_text: Option<&str>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
@@ -353,14 +351,14 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     });
     if let Some(ref cls) = owner {
         // For relation-query methods, override with Builder<RelatedModel>.
-        if let Some(override_params) =
-            super::super::closure_resolution::try_relation_query_override_pub(
-                &[Arc::new(cls.clone())],
-                method_name,
-                first_arg_text,
-                ctx.class_loader,
-            )
-        {
+        if let Some(override_params) = infer_relation_callback_params(
+            &[ResolvedType::from_class(cls.clone())],
+            method_name,
+            arg_idx,
+            argument_list,
+            scope,
+            ctx,
+        ) {
             return override_params;
         }
 
@@ -527,31 +525,6 @@ pub(crate) fn extract_callable_params_at_fw(
     vec![]
 }
 
-/// Extract the text of the first positional argument, stripping quotes.
-pub(crate) fn extract_first_arg_string_fw(
-    arguments: &TokenSeparatedSequence<'_, Argument<'_>>,
-    content: &str,
-) -> Option<String> {
-    let first = arguments.iter().next()?;
-    let expr = match first {
-        Argument::Positional(pos) => pos.value,
-        Argument::Named(named) => named.value,
-    };
-    let span = expr.span();
-    let start = span.start.offset as usize;
-    let end = span.end.offset as usize;
-    let raw = content.get(start..end)?.trim();
-
-    if raw.len() >= 2
-        && ((raw.starts_with('\'') && raw.ends_with('\''))
-            || (raw.starts_with('"') && raw.ends_with('"')))
-    {
-        Some(raw[1..raw.len() - 1].to_string())
-    } else {
-        None
-    }
-}
-
 /// Seed `$this` in the scope with the enclosing class's type.  Callers
 /// invoke this only for non-static class methods; the scope-based
 /// variable resolver then serves `$this` lookups from this entry
@@ -609,14 +582,11 @@ pub(crate) fn infer_callable_params_for_call(
             };
             if let Some(ref name) = method_name {
                 let obj_span = mc.object.span();
-                let first_arg =
-                    extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
                 infer_callable_params_from_receiver_fw(
                     (obj_span.start.offset, obj_span.end.offset),
                     name,
                     arg_idx,
                     &mc.argument_list,
-                    first_arg.as_deref(),
                     scope,
                     ctx,
                 )
@@ -632,14 +602,11 @@ pub(crate) fn infer_callable_params_for_call(
             };
             if let Some(ref name) = method_name {
                 let obj_span = mc.object.span();
-                let first_arg =
-                    extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
                 infer_callable_params_from_receiver_fw(
                     (obj_span.start.offset, obj_span.end.offset),
                     name,
                     arg_idx,
                     &mc.argument_list,
-                    first_arg.as_deref(),
                     scope,
                     ctx,
                 )
@@ -654,14 +621,11 @@ pub(crate) fn infer_callable_params_for_call(
                 None
             };
             if let Some(ref name) = method_name {
-                let first_arg =
-                    extract_first_arg_string_fw(&sc.argument_list.arguments, ctx.content);
                 infer_callable_params_from_static_receiver_fw(
                     sc.class,
                     name,
                     arg_idx,
                     &sc.argument_list,
-                    first_arg.as_deref(),
                     scope,
                     ctx,
                 )

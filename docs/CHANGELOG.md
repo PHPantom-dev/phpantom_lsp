@@ -33,11 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Eloquent query examples and inference coverage.** The Laravel playground demonstrates custom builders surviving query chains and callbacks following dotted relationships. An audit against the PHPStan Laravel extensions now guards these behaviours with editor and runtime assertions; the remaining inference gaps are tracked as focused follow-up work. Contributed by @shuvroroy.
 - **Extract interface is offered only to editors that can create files.** The action writes the new interface to a file of its own, which an editor has to say it accepts (the `create` resource operation) before a server may send it. Editors that do not are no longer shown an action they cannot apply.
 - **Updated the bundled mago toolchain to 1.47.5.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.
 
 ### Fixed
 
+- **Relation callbacks keep their full context.** Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.
+
+- **Relation callbacks follow their argument types.** Completion and diagnostics keep related model types when constraints use relation-name variables, unions, or relation objects. Relation shortcuts and direct eager-loading callbacks now retain their concrete builder or relation too. Contributed by @shuvroroy.
+
+- **Eager relation constraints keep both callback types.** `withWhereHas()` and `withWhereRelation()` now retain the related builder and relation through fluent calls, including dotted paths and explicit union hints. Contributed by @shuvroroy.
+
+- **Morph relation callbacks infer their candidate models.** Completion and diagnostics retain custom builders for polymorphic constraints, including unions and class-string variables, while unknown candidates use the relation’s declared model. Contributed by @shuvroroy.
+
+- **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.
+
+- **Relation callbacks retain custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
+- **Model instance queries keep custom builders.** Starting a query with `newQuery()`, `newModelQuery()`, or `newQueryWithoutScopes()` now retains the model’s custom builder and its model type through subsequent calls. Contributed by @shuvroroy.
 - **Hover, completion, go-to-definition, signature help, and inlay hints parse the document once per request.** The type engine reads the syntax tree from several places while resolving an expression, and only diagnostics and code actions were sharing one parse between them; every other request re-parsed the whole file once per resolution step, which on a large file made a hover noticeably slower than the diagnostics for the same line.
 - **A Blade template deleted or renamed on disk no longer keeps its lowered PHP in memory.** The template's generated PHP and source map were only released when the editor closed the file, so a template removed by a rename or a branch switch stayed resident for the rest of the session and kept being visited by every Blade refresh pass.
 - **A method's unnamed `@param` tags are now matched by position, and its `@param` descriptions now show up in hover.** Both already worked for a standalone function's docblock; a method's own merge was a separate, older implementation that never grew the positional fallback (common in phpstorm-stubs-style docs, e.g. `@param callable(TValue, TKey): bool` with no `$callback`) and never copied the description across at all.

@@ -1501,8 +1501,11 @@ fn ancestor_bound_binding(
     };
     let position = g.args.iter().position(|a| a.is_named(tpl_name))?;
     let subject = bound_to.unwrap_class_string_inner().unwrap_or(bound_to);
-    crate::type_engine::variable::rhs_resolution::extract_generic_arg_from_ancestor(
-        subject, &g.name, position, ctx,
+    crate::inheritance::extract_generic_arg_from_ancestor(
+        subject,
+        &g.name,
+        position,
+        ctx.class_loader,
     )
 }
 

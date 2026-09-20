@@ -299,7 +299,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
         }
         Expression::Instantiation(inst) => {
             if let Some(ref args) = inst.argument_list {
-                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, None, |_| vec![]);
             }
         }
         Expression::AnonymousClass(anon) => {
@@ -366,19 +366,25 @@ pub(crate) fn walk_closures_in_call<'b>(
                 Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                 _ => None,
             };
-            walk_closures_in_call_args(&fc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = func_name {
-                    infer_callable_params_from_function_fw(
-                        name,
-                        arg_idx,
-                        &fc.argument_list,
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &fc.argument_list.arguments,
+                outer_scope,
+                ctx,
+                Some(call),
+                |arg_idx| {
+                    if let Some(ref name) = func_name {
+                        infer_callable_params_from_function_fw(
+                            name,
+                            arg_idx,
+                            &fc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::Method(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
@@ -389,22 +395,26 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let obj_span = mc.object.span();
-            let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                outer_scope,
+                ctx,
+                Some(call),
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::NullSafeMethod(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
@@ -415,22 +425,26 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let obj_span = mc.object.span();
-            let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                outer_scope,
+                ctx,
+                Some(call),
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::StaticMethod(sc) => {
             walk_closures_in_expr(sc.class, outer_scope, ctx, None);
@@ -440,22 +454,26 @@ pub(crate) fn walk_closures_in_call<'b>(
             } else {
                 None
             };
-            let first_arg = extract_first_arg_string_fw(&sc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&sc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_static_receiver_fw(
-                        sc.class,
-                        name,
-                        arg_idx,
-                        &sc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &sc.argument_list.arguments,
+                outer_scope,
+                ctx,
+                Some(call),
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_static_receiver_fw(
+                            sc.class,
+                            name,
+                            arg_idx,
+                            &sc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
     }
 }
@@ -468,6 +486,7 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
     arguments: &'b TokenSeparatedSequence<'b, Argument<'b>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
+    call: Option<&Call<'b>>,
     infer_fn: F,
 ) where
     F: Fn(usize) -> Vec<PhpType>,
@@ -477,6 +496,14 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
             Argument::Positional(a) => a.value,
             Argument::Named(a) => a.value,
         };
+        if let Some(entries) =
+            call.and_then(|call| eager_callback_arguments(call, arg_idx, outer_scope, ctx))
+        {
+            for entry in entries {
+                walk_closures_in_expr(entry.expression, outer_scope, ctx, Some(&entry.parameters));
+            }
+            continue;
+        }
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
                 let inferred = infer_fn(arg_idx);
@@ -663,7 +690,11 @@ pub(crate) fn seed_closure_params(
         let use_inferred_over_explicit = if let Some(ref eff) = effective_type
             && let Some(inferred) = inferred_for_idx
         {
-            super::super::closure_resolution::inferred_type_is_more_specific_pub(eff, inferred)
+            super::super::closure_resolution::inferred_type_is_more_specific_pub(
+                eff,
+                inferred,
+                ctx.class_loader,
+            )
         } else {
             false
         };

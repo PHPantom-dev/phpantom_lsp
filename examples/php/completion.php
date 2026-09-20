@@ -1453,6 +1453,13 @@ class InArrayNarrowingDemo
 
 class GenericsDemo
 {
+    /** @param Scaffolding\Box<Scaffolding\Pen>|Scaffolding\Box<Scaffolding\Pencil> $box */
+    public function boxedAlternatives(Scaffolding\Box $box): string
+    {
+        // Try completion after unwrap()->: both Pen and Pencil members appear.
+        return $box->unwrap()->label(); // → string; both instantiations retain their value type.
+    }
+
     public function demo(): void
     {
         $repo = new Scaffolding\PenRepository();
