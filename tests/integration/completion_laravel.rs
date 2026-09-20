@@ -2502,6 +2502,9 @@ class Team extends Model {
             "Team::query()->where('active', true)->orderBy('id')",
             "Team::where('active', true)->orderBy('id')",
             "Team::active()->whereIn('id', [1])->lockForUpdate()",
+            "(new Team())->newQuery()->where('active', true)->orderBy('id')",
+            "(new Team())->newModelQuery()->orderBy('id')",
+            "(new Team())->newQueryWithoutScopes()->active()",
         ] {
             let content = format!(
                 "<?php namespace App\\Models;\n$query = {chain};\n$query->active();\n$query->"

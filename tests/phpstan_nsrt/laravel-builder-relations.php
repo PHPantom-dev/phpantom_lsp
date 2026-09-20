@@ -32,6 +32,10 @@ namespace Illuminate\Database\Eloquent {
         public static function query() {}
         /** @return Builder<static> */
         public function newQuery() {}
+        /** @return Builder<static> */
+        public function newQueryWithoutScopes() {}
+        /** @return Builder<static> */
+        public function newModelQuery() {}
     }
 
     /**
@@ -232,6 +236,14 @@ namespace BuilderRelationAudit {
         public function newEloquentBuilder($query): PlainTeamBuilder { return new PlainTeamBuilder(); }
         public function teamName(): string { return ''; }
     }
+    class ChildTeam extends Team {}
+    class OverrideTeam extends Team {
+        public function newQuery(): PlainTeamBuilder { return new PlainTeamBuilder(); }
+    }
+    class OtherModelQuery extends Team {
+        /** @return Builder<Warehouse> */
+        public function newQuery(): Builder {}
+    }
     class Comment extends Model {
         /** @return MorphTo<Model, $this> */
         public function commentable(): MorphTo {}
@@ -249,16 +261,27 @@ namespace BuilderRelationAudit {
         assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::where('active', true)->orderBy('id'));
         assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::query()->where('active', true)->orderBy('id')->active());
         assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::active()->whereIn('id', [1])->lockForUpdate());
-        assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $team->newQuery()->orderBy('id')); // SKIP: newQuery loses the custom builder
+        assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $team->newQuery()->orderBy('id'));
         assertType('BuilderRelationAudit\Team', Team::where('id', 1)->firstOrFail());
+        assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $team->newQueryWithoutScopes()->active());
+        assertType('BuilderRelationAudit\Team', $team->newModelQuery()->firstOrFail());
+        assertType('BuilderRelationAudit\PlainTeam', $plain->newQueryWithoutScopes()->firstOrFail());
+        assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', $plain->newModelQuery()->active());
         assertType('BuilderRelationAudit\Team|null', Team::query()->active()->first());
         assertType('bool', Team::query()->where('id', 1)->exists());
         assertType('int', Team::query()->where('id', 1)->count());
         // PHPantom retains the model argument even on a non-generic custom builder.
         assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', PlainTeam::query()->where('active', true)->orderBy('id')->active());
         assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', PlainTeam::where('active', true)->orderBy('id'));
-        assertType('BuilderRelationAudit\PlainTeamBuilder', $plain->newQuery()->orderBy('id')); // SKIP: newQuery loses the custom builder
+        assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', $plain->newQuery()->orderBy('id'));
         assertType('BuilderRelationAudit\PlainTeam', PlainTeam::query()->active()->firstOrFail());
+    }
+
+    function inheritedFactories(ChildTeam $child, OverrideTeam $override, Warehouse $ordinary, OtherModelQuery $other): void {
+        assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\ChildTeam>', $child->newQuery()->active());
+        assertType('BuilderRelationAudit\PlainTeamBuilder', $override->newQuery());
+        assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $ordinary->newQuery());
+        assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $other->newQuery());
     }
 
     class UnrelatedQuery {

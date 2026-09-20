@@ -247,26 +247,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L55. Preserve custom builders through model instance query factories
-
-**Impact: Medium · Complexity: Medium**
-
-`Team::query()` and `Team::where(…)->orderBy(…)` preserve a custom
-`TeamBuilder`, but `$team->newQuery()->orderBy(…)` returns `Builder<Team>`
-instead. This loses custom methods even though Laravel constructs the
-same builder in both cases. Both generic and non-generic custom builders
-are affected.
-
-**Reproducer:** The `builders()` assertions marked `SKIP` in
-`tests/phpstan_nsrt/laravel-builder-relations.php`. Compare
-[Larastan's custom builder assertions](https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/tests/Type/data/custom-eloquent-builder.php).
-
-**Where to change:** Reuse the model's custom-builder selection for the
-instance query-factory return in the shared type engine. Check
-`newQueryWithoutScopes()` and `newModelQuery()` alongside `newQuery()`.
-Keep the inferred model argument for a builder without its own templates;
-removing that context would break terminal methods such as `firstOrFail()`.
-
 #### L56. Preserve custom builders in relation callbacks
 
 **Impact: Medium · Complexity: Medium-High**

@@ -184,6 +184,9 @@ class Demo
         Loaf::query()->where('crust', 'sourdough')->orderBy('id')->stale(); // → LoafBuilder
         Loaf::where('crust', 'sourdough')->orderBy('id')->stale();          // → LoafBuilder
         Baker::query()->whereIn('id', [1])->lockForUpdate()->active();     // → BakerBuilder<Baker>
+        (new Loaf())->newQuery()->orderBy('id')->stale();                 // → LoafBuilder
+        (new Baker())->newQueryWithoutScopes()->active();                // → BakerBuilder<Baker>
+        (new Baker())->newModelQuery()->firstOrFail()->getName();         // → Baker
 
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {

@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::inheritance::apply_substitution_to_conditional;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
 use crate::virtual_members::ResolvedClassCache;
 
@@ -163,14 +163,42 @@ pub(super) fn build_builder_forwarded_methods(
         methods.push(forwarded);
     }
 
-    // ── query() / newQuery() / newModelQuery() ──────────────────────
-    // When a model has a custom builder, User::query() should return
-    // UserBuilder<User> instead of the default Builder<User>.
-    for name in ["query", "newQuery", "newModelQuery"] {
-        methods.push(Arc::new(MethodInfo {
-            is_static: true,
-            ..MethodInfo::virtual_method_typed(name, Some(&builder_self_type))
-        }));
+    let query_fp = crate::virtual_members::TransformFingerprint::new(
+        Some(&subs),
+        Some("model-query-factory"),
+        0,
+    );
+    for name in [
+        "query",
+        "newQuery",
+        "newModelQuery",
+        "newQueryWithoutScopes",
+    ] {
+        if let Some(original) = class.get_method_arc(name) {
+            // A user override returning a different builder owns its type.
+            // Refine only the framework's base-builder declaration, keeping
+            // its parameters, visibility and instance/static distinction.
+            if let Some(ret) = original.return_type.as_ref()
+                && (ret.base_name() != Some(ELOQUENT_BUILDER_FQN)
+                    || matches!(ret.kind(), TypeKind::Generic(g) if g.args.first().is_some_and(|model| !model.is_self_ref())))
+            {
+                continue;
+            }
+            methods.push(crate::virtual_members::intern_transformed_method(
+                &original,
+                query_fp,
+                || {
+                    let mut method = (*original).clone();
+                    method.return_type = Some(builder_self_type.clone());
+                    method
+                },
+            ));
+        } else {
+            methods.push(Arc::new(MethodInfo {
+                is_static: name == "query",
+                ..MethodInfo::virtual_method_typed(name, Some(&builder_self_type))
+            }));
+        }
     }
 
     methods

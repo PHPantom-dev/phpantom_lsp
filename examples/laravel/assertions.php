@@ -210,6 +210,18 @@ check(
     && $query->getModel() instanceof \App\Models\Baker
 );
 
+foreach (['newQuery', 'newModelQuery', 'newQueryWithoutScopes'] as $factory) {
+    $loafQuery = (new \App\Models\Loaf())->$factory();
+    $bakerQuery = (new \App\Models\Baker())->$factory();
+    check(
+        "Model::$factory preserves custom builders and their models",
+        $loafQuery instanceof \App\Models\LoafBuilder
+        && $loafQuery->stale()->getModel() instanceof \App\Models\Loaf
+        && $bakerQuery instanceof \App\Models\BakerBuilder
+        && $bakerQuery->active()->getModel() instanceof \App\Models\Baker
+    );
+}
+
 $callbackModels = [];
 \App\Models\BlogPost::whereHas('author.posts', function ($query) use (&$callbackModels) {
     $callbackModels[] = get_class($query->getModel());

@@ -158,7 +158,6 @@ unlikely to move the needle for most users.
 | L46 | [`->can()` on a user model the receiver does not name](todo/laravel.md#l46-can-on-a-user-model-the-receiver-does-not-name)                                                  | Medium-High | Medium-High |
 | L30 | [Eloquent attribute-array key completion](todo/laravel.md#l30-eloquent-attribute-array-key-completion)                                                                      | Medium      | Medium      |
 | L53 | [Collection key types from the column for `keyBy` / `groupBy` / `pluck`](todo/laravel.md#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck)                   | Medium      | Medium      |
-| L55 | [Preserve custom builders through model instance query factories](todo/laravel.md#l55-preserve-custom-builders-through-model-instance-query-factories)                      | Medium      | Medium      |
 | L57 | [Bind named relation callback arguments before inference](todo/laravel.md#l57-bind-named-relation-callback-arguments-before-inference)                                      | Medium      | Medium      |
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Medium      |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
