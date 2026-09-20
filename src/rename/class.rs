@@ -1281,8 +1281,9 @@ fn build_use_statement_edit(
         .map(String::as_str)
         .unwrap_or(old_fqn);
 
-    let use_statement_spans = crate::diagnostics::helpers::compute_use_statement_spans(content);
-    let location = crate::diagnostics::helpers::find_use_statement(
+    let use_statement_spans =
+        crate::diagnostics::use_statements::compute_use_statement_spans(content);
+    let location = crate::diagnostics::use_statements::find_use_statement(
         content,
         &use_statement_spans,
         source_fqn,

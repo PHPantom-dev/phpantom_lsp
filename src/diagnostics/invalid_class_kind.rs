@@ -24,10 +24,8 @@ use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::util::short_name;
 
-use super::helpers::{
-    FileDiagnosticContext, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
-    resolve_to_fqn,
-};
+use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic, resolve_to_fqn};
+use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
 pub(crate) const INVALID_CLASS_KIND_CODE: &str = "invalid_class_kind";

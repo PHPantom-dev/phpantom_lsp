@@ -7,7 +7,10 @@
 //! or every `route('…')` call naming one of those routes is reported as
 //! unknown.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
+use crate::common::{
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
+    open_initialized_php,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -86,11 +89,8 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
 
 #[tokio::test]
 async fn routes_outside_the_routes_directory_are_not_reported_as_unknown() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
@@ -132,14 +132,12 @@ class Widget {
 
 #[tokio::test]
 async fn a_package_with_no_route_files_does_not_flag_route_calls() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         PACKAGE_COMPOSER_JSON,
         &[("src/Widget.php", PACKAGE_CONSUMER)],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Widget.php")).unwrap();
-    open_php(&backend, &uri, PACKAGE_CONSUMER).await;
+        "src/Widget.php",
+    )
+    .await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), PACKAGE_CONSUMER, &mut diags);
@@ -160,11 +158,8 @@ async fn a_package_with_no_route_files_does_not_flag_route_calls() {
 
 #[tokio::test]
 async fn goto_definition_reaches_a_route_outside_the_routes_directory() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     // Cursor inside 'kiosk.register' on line 4.
     let result = backend
@@ -231,17 +226,15 @@ class Nav {
 
 #[tokio::test]
 async fn routes_under_a_dynamic_group_prefix_are_not_flagged() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("routes/web.php", DYNAMIC_ROUTES),
             ("src/Nav.php", CONSUMER_DYNAMIC),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER_DYNAMIC).await;
+        "src/Nav.php",
+    )
+    .await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_DYNAMIC, &mut diags);
@@ -296,17 +289,15 @@ class Nav {
 
 #[tokio::test]
 async fn routes_under_a_wholly_unknown_group_name_are_not_flagged() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("routes/web.php", BARE_DYNAMIC_ROUTES),
             ("src/Nav.php", CONSUMER_BARE_DYNAMIC),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Nav.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER_BARE_DYNAMIC).await;
+        "src/Nav.php",
+    )
+    .await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER_BARE_DYNAMIC, &mut diags);

@@ -419,18 +419,18 @@ impl Backend {
     /// The class itself is not consulted: every caller is asking whether
     /// a member it already found there was inherited from somewhere.
     fn ancestor_declares(&self, class: &ClassInfo, declares: &dyn Fn(&ClassInfo) -> bool) -> bool {
-        let mut current = class.clone();
+        let mut parent_name = class.parent_class;
         for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(parent_name) = current.parent_class else {
+            let Some(name) = parent_name else {
                 return false;
             };
-            let Some(parent) = self.find_or_load_class(&parent_name) else {
+            let Some(parent) = self.find_or_load_class(&name) else {
                 return false;
             };
             if declares(&parent) || self.traits_declare(&parent.used_traits, 0, declares) {
                 return true;
             }
-            current = ClassInfo::clone(&parent);
+            parent_name = parent.parent_class;
         }
         false
     }

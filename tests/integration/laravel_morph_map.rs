@@ -7,8 +7,8 @@
 //! `enforceMorphMap()` — an unregistered alias is flagged.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_locations, goto_definition_at,
-    hover_text_at, open_php_str, position_after,
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, definition_locations,
+    goto_definition_at, hover_text_at, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -83,7 +83,7 @@ async fn workspace(
     consumer: &str,
 ) -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
     let provider_src = provider(enforce);
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -93,13 +93,10 @@ async fn workspace(
             ("src/Models/Comment.php", COMMENT_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
     (backend, dir, uri)
 }
 
@@ -310,7 +307,7 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -320,12 +317,10 @@ class Consumer {
             ("src/Models/Comment.php", COMMENT_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);

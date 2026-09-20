@@ -17,8 +17,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
-use crate::diagnostics::helpers::{compute_use_line_ranges, is_offset_in_ranges};
+use crate::diagnostics::helpers::is_offset_in_ranges;
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
+use crate::diagnostics::use_statements::compute_use_line_ranges;
 
 use crate::class_lookup::is_class_keyword;
 use crate::symbol_map::{ClassRefContext, SymbolKind};

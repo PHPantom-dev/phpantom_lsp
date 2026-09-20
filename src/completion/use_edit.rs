@@ -18,7 +18,7 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::blade::source_map::BladeSourceMap;
 use crate::blade::use_directive::{first_string_literal, imported_name, use_directive_arguments};
-use crate::diagnostics::helpers::scan_use_statements;
+use crate::diagnostics::use_statements::scan_use_statements;
 use crate::text_position::LineIndex;
 use crate::util::short_name;
 
@@ -286,7 +286,7 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 ///
 /// This answers "where does a *new* import go?".  To find the statement
 /// that already imports a given class, use
-/// [`crate::diagnostics::helpers::find_use_statement`] instead.
+/// [`crate::diagnostics::use_statements::find_use_statement`] instead.
 ///
 /// The imports are read by [`scan_use_statements`], which tells a
 /// namespace-level import from a trait `use` inside a class, enum, or

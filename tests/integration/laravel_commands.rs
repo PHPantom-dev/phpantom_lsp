@@ -7,8 +7,8 @@
 //! command's signature.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_psr4_workspace, open_php_str,
-    position_after,
+    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
+    create_psr4_workspace, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -63,20 +63,17 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Console/Commands/ReportCommand.php", REPORT_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let position = position_after(consumer, "Artisan::call('");
     let labels = complete_at(&backend, &uri, position).await;
@@ -102,19 +99,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     // Cursor on `app:sync` inside the string.
     let position = position_after(consumer, "Artisan::call('app");
@@ -158,19 +152,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -218,7 +209,7 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
@@ -228,13 +219,10 @@ class Runner {
             ),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -263,19 +251,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -349,19 +334,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let position = position_after(consumer, "/* don't ( */ '");
     let labels = complete_at(&backend, &uri, position).await;
@@ -385,19 +367,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/SyncCommand.php", SYNC_COMMAND),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let position = position_after(consumer, "[\n            '");
     let labels = complete_at(&backend, &uri, position).await;
@@ -477,7 +456,7 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             // A conventionally-named command so the index is non-empty:
@@ -487,13 +466,10 @@ class Runner {
             ("src/Commands/Reload.php", reload),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -540,7 +516,7 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             // A conventionally-named command so the index is non-empty:
@@ -550,13 +526,10 @@ class Runner {
             ("src/Actions/SyncProject.php", action_command),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -616,19 +589,16 @@ class Runner {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("src/Console/Commands/Aliased.php", aliased_commands),
             ("src/Runner.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Runner.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -717,16 +687,13 @@ async fn hover_in_typed_command(
 
 #[tokio::test]
 async fn signature_types_argument_and_option_accessors() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/TypedCommand.php", TYPED_COMMAND)],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Console/Commands/TypedCommand.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, TYPED_COMMAND).await;
+        "src/Console/Commands/TypedCommand.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     for (needle, expected) in [
         // `{user}` is required, so it always arrives.
@@ -762,22 +729,16 @@ async fn signature_types_argument_and_option_accessors() {
 
 #[tokio::test]
 async fn an_attribute_declared_signature_types_the_accessors_too() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[(
             "src/Console/Commands/AttributedCommand.php",
             ATTRIBUTE_TYPED_COMMAND,
         )],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(
-        dir.path()
-            .join("src/Console/Commands/AttributedCommand.php"),
+        "src/Console/Commands/AttributedCommand.php",
     )
-    .unwrap()
-    .to_string();
-    open_php_str(&backend, &uri, ATTRIBUTE_TYPED_COMMAND).await;
+    .await;
+    let uri = uri.to_string();
 
     let position = position_after(ATTRIBUTE_TYPED_COMMAND, "$days");
     let hover = backend
@@ -877,16 +838,13 @@ class GuardedCommand extends Command
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[("src/Console/Commands/GuardedCommand.php", GUARDED_COMMAND)],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Console/Commands/GuardedCommand.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, GUARDED_COMMAND).await;
+        "src/Console/Commands/GuardedCommand.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let position = position_after(GUARDED_COMMAND, "        if ($markets");
     let hover = backend

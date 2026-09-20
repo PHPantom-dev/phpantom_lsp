@@ -7,7 +7,10 @@
 //! `hasForLocale()`, a config key inside `getMany()`, and an environment
 //! variable behind `Env::get()`.
 
-use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, markup_hover_at, open_php};
+use crate::common::{
+    LARAVEL_APP_COMPOSER, create_initialized_psr4_workspace, create_psr4_workspace,
+    markup_hover_at, open_initialized_php, open_php,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -125,10 +128,8 @@ async fn a_route_pattern_is_judged_by_what_it_matches() {
         \x20       Route::is('admin.*');\n\
         \x20       Route::is('adnim.*');\n\
         \x20   }\n}\n";
-    let (backend, dir) = route_workspace(caller);
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open_php(&backend, &uri, caller).await;
+    let (backend, _dir) = route_workspace(caller);
+    let uri = open_initialized_php(&backend, "app/Demo.php").await;
 
     let mut diagnostics = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), caller, &mut diagnostics);
@@ -278,7 +279,7 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
         \x20       env('STRIPE_SECRET');\n\
         \x20       env('MAIL_FROM');\n\
         \x20   }\n}\n";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
@@ -287,10 +288,9 @@ async fn env_hover_shows_the_value_unless_the_name_reads_as_a_secret() {
                 "MAIL_MAILER=log  # the mailer\nSTRIPE_SECRET=sk_test_123\nMAIL_FROM=\n",
             ),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open_php(&backend, &uri, caller).await;
+        "app/Demo.php",
+    )
+    .await;
 
     let declared = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(
@@ -316,16 +316,15 @@ async fn the_env_helper_completes_the_projects_variables() {
         \x20   public function go(): void {\n\
         \x20       env('');\n\
         \x20   }\n}\n";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_APP_COMPOSER,
         &[
             ("app/Demo.php", caller),
             (".env", "APP_NAME=Acme\nMAIL_MAILER=log\n"),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open_php(&backend, &uri, caller).await;
+        "app/Demo.php",
+    )
+    .await;
 
     let items = match backend
         .completion(CompletionParams {
@@ -363,13 +362,12 @@ async fn translation_hover_shows_the_translated_line() {
     let lang = "<?php\nreturn [\n\
         \x20   'explore' => 'Explore :name',\n\
         \x20   'nested' => ['deep' => 'Deep'],\n];\n";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_APP_COMPOSER,
         &[("app/Demo.php", caller), ("lang/en/boards.php", lang)],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("app/Demo.php")).unwrap();
-    open_php(&backend, &uri, caller).await;
+        "app/Demo.php",
+    )
+    .await;
 
     let leaf = markup_hover_at(&backend, &uri, 4, 16).await;
     assert!(

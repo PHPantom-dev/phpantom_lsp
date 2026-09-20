@@ -7,8 +7,8 @@
 //! completion, hover, diagnostics, and go-to-definition.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_uri, open_php, position_after,
-    response_labels,
+    LARAVEL_SRC_COMPOSER, create_psr4_workspace, definition_uri, open_initialized_php,
+    position_after, response_labels,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -61,11 +61,8 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
 
 #[tokio::test]
 async fn a_named_folio_page_is_not_reported_as_an_unknown_route() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &uri, SERVICE_PHP).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), SERVICE_PHP, &mut diags);
@@ -92,11 +89,8 @@ async fn a_named_folio_page_is_not_reported_as_an_unknown_route() {
 
 #[tokio::test]
 async fn goto_definition_on_a_folio_route_name_lands_on_the_page() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let service_uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &service_uri, SERVICE_PHP).await;
+    let (backend, _dir) = workspace();
+    let service_uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let params = GotoDefinitionParams {
         text_document_position_params: TextDocumentPositionParams {
@@ -126,11 +120,8 @@ async fn goto_definition_on_a_folio_route_name_lands_on_the_page() {
 
 #[tokio::test]
 async fn hover_on_a_folio_route_name_names_the_page() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &uri, SERVICE_PHP).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let hover = backend
         .hover(HoverParams {
@@ -156,11 +147,8 @@ async fn hover_on_a_folio_route_name_names_the_page() {
 
 #[tokio::test]
 async fn completion_inside_route_offers_the_folio_page_name() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Services/Service.php")).unwrap();
-    open_php(&backend, &uri, SERVICE_PHP).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Services/Service.php").await;
 
     let result = backend
         .completion(CompletionParams {

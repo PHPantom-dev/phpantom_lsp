@@ -26,7 +26,7 @@ use tower_lsp::lsp_types::*;
 
 use super::{CodeActionData, make_code_action_data};
 use crate::Backend;
-use crate::diagnostics::helpers::scan_use_statements;
+use crate::diagnostics::use_statements::scan_use_statements;
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 
 impl Backend {

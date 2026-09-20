@@ -84,9 +84,9 @@ use crate::type_engine::resolver::{
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
+use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{
-    FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
-    find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
 use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
