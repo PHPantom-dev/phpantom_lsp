@@ -395,7 +395,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
     });
     if let Some(ref cls) = owner {
         // For relation-query methods, override with Builder<RelatedModel>.
-        if crate::virtual_members::laravel::RELATION_QUERY_METHODS.contains(&method_name)
+        if crate::virtual_members::laravel::relation_query_method(method_name).is_some()
             && let Some(override_params) = infer_relation_callback_params(
                 &[ResolvedType::from_class(cls.clone())],
                 method_name,
@@ -595,94 +595,6 @@ pub(crate) fn extract_callable_params_at_fw(
         .and_then(|p| p.type_hint.as_ref())
         .and_then(callable_param_hints)
         .unwrap_or_default()
-}
-
-/// Refine only the closure bound to the relation constraint parameter.
-/// Binding against the installed declaration handles reordered named arguments
-/// and callbacks after optional parameters without duplicating PHP's call rules.
-fn infer_relation_callback_params(
-    receivers: &[ResolvedType],
-    method_name: &str,
-    arg_idx: usize,
-    argument_list: &ArgumentList<'_>,
-    scope: &ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-) -> Option<Vec<PhpType>> {
-    if !crate::virtual_members::laravel::RELATION_QUERY_METHODS.contains(&method_name) {
-        return None;
-    }
-    let callback_name = if method_name.ends_with("Relation") {
-        "column"
-    } else {
-        "callback"
-    };
-    let relation_name = if method_name == "with" {
-        "relations"
-    } else {
-        "relation"
-    };
-    let argument = argument_list.arguments.iter().nth(arg_idx)?.value();
-    for receiver in receivers {
-        let Some(class) = receiver.class_info.as_ref() else {
-            continue;
-        };
-        let method = class.get_method_arc(method_name).or_else(|| {
-            crate::virtual_members::resolve_class_fully_maybe_cached(
-                class,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            )
-            .get_method_arc(method_name)
-        });
-        let Some(method) = method else { continue };
-        let param_index = |name| {
-            method
-                .parameters
-                .iter()
-                .position(|p| p.name.trim_start_matches('$') == name)
-        };
-        let (Some(relation_idx), Some(callback_idx)) =
-            (param_index(relation_name), param_index(callback_name))
-        else {
-            continue;
-        };
-        let bound = crate::call_args::bind_args_to_params(&method.parameters, argument_list);
-        if bound[callback_idx].is_none_or(|callback| callback.span() != argument.span()) {
-            continue;
-        }
-        let relation = bound[relation_idx]?;
-        let scope_resolver =
-            |name: &str| scope.locals.get(&atom(name)).cloned().unwrap_or_default();
-        let var_ctx = ctx.var_ctx_for_with_scope(
-            "$__infer",
-            relation.span().start.offset,
-            &scope_resolver,
-            Some(scope.proofs()),
-        );
-        let relation_type = super::super::resolution::resolve_arg_raw_type(relation, &var_ctx)?;
-        let candidates = if method_name.contains("Morph") {
-            let types = bound[param_index("types")?]?;
-            Some(
-                super::super::resolution::resolve_arg_raw_type(types, &var_ctx)
-                    .unwrap_or_else(PhpType::mixed),
-            )
-        } else {
-            None
-        };
-        let mut inferred = super::super::closure_resolution::try_relation_query_override_pub(
-            receivers,
-            method_name,
-            &relation_type,
-            candidates.as_ref(),
-            &var_ctx.as_resolution_ctx(),
-        )?;
-        // Refine the query parameter without losing Laravel's second morph
-        // callback parameter (the candidate's class-string).
-        let declared = extract_callable_params_at_fw(&method.parameters, argument_list, arg_idx);
-        inferred.extend(declared.into_iter().skip(1));
-        return Some(inferred);
-    }
-    None
 }
 
 /// Seed `$this` in the scope with the enclosing class's type.  Callers

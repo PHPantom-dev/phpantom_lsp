@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Relation callbacks follow their argument types.** Closures passed to `whereHas()` and similar methods are now typed when the relation is a variable, one of several names, or a relation object. Callbacks for `orWhereRelation()`, `whereDoesntHaveRelation()`, and `with('relation', fn)` are typed too. Contributed by @shuvroroy.
+- **Relation callbacks keep their full context.** Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.
 - **Eager relation constraints keep both callback types.** `withWhereHas()` and `withWhereRelation()` now retain the related builder and relation through fluent calls, including dotted paths and explicit union hints. Contributed by @shuvroroy.
 - **Polymorphic relation callbacks know their candidate models.** Closures passed to `whereHasMorph()` and related methods are now typed from the listed model classes, including their custom builders. Unknown candidates and `'*'` use the relation's declared model. Contributed by @shuvroroy.
 - **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.

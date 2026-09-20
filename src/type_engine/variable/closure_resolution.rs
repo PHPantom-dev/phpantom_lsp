@@ -23,7 +23,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
-    model_builder_type, resolve_relation_chain_details,
+    model_builder_type, related_model_type, resolve_relation_chain_details,
 };
 
 thread_local! {
@@ -903,20 +903,26 @@ fn try_relation_query_override(
     if !RELATION_QUERY_METHODS.contains(&method_name) {
         return None;
     }
-    let model = find_model_from_receivers(receivers, rctx.class_loader)?;
-    let query = relation_callback_type(&model, method_name, relation, rctx);
-    if let Some(candidates) = candidates {
-        let fallback = query.unwrap_or_else(|| {
-            PhpType::generic(
-                ELOQUENT_BUILDER_FQN,
-                vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
-            )
-        });
-        return Some(vec![
-            morph_candidate_builders(candidates, &fallback, rctx.class_loader).simplified(),
-        ]);
+    let mut queries = Vec::new();
+    for model in find_models_from_receivers(receivers, rctx) {
+        let query = relation_callback_type(&model, method_name, relation, rctx);
+        if let Some(candidates) = candidates {
+            let fallback = query.unwrap_or_else(|| {
+                PhpType::generic(
+                    ELOQUENT_BUILDER_FQN,
+                    vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
+                )
+            });
+            queries.push(morph_candidate_builders(
+                candidates,
+                &fallback,
+                rctx.class_loader,
+            ));
+        } else if let Some(query) = query {
+            queries.push(query);
+        }
     }
-    Some(vec![query?])
+    (!queries.is_empty()).then(|| vec![PhpType::union(queries).simplified()])
 }
 
 /// The callback parameter for one relation argument type. Every alternative
@@ -958,7 +964,14 @@ fn relation_callback_type(
         if method_name == "with" {
             return Some(related.relation_type);
         }
-        let builder = model_builder_type(&related.model, rctx.class_loader);
+        let builder = PhpType::union(
+            related
+                .models
+                .iter()
+                .map(|model| model_builder_type(model, rctx.class_loader))
+                .collect(),
+        )
+        .simplified();
         return Some(if eager {
             PhpType::union(vec![builder, related.relation_type])
         } else {
@@ -972,9 +985,7 @@ fn relation_callback_type(
     // A relation object hands its related model to the `Relation` ancestor;
     // projecting through the ancestor chain (which applies the object's own
     // type arguments) copes with subclasses that reorder or fix them.
-    const RELATION_FQN: &str = "Illuminate\\Database\\Eloquent\\Relations\\Relation";
-    let related =
-        super::rhs_resolution::extract_generic_arg_from_ancestor(relation, RELATION_FQN, 0, rctx)?;
+    let related = related_model_type(relation, rctx.class_loader)?;
     let fallback = PhpType::generic(
         ELOQUENT_BUILDER_FQN,
         vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
@@ -1138,21 +1149,23 @@ fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Opti
 /// Given resolved receivers, find the underlying Eloquent model:
 /// the receiver itself when it is a model class, or the model extracted
 /// from a `Builder<Model>` receiver.
-fn find_model_from_receivers(
+fn find_models_from_receivers(
     receivers: &[ResolvedType],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<Arc<ClassInfo>> {
+    rctx: &ResolutionCtx<'_>,
+) -> Vec<Arc<ClassInfo>> {
+    let mut models = Vec::new();
     for receiver in receivers {
         let Some(cls) = receiver.class_info.as_ref() else {
             continue;
         };
-        if extends_eloquent_model(cls, class_loader) {
-            return Some(Arc::clone(cls));
+        if cls.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(cls, rctx.class_loader) {
+            models.push(Arc::clone(cls));
+            continue;
         }
         if cls.fqn() != ELOQUENT_BUILDER_FQN
             && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
                 cls,
-                class_loader,
+                rctx.class_loader,
             )
         {
             continue;
@@ -1160,28 +1173,42 @@ fn find_model_from_receivers(
         // Read the receiver's retained generic context before recovering it
         // from declarations; custom builders need not declare TModel at all.
         // Each source is tried in turn, so an unsubstituted `TModel` in one
-        // does not hide a concrete model in the next.
-        let as_model = |ty: &PhpType| {
-            ty.base_name()
-                .and_then(class_loader)
-                .filter(|model| extends_eloquent_model(model, class_loader))
-        };
-        let from_generic = match receiver.type_string.kind() {
-            TypeKind::Generic(g) => g.args.first().and_then(as_model),
-            _ => None,
-        };
-        if let Some(model) = from_generic
-            .or_else(|| {
-                cls.get_method("getModel")
-                    .and_then(|method| method.return_type.as_ref())
-                    .and_then(as_model)
+        // does not hide a concrete model in the next.  A source may name
+        // several models (`Builder<Post|Comment>`), and each is kept.
+        let current_class = rctx
+            .current_class
+            .map_or_else(|| atom(""), |class| class.name);
+        let as_models = |ty: &PhpType| -> Vec<Arc<ClassInfo>> {
+            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                ty,
+                &current_class,
+                rctx.all_classes,
+                rctx.class_loader,
+            )
+            .into_iter()
+            .filter(|model| {
+                model.fqn() == ELOQUENT_MODEL_FQN
+                    || extends_eloquent_model(model, rctx.class_loader)
             })
-            .or_else(|| extract_model_from_builder(cls).as_ref().and_then(as_model))
-        {
-            return Some(model);
-        }
+            .collect()
+        };
+        let non_empty = |found: Vec<Arc<ClassInfo>>| (!found.is_empty()).then_some(found);
+        let found = crate::inheritance::extract_generic_arg_from_ancestor(
+            &receiver.type_string,
+            ELOQUENT_BUILDER_FQN,
+            0,
+            rctx.class_loader,
+        )
+        .and_then(|ty| non_empty(as_models(&ty)))
+        .or_else(|| {
+            cls.get_method("getModel")
+                .and_then(|method| method.return_type.as_ref())
+                .and_then(|ty| non_empty(as_models(ty)))
+        })
+        .or_else(|| extract_model_from_builder(cls).and_then(|ty| non_empty(as_models(&ty))));
+        models.extend(found.into_iter().flatten());
     }
-    None
+    models
 }
 
 /// Extract the model type from a resolved `Builder<Model>` class by

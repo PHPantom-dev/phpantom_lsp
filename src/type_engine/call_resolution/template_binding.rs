@@ -19,9 +19,8 @@ use crate::type_engine::resolver::ResolutionCtx;
 use crate::type_engine::variable::rhs_resolution::{
     ArgWalkerTypes, TemplateBindingMode, array_element_binding, bound_binding_hint,
     candidate_binding_modes, class_string_generic_binding, class_string_inner_binding,
-    classify_template_binding, extract_array_position, extract_generic_args_from_ancestor,
-    insert_or_union, is_array_like_wrapper, resolve_arg_call_raw_type,
-    resolve_arg_iterable_raw_type, resolve_array_literal_generic,
+    classify_template_binding, extract_array_position, insert_or_union, is_array_like_wrapper,
+    resolve_arg_call_raw_type, resolve_arg_iterable_raw_type, resolve_array_literal_generic,
 };
 use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
 
@@ -469,10 +468,9 @@ fn bind_generic_wrapper(
     // arguments (`FooContainer extends Container<Foo>`).  A hint with a
     // single argument where the ancestor takes several (`Iterator<T>` for an
     // `Iterator<int, Foo>`) names the value, the last one.
-    if let Some(args) = resolved
-        .as_ref()
-        .and_then(|ty| extract_generic_args_from_ancestor(ty, wrapper_name, ctx))
-    {
+    if let Some(args) = resolved.as_ref().and_then(|ty| {
+        crate::inheritance::extract_generic_args_from_ancestor(ty, wrapper_name, ctx.class_loader)
+    }) {
         let arg = if arity == 1 && args.len() > 1 {
             args.last()
         } else {

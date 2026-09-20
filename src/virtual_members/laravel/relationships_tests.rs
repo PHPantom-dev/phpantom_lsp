@@ -831,7 +831,7 @@ fn relation_chain_details_keep_the_terminal_declaring_model() {
     let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
     let relation =
         resolve_relation_chain_details(&classes[0], " stocks . warehouse ", &loader, None).unwrap();
-    assert_eq!(relation.model.fqn(), "Warehouse");
+    assert_eq!(relation.models[0].fqn(), "Warehouse");
     assert_eq!(
         relation.relation_type,
         PhpType::parse("BelongsTo<Warehouse, Stock>")

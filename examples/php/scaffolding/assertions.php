@@ -80,6 +80,10 @@ function runDemoAssertions(): void
     assert($selfOutBox->value instanceof Scaffolding\Pencil, 'replace() swaps the contents, so the box holds a Scaffolding\Pencil after the call');
     assert(!$selfOutBox->value instanceof Scaffolding\Pen, 'a Scaffolding\Pencil is not a Scaffolding\Pen — the template argument really changed');
 
+    $genericDemo = new GenericsDemo();
+    assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pen())) === 'pen', 'a Box<Pen> unwraps to a Pen');
+    assert($genericDemo->boxedAlternatives(new Scaffolding\Box(new Scaffolding\Pencil())) === 'pencil', 'a Box<Pencil> retains the other generic alternative');
+
     // ── Trait `return $this` fluent chain ───────────────────────────────
     $page = new Scaffolding\TestablePage();
     assert($page->assertSee('a') instanceof Scaffolding\TestablePage, 'trait return $this resolves to the using class');

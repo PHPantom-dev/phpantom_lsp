@@ -205,13 +205,12 @@ fn has_morph_column(ty: &PhpType, site: &MorphColumnSite, ctx: &ResolutionCtx<'_
             super::ELOQUENT_BUILDER_FQN,
             ctx.class_loader,
         )
-        && let Some(model) =
-            crate::type_engine::variable::rhs_resolution::extract_generic_arg_from_ancestor(
-                ty,
-                super::ELOQUENT_BUILDER_FQN,
-                0,
-                ctx,
-            )
+        && let Some(model) = crate::inheritance::extract_generic_arg_from_ancestor(
+            ty,
+            super::ELOQUENT_BUILDER_FQN,
+            0,
+            ctx.class_loader,
+        )
         && crate::class_lookup::is_subtype_of_named(
             &model,
             super::ELOQUENT_MODEL_FQN,

@@ -559,7 +559,7 @@ pub(crate) fn walk_closures_in_call<'b>(
 /// rebinds its `$this`.
 pub(crate) fn walk_closures_in_call_args<'b, F>(
     arguments: &'b TokenSeparatedSequence<'b, Argument<'b>>,
-    call: Option<&Call<'_>>,
+    call: Option<&Call<'b>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     infer_fn: F,
@@ -571,6 +571,14 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
             Argument::Positional(a) => a.value,
             Argument::Named(a) => a.value,
         };
+        if let Some(entries) =
+            call.and_then(|call| eager_callback_arguments(call, arg_idx, outer_scope, ctx))
+        {
+            for entry in entries {
+                walk_closures_in_expr(entry.expression, outer_scope, ctx, Some(&entry.parameters));
+            }
+            continue;
+        }
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
                 let inferred = infer_fn(arg_idx);
