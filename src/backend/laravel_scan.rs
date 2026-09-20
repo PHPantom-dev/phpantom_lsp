@@ -13,6 +13,7 @@ use std::path::PathBuf;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::type_engine::resolver::CtxLoaders;
 
 impl Backend {
     /// Build the Laravel macro index by scanning the project's own source
@@ -1063,18 +1064,18 @@ impl Backend {
                 continue;
             };
             let rctx = crate::type_engine::resolver::ResolutionCtx {
-                current_class: Some(target_class.as_ref()),
-                all_classes: &file_ctx.classes,
-                content,
-                cursor_offset: reg.name_offset,
-                class_loader: &class_loader,
-                backend: Some(self),
-                laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                resolved_class_cache: Some(&self.resolved_class_cache),
-                function_loader: Some(&function_loader),
-                scope_var_resolver: None,
-                is_in_static_method: false,
                 preserve_static: true,
+                ..self.resolution_ctx_at(
+                    Some(target_class.as_ref()),
+                    &file_ctx.classes,
+                    content,
+                    reg.name_offset,
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
+                    ),
+                )
             };
             if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
                 reg.method.return_type = Some(ty);
@@ -1166,23 +1167,16 @@ impl Backend {
             let Some(closure_text) = reg.closure_text.as_deref() else {
                 continue;
             };
-            let rctx = crate::type_engine::resolver::ResolutionCtx {
-                current_class: crate::diagnostics::helpers::find_innermost_enclosing_class(
+            let rctx = self.resolution_ctx_at(
+                crate::diagnostics::helpers::find_innermost_enclosing_class(
                     &file_ctx.classes,
                     reg.closure_offset,
                 ),
-                all_classes: &file_ctx.classes,
+                &file_ctx.classes,
                 content,
-                cursor_offset: reg.closure_offset,
-                class_loader: &class_loader,
-                backend: Some(self),
-                laravel_macro_this_resolver: None,
-                resolved_class_cache: Some(&self.resolved_class_cache),
-                function_loader: Some(&function_loader),
-                scope_var_resolver: None,
-                is_in_static_method: false,
-                preserve_static: false,
-            };
+                reg.closure_offset,
+                CtxLoaders::without_macro_this(&class_loader, &function_loader),
+            );
             reg.return_type = Self::infer_closure_return_type(closure_text, &rctx);
         }
     }
@@ -1219,18 +1213,18 @@ impl Backend {
         let function_loader = self.function_loader(&file_ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
         let rctx = crate::type_engine::resolver::ResolutionCtx {
-            current_class: Some(target_class.as_ref()),
-            all_classes: &file_ctx.classes,
-            content: &content,
-            cursor_offset: reg.name_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
             preserve_static: true,
+            ..self.resolution_ctx_at(
+                Some(target_class.as_ref()),
+                &file_ctx.classes,
+                &content,
+                reg.name_offset,
+                CtxLoaders::new(
+                    &class_loader,
+                    &function_loader,
+                    &laravel_macro_this_resolver,
+                ),
+            )
         };
         if let Some(ty) = Self::infer_closure_return_type(&closure_text, &rctx) {
             reg.method.return_type = Some(ty);

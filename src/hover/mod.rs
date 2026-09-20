@@ -31,7 +31,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::CtxLoaders;
 use crate::types::*;
 
 use formatting::*;
@@ -175,20 +175,17 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
-                let rctx = ResolutionCtx {
+                let rctx = self.resolution_ctx_at(
                     current_class,
-                    all_classes: &ctx.classes,
+                    &ctx.classes,
                     content,
                     cursor_offset,
-                    class_loader: &class_loader,
-                    backend: Some(self),
-                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    function_loader: Some(&function_loader),
-                    scope_var_resolver: None,
-                    is_in_static_method: false,
-                    preserve_static: false,
-                };
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
+                    ),
+                );
 
                 let access_kind = if *is_static {
                     AccessKind::DoubleColon

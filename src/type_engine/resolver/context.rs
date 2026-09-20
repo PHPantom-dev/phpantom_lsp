@@ -259,6 +259,48 @@ pub(crate) struct ResolutionCtx<'a> {
     pub preserve_static: bool,
 }
 
+/// The cross-file loader closures a [`ResolutionCtx`] carries.
+///
+/// They are built at the call site rather than inside
+/// [`Backend::resolution_ctx_at`](crate::Backend::resolution_ctx_at):
+/// each borrows the file context it resolves names against, and the
+/// Laravel macro resolver borrows the class loader in turn, so they
+/// have to outlive the context they are handed to.
+pub(crate) struct CtxLoaders<'a> {
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    pub function_loader: FunctionLoaderFn<'a>,
+    pub laravel_macro_this_resolver: LaravelMacroThisResolverFn<'a>,
+}
+
+impl<'a> CtxLoaders<'a> {
+    /// The full trio, as a request handler with a file context builds
+    /// them.
+    pub(crate) fn new(
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
+        laravel_macro_this_resolver: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        Self {
+            class_loader,
+            function_loader: Some(function_loader),
+            laravel_macro_this_resolver: Some(laravel_macro_this_resolver),
+        }
+    }
+
+    /// Without a Laravel macro `$this` resolver, for the paths that
+    /// cannot reach a macro closure body.
+    pub(crate) fn without_macro_this(
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        function_loader: &'a dyn Fn(&str, u32) -> Option<FunctionInfo>,
+    ) -> Self {
+        Self {
+            class_loader,
+            function_loader: Some(function_loader),
+            laravel_macro_this_resolver: None,
+        }
+    }
+}
+
 /// Bundles the common parameters threaded through variable-type resolution.
 ///
 /// Introducing this struct avoids passing 7–10 individual arguments to
