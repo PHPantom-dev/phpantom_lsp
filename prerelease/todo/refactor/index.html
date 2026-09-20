@@ -1809,42 +1809,7 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>Filed by the Sprint 7 gate analysis of 2026-09-14 (fourth pass, sections
-2 and 3, scoped to every <code>src/</code> and <code>tests/</code> file changed since 0.10.0).
-Items are grouped so that each group touches a distinct set of files.</p>
-<p>Section 2 (test placement) is clear: the integration-shaped tests that
-lived in <code>src/</code> have moved to <code>tests/integration/</code>, and no test helper or
-fixture is copy-pasted across three or more suites any more. Everything
-below is section 3 (code duplication). R3 to R8 are done. R9 is
-part-done: what is listed below is what remains of it. R10 has not been
-started, and wants R9 finished first since it touches the same files.</p>
-<h2 id="r9-editor-features">R9. Editor features<a class="headerlink" href="#r9-editor-features" title="Permanent link">&para;</a></h2>
-<p><code>src/completion/context/override_completion.rs</code>'s <code>collect_from_traits</code>
-(×3) and <code>collect_from_interface</code> (×2) across
-<code>MethodCollector</code>/<code>PropertyCollector</code>/<code>ConstantCollector</code> share a
-traversal shape but not a signature: <code>PropertyCollector</code> has no
-interface traversal (interfaces cannot declare properties),
-<code>ConstantCollector</code>'s constant version-gates trait/interface constants
-that methods and properties do not, and each <code>push_from*</code> needs <code>&amp;mut
-self</code> on a struct already borrowing <code>self.visited</code> and
-<code>self.class_loader</code> separately — a shared free function taking a <code>push:
-impl FnMut(&amp;ClassInfo)</code> closure hits exactly that conflict, since the
-closure's method call captures all of <code>self</code>, not just the fields it
-touches. The property and constant item builders differ in the same way
-the method one does from both: constants have no <code>skip_override_attr</code>
-(no per-item <code>additional_text_edits</code> gating), properties add
-<code>readonly</code>/<code>static</code> modifiers and a <code>= default</code> insert the others don't,
-and labels are shaped per member kind (<code>$name: Type</code>, <code>NAME: Type</code>,
-<code>name(Params): Type</code>). Unifying either needs the same per-kind
-closure/trait injection.</p>
-<h2 id="r10-resolutionctx-factory">R10. <code>ResolutionCtx</code> factory<a class="headerlink" href="#r10-resolutionctx-factory" title="Permanent link">&para;</a></h2>
-<p>The 13-field <code>ResolutionCtx</code> literal with identical fixed fields is
-written in <code>hover/mod.rs:178</code>, <code>definition/member/mod.rs:156</code>,
-<code>definition/type_definition.rs:90</code>, <code>definition/implementation.rs:534</code>,
-<code>completion/handler/member_access.rs:67/95</code>, <code>backend/laravel_scan.rs</code>
-(three sites), and ~15 more places outside the changed set. Add
-<code>Backend::resolution_ctx_at(...)</code> and use it. Run this after R7 to R9
-since it touches their files.</p>
+<p>No outstanding items.</p>
 
 
 
