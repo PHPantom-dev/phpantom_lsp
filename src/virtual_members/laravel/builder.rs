@@ -42,6 +42,22 @@ pub(crate) fn custom_builder_fqn(
         .or_else(|| ancestors(class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
+/// The concrete query type constructed for a model, including custom builders
+/// that do not declare their own template parameter. A custom builder that
+/// fails to load falls back to Eloquent's builder, as static forwarding does.
+pub(crate) fn model_builder_type(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    let name = custom_builder_fqn(model, class_loader)
+        .and_then(|fqn| class_loader(&fqn))
+        .map_or_else(
+            || crate::atom::atom(ELOQUENT_BUILDER_FQN),
+            |builder| builder.fqn(),
+        );
+    PhpType::generic_atom(name, vec![PhpType::named(model.fqn())])
+}
+
 /// Build static virtual methods by forwarding Eloquent Builder's public
 /// instance methods onto the model class. See the module docs for the
 /// return-type mapping.

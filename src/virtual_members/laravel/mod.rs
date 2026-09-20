@@ -250,7 +250,7 @@ use std::sync::Arc;
 
 use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
-pub(crate) use builder::custom_builder_fqn;
+pub(crate) use builder::{custom_builder_fqn, model_builder_type};
 use casts::cast_type_to_php_type;
 pub(crate) use casts::qualify_cast_type;
 pub use facade::LaravelFacadeProvider;

@@ -198,6 +198,7 @@ namespace Illuminate\Database\Eloquent\Relations {
 
 namespace BuilderRelationAudit {
     use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Builder as Query;
     use Illuminate\Database\Eloquent\Model;
     use Illuminate\Database\Eloquent\Relations\BelongsTo;
     use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -224,6 +225,8 @@ namespace BuilderRelationAudit {
         public function warehouse(): BelongsTo {}
         /** @return BelongsTo<Team, $this> */
         public function team(): BelongsTo {}
+        /** @return BelongsTo<PlainTeam, $this> */
+        public function plainTeam(): BelongsTo {}
     }
     class Warehouse extends Model {
         public function warehouseName(): string { return ''; }
@@ -307,7 +310,7 @@ namespace BuilderRelationAudit {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
         });
         Team::query()->where('active', true)->whereHas('stocks.warehouse', function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query); // SKIP: custom-builder receiver is not recognized
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
         });
         Team::has('stocks.warehouse', '>=', 1, 'and', function ($query) {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query);
@@ -331,10 +334,19 @@ namespace BuilderRelationAudit {
             assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>', $query); // SKIP: relation argument must currently come first
         }, relation: 'stocks.warehouse');
         Stock::whereHas('team', function ($query) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: related custom builder is replaced with the base builder
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
         });
         Stock::whereHas('team', function (Builder $query) {
-            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: related custom builder is replaced with the base builder
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query);
+        });
+        Stock::query()->whereHas('team', function (Query $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query->active());
+        });
+        Stock::whereHas('plainTeam', function (Builder $query) {
+            assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', $query);
+        });
+        Stock::whereHas('team', function (Warehouse $query) {
+            assertType('BuilderRelationAudit\Warehouse', $query);
         });
     }
 

@@ -143,7 +143,6 @@ unlikely to move the needle for most users.
 | L62 | [Bind named relation callback arguments before inference](todo/laravel.md#l62-bind-named-relation-callback-arguments-before-inference)                                      | Medium      | Medium      |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
-| L61 | [Preserve custom builders in relation callbacks](todo/laravel.md#l61-preserve-custom-builders-in-relation-callbacks)                                                        | Medium      | Medium-High |
 | L63 | [Infer morph constraint callbacks from candidate models](todo/laravel.md#l63-infer-morph-constraint-callbacks-from-candidate-models)                                        | Medium      | Medium-High |
 | L64 | [Infer both callback receivers for withWhereHas](todo/laravel.md#l64-infer-both-callback-receivers-for-withwherehas)                                                        | Medium      | Medium-High |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
