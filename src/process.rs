@@ -195,6 +195,78 @@ pub fn paths_match(a: &str, b: &str) -> bool {
     a_norm.ends_with(&format!("/{}", b_norm)) || b_norm.ends_with(&format!("/{}", a_norm))
 }
 
+/// Project-wide runs multiply the per-file timeout by this factor.
+pub const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
+
+/// Turn a project-wide tool run's exit code into diagnostics grouped by
+/// file path.
+///
+/// The three proxies agree on the shape: one set of exit codes means
+/// "ran, found something", anything higher means the tool failed. A
+/// failing run still gets its output parsed, because a tool that reports
+/// findings *and* exits non-zero (a baseline error, a partially
+/// unreadable file) has already told us something worth showing; only a
+/// run that produced nothing usable becomes an error.
+///
+/// `findings_codes` lists the exit codes that mean "parse the output"
+/// (PHPCS uses both 1 and 2). `success_parses` is for tools whose
+/// zero-exit output still carries diagnostics.
+pub fn workspace_run_result<F>(
+    output: &CommandOutput,
+    tool_name: &str,
+    findings_codes: &[i32],
+    success_parses: bool,
+    parse: F,
+) -> Result<
+    std::collections::HashMap<std::path::PathBuf, Vec<tower_lsp::lsp_types::Diagnostic>>,
+    String,
+>
+where
+    F: Fn(
+        &str,
+    ) -> Result<
+        std::collections::HashMap<std::path::PathBuf, Vec<tower_lsp::lsp_types::Diagnostic>>,
+        String,
+    >,
+{
+    if output.code == 0 {
+        if !success_parses || output.stdout.trim().is_empty() {
+            return Ok(std::collections::HashMap::new());
+        }
+        return parse(&output.stdout).or_else(|_| Ok(std::collections::HashMap::new()));
+    }
+
+    if findings_codes.contains(&output.code) {
+        return parse(&output.stdout);
+    }
+
+    match parse(&output.stdout) {
+        Ok(map) if !map.is_empty() => Ok(map),
+        _ => Err(format!(
+            "{} exited with code {} (stderr: {})",
+            tool_name,
+            output.code,
+            output.stderr.trim()
+        )),
+    }
+}
+
+/// The whole of a single line, as external tools report positions.
+///
+/// PHPStan and PHPCS both report a line and an ambiguous (or absent)
+/// column, so there is no reliable way to derive a precise range. Both
+/// underline the full line instead; the editor clamps the end column to
+/// the line's real length.
+pub fn full_line_range(line: u32) -> tower_lsp::lsp_types::Range {
+    tower_lsp::lsp_types::Range {
+        start: tower_lsp::lsp_types::Position { line, character: 0 },
+        end: tower_lsp::lsp_types::Position {
+            line,
+            character: u32::MAX,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

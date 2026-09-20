@@ -125,21 +125,17 @@ impl Backend {
     }
 
     pub(super) fn reference_file_content(&self, uri: &str) -> Option<String> {
-        if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
-        {
-            return Some(content.clone());
-        }
-        self.get_file_content(uri)
+        self.reference_file_content_arc(uri)
+            .map(|content| String::clone(&content))
     }
 
     /// Read content in the coordinate space used by the file's symbol map.
     /// Blade maps describe generated PHP; locations are translated for the client later.
     pub(crate) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
         if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
+            && let Some(content) = self.blade_virtual_php_arc(uri)
         {
-            return Some(Arc::new(content.clone()));
+            return Some(content);
         }
         self.get_file_content_arc(uri)
     }
@@ -218,7 +214,10 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
 }
 
-fn sort_locations_for_references(locations: &mut Vec<Location>) {
+/// Put the locations a Find References answer carries into the order an
+/// editor lists them: by file, then by position within it, with exact
+/// duplicates collapsed.
+pub(super) fn sort_locations_for_references(locations: &mut Vec<Location>) {
     locations.sort_by(|a, b| {
         a.uri
             .as_str()

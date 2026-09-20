@@ -264,6 +264,7 @@ mod mago;
 mod mem_audit;
 pub mod move_cli;
 pub(crate) mod names;
+mod parallel;
 mod parser;
 pub(crate) mod phar;
 pub mod php_type;
@@ -956,7 +957,11 @@ pub struct Backend {
     /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
-    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    ///
+    /// Shared rather than owned: every request against a template reads
+    /// this text, and a template's virtual PHP is several times the size
+    /// of the template itself.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
@@ -1471,6 +1476,13 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php_arc(uri)
+            .map(|php| String::clone(&php))
+    }
+
+    /// [`Self::blade_virtual_php`] without the copy, for the request paths
+    /// that only need to read the text.
+    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         self.blade_virtual_content.read().get(uri).cloned()
     }
 
@@ -1774,9 +1786,19 @@ impl Backend {
     /// access; this only restores the lightweight discovery indexes.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
-    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+    ///
+    /// Returns whether any *class declaration* was dropped, handed to a
+    /// surviving file, or discovered — i.e. whether class resolution could
+    /// now answer differently.  A batch of declaration-free files (a
+    /// generated cache artifact, a routes or config file) returns `false`,
+    /// and the caller can keep the resolved-class caches it would
+    /// otherwise have to drop.
+    pub(crate) fn reindex_files_batch(
+        &self,
+        changes: &[(String, PathBuf, FileChangeType)],
+    ) -> bool {
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         // Index values are stored under either the editor URI or the
@@ -1804,6 +1826,7 @@ impl Backend {
         // These FQNs no longer resolve, and the promoted ones resolve
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
+        let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1877,6 +1900,7 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
+            classes_changed |= !classes.is_empty();
             self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
                     decls.note_discovered(&fqn, uri_str.clone());
@@ -1897,6 +1921,7 @@ impl Backend {
                 }
             }
         }
+        classes_changed
     }
 
     /// Create a shallow clone of this `Backend` that shares every
@@ -2116,246 +2141,5 @@ impl Backend {
         self.stub_constant_index
             .write()
             .retain(|name, source| !stubs::is_stub_constant_removed(source, name, version));
-    }
-
-    /// Check whether a URI refers to a Blade template file.
-    /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
-    pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
-    }
-
-    /// Translate a position from an original Blade file to the virtual PHP file.
-    pub(crate) fn translate_blade_to_php(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.blade_to_php(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade file.
-    pub(crate) fn translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.php_to_blade(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade
-    /// file, or `None` when the position lies in the injected prologue.
-    ///
-    /// Use this instead of [`Self::translate_php_to_blade`] wherever the
-    /// result becomes a text edit or a range the editor navigates to: the
-    /// prologue has no template text behind it, and clamping a prologue
-    /// position to `0:0` produces an edit at the very start of the template.
-    pub(crate) fn try_translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
-            Some(map) => map.try_php_to_blade(pos),
-            None => Some(pos),
-        }
-    }
-
-    /// Translate a range from virtual PHP coordinates back to original Blade
-    /// coordinates, dropping it when either end lies in the prologue.
-    pub(crate) fn try_translate_blade_range(
-        &self,
-        uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> Option<tower_lsp::lsp_types::Range> {
-        Some(tower_lsp::lsp_types::Range {
-            start: self.try_translate_php_to_blade(uri, range.start)?,
-            end: self.try_translate_php_to_blade(uri, range.end)?,
-        })
-    }
-
-    /// Translate one completion item's edit ranges from virtual PHP
-    /// coordinates back to Blade, dropping the item if any range falls in
-    /// the injected prologue.
-    fn translate_completion_item(
-        &self,
-        uri: &str,
-        mut item: tower_lsp::lsp_types::CompletionItem,
-    ) -> Option<tower_lsp::lsp_types::CompletionItem> {
-        use tower_lsp::lsp_types::CompletionTextEdit;
-
-        if let Some(edit) = item.text_edit.take() {
-            item.text_edit = Some(match edit {
-                CompletionTextEdit::Edit(mut e) => {
-                    e.range = self.try_translate_blade_range(uri, e.range)?;
-                    CompletionTextEdit::Edit(e)
-                }
-                CompletionTextEdit::InsertAndReplace(mut e) => {
-                    e.insert = self.try_translate_blade_range(uri, e.insert)?;
-                    e.replace = self.try_translate_blade_range(uri, e.replace)?;
-                    CompletionTextEdit::InsertAndReplace(e)
-                }
-            });
-        }
-
-        if let Some(edits) = item.additional_text_edits.take() {
-            let mut translated = Vec::with_capacity(edits.len());
-            for mut e in edits {
-                e.range = self.try_translate_blade_range(uri, e.range)?;
-                translated.push(e);
-            }
-            item.additional_text_edits = Some(translated);
-        }
-
-        Some(item)
-    }
-
-    /// Translate every completion item in a response from virtual PHP
-    /// coordinates back to Blade, dropping items whose edits target the
-    /// preprocessor's injected prologue rather than clamping them to the
-    /// start of the template.
-    pub(crate) fn translate_completion_response(
-        &self,
-        uri: &str,
-        response: tower_lsp::lsp_types::CompletionResponse,
-    ) -> tower_lsp::lsp_types::CompletionResponse {
-        use tower_lsp::lsp_types::{CompletionList, CompletionResponse};
-
-        match response {
-            CompletionResponse::Array(items) => CompletionResponse::Array(
-                items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            ),
-            CompletionResponse::List(list) => CompletionResponse::List(CompletionList {
-                is_incomplete: list.is_incomplete,
-                items: list
-                    .items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            }),
-        }
-    }
-
-    /// Translate a location from virtual PHP coordinates back to original Blade
-    /// coordinates if the location points into a Blade file.
-    pub(crate) fn translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> tower_lsp::lsp_types::Location {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
-            location.range.end = self.translate_php_to_blade(&uri_str, location.range.end);
-        }
-        location
-    }
-
-    /// Like [`Self::translate_location`], but drops a Blade location whose
-    /// range falls inside the preprocessor's prologue.
-    pub(crate) fn try_translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> Option<tower_lsp::lsp_types::Location> {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range = self.try_translate_blade_range(&uri_str, location.range)?;
-        }
-        Some(location)
-    }
-
-    /// Move a file's edits from the virtual PHP they were planned against
-    /// back into the file's own coordinates, dropping the ones that target
-    /// a template's injected prologue.
-    ///
-    /// A no-op for every file that is not a template.  A template is
-    /// planned against the virtual PHP it lowers to, because that is what
-    /// its symbol map describes, but the editor applies the edits to the
-    /// template; the prologue holds declarations no template line stands
-    /// behind, so an edit landing there has no position to be applied at.
-    pub(crate) fn translate_template_edits(
-        &self,
-        uri: &str,
-        edits: &mut Vec<tower_lsp::lsp_types::TextEdit>,
-    ) {
-        if !self.is_blade_file(uri) {
-            return;
-        }
-        edits.retain_mut(
-            |edit| match self.try_translate_blade_range(uri, edit.range) {
-                Some(range) => {
-                    edit.range = range;
-                    true
-                }
-                None => false,
-            },
-        );
-    }
-
-    /// Move every template edit in a workspace edit from the virtual PHP it
-    /// was planned against back into the template's own coordinates, the
-    /// way [`Self::translate_template_edits`] does for one file's edits.
-    ///
-    /// Edits to files that are not templates are left alone, and an edit
-    /// that targets a template's injected prologue is dropped, whichever
-    /// shape (`changes` or `document_changes`) carries it.
-    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
-        if let Some(changes) = edit.changes.as_mut() {
-            for (uri, edits) in changes.iter_mut() {
-                self.translate_template_edits(uri.as_str(), edits);
-            }
-        }
-        let Some(document_changes) = edit.document_changes.as_mut() else {
-            return;
-        };
-        match document_changes {
-            DocumentChanges::Edits(edits) => {
-                for document in edits {
-                    self.translate_document_edit(document);
-                }
-            }
-            DocumentChanges::Operations(operations) => {
-                for operation in operations {
-                    if let DocumentChangeOperation::Edit(document) = operation {
-                        self.translate_document_edit(document);
-                    }
-                }
-            }
-        }
-    }
-
-    /// [`Self::translate_template_edits`] for the edits of one
-    /// `TextDocumentEdit`, whichever of the two edit shapes each carries.
-    fn translate_document_edit(&self, document: &mut tower_lsp::lsp_types::TextDocumentEdit) {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri = document.text_document.uri.as_str();
-        if !self.is_blade_file(uri) {
-            return;
-        }
-        document.edits.retain_mut(|edit| {
-            let range = match edit {
-                OneOf::Left(edit) => &mut edit.range,
-                OneOf::Right(edit) => &mut edit.text_edit.range,
-            };
-            match self.try_translate_blade_range(uri, *range) {
-                Some(translated) => {
-                    *range = translated;
-                    true
-                }
-                None => false,
-            }
-        });
     }
 }

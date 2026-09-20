@@ -79,14 +79,14 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{
-    ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
+use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{
-    FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
-    find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
 use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
@@ -178,6 +178,9 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         let file_use_map = &ctx.file.use_map;
         let file_namespace = &ctx.file.namespace;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -268,7 +271,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
@@ -355,18 +358,18 @@ impl Backend {
                 .entry(cache_key)
                 .or_insert_with(|| {
                     let rctx = ResolutionCtx {
-                        current_class,
-                        all_classes: local_classes,
-                        content,
-                        cursor_offset: span.start,
-                        class_loader: &class_loader,
-                        backend: Some(self),
-                        laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                        resolved_class_cache: Some(resolved_cache),
-                        function_loader: Some(&function_loader),
-                        scope_var_resolver: None,
                         is_in_static_method: symbol_map.is_in_static_method(span.start),
-                        preserve_static: false,
+                        ..self.resolution_ctx_at(
+                            current_class,
+                            local_classes,
+                            content,
+                            span.start,
+                            CtxLoaders::new(
+                                &class_loader,
+                                &function_loader,
+                                &laravel_macro_this_resolver,
+                            ),
+                        )
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -532,18 +535,18 @@ impl Backend {
                     let (result, diags) =
                         if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
-                                current_class,
-                                all_classes: local_classes,
-                                content,
-                                cursor_offset: span.start,
-                                class_loader: &class_loader,
-                                backend: Some(self),
-                                laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                                resolved_class_cache: Some(resolved_cache),
-                                function_loader: Some(&function_loader),
-                                scope_var_resolver: None,
                                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                preserve_static: false,
+                                ..self.resolution_ctx_at(
+                                    current_class,
+                                    local_classes,
+                                    content,
+                                    span.start,
+                                    CtxLoaders::new(
+                                        &class_loader,
+                                        &function_loader,
+                                        &laravel_macro_this_resolver,
+                                    ),
+                                )
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {

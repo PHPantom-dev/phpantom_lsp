@@ -40,6 +40,7 @@ use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
 
+use super::file_contributions::FileContributions;
 use super::helpers::{extract_string_literal, walks_parent_chain};
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, PropertySource};
@@ -116,21 +117,11 @@ pub(crate) struct CommandEntry {
 /// merged by-name lookup.
 #[derive(Default)]
 pub(crate) struct LaravelCommandIndex {
-    by_uri: HashMap<String, Vec<CommandEntry>>,
+    pub(crate) files: FileContributions<Vec<CommandEntry>>,
     by_name: HashMap<String, CommandEntry>,
 }
 
 impl LaravelCommandIndex {
-    /// Replace the commands contributed by `uri`.  An empty vector removes
-    /// the file's contribution.  Call [`Self::rebuild`] afterwards.
-    pub(crate) fn set_file(&mut self, uri: String, entries: Vec<CommandEntry>) {
-        if entries.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, entries);
-        }
-    }
-
     /// Rebuild the merged name → entry lookup from per-file contributions.
     ///
     /// Primary names are inserted before aliases so a command that *is*
@@ -141,14 +132,14 @@ impl LaravelCommandIndex {
     /// acceptable for a diagnostic / navigation aid.
     pub(crate) fn rebuild(&mut self) {
         let mut by_name = HashMap::new();
-        for entries in self.by_uri.values() {
+        for entries in self.files.values() {
             for entry in entries {
                 by_name
                     .entry(entry.name.clone())
                     .or_insert_with(|| entry.clone());
             }
         }
-        for entries in self.by_uri.values() {
+        for entries in self.files.values() {
             for entry in entries {
                 for alias in &entry.aliases {
                     by_name
@@ -158,11 +149,6 @@ impl LaravelCommandIndex {
             }
         }
         self.by_name = by_name;
-    }
-
-    /// Whether `uri` currently contributes any commands.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
     }
 
     /// Whether the index contains no commands at all.
@@ -182,7 +168,7 @@ impl LaravelCommandIndex {
     /// accessor types need.  Commands number in the tens even in a large
     /// project, so the scan is cheaper than a second index.
     pub(crate) fn get_by_fqn(&self, fqn: &str) -> Option<&CommandEntry> {
-        self.by_uri
+        self.files
             .values()
             .flatten()
             .find(|entry| entry.fqn.as_deref() == Some(fqn))

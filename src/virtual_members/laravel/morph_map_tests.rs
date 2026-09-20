@@ -207,14 +207,14 @@ fn entry(alias: &str, fqn: &str) -> MorphMapEntry {
 #[test]
 fn index_merges_registrations_across_files() {
     let mut index = LaravelMorphMapIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         MorphMapScan {
             entries: vec![entry("post", "App\\Models\\Post")],
             ..Default::default()
         },
     );
-    index.set_file(
+    index.files.set_file(
         "file:///b.php".to_string(),
         MorphMapScan {
             entries: vec![entry("video", "App\\Models\\Video")],
@@ -239,7 +239,7 @@ fn index_merges_registrations_across_files() {
 fn index_drops_a_files_contributions_when_it_stops_registering() {
     let mut index = LaravelMorphMapIndex::default();
     let uri = "file:///a.php".to_string();
-    index.set_file(
+    index.files.set_file(
         uri.clone(),
         MorphMapScan {
             entries: vec![entry("post", "App\\Models\\Post")],
@@ -248,11 +248,11 @@ fn index_drops_a_files_contributions_when_it_stops_registering() {
         },
     );
     index.rebuild();
-    assert!(index.has_uri(&uri));
+    assert!(index.files.has_uri(&uri));
 
-    index.set_file(uri.clone(), MorphMapScan::default());
+    index.files.set_file(uri.clone(), MorphMapScan::default());
     index.rebuild();
-    assert!(!index.has_uri(&uri));
+    assert!(!index.files.has_uri(&uri));
     assert!(index.all_aliases().is_empty());
     assert!(index.get("post").is_none());
     assert!(!index.is_enforced());
@@ -261,7 +261,7 @@ fn index_drops_a_files_contributions_when_it_stops_registering() {
 #[test]
 fn index_keeps_the_first_registration_for_a_duplicated_alias() {
     let mut index = LaravelMorphMapIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         MorphMapScan {
             entries: vec![
@@ -281,7 +281,7 @@ fn index_keeps_the_first_registration_for_a_duplicated_alias() {
 #[test]
 fn index_lists_every_alias() {
     let mut index = LaravelMorphMapIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         MorphMapScan {
             entries: vec![

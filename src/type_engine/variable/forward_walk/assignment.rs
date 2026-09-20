@@ -1,5 +1,4 @@
 use super::*;
-use std::collections::HashMap;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
@@ -9,7 +8,6 @@ use crate::docblock::type_strings::split_type_token;
 use crate::parser::with_parsed_program;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::call_resolution::{OutParamCallee, effective_out_type};
-use crate::type_engine::resolver::VarResolutionCtx;
 use crate::type_engine::types::narrowing;
 use crate::types::{ClassInfo, ResolvedType};
 
@@ -210,7 +208,7 @@ pub(crate) fn process_expression_statement<'b>(
     // `@var` docblock is still found, but everything that inspects the
     // expression's shape works on the inner one.
     let outer = expr_stmt.expression;
-    let expr = unwrap_parens(outer);
+    let expr = crate::parser::unwrap_parens(outer);
 
     // Try inline `/** @var Type $x */` override first.
     // A `@var` block is authoritative over the assignment it annotates,
@@ -488,7 +486,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             // `(function () use (&$x) { ... })()` runs the closure right
             // here, so its final variable state replaces the outer one.
             if let Call::Function(fc) = call
-                && let Expression::Closure(closure) = unwrap_parens(fc.function)
+                && let Expression::Closure(closure) = crate::parser::unwrap_parens(fc.function)
             {
                 process_by_ref_closure_capture(closure, scope, ctx, true);
             }
@@ -528,16 +526,11 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
                 }
             }
         }
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                if let Some(value) = array_element_value(elem) {
-                    process_by_ref_closure_captures(value, scope, ctx);
-                }
-            }
-        }
-        Expression::LegacyArray(arr) => {
-            for elem in arr.elements.iter() {
-                if let Some(value) = array_element_value(elem) {
+        Expression::Array(_) | Expression::LegacyArray(_) => {
+            let elements =
+                crate::parser::array_literal_elements(expr).expect("an array literal has elements");
+            for elem in elements.iter() {
+                if let Some(value) = crate::parser::array_element_value(elem) {
                     process_by_ref_closure_captures(value, scope, ctx);
                 }
             }
@@ -549,16 +542,6 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
-    }
-}
-
-/// The value expression of an array element, ignoring its key.
-fn array_element_value<'b>(elem: &'b ArrayElement<'b>) -> Option<&'b Expression<'b>> {
-    match elem {
-        ArrayElement::KeyValue(kv) => Some(kv.value),
-        ArrayElement::Value(v) => Some(v.value),
-        ArrayElement::Variadic(v) => Some(v.value),
-        ArrayElement::Missing(_) => None,
     }
 }
 
@@ -693,7 +676,7 @@ pub(crate) fn function_invokes_callable_arg_immediately(
                     else {
                         return false;
                     };
-                    return !function_param_has_invocation_tag(
+                    return !node_param_has_invocation_tag(
                         func.name.span.start.offset as usize,
                         ctx.content,
                         bytes_to_str(param.variable.name),
@@ -824,15 +807,6 @@ pub(crate) fn class_name_matches_receiver(name: &[u8], receiver_names: &[String]
         receiver.eq_ignore_ascii_case(class_name)
             || crate::util::short_name(receiver).eq_ignore_ascii_case(class_name)
     })
-}
-
-pub(crate) fn function_param_has_invocation_tag(
-    node_start: usize,
-    content: &str,
-    param_name: &str,
-    tag_name: &str,
-) -> bool {
-    node_param_has_invocation_tag(node_start, content, param_name, tag_name)
 }
 
 pub(crate) fn node_param_has_invocation_tag(
@@ -1124,7 +1098,7 @@ pub(crate) fn try_process_inline_var_override<'b>(
 
     // Try multi-@var first: a single docblock may declare several
     // variables (e.g. `/** @var App $app  @var array{…} $params */`).
-    let multi = parse_all_inline_var_docblocks(doc_text, ctx);
+    let multi = parse_var_docblock_pairs(doc_text);
     if !multi.is_empty() {
         // The blocks further back run first, so a name this docblock also
         // declares ends up carrying the type written closest to the
@@ -1245,10 +1219,7 @@ pub(crate) fn resolve_rhs_native_type(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<PhpType> {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = move |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx =
         ctx.var_ctx_for_with_scope("$__rhs_check", 0, &scope_resolver, Some(scope.proofs()));
     super::super::resolution::extract_native_type_from_rhs(rhs, &var_ctx)
@@ -1275,7 +1246,7 @@ pub(crate) fn apply_preceding_var_docblocks(
     // Keep scanning as long as the preceding text ends with a docblock.
     while let Some(doc_text) = trailing_docblock(remaining) {
         let doc_start = remaining.len() - doc_text.len();
-        let vars = parse_all_inline_var_docblocks(doc_text, ctx);
+        let vars = parse_var_docblock_pairs(doc_text);
         if vars.is_empty() {
             // Not a @var docblock — stop scanning.
             break;
@@ -1425,17 +1396,7 @@ pub(crate) fn resolve_type_to_resolved_types(
         ctx.current_class.file_namespace.as_deref(),
         ctx.class_loader,
     );
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-        &php_type,
-        &ctx.current_class.name,
-        ctx.all_classes,
-        ctx.class_loader,
-    );
-    if !classes.is_empty() {
-        ResolvedType::from_classes_with_hint(classes, php_type)
-    } else {
-        vec![ResolvedType::from_type_string(php_type)]
-    }
+    ctx.resolved_types_for(php_type)
 }
 
 /// Strip the `/**`…`*/` wrapper from a docblock and collapse its
@@ -1510,23 +1471,6 @@ pub(crate) fn parse_var_docblock_pairs(doc_text: &str) -> Vec<(String, PhpType)>
     results
 }
 
-/// Parse ALL `@var Type $varName` pairs from a docblock preceding an
-/// assignment or expression.
-pub(crate) fn parse_all_inline_var_docblocks(
-    doc_text: &str,
-    _ctx: &ForwardWalkCtx<'_>,
-) -> Vec<(String, PhpType)> {
-    parse_var_docblock_pairs(doc_text)
-}
-
-/// Parse ALL `@var Type $varName` annotations from a docblock.
-/// Supports single-line (`/** @var Type $var */`), one-annotation-per-line
-/// multi-line docblocks, and annotations whose type spans several lines
-/// (e.g. a multi-line `array{...}` shape).
-pub(crate) fn parse_all_var_docblock_annotations(doc_text: &str) -> Vec<(String, PhpType)> {
-    parse_var_docblock_pairs(doc_text)
-}
-
 /// Parse `/** @var Type */` (without variable name) and return the PhpType.
 pub(crate) fn parse_inline_var_docblock_no_var(doc_text: &str) -> Option<PhpType> {
     // Flatten line-continuation markers so a `array{...}` shape spread
@@ -1563,13 +1507,16 @@ pub(crate) fn process_assignment_expr<'b>(
 ) {
     // `($a = expr);` is a parenthesized assignment statement — written by
     // hand, or produced by the Blade preprocessor for `@php($a = expr)`.
-    if let Expression::Assignment(assignment) = unwrap_parens(expr) {
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(expr) {
         // An assignment buried in the value runs before the target here is
         // written, and the rest of the value reads what it wrote:
         // `$ok = ($x = $map[$key])->truthy();`.  A right-hand side that
         // *is* an assignment is left to the chain handling below, which
         // knows shapes (destructuring, indexed writes) this does not.
-        if !matches!(unwrap_parens(assignment.rhs), Expression::Assignment(_)) {
+        if !matches!(
+            crate::parser::unwrap_parens(assignment.rhs),
+            Expression::Assignment(_)
+        ) {
             process_nested_assignments(assignment.rhs, scope, ctx);
         }
 
@@ -1802,7 +1749,7 @@ fn property_write_dispatches_to_magic_set(
     // subject is magic as soon as one member routes the write through
     // `__set`: the recorded type would have no authority over what that
     // member's `__get` returns.
-    let object = unwrap_parens(object);
+    let object = crate::parser::unwrap_parens(object);
     if let Expression::Variable(Variable::Direct(dv)) = object {
         let var_name = bytes_to_str(dv.name);
         if var_name == "$this" {
@@ -1907,43 +1854,59 @@ pub(crate) fn process_compound_assignment<'b>(
         return;
     }
 
-    let result_type = match &assignment.operator {
-        AssignmentOperator::Concat(_) => PhpType::string(),
-        AssignmentOperator::Modulo(_) => PhpType::int(),
-        AssignmentOperator::LeftShift(_)
-        | AssignmentOperator::RightShift(_)
-        | AssignmentOperator::BitwiseAnd(_)
-        | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => PhpType::int(),
-        AssignmentOperator::Addition(_) => {
-            let lhs_types = scope.get(&var_name).to_vec();
-            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            infer_addition_result_type(&lhs_types, &rhs_types)
-        }
-        AssignmentOperator::Subtraction(_)
-        | AssignmentOperator::Multiplication(_)
-        | AssignmentOperator::Division(_)
-        | AssignmentOperator::Exponentiation(_) => {
-            let lhs_types = scope.get(&var_name).to_vec();
-            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-            let op_kind = match assignment.operator {
-                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
-                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                _ => ArithmeticOpKind::Other,
-            };
-            infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind)
-        }
-        AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => return, // handled above / elsewhere
+    // `??=` was handled above and plain `=` never reaches here.
+    let Some(result_type) = compound_assignment_result(
+        &assignment.operator,
+        || scope.get(&var_name).to_vec(),
+        || resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+    ) else {
+        return;
     };
 
     scope.set(&var_name, vec![ResolvedType::from_type_string(result_type)]);
 }
 
-/// Unwrap parenthesized expressions to their inner expression.
-pub(crate) fn unwrap_parens<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
-    match expr {
-        Expression::Parenthesized(p) => unwrap_parens(p.expression),
-        other => other,
+/// The type a compound assignment (`.=`, `+=`, `<<=`, …) leaves in its
+/// target, given the types the target held and the types the right-hand
+/// side produces.
+///
+/// The operand closures are only called for the operators that need them,
+/// so a `.=` never pays for resolving its right-hand side.
+///
+/// `??=` and plain `=` return `None`: neither is decided by the operator
+/// alone, so each caller settles them for itself.
+fn compound_assignment_result(
+    operator: &AssignmentOperator,
+    lhs_types: impl FnOnce() -> Vec<ResolvedType>,
+    rhs_types: impl FnOnce() -> Vec<ResolvedType>,
+) -> Option<PhpType> {
+    match operator {
+        AssignmentOperator::Concat(_) => Some(PhpType::string()),
+        AssignmentOperator::Modulo(_)
+        | AssignmentOperator::LeftShift(_)
+        | AssignmentOperator::RightShift(_)
+        | AssignmentOperator::BitwiseAnd(_)
+        | AssignmentOperator::BitwiseOr(_)
+        | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
+        AssignmentOperator::Addition(_) => {
+            Some(infer_addition_result_type(&lhs_types(), &rhs_types()))
+        }
+        AssignmentOperator::Subtraction(_)
+        | AssignmentOperator::Multiplication(_)
+        | AssignmentOperator::Division(_)
+        | AssignmentOperator::Exponentiation(_) => {
+            let op_kind = match operator {
+                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
+                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
+                _ => ArithmeticOpKind::Other,
+            };
+            Some(infer_arithmetic_result_type(
+                &lhs_types(),
+                &rhs_types(),
+                op_kind,
+            ))
+        }
+        AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => None,
     }
 }
 
@@ -1980,56 +1943,28 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         && !assignment.operator.is_assign()
     {
         use mago_syntax::cst::assignment::AssignmentOperator;
-        let result_type = match &assignment.operator {
-            AssignmentOperator::Concat(_) => Some(PhpType::string()),
-            AssignmentOperator::Modulo(_) => Some(PhpType::int()),
-            AssignmentOperator::LeftShift(_)
-            | AssignmentOperator::RightShift(_)
-            | AssignmentOperator::BitwiseAnd(_)
-            | AssignmentOperator::BitwiseOr(_)
-            | AssignmentOperator::BitwiseXor(_) => Some(PhpType::int()),
-            AssignmentOperator::Addition(_) => {
-                let lhs_types = if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
-                    scope.get(bytes_to_str(dv.name)).to_vec()
-                } else {
-                    vec![]
-                };
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                Some(infer_addition_result_type(&lhs_types, &rhs_types))
+        // `$x = $cache[$k] ??= expensive();` — the value is whichever side
+        // survives: the target's non-null half, or the fallback that
+        // replaced it.
+        if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
+            let lhs_types = resolve_rhs_with_scope(assignment.lhs, scope, ctx);
+            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+            let combined = coalesce_assign_value(lhs_types, rhs_types);
+            if combined.is_empty() {
+                return vec![ResolvedType::from_type_string(PhpType::mixed())];
             }
-            AssignmentOperator::Subtraction(_)
-            | AssignmentOperator::Multiplication(_)
-            | AssignmentOperator::Division(_)
-            | AssignmentOperator::Exponentiation(_) => {
-                let lhs_types = if let Expression::Variable(Variable::Direct(dv)) = assignment.lhs {
+            return combined;
+        }
+        let result_type = compound_assignment_result(
+            &assignment.operator,
+            || match assignment.lhs {
+                Expression::Variable(Variable::Direct(dv)) => {
                     scope.get(bytes_to_str(dv.name)).to_vec()
-                } else {
-                    vec![]
-                };
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                let op_kind = match assignment.operator {
-                    AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
-                    AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                    _ => ArithmeticOpKind::Other,
-                };
-                Some(infer_arithmetic_result_type(
-                    &lhs_types, &rhs_types, op_kind,
-                ))
-            }
-            // `$x = $cache[$k] ??= expensive();` — the value is whichever
-            // side survives: the target's non-null half, or the fallback
-            // that replaced it.
-            AssignmentOperator::Coalesce(_) => {
-                let lhs_types = resolve_rhs_with_scope(assignment.lhs, scope, ctx);
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
-                let combined = coalesce_assign_value(lhs_types, rhs_types);
-                if combined.is_empty() {
-                    return vec![ResolvedType::from_type_string(PhpType::mixed())];
                 }
-                return combined;
-            }
-            AssignmentOperator::Assign(_) => None,
-        };
+                _ => Vec::new(),
+            },
+            || resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+        );
         if let Some(ty) = result_type {
             return vec![ResolvedType::from_type_string(ty)];
         }
@@ -2144,7 +2079,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // last resort so they never override a more precise result.
 
     // Unwrap parenthesized expressions for structural inference.
-    let rhs = unwrap_parens(rhs);
+    let rhs = crate::parser::unwrap_parens(rhs);
 
     // Composite strings are not scalar literals and may not be handled by the
     // canonical literal resolver. Exact scalar literals have no fallback here:
@@ -2205,13 +2140,7 @@ pub(crate) fn resolve_rhs_via_subject(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = move |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_ctx =
         ctx.var_ctx_for_with_scope("$__rhs_subject", 0, &scope_resolver, Some(scope.proofs()));
     let rctx = var_ctx.as_resolution_ctx();
@@ -2237,35 +2166,18 @@ pub(crate) fn process_destructuring_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
 
     // Build a temporary VarResolutionCtx just to resolve the RHS type.
     // The var_name doesn't matter here since we're resolving the RHS
     // expression, not looking up a specific variable.
     let dummy_name = String::from("$__destructuring_rhs");
-    let var_ctx = VarResolutionCtx {
-        var_name: &dummy_name,
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: assignment.span().start.offset,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: ctx.enclosing_return_type.clone(),
-        top_level_scope: ctx.top_level_scope.clone(),
-        branch_aware: false,
-        match_arm_narrowing: HashMap::new(),
-        scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: Some(scope.proofs()),
-    };
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        &dummy_name,
+        assignment.span().start.offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
 
     // Try inline @var docblock first, then fall back to RHS expression.
     let stmt_offset = assignment.span().start.offset as usize;
@@ -2599,13 +2511,7 @@ pub(crate) fn process_pass_by_ref<'b>(
     // Phase 1: use the existing `try_apply_pass_by_reference_type`
     // infrastructure for variables already in scope (works for class
     // types like `Type &$param`).
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
 
     // Collect all variable names that appear as arguments in this
     // expression, including ones not yet in scope.
@@ -2617,23 +2523,12 @@ pub(crate) fn process_pass_by_ref<'b>(
     }
 
     for var_name in all_var_names {
-        let var_ctx = VarResolutionCtx {
-            var_name: &var_name,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
-            top_level_scope: ctx.top_level_scope.clone(),
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
-            scope_var_resolver: Some(&scope_resolver),
-            scope_proofs: Some(scope.proofs()),
-        };
+        let var_ctx = ctx.var_ctx_for_with_scope(
+            &var_name,
+            ctx.cursor_offset,
+            &scope_resolver,
+            Some(scope.proofs()),
+        );
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
         super::super::resolution::try_apply_pass_by_reference_type(
@@ -2764,6 +2659,66 @@ pub(crate) fn seed_pass_by_ref_in_condition<'b>(
     }
 }
 
+/// The callee an instance method call names, with the parameters the
+/// out-param pass binds its arguments to.
+///
+/// The receiver has to be a variable whose class is already known: `$this`
+/// names the enclosing class, and any other variable names whatever class
+/// the scope recorded for it. A scalar is not a receiver, so a variable
+/// holding one yields `None` rather than a class named `string`.
+fn instance_method_callee<'b>(
+    object: &'b Expression<'b>,
+    selector: &ClassLikeMemberSelector<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<(
+    crate::types::SharedVec<crate::types::ParameterInfo>,
+    OutParamCallee,
+)> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let method_name = bytes_to_str(ident.value).to_string();
+
+    let class_name = match object {
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
+            ctx.current_class.name.to_string()
+        }
+        Expression::Variable(Variable::Direct(dv)) => {
+            scope.get(bytes_to_str(dv.name)).iter().find_map(|rt| {
+                let name = rt.type_string.base_name()?;
+                (!crate::php_type::is_primitive_scalar_name(name)).then(|| name.to_string())
+            })?
+        }
+        _ => return None,
+    };
+
+    resolved_method_callee(&class_name, &method_name, ctx)
+}
+
+/// Load `class_name`, merge everything it inherits, and look `method_name`
+/// up on the result.
+fn resolved_method_callee(
+    class_name: &str,
+    method_name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<(
+    crate::types::SharedVec<crate::types::ParameterInfo>,
+    OutParamCallee,
+)> {
+    let cls = (ctx.class_loader)(class_name)?;
+    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+        &cls,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+    );
+    let parameters = merged.get_method(method_name)?.parameters.clone();
+    Some((
+        parameters,
+        OutParamCallee::Method(merged, atom(method_name)),
+    ))
+}
+
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
@@ -2805,127 +2760,36 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             )
         }
         Expression::Call(Call::Method(mc)) => {
-            let method_name = match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-                _ => return,
+            let Some((parameters, callee)) =
+                instance_method_callee(mc.object, &mc.method, scope, ctx)
+            else {
+                return;
             };
-            let receiver_class = match mc.object {
-                Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-                    Some(ctx.current_class.name.to_string())
-                }
-                Expression::Variable(Variable::Direct(dv)) => {
-                    let types = scope.get(bytes_to_str(dv.name));
-                    types.iter().find_map(|rt| {
-                        let name = rt.type_string.base_name()?;
-                        if crate::php_type::is_primitive_scalar_name(name) {
-                            None
-                        } else {
-                            Some(name.to_string())
-                        }
-                    })
-                }
-                _ => return,
-            };
-            let class_name = match receiver_class {
-                Some(n) => n,
-                None => return,
-            };
-            let cls = match (ctx.class_loader)(&class_name) {
-                Some(c) => c,
-                None => return,
-            };
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                &cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            let method = match merged.get_method(&method_name) {
-                Some(m) => m,
-                None => return,
-            };
-            (
-                &mc.argument_list,
-                method.parameters.clone(),
-                OutParamCallee::Method(merged, atom(&method_name)),
-            )
+            (&mc.argument_list, parameters, callee)
         }
         Expression::Call(Call::NullSafeMethod(mc)) => {
-            let method_name = match &mc.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
-                _ => return,
+            let Some((parameters, callee)) =
+                instance_method_callee(mc.object, &mc.method, scope, ctx)
+            else {
+                return;
             };
-            let receiver_class = match mc.object {
-                Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
-                    Some(ctx.current_class.name.to_string())
-                }
-                Expression::Variable(Variable::Direct(dv)) => {
-                    let types = scope.get(bytes_to_str(dv.name));
-                    types.iter().find_map(|rt| {
-                        let name = rt.type_string.base_name()?;
-                        if crate::php_type::is_primitive_scalar_name(name) {
-                            None
-                        } else {
-                            Some(name.to_string())
-                        }
-                    })
-                }
-                _ => return,
-            };
-            let class_name = match receiver_class {
-                Some(n) => n,
-                None => return,
-            };
-            let cls = match (ctx.class_loader)(&class_name) {
-                Some(c) => c,
-                None => return,
-            };
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                &cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            let method = match merged.get_method(&method_name) {
-                Some(m) => m,
-                None => return,
-            };
-            (
-                &mc.argument_list,
-                method.parameters.clone(),
-                OutParamCallee::Method(merged, atom(&method_name)),
-            )
+            (&mc.argument_list, parameters, callee)
         }
         Expression::Call(Call::StaticMethod(sc)) => {
             let method_name = match &sc.method {
                 ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return,
             };
-            let class_name = match sc.class {
-                Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-                Expression::Parent(_) => match ctx.current_class.parent_class {
-                    Some(p) => p.to_string(),
-                    None => return,
-                },
-                Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-                _ => return,
+            let Some(class_name) =
+                crate::class_lookup::class_expression_name(sc.class, ctx.current_class)
+            else {
+                return;
             };
-            let cls = match (ctx.class_loader)(&class_name) {
-                Some(c) => c,
-                None => return,
+            let Some((parameters, callee)) = resolved_method_callee(&class_name, &method_name, ctx)
+            else {
+                return;
             };
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                &cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            let method = match merged.get_method(&method_name) {
-                Some(m) => m,
-                None => return,
-            };
-            (
-                &sc.argument_list,
-                method.parameters.clone(),
-                OutParamCallee::Method(merged, atom(&method_name)),
-            )
+            (&sc.argument_list, parameters, callee)
         }
         _ => return,
     };
@@ -3100,30 +2964,9 @@ fn preg_flag_bits<'b>(
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<i64> {
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
-    let var_ctx = VarResolutionCtx {
-        var_name: "",
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: ctx.cursor_offset,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: ctx.enclosing_return_type.clone(),
-        top_level_scope: ctx.top_level_scope.clone(),
-        branch_aware: false,
-        match_arm_narrowing: HashMap::new(),
-        scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: Some(scope.proofs()),
-    };
+    let scope_resolver = scope.snapshot_resolver();
+    let var_ctx =
+        ctx.var_ctx_for_with_scope("", ctx.cursor_offset, &scope_resolver, Some(scope.proofs()));
     let flags =
         crate::type_engine::variable::foreach_resolution::resolve_expression_type(expr, &var_ctx)
             .as_ref()
@@ -3184,7 +3027,7 @@ const CONDITION_GUARD_FUNCTIONS: [(&str, &str, bool); 5] = [
 /// Matches every spelling PHP accepts: unqualified, fully-qualified
 /// (`\assert`), and any letter case.
 fn guard_call_condition<'b>(expr: &'b Expression<'b>) -> Option<(&'b Expression<'b>, bool)> {
-    let Expression::Call(Call::Function(fc)) = unwrap_parens(expr) else {
+    let Expression::Call(Call::Function(fc)) = crate::parser::unwrap_parens(expr) else {
         return None;
     };
     let Expression::Identifier(ident) = fc.function else {
@@ -3329,32 +3172,15 @@ pub(crate) fn process_assert_narrowing<'b>(
     }
 
     // Apply assert narrowing to each variable in scope.
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
-        scope_snapshot
-            .get(&atom(var_name))
-            .cloned()
-            .unwrap_or_default()
-    };
+    let scope_resolver = scope.snapshot_resolver();
     let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
     for var_name in var_names {
-        let var_ctx = VarResolutionCtx {
-            var_name: &var_name,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
-            top_level_scope: ctx.top_level_scope.clone(),
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
-            scope_var_resolver: Some(&scope_resolver),
-            scope_proofs: Some(scope.proofs()),
-        };
+        let var_ctx = ctx.var_ctx_for_with_scope(
+            &var_name,
+            ctx.cursor_offset,
+            &scope_resolver,
+            Some(scope.proofs()),
+        );
         let before = scope.get(&var_name).to_vec();
         let mut results = before.clone();
 
@@ -3483,27 +3309,13 @@ pub(crate) fn process_self_out_narrowing<'b>(
     );
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
 
-    let scope_snapshot = scope.locals.clone();
-    let scope_resolver = |vn: &str| -> Vec<ResolvedType> {
-        scope_snapshot.get(&atom(vn)).cloned().unwrap_or_default()
-    };
-    let var_ctx = VarResolutionCtx {
+    let scope_resolver = scope.snapshot_resolver();
+    let var_ctx = ctx.var_ctx_for_with_scope(
         var_name,
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: ctx.cursor_offset,
-        class_loader: ctx.class_loader,
-        backend: ctx.backend,
-        loaders: ctx.loaders,
-        resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: ctx.enclosing_return_type.clone(),
-        top_level_scope: ctx.top_level_scope.clone(),
-        branch_aware: false,
-        match_arm_narrowing: HashMap::new(),
-        scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: Some(scope.proofs()),
-    };
+        ctx.cursor_offset,
+        &scope_resolver,
+        Some(scope.proofs()),
+    );
     let rctx = var_ctx.as_resolution_ctx();
 
     let mut changed = false;

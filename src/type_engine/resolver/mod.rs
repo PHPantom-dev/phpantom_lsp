@@ -33,8 +33,8 @@ mod context;
 mod property_narrowing;
 
 pub(crate) use context::{
-    FunctionLoaderFn, Loaders, ResolutionCtx, ScopeVarResolverFn, VarResolutionCtx,
-    with_chain_resolution_cache, with_isolated_chain_cache,
+    CtxLoaders, FunctionLoaderFn, LendsLoaders, Loaders, OwnedLoaders, ResolutionCtx,
+    ScopeVarResolverFn, VarResolutionCtx, with_chain_resolution_cache, with_isolated_chain_cache,
 };
 pub(crate) use property_narrowing::apply_property_narrowing;
 
@@ -188,6 +188,23 @@ fn narrowed_property_path(
         return None;
     }
     lookup_scope_for_subject(&subject_scope_key(expr), ctx)
+}
+
+/// Whether `var_name` is a plain `$variable` name rather than a complex
+/// expression (a property/static chain, array access, a comparison or
+/// boolean operator) that a scope entry could never match.
+///
+/// The scope-reading fast path is built for bare variables; anything
+/// else falls through to it wastefully, so callers guard on this before
+/// taking that path.
+fn is_bare_variable(var_name: &str) -> bool {
+    !var_name.contains("->")
+        && !var_name.contains("::")
+        && !var_name.contains('[')
+        && !var_name.contains("===")
+        && !var_name.contains("&&")
+        && !var_name.contains("??")
+        && !var_name.contains("||")
 }
 
 fn lookup_chain_cache(cache_key: &str) -> Option<Vec<ResolvedType>> {
@@ -509,32 +526,18 @@ fn resolve_target_classes_expr_inner(
                 .collect()
         }
 
-        // ── Bare class name ─────────────────────────────────────
-        SubjectExpr::ClassName(name) => {
+        // ── A bare class name, and `new ClassName` without trailing
+        //    call parens, are the same reference written two ways ──
+        SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
             if let Some(cls) = find_class_by_name(all_classes, name) {
                 return vec![ResolvedType::from_arc(Arc::clone(cls))];
             }
-            // Source-level reference: the current namespace wins over
-            // a global class of the same short name.
-            let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-            let fqn = crate::util::resolve_source_class_name(name, ns, class_loader);
-            class_loader(&fqn)
-                .map(ResolvedType::from_arc)
-                .into_iter()
-                .collect()
-        }
-
-        // ── `new ClassName` (without trailing call parens) ───────
-        SubjectExpr::NewExpr { class_name } => {
-            if let Some(cls) = find_class_by_name(all_classes, class_name) {
-                return vec![ResolvedType::from_arc(Arc::clone(cls))];
-            }
-            // `new X` is a source-level reference: PHP resolves an
+            // Both are source-level references: PHP resolves an
             // unqualified name against the current namespace before the
             // global scope, so a same-namespace class must win over a
             // global stub of the same short name.
             let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-            let fqn = crate::util::resolve_source_class_name(class_name, ns, class_loader);
+            let fqn = crate::util::resolve_source_class_name(name, ns, class_loader);
             class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()
@@ -857,14 +860,7 @@ fn resolve_target_classes_expr_inner(
             // non-variable expressions (chains, array access, comparisons,
             // null coalescing, boolean expressions) to avoid polluting
             // the scope cache with unsupported keys.
-            let is_bare_variable = !base_var.contains("->")
-                && !base_var.contains("::")
-                && !base_var.contains('[')
-                && !base_var.contains("===")
-                && !base_var.contains("&&")
-                && !base_var.contains("??")
-                && !base_var.contains("||");
-            let ast_type: Option<PhpType> = if is_bare_variable {
+            let ast_type: Option<PhpType> = if is_bare_variable(&base_var) {
                 // When a scope_var_resolver is available (i.e. we are
                 // inside the forward walker), read the variable type
                 // from the in-progress ScopeState instead of calling
@@ -1011,68 +1007,12 @@ fn resolve_call_raw_return_type(
         SubjectExpr::MethodCall { base, method } => {
             let base_classes =
                 resolved_to_arcs(resolve_target_classes_expr(base, AccessKind::Arrow, ctx));
-            for cls in &base_classes {
-                // Use a fully-resolved class so that inherited docblock
-                // return types (e.g. `list<Pen>` from an interface or
-                // parent) are visible instead of the bare native hint.
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    cls,
-                    ctx.class_loader,
-                    ctx.resolved_class_cache,
-                );
-                let found = merged.get_method_ci(method);
-                if let Some(m) = found {
-                    if let Some(ref ret) = m.return_type {
-                        return Some(ret.clone());
-                    }
-                    // Method exists but has no return type.
-                    // Only fall through to __call for virtual methods
-                    // (from @method tags or @mixin). Real methods are
-                    // invoked directly at runtime, not through __call.
-                    if !m.is_virtual {
-                        continue;
-                    }
-                }
-                // __call fallback: method not found, or virtual method
-                // without a return type.  Use __call's return type so
-                // that chains through dynamic calls (e.g. Builder
-                // where{Column}) preserve the type.
-                if let Some(m) = merged.get_method_ci("__call")
-                    && let Some(ref ret) = m.return_type
-                {
-                    return Some(ret.clone());
-                }
-            }
-            None
+            raw_return_type_with_magic_fallback(&base_classes, method, "__call", ctx)
         }
         SubjectExpr::StaticMethodCall { class, method } => {
             let owner = resolve_static_owner_class(class, ctx);
-            if let Some(ref cls) = owner {
-                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                    cls,
-                    ctx.class_loader,
-                    ctx.resolved_class_cache,
-                );
-                let found = merged.get_method_ci(method);
-                if let Some(m) = found {
-                    if let Some(ref ret) = m.return_type {
-                        return Some(ret.clone());
-                    }
-                    // Method exists but has no return type.
-                    // Only fall through to __callStatic for virtual methods.
-                    if !m.is_virtual {
-                        return None;
-                    }
-                }
-                // __callStatic fallback: method not found, or virtual
-                // method without a return type.
-                if let Some(m) = merged.get_method_ci("__callStatic")
-                    && let Some(ref ret) = m.return_type
-                {
-                    return Some(ret.clone());
-                }
-            }
-            None
+            let owner = owner.as_slice();
+            raw_return_type_with_magic_fallback(owner, method, "__callStatic", ctx)
         }
         SubjectExpr::FunctionCall(fn_name) => {
             if let Some(fl) = ctx.function_loader
@@ -1084,6 +1024,48 @@ fn resolve_call_raw_return_type(
         }
         _ => None,
     }
+}
+
+/// The raw return type of `method` on the first of `classes` that
+/// declares it, falling back to `magic_name` (`__call`/`__callStatic`)
+/// when the method is virtual (from a `@method` tag or `@mixin`) and
+/// carries no return type of its own, or is not declared at all.
+///
+/// A *real* method with no return type does not fall through: it is
+/// invoked directly at runtime, never through the magic method, so
+/// reading the magic method's return type there would be answering a
+/// different call. `classes` is a slice rather than one class because
+/// `$obj->method()` on a union receiver tries each alternative in turn.
+fn raw_return_type_with_magic_fallback(
+    classes: &[Arc<ClassInfo>],
+    method: &str,
+    magic_name: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    for cls in classes {
+        // Use a fully-resolved class so that inherited docblock return
+        // types (e.g. `list<Pen>` from an interface or parent) are
+        // visible instead of the bare native hint.
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            cls,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if let Some(m) = merged.get_method_ci(method) {
+            if let Some(ref ret) = m.return_type {
+                return Some(ret.clone());
+            }
+            if !m.is_virtual {
+                continue;
+            }
+        }
+        if let Some(m) = merged.get_method_ci(magic_name)
+            && let Some(ref ret) = m.return_type
+        {
+            return Some(ret.clone());
+        }
+    }
+    None
 }
 
 // ─── Enriched subject resolution for diagnostics ────────────────────────────
@@ -1336,20 +1318,7 @@ fn declared_call_return_type(
         // Instance method call: $obj->getAge()
         SubjectExpr::MethodCall { base, method } => {
             let base_arcs = resolved_to_arcs(resolve_target_classes_expr(base, access_kind, ctx));
-            for cls in &base_arcs {
-                let resolved = resolve_class_fully_maybe_cached(
-                    cls,
-                    ctx.class_loader,
-                    ctx.resolved_class_cache,
-                );
-                if let Some(m) = resolved.get_method_ci(method)
-                    && let Some(ref hint) = m.return_type
-                    && accept(hint)
-                {
-                    return Some(hint.clone());
-                }
-            }
-            None
+            declared_return_type_of(&base_arcs, method, ctx, accept)
         }
         // Standalone function call: getInt()
         SubjectExpr::FunctionCall(fn_name) => {
@@ -1365,23 +1334,36 @@ fn declared_call_return_type(
         // Static method call: Foo::getInt()
         SubjectExpr::StaticMethodCall { class, method } => {
             let cls = (ctx.class_loader)(class);
-            if let Some(cls) = cls {
-                let resolved = resolve_class_fully_maybe_cached(
-                    &cls,
-                    ctx.class_loader,
-                    ctx.resolved_class_cache,
-                );
-                if let Some(m) = resolved.get_method_ci(method)
-                    && let Some(ref hint) = m.return_type
-                    && accept(hint)
-                {
-                    return Some(hint.clone());
-                }
-            }
-            None
+            declared_return_type_of(cls.as_slice(), method, ctx, accept)
         }
         _ => None,
     }
+}
+
+/// The first declared return type `accept` recognises among `classes`'
+/// `method`, or `None` when it names no such method on any of them.
+///
+/// `classes` is a slice rather than one class because `$obj->method()`
+/// on a union receiver tries each alternative in turn; `accept` lets a
+/// caller looking for a specific shape (all-scalar, `mixed`) keep
+/// looking past a class whose declaration is something else.
+fn declared_return_type_of(
+    classes: &[Arc<ClassInfo>],
+    method: &str,
+    ctx: &ResolutionCtx<'_>,
+    accept: &dyn Fn(&PhpType) -> bool,
+) -> Option<PhpType> {
+    for cls in classes {
+        let resolved =
+            resolve_class_fully_maybe_cached(cls, ctx.class_loader, ctx.resolved_class_cache);
+        if let Some(m) = resolved.get_method_ci(method)
+            && let Some(ref hint) = m.return_type
+            && accept(hint)
+        {
+            return Some(hint.clone());
+        }
+    }
+    None
 }
 
 /// Check whether a raw type string refers to a class that cannot be
@@ -1605,14 +1587,8 @@ fn resolve_variable_fallback(
     // (array access like `$arr['key']`, null coalescing, comparisons)
     // that will never match a scope entry.  Skip them to avoid wasted
     // backward scans and fallthrough noise.
-    let is_bare_variable = !var_name.contains("->")
-        && !var_name.contains("::")
-        && !var_name.contains('[')
-        && !var_name.contains("===")
-        && !var_name.contains("&&")
-        && !var_name.contains("??")
-        && !var_name.contains("||");
-    let resolved_types = if is_bare_variable {
+    let bare_variable = is_bare_variable(var_name);
+    let resolved_types = if bare_variable {
         // When a scope variable resolver is available (i.e. we are
         // inside the forward walker's scope-building pass), read the
         // variable's type directly from the in-progress ScopeState.
@@ -1647,7 +1623,7 @@ fn resolve_variable_fallback(
     // check for a standalone `/** @var Type $var */` annotation above
     // the cursor.  This handles Blade templates and files where the
     // only type source is a docblock assertion.
-    let resolved_types = if resolved_types.is_empty() && is_bare_variable {
+    let resolved_types = if resolved_types.is_empty() && bare_variable {
         let prefixed = if var_name.starts_with('$') {
             var_name.to_string()
         } else {

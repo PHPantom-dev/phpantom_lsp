@@ -36,11 +36,15 @@
 //! - `1` — a file could not be read, formatted, or written.
 //! - `2` — `--check` found files that are not formatted.
 
-use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::AtomicBool;
 
-use crate::analyse::{OutputFormat, print_success_box, progress_bar};
+use serde::Serialize;
+
+use crate::analyse::{
+    Colour, OutputFormat, dispatch_report, github_annotation, note_plain_php_project, print_box,
+    progress_bar,
+};
 use crate::config::FormattingConfig;
 use crate::formatting::blade::{BladeFormatOptions, BladeFormattingStrategy};
 use crate::formatting::{FormattingStrategy, Tool};
@@ -142,12 +146,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     // A missing composer.json is not an error: a plain PHP tree formats
     // fine with the built-in formatter.  Note it on stderr so a mistyped
     // --project-root does not silently rewrite the wrong directory.
-    if !root.join("composer.json").is_file() {
-        eprintln!(
-            "Note: no composer.json found in {} - treating it as a plain PHP project.",
-            root.display()
-        );
-    }
+    note_plain_php_project(root, "treating it as a plain PHP project.");
 
     // ── 1. Open the project (config and source layout, no index) ────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
@@ -268,52 +267,23 @@ fn format_files(
     show_progress: bool,
 ) -> (Vec<Reformatted>, Vec<Failure>) {
     let file_count = files.len();
-    // Every worker reserves PARSE_WORKER_STACK_SIZE, so a run over a
-    // handful of files must not spawn one per core.
-    let n_threads = std::thread::available_parallelism()
-        .map(|n| n.get())
-        .unwrap_or(4)
-        .min(file_count);
-    let next_idx = AtomicUsize::new(0);
-
     if show_progress {
         eprint!("\r\x1b[2K {}", progress_bar(0, file_count, "Formatting"));
     }
 
-    let outcomes: Vec<Outcome> = std::thread::scope(|s| {
-        let handles: Vec<_> = (0..n_threads)
-            .map(|_| {
-                let next_idx = &next_idx;
-                std::thread::Builder::new()
-                    .name("format-worker".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut outcomes: Vec<Outcome> = Vec::new();
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-                            if show_progress && i.is_multiple_of(20) {
-                                eprint!(
-                                    "\r\x1b[2K {}",
-                                    progress_bar(i + 1, file_count, "Formatting")
-                                );
-                            }
-                            outcomes.push(format_one(context, &files[i]));
-                        }
-                        outcomes
-                    })
-                    .expect("failed to spawn format-worker thread")
-            })
-            .collect();
-
-        let mut merged: Vec<Outcome> = Vec::new();
-        for handle in handles {
-            merged.extend(handle.join().unwrap_or_default());
-        }
-        merged
-    });
+    let outcomes: Vec<Outcome> =
+        crate::parallel::map_indexed("format-worker", file_count, |_worker, i| {
+            if show_progress && i.is_multiple_of(20) {
+                eprint!(
+                    "\r\x1b[2K {}",
+                    progress_bar(i + 1, file_count, "Formatting")
+                );
+            }
+            Some(format_one(context, &files[i]))
+        })
+        .into_iter()
+        .map(|(_, outcome)| outcome)
+        .collect();
 
     if show_progress {
         eprint!(
@@ -431,18 +401,12 @@ fn report(outcomes: &Outcomes, options: &FormatOptions) {
         failures,
         ..
     } = outcomes;
-    match options.output_format {
-        OutputFormat::Table => {
-            // Annotate in CI without giving up the readable summary, the
-            // way `analyze`, `fix`, and `move` do.
-            if std::env::var("GITHUB_ACTIONS").is_ok() {
-                print_github_annotations(reformatted, failures, options.check);
-            }
-            print_table(outcomes, options);
-        }
-        OutputFormat::Github => print_github_annotations(reformatted, failures, options.check),
-        OutputFormat::Json => println!("{}", json_report(reformatted, failures, options.check)),
-    }
+    dispatch_report(
+        options.output_format,
+        || print_table(outcomes, options),
+        || print_github_annotations(reformatted, failures, options.check),
+        || println!("{}", json_report(reformatted, failures, options.check)),
+    );
 }
 
 /// List the affected files and close with a summary box.
@@ -470,11 +434,12 @@ fn print_table(outcomes: &Outcomes, options: &FormatOptions) {
     }
 
     if reformatted.is_empty() {
-        print_success_box(
+        print_box(
             &format!(
                 " [OK] {file_count} {} already formatted ",
                 plural(*file_count)
             ),
+            Colour::Green,
             options.use_colour,
         );
         return;
@@ -500,32 +465,6 @@ fn print_table(outcomes: &Outcomes, options: &FormatOptions) {
 /// `file` or `files`, for a count the summary reads out.
 fn plural(count: usize) -> &'static str {
     if count == 1 { "file" } else { "files" }
-}
-
-/// The background a summary box is drawn on.
-enum Colour {
-    Green,
-    Yellow,
-    Red,
-}
-
-/// Print a summary box, matching the ones `analyze` and `fix` close with.
-fn print_box(text: &str, colour: Colour, use_colour: bool) {
-    if !use_colour {
-        println!("{text}");
-        return;
-    }
-    let sgr = match colour {
-        Colour::Green => "30;42",
-        Colour::Yellow => "30;43",
-        Colour::Red => "97;41",
-    };
-    let pad = " ".repeat(text.len());
-    println!();
-    println!(" \x1b[{sgr}m{pad}\x1b[0m");
-    println!(" \x1b[{sgr}m{text}\x1b[0m");
-    println!(" \x1b[{sgr}m{pad}\x1b[0m");
-    println!();
 }
 
 // ── GitHub Actions annotations ──────────────────────────────────────────────
@@ -554,20 +493,40 @@ fn github_annotations(
     };
     reformatted
         .iter()
-        .map(|file| {
-            format!(
-                "::{level} file={path},line=1,col=0,title=format::{message}",
-                path = file.display_path,
-            )
-        })
+        .map(|file| github_annotation(level, &file.display_path, 1, "format", message))
         .chain(failures.iter().map(|failure| {
-            format!(
-                "::error file={path},line=1,col=0,title=format::{message}",
-                path = failure.display_path,
-                message = crate::analyse::format_github_message(&failure.message),
+            github_annotation(
+                "error",
+                &failure.display_path,
+                1,
+                "format",
+                &failure.message,
             )
         }))
         .collect()
+}
+
+/// The `"totals"` object of the `format` report.
+#[derive(Serialize)]
+struct FormatTotals {
+    files: usize,
+    errors: usize,
+    check: bool,
+}
+
+/// A file the run could not format, as reported in JSON.
+#[derive(Serialize)]
+struct FormatError<'a> {
+    file: &'a str,
+    message: &'a str,
+}
+
+/// The whole `format` report; see [`json_report`].
+#[derive(Serialize)]
+struct FormatReport<'a> {
+    totals: FormatTotals,
+    files: Vec<&'a str>,
+    errors: Vec<FormatError<'a>>,
 }
 
 /// The run as a single JSON object.
@@ -580,42 +539,25 @@ fn github_annotations(
 /// }
 /// ```
 fn json_report(reformatted: &[Reformatted], failures: &[Failure], check: bool) -> String {
-    let mut out = String::from("{\n");
-    let _ = writeln!(
-        out,
-        "  \"totals\": {{ \"files\": {}, \"errors\": {}, \"check\": {} }},",
-        reformatted.len(),
-        failures.len(),
-        check,
-    );
-
-    out.push_str("  \"files\": [");
-    for (i, file) in reformatted.iter().enumerate() {
-        let _ = write!(
-            out,
-            "\n    {}{}",
-            crate::analyse::json_escape(&file.display_path),
-            if i + 1 < reformatted.len() {
-                ","
-            } else {
-                "\n  "
-            },
-        );
-    }
-    out.push_str("],\n");
-
-    out.push_str("  \"errors\": [");
-    for (i, failure) in failures.iter().enumerate() {
-        let _ = write!(
-            out,
-            "\n    {{ \"file\": {}, \"message\": {} }}{}",
-            crate::analyse::json_escape(&failure.display_path),
-            crate::analyse::json_escape(&failure.message),
-            if i + 1 < failures.len() { "," } else { "\n  " },
-        );
-    }
-    out.push_str("]\n}");
-    out
+    let report = FormatReport {
+        totals: FormatTotals {
+            files: reformatted.len(),
+            errors: failures.len(),
+            check,
+        },
+        files: reformatted
+            .iter()
+            .map(|file| file.display_path.as_str())
+            .collect(),
+        errors: failures
+            .iter()
+            .map(|failure| FormatError {
+                file: &failure.display_path,
+                message: &failure.message,
+            })
+            .collect(),
+    };
+    serde_json::to_string_pretty(&report).unwrap_or_else(|_| "{}".to_string())
 }
 
 #[cfg(test)]

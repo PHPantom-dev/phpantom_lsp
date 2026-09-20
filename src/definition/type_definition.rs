@@ -20,7 +20,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::php_type::PhpType;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, Loaders};
 use crate::types::*;
 
 impl Backend {
@@ -87,26 +87,22 @@ impl Backend {
                     AccessKind::Arrow
                 };
 
-                let rctx = ResolutionCtx {
+                let rctx = self.resolution_ctx_at(
                     current_class,
-                    all_classes: &ctx.classes,
+                    &ctx.classes,
                     content,
-                    cursor_offset: offset,
-                    class_loader: &class_loader,
-                    backend: Some(self),
-                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    function_loader: Some(
-                        &function_loader as &dyn Fn(&str, u32) -> Option<FunctionInfo>,
+                    offset,
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
                     ),
-                    scope_var_resolver: None,
-                    is_in_static_method: false,
-                    preserve_static: false,
-                };
+                );
 
+                let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),
@@ -328,75 +324,4 @@ fn resolve_variable_type_names(
     // Only return types that contain at least one class name (scalars
     // are not useful for go-to-type-definition).
     resolved.filter(|t| !t.top_level_class_names().is_empty())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_extract_simple_class() {
-        let names = PhpType::parse("User").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_fqn_class() {
-        let names = PhpType::parse("\\App\\Models\\User").top_level_class_names();
-        assert_eq!(names, vec!["\\App\\Models\\User"]);
-    }
-
-    #[test]
-    fn test_extract_nullable() {
-        let names = PhpType::parse("?User").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_union_with_null() {
-        let names = PhpType::parse("User|null").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_union_multiple_classes() {
-        let names = PhpType::parse("User|Admin").top_level_class_names();
-        assert_eq!(names, vec!["User", "Admin"]);
-    }
-
-    #[test]
-    fn test_extract_generic_stripped() {
-        let names = PhpType::parse("Collection<int, User>").top_level_class_names();
-        assert_eq!(names, vec!["Collection"]);
-    }
-
-    #[test]
-    fn test_extract_scalar_excluded() {
-        let names = PhpType::parse("string").top_level_class_names();
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn test_extract_mixed_union() {
-        let names = PhpType::parse("string|User|int|Admin|null").top_level_class_names();
-        assert_eq!(names, vec!["User", "Admin"]);
-    }
-
-    #[test]
-    fn test_extract_void() {
-        let names = PhpType::parse("void").top_level_class_names();
-        assert!(names.is_empty());
-    }
-
-    #[test]
-    fn test_extract_array_of_class() {
-        let names = PhpType::parse("User[]").top_level_class_names();
-        assert_eq!(names, vec!["User"]);
-    }
-
-    #[test]
-    fn test_extract_array_shape_excluded() {
-        let names = PhpType::parse("array{name: string}").top_level_class_names();
-        assert!(names.is_empty());
-    }
 }

@@ -6,18 +6,10 @@
 //! needed) adds a `use` import for the exception class.
 
 use crate::common::{
-    apply_edits, create_test_backend, extract_edits, get_code_actions_at, inject_phpstan_diag,
-    resolve_action,
+    apply_edits, create_test_backend, extract_edits, find_action, get_code_actions_at,
+    inject_phpstan_diag, resolve_action,
 };
 use tower_lsp::lsp_types::*;
-
-/// Find the "Add @throws" code action.
-fn find_add_throws_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Add @throws") => Some(ca),
-        _ => None,
-    })
-}
 
 // ── Basic: adds @throws into existing multi-line docblock ───────────────────
 
@@ -48,7 +40,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 8, 10);
-    let action = find_add_throws_action(&actions).expect("should offer Add @throws action");
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
 
     assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
     assert_eq!(action.is_preferred, Some(true));
@@ -103,7 +95,7 @@ class Thrower {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 8, 10);
-    let action = find_add_throws_action(&actions).expect("should offer Add @throws action");
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -153,7 +145,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 10, 10);
-    let action = find_add_throws_action(&actions).expect("should offer action");
+    let action = find_action(&actions, "Add @throws").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -199,7 +191,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 5, 10);
-    let action = find_add_throws_action(&actions).expect("should offer action");
+    let action = find_action(&actions, "Add @throws").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -257,7 +249,7 @@ function doThings(): void {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 5, 10);
-    let action = find_add_throws_action(&actions).expect("should offer action");
+    let action = find_action(&actions, "Add @throws").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -301,7 +293,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 10, 10);
-    let action = find_add_throws_action(&actions);
+    let action = find_action(&actions, "Add @throws");
     assert!(
         action.is_none(),
         "should NOT offer action when @throws already documented"
@@ -335,7 +327,7 @@ class Foo {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 6, 10);
-    let action = find_add_throws_action(&actions);
+    let action = find_action(&actions, "Add @throws");
     assert!(
         action.is_none(),
         "should NOT offer action for non-checkedException identifiers"
@@ -371,7 +363,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 8, 10);
-    let action = find_add_throws_action(&actions).expect("should offer action");
+    let action = find_action(&actions, "Add @throws").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -424,7 +416,7 @@ class FooController {
     );
 
     let actions = get_code_actions_at(&backend, uri, content, 14, 10);
-    let action = find_add_throws_action(&actions).expect("should offer action");
+    let action = find_action(&actions, "Add @throws").expect("should offer action");
 
     let resolved = resolve_action(&backend, uri, content, action);
     let edits = extract_edits(&resolved);
@@ -479,7 +471,7 @@ class BadgeHelper {
 
     // Trigger the action on the first diagnostic (line 11).
     let actions = get_code_actions_at(&backend, uri, content, 11, 10);
-    let action = find_add_throws_action(&actions).expect("should offer Add @throws action");
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
 
     // Resolve — this should clear BOTH diagnostics from the cache.
     let resolved = resolve_action(&backend, uri, content, action);
@@ -562,7 +554,7 @@ class BadgeHelper {
 
     // Resolve only the RuntimeException action.
     let actions = get_code_actions_at(&backend, uri, content, 12, 10);
-    let action = find_add_throws_action(&actions).expect("should offer Add @throws action");
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
     let _resolved = resolve_action(&backend, uri, content, action);
 
     // The InvalidArgumentException diagnostic must still be in the cache.
@@ -634,7 +626,7 @@ class BadgeHelper {
 
     // Resolve the action for first() only.
     let actions = get_code_actions_at(&backend, uri, content, 10, 10);
-    let action = find_add_throws_action(&actions).expect("should offer Add @throws action");
+    let action = find_action(&actions, "Add @throws").expect("should offer Add @throws action");
     let _resolved = resolve_action(&backend, uri, content, action);
 
     // The diagnostic in second() must still be in the cache.

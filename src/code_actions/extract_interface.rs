@@ -14,6 +14,7 @@ use super::implement_methods::{detect_class_indent, shorten_single_type};
 use super::make_code_action_data;
 use crate::Backend;
 use crate::atom::atom;
+use crate::class_lookup::find_class_at_offset;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, Visibility};
 
@@ -58,19 +59,7 @@ impl Backend {
 
         // Look up the ClassInfo for the class the cursor is in.
         let file_ctx = self.file_context(uri);
-        let current_class = match file_ctx
-            .classes
-            .iter()
-            .filter(|c| {
-                let effective_start = if c.keyword_offset > 0 {
-                    c.keyword_offset
-                } else {
-                    c.start_offset
-                };
-                cursor_offset >= effective_start && cursor_offset <= c.end_offset
-            })
-            .min_by_key(|c| c.end_offset - c.start_offset)
-        {
+        let current_class = match find_class_at_offset(&file_ctx.classes, cursor_offset) {
             Some(c) => c,
             None => return,
         };
@@ -119,18 +108,7 @@ impl Backend {
 
         let file_ctx = self.file_context(uri);
 
-        let current_class = file_ctx
-            .classes
-            .iter()
-            .filter(|c| {
-                let effective_start = if c.keyword_offset > 0 {
-                    c.keyword_offset
-                } else {
-                    c.start_offset
-                };
-                cursor_offset >= effective_start && cursor_offset <= c.end_offset
-            })
-            .min_by_key(|c| c.end_offset - c.start_offset)?;
+        let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset)?;
 
         if current_class.kind != ClassLikeKind::Class {
             return None;

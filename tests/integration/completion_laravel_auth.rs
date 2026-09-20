@@ -1,7 +1,7 @@
 //! Integration tests for resolving the authenticated-user model from
 //! `config/auth.php` (`Request::user()` / `Guard::user()`).
 
-use crate::common::create_psr4_workspace;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -201,48 +201,11 @@ async fn complete_labels_with_opens(
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
     for (path, text) in pre_open {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &uri, text).await;
     }
     let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    };
-    items.into_iter().map(|i| i.label).collect()
+    open_php(&backend, &uri, content).await;
+    complete_labels_at_opened(&backend, &uri, line, character).await
 }
 
 /// A hard-literal single guard resolves `$request->user()` precisely to the

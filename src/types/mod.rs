@@ -658,37 +658,7 @@ impl MethodInfo {
     /// }
     /// ```
     pub fn virtual_method(name: &str, return_type: Option<&str>) -> Self {
-        Self {
-            name: crate::atom::atom(name),
-            name_offset: 0,
-            parameters: SharedVec::new(),
-            return_type: return_type.map(PhpType::parse),
-            native_return_type: None,
-            description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            is_static: false,
-            visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: Vec::new(),
-            template_param_bounds: AtomMap::default(),
-            template_bindings: Vec::new(),
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: true,
-            is_macro: false,
-            is_inferred_return: false,
-            type_assertions: Vec::new(),
-            throws: Vec::new(),
-            if_this_is: None,
-            self_out: None,
-            is_pure: false,
-            is_impure: false,
-        }
+        Self::virtual_method_typed(name, return_type.map(PhpType::parse).as_ref())
     }
 
     /// Like [`virtual_method`], but accepts the return type as a

@@ -3,35 +3,10 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_closure_stub,
     create_test_backend_with_full_stubs, create_test_backend_with_function_stubs,
-    create_test_backend_with_stdclass_stub,
+    create_test_backend_with_stdclass_stub, hover_at, hover_text,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Register file content in the backend (sync) and return the hover result
-/// at the given (0-based) line and character.
-fn hover_at(
-    backend: &Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Option<Hover> {
-    // Parse and populate ast_map, use_map, namespace_map, symbol_maps
-    backend.update_ast(uri, content);
-
-    backend.handle_hover(uri, content, Position { line, character })
-}
-
-/// Extract the Markdown text from a Hover response.
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
 
 // ─── Multi-namespace hover ──────────────────────────────────────────────────
 

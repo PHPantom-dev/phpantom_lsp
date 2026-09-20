@@ -1,4 +1,4 @@
-use crate::common::create_psr4_workspace;
+use crate::common::{create_psr4_workspace, definition_uri, goto_definition_at, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -129,7 +129,7 @@ fn make_workspace(app_files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfil
 }
 
 /// Helper: open a file and trigger go-to-definition, returning the location.
-async fn goto_definition_at(
+async fn open_and_goto_definition(
     backend: &phpantom_lsp::Backend,
     dir: &tempfile::TempDir,
     relative_path: &str,
@@ -138,27 +138,8 @@ async fn goto_definition_at(
     character: u32,
 ) -> Option<GotoDefinitionResponse> {
     let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
-
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-
-    backend.goto_definition(params).await.unwrap()
+    open_php(backend, &uri, content).await;
+    goto_definition_at(backend, &uri, line, character).await
 }
 
 /// Extract the target line number from a definition response.
@@ -167,15 +148,6 @@ fn definition_line(response: &GotoDefinitionResponse) -> u32 {
         GotoDefinitionResponse::Scalar(location) => location.range.start.line,
         GotoDefinitionResponse::Array(locations) => locations[0].range.start.line,
         GotoDefinitionResponse::Link(links) => links[0].target_range.start.line,
-    }
-}
-
-/// Extract the target URI from a definition response.
-fn definition_uri(response: &GotoDefinitionResponse) -> &Url {
-    match response {
-        GotoDefinitionResponse::Scalar(location) => &location.uri,
-        GotoDefinitionResponse::Array(locations) => &locations[0].uri,
-        GotoDefinitionResponse::Link(links) => &links[0].target_uri,
     }
 }
 
@@ -200,7 +172,7 @@ class BlogAuthor extends Model {
 
     // Cursor on "where" in `BlogAuthor::where('active', true);`
     // Line 5 (0-indexed), "where" starts at character 20
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -252,7 +224,7 @@ class BlogAuthor extends Model {
 
     // Cursor on "where" in `BlogAuthor::where('active', true);`
     // Line 12 (0-indexed), "where" starts at character 20
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -294,7 +266,7 @@ class BlogAuthor extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/BlogAuthor.php", author_php)]);
 
     // Cursor on "orderBy" in `BlogAuthor::orderBy('name');`
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -341,7 +313,7 @@ class BlogAuthor extends Model {
 
     // Cursor on "active" in `BlogAuthor::active();`
     // Line 9 (0-indexed), "active" starts at character 20
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -390,7 +362,7 @@ class BlogAuthor extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/BlogAuthor.php", author_php)]);
 
     // Cursor on "whereIn" in `BlogAuthor::whereIn('id', [1, 2, 3]);`
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -436,7 +408,8 @@ class User extends Model {
 
     // Cursor on "orderBy" in `$q->orderBy('name');`
     // Line 7 (0-indexed), "orderBy" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 7, 14).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 7, 14).await;
 
     assert!(
         result.is_some(),
@@ -479,7 +452,8 @@ class User extends Model {
 
     // Cursor on "orderBy" in `$q->orderBy('name');`
     // Line 9 (0-indexed), "orderBy" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 9, 14).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 9, 14).await;
 
     assert!(
         result.is_some(),
@@ -516,7 +490,8 @@ class User extends Model {
 
     // Cursor on "orderBy" in `$q->orderBy('name');`
     // Line 6 (0-indexed), "orderBy" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 14).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 14).await;
 
     assert!(
         result.is_some(),
@@ -550,7 +525,8 @@ class User extends Model {
 
     // Cursor on "get" in `$q->get();`
     // Line 6 (0-indexed), "get" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
 
     assert!(
         result.is_some(),
@@ -584,7 +560,8 @@ class User extends Model {
 
     // Cursor on "first" in `$q->first();`
     // Line 6 (0-indexed), "first" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
 
     assert!(
         result.is_some(),
@@ -618,7 +595,8 @@ class User extends Model {
 
     // Cursor on "get" in `$q->get();`
     // Line 6 (0-indexed), "get" starts at character 12
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 13).await;
 
     assert!(
         result.is_some(),
@@ -658,7 +636,7 @@ class ChildModel extends BaseModel {
     ]);
 
     // Cursor on "where" in `ChildModel::where('id', 1);`
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/ChildModel.php",
@@ -703,7 +681,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // Cursor on "where" in `User::where('active', true);`
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 8, 16).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 8, 16).await;
 
     assert!(
         result.is_some(),
@@ -745,7 +724,7 @@ class BlogAuthor extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/BlogAuthor.php", author_php)]);
 
     // "display_name" on line 9, cursor at character 18
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -790,7 +769,7 @@ class BlogAuthor extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/BlogAuthor.php", author_php)]);
 
     // "avatar_url" on line 9, cursor at character 18
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -841,7 +820,7 @@ class Bakery extends Model {
 
     // "master_recipe" on line 10, cursor at character 18
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Bakery.php", bakery_php, 10, 18).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Bakery.php", bakery_php, 10, 18).await;
 
     // Should NOT resolve — master_recipe is not a real property.
     // If it resolves, it means the accessor fallback incorrectly matched
@@ -877,7 +856,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "is_admin" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -916,7 +896,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "verified_at" on line 11, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 11, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 11, 15).await;
 
     assert!(
         result.is_some(),
@@ -954,7 +935,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "role" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -992,7 +974,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "name" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -1030,7 +1013,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "deleted_at" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -1068,7 +1052,7 @@ class Bakery extends Model {
 
     // "whereFlour" on line 9, cursor at character 17
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Bakery.php", model_php, 9, 17).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Bakery.php", model_php, 9, 17).await;
 
     assert!(
         result.is_some(),
@@ -1105,7 +1089,7 @@ class Bakery extends Model {
 
     // "whereApricot" on line 8, cursor at character 17
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Bakery.php", model_php, 8, 17).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Bakery.php", model_php, 8, 17).await;
 
     assert!(
         result.is_some(),
@@ -1142,7 +1126,7 @@ class Bakery extends Model {
 
     // "whereDefrostedAt" on line 8, cursor at character 17
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Bakery.php", model_php, 8, 17).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Bakery.php", model_php, 8, 17).await;
 
     assert!(
         result.is_some(),
@@ -1180,7 +1164,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "password" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -1217,7 +1202,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "secret_key" on line 9, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 9, 15).await;
 
     assert!(
         result.is_some(),
@@ -1255,7 +1241,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "website" on line 10, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -1310,7 +1297,7 @@ class TestService {
 ";
     // Cursor on "pluck" in `->pluck('brand_id')`
     // Line 4 (0-indexed), "pluck" starts at character 44
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/TestService.php",
@@ -1376,7 +1363,7 @@ class TestService {
 ";
     // Cursor on "pluck" in `$q->pluck('brand_id');`
     // Line 5 (0-indexed), "pluck" starts at character 12
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/TestService.php",
@@ -1431,7 +1418,7 @@ class Brand extends Model {
     // Cursor on "isActive" in `$q->isActive();`
     // Line 10 (0-indexed), "isActive" starts at character 12
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 10, 14).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 10, 14).await;
 
     assert!(
         result.is_some(),
@@ -1475,7 +1462,8 @@ class Brand extends Model {
 
     // Cursor on "isActive" in `Brand::where('id', 1)->isActive();`
     // Line 9 (0-indexed), "isActive" starts at character 31
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 33).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 33).await;
 
     assert!(
         result.is_some(),
@@ -1513,7 +1501,7 @@ class BlogAuthor extends Model {
 
     // Cursor on "ofGenre" in `$q->ofGenre('fiction');`
     // Line 10 (0-indexed), "ofGenre" starts at character 12
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Models/BlogAuthor.php",
@@ -1566,7 +1554,8 @@ class User extends Model {
 
     // Cursor on "verified" in `$query->verified();`
     // Line 6 (0-indexed), "verified" starts at character 16
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 18).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 18).await;
 
     assert!(
         result.is_some(),
@@ -1603,7 +1592,8 @@ class Brand extends Model {
 
     // Cursor on "ofType" in `->ofType('premium');`
     // Line 8 (0-indexed), "ofType" starts at character 42
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 8, 44).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 8, 44).await;
 
     assert!(
         result.is_some(),
@@ -1646,7 +1636,8 @@ class Brand extends Model {
     // Cursor on "sortable" in `Brand::with('english')->sortable();`
     // Line 9 (0-indexed): "        Brand::with('english')->sortable();"
     // "sortable" starts at character 32
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 34).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 34).await;
 
     assert!(
         result.is_some(),
@@ -1692,7 +1683,8 @@ class Brand extends Model {
     // Cursor on "sortable" in `->sortable();`
     // Line 9 (0-indexed): "        Brand::with('english')->where('active', 1)->sortable();"
     // "sortable" starts at character 52
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 54).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 54).await;
 
     assert!(
         result.is_some(),
@@ -1738,7 +1730,7 @@ class Brand extends Model {
     // Cursor on "isActive" in `            ->isActive();`
     // Line 11 (0-indexed), "isActive" starts at character 14
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 11, 16).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 11, 16).await;
 
     assert!(
         result.is_some(),
@@ -1782,7 +1774,8 @@ class Brand extends Model {
 
     // Cursor on "get" in `            ->get();`
     // Line 8 (0-indexed), "get" starts at character 14
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 8, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 8, 15).await;
 
     assert!(
         result.is_some(),
@@ -1870,7 +1863,8 @@ class Brand extends Model {
 
     // Cursor on "sortable" in `Brand::with('english')->sortable();`
     // Line 9 (0-indexed), "sortable" starts at character 32
-    let result = goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 34).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 9, 34).await;
 
     assert!(
         result.is_some(),
@@ -1916,7 +1910,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "posts_count" on line 10, cursor within the name
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 10, 18).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 10, 18).await;
 
     assert!(
         result.is_some(),
@@ -1954,7 +1949,7 @@ class Bakery extends Model {
 
     // "head_baker_count" on line 10, cursor within the name
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Bakery.php", bakery_php, 10, 15).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Bakery.php", bakery_php, 10, 15).await;
 
     assert!(
         result.is_some(),
@@ -1990,7 +1985,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "$this->posts_count" on line 9, cursor within the name
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 9, 18).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 9, 18).await;
 
     assert!(
         result.is_some(),
@@ -2038,7 +2034,7 @@ class Brand extends Model {
     // Line 16 (0-indexed): "        Brand::productInformation()->sortable();"
     // "sortable" starts at character 37
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 16, 39).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 16, 39).await;
 
     assert!(
         result.is_some(),
@@ -2075,7 +2071,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "created_at" on line 7, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
 
     assert!(
         result.is_some(),
@@ -2117,7 +2114,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "created" on line 7, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 7, 15).await;
 
     assert!(
         result.is_some(),
@@ -2158,7 +2156,8 @@ class User extends Model {
     let (backend, dir) = make_workspace(&[("src/Models/User.php", user_php)]);
 
     // "updated_at" on line 6, cursor at character 15
-    let result = goto_definition_at(&backend, &dir, "src/Models/User.php", user_php, 6, 15).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Models/User.php", user_php, 6, 15).await;
 
     assert!(
         result.is_some(),
@@ -2224,7 +2223,7 @@ class Brand extends Model {
     // Line 14 (0-indexed): "        Brand::productInformation()->sortable();"
     // "sortable" starts at character 37
     let result =
-        goto_definition_at(&backend, &dir, "src/Models/Brand.php", brand_php, 14, 39).await;
+        open_and_goto_definition(&backend, &dir, "src/Models/Brand.php", brand_php, 14, 39).await;
 
     assert!(
         result.is_some(),
@@ -2271,7 +2270,7 @@ return [
     ]);
 
     // Cursor on "app.name" in config('app.name').
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2328,7 +2327,7 @@ return [
     ]);
 
     // Cursor on "app.mail.from.address".
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2654,7 +2653,7 @@ return [
     ]);
 
     // Config::string('app.name') — cursor on "app.name"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2676,7 +2675,7 @@ return [
     assert_eq!(definition_line(&response), 2, "Config::string → 'name' key");
 
     // Config::has('app.timezone') — cursor on "app.timezone"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2702,7 +2701,7 @@ return [
     );
 
     // Config::integer('app.retry') — cursor on "app.retry"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2728,7 +2727,7 @@ return [
     );
 
     // Config::boolean('app.debug') — cursor on "app.debug"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2754,7 +2753,7 @@ return [
     );
 
     // Config::float('app.rate') — cursor on "app.rate"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2773,7 +2772,7 @@ return [
     assert_eq!(definition_line(&response), 6, "Config::float → 'rate' key");
 
     // Config::array('app.providers') — cursor on "app.providers"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2799,7 +2798,7 @@ return [
     );
 
     // Config::collection('app.providers') — cursor on "app.providers"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2825,7 +2824,7 @@ return [
     );
 
     // Config::prepend('app.providers', 'X') — cursor on "app.providers"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2851,7 +2850,7 @@ return [
     );
 
     // Config::push('app.providers', 'Y') — cursor on "app.providers"
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -2915,7 +2914,8 @@ return [
     ]);
 
     // config()->get('app.name') — cursor on "app.name"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 3, 28).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 3, 28).await;
     assert!(result.is_some(), "config()->get('app.name') should resolve");
     let response = result.unwrap();
     assert!(
@@ -2926,7 +2926,8 @@ return [
     assert_eq!(definition_line(&response), 2, "config()->get → 'name' key");
 
     // config()->has('app.timezone') — cursor on "app.timezone"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 4, 28).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 4, 28).await;
     assert!(
         result.is_some(),
         "config()->has('app.timezone') should resolve"
@@ -2944,7 +2945,8 @@ return [
     );
 
     // config()->string('app.name') — cursor on "app.name"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 5, 31).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 5, 31).await;
     assert!(
         result.is_some(),
         "config()->string('app.name') should resolve"
@@ -2962,7 +2964,8 @@ return [
     );
 
     // config()->integer('app.retry') — cursor on "app.retry"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 6, 32).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 6, 32).await;
     assert!(
         result.is_some(),
         "config()->integer('app.retry') should resolve"
@@ -2980,7 +2983,8 @@ return [
     );
 
     // config()->float('app.rate') — cursor on "app.rate"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 7, 30).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 7, 30).await;
     assert!(
         result.is_some(),
         "config()->float('app.rate') should resolve"
@@ -2998,7 +3002,8 @@ return [
     );
 
     // config()->boolean('app.debug') — cursor on "app.debug"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 8, 32).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 8, 32).await;
     assert!(
         result.is_some(),
         "config()->boolean('app.debug') should resolve"
@@ -3016,7 +3021,8 @@ return [
     );
 
     // config()->array('app.providers') — cursor on "app.providers"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 9, 30).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 9, 30).await;
     assert!(
         result.is_some(),
         "config()->array('app.providers') should resolve"
@@ -3034,7 +3040,8 @@ return [
     );
 
     // config()->collection('app.providers') — cursor on "app.providers"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 10, 35).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 10, 35).await;
     assert!(
         result.is_some(),
         "config()->collection('app.providers') should resolve"
@@ -3052,7 +3059,8 @@ return [
     );
 
     // config()->set('app.name', 'X') — cursor on "app.name"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 11, 28).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 11, 28).await;
     assert!(result.is_some(), "config()->set('app.name') should resolve");
     let response = result.unwrap();
     assert!(
@@ -3063,7 +3071,8 @@ return [
     assert_eq!(definition_line(&response), 2, "config()->set → 'name' key");
 
     // config()->prepend('app.providers', 'X') — cursor on "app.providers"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 12, 32).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 12, 32).await;
     assert!(
         result.is_some(),
         "config()->prepend('app.providers') should resolve"
@@ -3081,7 +3090,8 @@ return [
     );
 
     // \config()->get('app.name') — cursor on "app.name"
-    let result = goto_definition_at(&backend, &dir, "src/Service.php", service_php, 14, 29).await;
+    let result =
+        open_and_goto_definition(&backend, &dir, "src/Service.php", service_php, 14, 29).await;
     assert!(
         result.is_some(),
         "\\config()->get('app.name') should resolve"
@@ -3123,7 +3133,7 @@ return [
     ]);
 
     // Cursor on "api.keys.secret" — line 4, char 24.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3160,7 +3170,7 @@ class Service {
         make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "APP_KEY" in env('APP_KEY') — line 4, char 20.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3202,7 +3212,7 @@ class Service {
         make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "DB_HOST" in env('DB_HOST', 'localhost') — line 4, char 21.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3244,7 +3254,7 @@ class Service {
         make_workspace(&[("src/Services/Service.php", service_php), (".env", dot_env)]);
 
     // Cursor on "UNDEFINED_KEY" — line 4, char 18.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3285,7 +3295,7 @@ class Service {
     let (backend, dir) = make_workspace(&[("src/Services/Service.php", service_php)]);
 
     // Cursor on "APP_KEY" — line 4, char 20.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3322,7 +3332,7 @@ class Service {
     ]);
 
     // Cursor on "welcome" in view('welcome') — line 4, char 19.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3367,7 +3377,7 @@ class Service {
     ]);
 
     // Cursor on "components.button" — line 4, char 19.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3423,7 +3433,7 @@ class Service {
     ]);
 
     // Cursor on "admin.permissions.index" — line 4, char 20.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3573,7 +3583,7 @@ class Service {
     );
 
     // Cursor on `redirects/create` in the leading-slash spelling.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3619,7 +3629,7 @@ class Service {
     ]);
 
     // Cursor on "admin.index" in View::make('admin.index') — line 4, char 25.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3665,7 +3675,7 @@ Route::get('/user/profile')->name('user.profile');
     ]);
 
     // Cursor on "home" in route('home') — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3712,7 +3722,7 @@ Route::get('/user/profile')->name('user.profile');
     ]);
 
     // Cursor on "user.profile" in route('user.profile') — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3767,7 +3777,7 @@ return [
     ]);
 
     // Cursor on "messages.welcome" in __('messages.welcome') — line 4, char 19.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3816,7 +3826,7 @@ return [
     ]);
 
     // Cursor on "auth.failed" in \Lang::get('auth.failed') — line 4, char 27.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3868,7 +3878,7 @@ return [
     ]);
 
     // Cursor on "messages.auth.password" in trans('messages.auth.password') — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3919,7 +3929,7 @@ Route::name('admin.email.template.')->group(function () {
     ]);
 
     // Cursor on "admin.email.template.create" — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -3972,7 +3982,7 @@ Route::name('admin.')->group(function () {
     ]);
 
     // Cursor on "admin.email.template.create" — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4017,7 +4027,7 @@ Route::group(['middleware' => 'web'], function () {
     ]);
 
     // Cursor on "posts.show" — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4067,7 +4077,7 @@ Route::group(['as' => 'admin.', 'prefix' => 'admin', 'middleware' => 'auth'], fu
     ]);
 
     // Cursor on "admin.dashboard" — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4115,7 +4125,7 @@ Route::get('/products', [ProductController::class, 'index'])->name('products.ind
     ]);
 
     // Cursor on "products.index" — line 4, char 22.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4155,7 +4165,7 @@ class Service {{
         ("routes/web.php", routes),
     ]);
 
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4230,7 +4240,7 @@ class Service {
         ("routes/web.php", routes),
     ]);
 
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "src/Services/Service.php",
@@ -4279,7 +4289,7 @@ async fn test_goto_definition_blade_include_directive() {
     ]);
 
     // Cursor on "partials.header" in @include('partials.header') — line 1, char 16.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "resources/views/layout.blade.php",
@@ -4311,7 +4321,7 @@ async fn test_goto_definition_blade_extends_directive() {
     ]);
 
     // Cursor on "layouts.app" in @extends('layouts.app') — line 0, char 13.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "resources/views/page.blade.php",
@@ -4343,7 +4353,7 @@ async fn test_goto_definition_blade_each_directive() {
     ]);
 
     // Cursor on "partials.row" in @each('partials.row', …) — line 1, char 14.
-    let result = goto_definition_at(
+    let result = open_and_goto_definition(
         &backend,
         &dir,
         "resources/views/table.blade.php",

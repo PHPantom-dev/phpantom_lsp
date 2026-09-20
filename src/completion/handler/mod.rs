@@ -181,20 +181,15 @@ impl Backend {
             return Ok(Some(response));
         }
 
-        // Get file content for offset calculation.  For Blade files,
-        // use the virtual PHP content and translate the cursor position
-        // so that variable resolution walks the preprocessed AST.
-        let content = if self.is_blade_file(&uri) {
-            let vc = self.blade_virtual_content.read();
-            if let Some(virtual_php) = vc.get(&uri) {
-                position = self.translate_blade_to_php(&uri, position);
-                Some(virtual_php.clone())
-            } else {
-                self.get_file_content(&uri)
-            }
-        } else {
-            self.get_file_content(&uri)
-        };
+        // A template is analysed as the virtual PHP it lowers to, with the
+        // cursor moved into it, so variable resolution walks the
+        // preprocessed AST.
+        let content = self
+            .analysable_content_at(&uri, position)
+            .map(|(content, translated)| {
+                position = translated;
+                content
+            });
 
         if let Some(content) = content {
             let response = (|| -> Result<Option<CompletionResponse>> {

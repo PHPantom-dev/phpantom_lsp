@@ -21,36 +21,41 @@ impl Backend {
         self.mago_lint_tool.notify.notify_one();
     }
 
-    /// Long-lived background task that runs `mago lint` on pending files.
+    /// Long-lived background task that runs one Mago command on pending
+    /// files.
     ///
-    /// Spawned once during `initialized`. This task is completely
-    /// independent: native diagnostics, PHPStan, PHPCS, and Mago
-    /// analyze are never blocked.
+    /// Spawned once per command during `initialized`. Each task is
+    /// completely independent: native diagnostics, PHPStan, PHPCS, and
+    /// the other Mago command are never blocked. At most one process per
+    /// command runs at a time.
     ///
-    /// At most one `mago lint` process runs at a time. The worker
-    /// loop follows the same pattern as the PHPCS worker.
-    pub(crate) async fn mago_lint_worker(&self) {
+    /// `service` picks the [`mago::MagoServices`] flag that decides
+    /// whether the project uses this command at all, and `run` is the
+    /// command itself.
+    async fn mago_worker(
+        &self,
+        tool: &crate::ExternalToolWorker,
+        label: &'static str,
+        service: fn(&mago::MagoServices) -> bool,
+        run: mago::MagoFileRunner,
+    ) {
         loop {
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
             }
 
             // ── Step 1: wait for work ───────────────────────────────
-            self.mago_lint_tool.notify.notified().await;
+            tool.notify.notified().await;
 
             if self.shutdown_flag.load(Ordering::Acquire) {
                 return;
             }
 
             // Drain any extra stored permits.
-            let _ = tokio::time::timeout(
-                std::time::Duration::ZERO,
-                self.mago_lint_tool.notify.notified(),
-            )
-            .await;
+            let _ = tokio::time::timeout(std::time::Duration::ZERO, tool.notify.notified()).await;
 
             // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_lint_tool.pending_uri.lock().take() {
+            let uri = match tool.pending_uri.lock().take() {
                 Some(u) => u,
                 None => continue,
             };
@@ -81,8 +86,12 @@ impl Backend {
                 .is_some_and(crate::composer::is_laravel_project);
 
             // Mago requires mago.toml to operate, and its tables decide
-            // whether the project uses `mago lint` at all.
-            if !mago::enabled_services(&workspace_root, &config.mago, laravel).lint {
+            // whether the project uses this command at all.
+            if !service(&mago::enabled_services(
+                &workspace_root,
+                &config.mago,
+                laravel,
+            )) {
                 continue;
             }
 
@@ -103,12 +112,12 @@ impl Backend {
                 None => continue,
             };
 
-            // ── Step 4: run mago lint (the slow part) ───────────────
+            // ── Step 4: run the command (the slow part) ─────────────
             let mago_config = config.mago.clone();
             let shutdown_flag = Arc::clone(&self.shutdown_flag);
             let mago_diags = {
-                let result = crate::server::run_blocking_cancel_safe("mago lint", move || {
-                    mago::run_mago_lint(
+                let result = crate::server::run_blocking_cancel_safe(label, move || {
+                    run(
                         &resolved,
                         &content,
                         &file_path,
@@ -133,12 +142,23 @@ impl Backend {
                 }
             }
 
-            self.mago_lint_tool.store_file_result(&uri, mago_diags);
+            tool.store_file_result(&uri, mago_diags);
 
             // In pull mode this also tells the editor to re-pull, but
             // only when the run actually changed the file's diagnostics.
             self.assemble_and_refresh(&uri).await;
         }
+    }
+
+    /// Run `mago lint` on pending files. See [`Backend::mago_worker`].
+    pub(crate) async fn mago_lint_worker(&self) {
+        self.mago_worker(
+            &self.mago_lint_tool,
+            "mago lint",
+            |services| services.lint,
+            mago::run_mago_lint,
+        )
+        .await;
     }
 
     // ── Mago analyze worker ─────────────────────────────────────────
@@ -152,123 +172,14 @@ impl Backend {
         self.mago_analyze_tool.notify.notify_one();
     }
 
-    /// Long-lived background task that runs `mago analyze` on pending files.
-    ///
-    /// Spawned once during `initialized`. This task is completely
-    /// independent: native diagnostics, PHPStan, PHPCS, and Mago lint
-    /// are never blocked.
-    ///
-    /// At most one `mago analyze` process runs at a time. The worker
-    /// loop follows the same pattern as the PHPStan worker.
+    /// Run `mago analyze` on pending files. See [`Backend::mago_worker`].
     pub(crate) async fn mago_analyze_worker(&self) {
-        loop {
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // ── Step 1: wait for work ───────────────────────────────
-            self.mago_analyze_tool.notify.notified().await;
-
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // Drain any extra stored permits.
-            let _ = tokio::time::timeout(
-                std::time::Duration::ZERO,
-                self.mago_analyze_tool.notify.notified(),
-            )
-            .await;
-
-            // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_analyze_tool.pending_uri.lock().take() {
-                Some(u) => u,
-                None => continue,
-            };
-
-            let content = {
-                let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
-                }
-            };
-
-            // ── Step 3: resolve Mago binary ─────────────────────────
-            let config = self.config();
-            if config.mago.is_disabled() {
-                continue;
-            }
-
-            let workspace_root = self.workspace.workspace_root.read().clone();
-            let workspace_root = match workspace_root {
-                Some(root) => root,
-                None => continue,
-            };
-
-            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
-            let laravel = composer_pkg
-                .as_ref()
-                .is_some_and(crate::composer::is_laravel_project);
-
-            // Mago requires mago.toml to operate, and its tables decide
-            // whether the project uses `mago analyze` at all.
-            if !mago::enabled_services(&workspace_root, &config.mago, laravel).analyze {
-                continue;
-            }
-
-            let file_path = match uri.parse::<Url>().ok().and_then(|u| u.to_file_path().ok()) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
-
-            let resolved = match mago::resolve_mago(
-                Some(&workspace_root),
-                &config.mago,
-                bin_dir.as_deref(),
-                composer_pkg.as_ref(),
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // ── Step 4: run mago analyze (the slow part) ────────────
-            let mago_config = config.mago.clone();
-            let shutdown_flag = Arc::clone(&self.shutdown_flag);
-            let mago_diags = {
-                let result = crate::server::run_blocking_cancel_safe("mago analyze", move || {
-                    mago::run_mago_analyze(
-                        &resolved,
-                        &content,
-                        &file_path,
-                        &workspace_root,
-                        &mago_config,
-                        &shutdown_flag,
-                    )
-                })
-                .await;
-
-                match result {
-                    Some(Ok(diags)) => diags,
-                    _ => continue,
-                }
-            };
-
-            // ── Step 5: cache results and re-publish ────────────────
-            {
-                let files = self.open_files.read();
-                if !files.contains_key(&uri) {
-                    continue;
-                }
-            }
-
-            self.mago_analyze_tool.store_file_result(&uri, mago_diags);
-
-            // In pull mode this also tells the editor to re-pull, but
-            // only when the run actually changed the file's diagnostics.
-            self.assemble_and_refresh(&uri).await;
-        }
+        self.mago_worker(
+            &self.mago_analyze_tool,
+            "mago analyze",
+            |services| services.analyze,
+            mago::run_mago_analyze,
+        )
+        .await;
     }
 }

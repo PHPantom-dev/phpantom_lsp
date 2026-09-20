@@ -179,6 +179,33 @@ impl Backend {
         items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
     }
 
+    /// Whether `stmt` may itself declare a class-like, or contain one
+    /// nested in its body, and so needs to be handed to
+    /// [`extract_classes_from_statements`](Self::extract_classes_from_statements).
+    ///
+    /// Beyond the four class-like kinds, this covers the conditional and
+    /// control-flow statements a class-like can be nested inside: version
+    /// guards (`if (! class_exists(...)) { class Foo {} }`), Doctrine-style
+    /// `ServiceEntityRepository` shims, and similar patterns real code
+    /// uses to conditionally define a class or trait.
+    pub(crate) fn is_classlike_extraction_candidate(stmt: &Statement<'_>) -> bool {
+        matches!(
+            stmt,
+            Statement::Class(_)
+                | Statement::Interface(_)
+                | Statement::Trait(_)
+                | Statement::Enum(_)
+                | Statement::If(_)
+                | Statement::Block(_)
+                | Statement::Try(_)
+                | Statement::Switch(_)
+                | Statement::While(_)
+                | Statement::DoWhile(_)
+                | Statement::For(_)
+                | Statement::Foreach(_)
+        )
+    }
+
     /// Recursively walk statements and extract class information.
     /// This handles classes at the top level as well as classes nested
     /// inside namespace declarations.
@@ -304,13 +331,9 @@ impl Backend {
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
                         doc_members: doc_info.doc_members,
-                        file_namespace: None,
-                        backed_type: None,
                         attribute_targets: attr_targets,
-                        method_index: Default::default(),
-                        indexed_method_count: 0,
                         laravel: Some(Box::new(laravel_metadata)),
-                        fqn: None,
+                        ..Default::default()
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -400,9 +423,6 @@ impl Backend {
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
                         require_implements: doc_info.require_implements,
-                        is_final: false,
-                        is_abstract: false,
-                        is_readonly: false,
                         deprecation_message: iface_depr.message,
                         deprecated_replacement: iface_depr.replacement,
                         links: doc_info.links,
@@ -422,13 +442,7 @@ impl Backend {
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
                         doc_members: doc_info.doc_members,
-                        file_namespace: None,
-                        backed_type: None,
-                        attribute_targets: 0,
-                        method_index: Default::default(),
-                        indexed_method_count: 0,
-                        laravel: None,
-                        fqn: None,
+                        ..Default::default()
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -493,16 +507,11 @@ impl Backend {
                         end_offset,
                         keyword_offset,
                         decl_start_offset,
-                        parent_class: None,
-                        interfaces: vec![],
                         used_traits,
                         mixins: doc_info.mixins,
                         mixin_generics: doc_info.mixin_generics,
                         require_extends: doc_info.require_extends,
                         require_implements: doc_info.require_implements,
-                        is_final: false,
-                        is_abstract: false,
-                        is_readonly: false,
                         deprecation_message: trait_depr.message,
                         deprecated_replacement: trait_depr.replacement,
                         links: doc_info.links,
@@ -510,21 +519,13 @@ impl Backend {
                         template_params: doc_info.template_params,
                         template_param_bounds: doc_info.template_param_bounds,
                         template_param_defaults: doc_info.template_param_defaults,
-                        extends_generics: vec![],
-                        implements_generics: vec![],
                         use_generics: inline_use_generics,
                         type_aliases: doc_info.type_aliases,
                         trait_precedences,
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
                         doc_members: doc_info.doc_members,
-                        file_namespace: None,
-                        backed_type: None,
-                        attribute_targets: 0,
-                        method_index: Default::default(),
-                        indexed_method_count: 0,
-                        laravel: None,
-                        fqn: None,
+                        ..Default::default()
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -641,7 +642,6 @@ impl Backend {
                         end_offset,
                         keyword_offset,
                         decl_start_offset,
-                        parent_class: None,
                         interfaces,
                         used_traits,
                         mixins: doc_info.mixins,
@@ -650,24 +650,14 @@ impl Backend {
                         require_implements: doc_info.require_implements,
                         // Enums are implicitly final and cannot be extended.
                         is_final: true,
-                        is_abstract: false,
-                        is_readonly: false,
                         deprecation_message: enum_depr.message,
                         deprecated_replacement: enum_depr.replacement,
                         links: doc_info.links,
                         see_refs: doc_info.see_refs,
-                        template_params: vec![],
-                        template_param_bounds: AtomMap::default(),
-                        template_param_defaults: AtomMap::default(),
-                        extends_generics: vec![],
                         implements_generics: doc_info.implements_generics,
-                        use_generics: vec![],
                         type_aliases: doc_info.type_aliases,
-                        trait_precedences: vec![],
-                        trait_aliases: vec![],
                         class_docblock: doc_info.raw_docblock,
                         doc_members: doc_info.doc_members,
-                        file_namespace: None,
                         backed_type: enum_def.backing_type_hint.as_ref().and_then(|h| {
                             let ty = crate::parser::extract_hint_type(&h.hint);
                             if ty.is_string_type() {
@@ -678,11 +668,7 @@ impl Backend {
                                 None
                             }
                         }),
-                        attribute_targets: 0,
-                        method_index: Default::default(),
-                        indexed_method_count: 0,
-                        laravel: None,
-                        fqn: None,
+                        ..Default::default()
                     });
 
                     // Walk method bodies for anonymous classes.
@@ -1176,56 +1162,7 @@ impl Backend {
                     // the promoted-property logic already used for
                     // constructor parameters.
                     if let Some(ref info) = method_docblock_info {
-                        for param in &mut parameters {
-                            let param_doc_type =
-                                docblock::extract_param_raw_type_from_info(info, &param.name);
-                            if let Some(ref doc_type) = param_doc_type {
-                                let effective = docblock::resolve_effective_type_typed(
-                                    param.type_hint.as_ref(),
-                                    Some(doc_type),
-                                );
-                                if effective.is_some() {
-                                    param.type_hint = effective;
-                                }
-                            }
-                        }
-
-                        // Populate `closure_this_type` from
-                        // `@param-closure-this` tags so that `$this`
-                        // inside a closure argument resolves to the
-                        // declared type instead of the lexical class.
-                        for (this_type, param_name) in
-                            docblock::extract_param_closure_this_from_info(info)
-                        {
-                            if let Some(param) =
-                                parameters.iter_mut().find(|p| p.name == param_name)
-                            {
-                                param.closure_this_type = Some(this_type);
-                            }
-                        }
-
-                        // Append extra `@param` tags that don't match any
-                        // native parameter.  These document parameters
-                        // accessed via `func_get_args()` or similar
-                        // mechanisms and should appear in hover/signature.
-                        for (tag_name, tag_type) in docblock::extract_all_param_tags_from_info(info)
-                        {
-                            if !parameters.iter().any(|p| p.name == tag_name) {
-                                let description =
-                                    docblock::extract_param_description_from_info(info, &tag_name);
-                                parameters.push(ParameterInfo {
-                                    name: atom(&tag_name),
-                                    is_required: false,
-                                    type_hint: Some(tag_type),
-                                    native_type_hint: None,
-                                    description,
-                                    default_value: None,
-                                    is_variadic: false,
-                                    is_reference: false,
-                                    closure_this_type: None,
-                                });
-                            }
-                        }
+                        docblock::merge_param_docblock_into_parameters(info, &mut parameters);
                     }
 
                     // A docblock `@param` merge above may have overwritten

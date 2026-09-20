@@ -526,15 +526,10 @@ pub(crate) fn block_name_at(content: &str, offset: usize) -> Option<BlockNameCon
 /// only part of (`'layouts.' . $theme`), name nothing that can be read.
 fn string_literal_span(content: &str, argument: &str) -> Option<(String, Span)> {
     let trimmed = argument.trim();
-    let quote = trimmed
-        .chars()
-        .next()
-        .filter(|ch| *ch == '\'' || *ch == '"')?;
-    let value = &trimmed[1..trimmed[1..].find(quote)? + 1];
+    let value = crate::blade::plain_string_literal(trimmed)?;
+    // The literal must be the whole argument: `'layouts.' . $theme` names
+    // nothing that can be read.
     if trimmed.len() != value.len() + 2 {
-        return None;
-    }
-    if quote == '"' && value.contains(['$', '{']) {
         return None;
     }
     let start = value.as_ptr() as usize - content.as_ptr() as usize;

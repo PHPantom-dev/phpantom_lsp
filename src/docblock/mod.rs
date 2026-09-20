@@ -46,7 +46,6 @@ pub(crate) use tag_kind::tag_kind;
 pub use tag_kind::{TagKind, TagVendor};
 
 // Core tags
-pub(crate) use tags::is_compatible_refinement_typed;
 pub use tags::{
     declares_impure, declares_pure, extract_all_param_tags, extract_all_param_tags_from_info,
     extract_deprecation_message, extract_deprecation_message_from_info,
@@ -67,6 +66,7 @@ pub use tags::{
     has_deprecated_tag, has_deprecated_tag_from_info, resolve_effective_type_typed,
     sanitise_and_parse_docblock_type, should_override_type_typed,
 };
+pub(crate) use tags::{is_compatible_refinement_typed, merge_param_docblock_into_parameters};
 
 // Template / generics / type alias tags
 pub use templates::{

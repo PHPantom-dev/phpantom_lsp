@@ -57,9 +57,10 @@ use crate::blade::component_tags::is_attr_name_char;
 use crate::blade::signature::matching_paren;
 
 use super::reindent::{
-    DISABLE_MARKER, ENABLE_MARKER, OPAQUE_ELEMENTS, PRESERVED_ELEMENTS, boundary_before,
-    echo_delimiters, find, find_byte, find_closing_tag, is_component_name, is_echo_start, tag_name,
-    word_end,
+    AttributeValue, DISABLE_MARKER, DirectiveHead, ENABLE_MARKER, OPAQUE_ELEMENTS,
+    PRESERVED_ELEMENTS, attribute_head, directive_head, echo_delimiters, find, find_byte,
+    find_closing_tag, find_directive, find_marker_comment, is_component_name, is_echo_start,
+    tag_name,
 };
 
 /// What the embedded formatter needs to format one fragment: the
@@ -224,53 +225,24 @@ impl Scanner<'_> {
 
     /// The end of the next `{{-- marker --}}` comment at or after `from`.
     fn find_marker(&self, from: usize, limit: usize, marker: &str) -> Option<usize> {
-        let mut i = from;
-        while let Some(start) = find(self.bytes, i, limit, b"{{--") {
-            let close = find(self.bytes, start + 4, limit, b"--}}")?;
-            if self.src[start + 4..close].trim() == marker {
-                return Some(close + 4);
-            }
-            i = close + 4;
-        }
-        None
+        find_marker_comment(self.src, self.bytes, from, limit, marker).map(|found| found.end)
     }
 
     // ── Directives ──────────────────────────────────────────────────
 
     fn directive(&mut self, at: usize, limit: usize) -> usize {
-        if !boundary_before(self.bytes, at) {
-            return at + 1;
-        }
-        match self.bytes.get(at + 1) {
-            // `@@if` is the escape for a literal `@if`.
-            Some(b'@') => return at + 2,
-            // `@{{ … }}` is a literal echo, whose text a frontend
-            // framework renders rather than PHP.
-            Some(b'{') if is_echo_start(self.bytes, at + 1) => {
-                let (open, close) = echo_delimiters(self.bytes, at + 1);
-                let body_start = at + 1 + open.len();
-                return find(self.bytes, body_start, limit, close.as_bytes())
-                    .map_or(body_start, |end| end + close.len());
-            }
-            _ => {}
-        }
-        let name_end = word_end(self.bytes, at + 1);
-        if name_end == at + 1 {
-            return at + 1;
-        }
-        let name = &self.src[at + 1..name_end];
-        // `@click="…"` is a JavaScript framework's binding, not a
-        // directive; the caller reads it as an attribute.
-        if self.bytes.get(name_end) == Some(&b'=') {
-            return name_end;
-        }
+        let (name, name_end, open, args) = match directive_head(self.src, self.bytes, at, limit) {
+            DirectiveHead::None(resume)
+            | DirectiveHead::Escaped(resume)
+            | DirectiveHead::LiteralEcho(resume) => return resume,
+            DirectiveHead::Named {
+                name,
+                name_end,
+                open,
+                args,
+            } => (name, name_end, open, args),
+        };
 
-        // Blade allows spaces and tabs, but no newline, between a
-        // directive's name and its argument list.
-        let mut open = name_end;
-        while matches!(self.bytes.get(open), Some(b' ' | b'\t')) {
-            open += 1;
-        }
         let has_args = self.bytes.get(open) == Some(&b'(');
         match name {
             "verbatim" => {
@@ -284,7 +256,7 @@ impl Scanner<'_> {
         if !has_args {
             return name_end;
         }
-        let Some(close) = matching_paren(self.bytes, open).filter(|close| *close < limit) else {
+        let Some(close) = args.map(|args| args.end - 1) else {
             return open + 1;
         };
         self.replace(
@@ -313,23 +285,10 @@ impl Scanner<'_> {
         }
     }
 
-    /// The next `@name` at or after `from`, honouring Blade's word-boundary
-    /// rule. A delimiter written inside a string literal counts, because
-    /// Blade's own scan for one is a non-greedy regex that knows nothing
-    /// about PHP: this has to agree with the reindenter and with the
-    /// compiler about where a block ends.
+    /// The next `@name` at or after `from`, by the reindenter's own rule so
+    /// the two agree about where a block ends.
     fn find_directive(&self, from: usize, limit: usize, name: &str) -> Option<Range<usize>> {
-        let mut i = from;
-        while let Some(at) = find(self.bytes, i, limit, b"@") {
-            i = at + 1;
-            if boundary_before(self.bytes, at)
-                && self.src[at + 1..].starts_with(name)
-                && word_end(self.bytes, at + 1) == at + 1 + name.len()
-            {
-                return Some(at..at + 1 + name.len());
-            }
-        }
-        None
+        find_directive(self.src, self.bytes, from, limit, name)
     }
 
     // ── Markup ──────────────────────────────────────────────────────
@@ -431,35 +390,13 @@ impl Scanner<'_> {
 
     /// One attribute, with its value when it has one.
     fn attribute(&mut self, at: usize, component: bool) -> usize {
-        let end = self.bytes.len();
-        let mut i = at;
-        while i < end && (is_attr_name_char(self.bytes[i] as char) || self.bytes[i] == b'$') {
-            i += 1;
-        }
-        let name = &self.src[at..i];
-        let mut j = i;
-        while j < end && self.bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        if self.bytes.get(j) != Some(&b'=') {
-            return i;
-        }
-        j += 1;
-        while j < end && self.bytes[j].is_ascii_whitespace() {
-            j += 1;
-        }
-        match self.bytes.get(j) {
-            Some(b'\'' | b'"') => {
-                self.attribute_value(j, !is_javascript_attribute(name, component))
+        let (name, value) = attribute_head(self.bytes, at, self.bytes.len());
+        match value {
+            AttributeValue::None(end) | AttributeValue::Unquoted(end) => end,
+            AttributeValue::Quoted(quote_at) => {
+                let name = &self.src[name];
+                self.attribute_value(quote_at, !is_javascript_attribute(name, component))
             }
-            Some(_) => {
-                // An unquoted value runs to whitespace or the tag's end.
-                while j < end && !self.bytes[j].is_ascii_whitespace() && self.bytes[j] != b'>' {
-                    j += 1;
-                }
-                j
-            }
-            None => j,
         }
     }
 

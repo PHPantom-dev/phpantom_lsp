@@ -257,32 +257,16 @@ pub(crate) fn walk_closures_in_expr<'b>(
             }
             _ => {}
         },
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                let elem_expr = match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        walk_closures_in_expr(kv.key, outer_scope, ctx, None);
-                        kv.value
-                    }
-                    ArrayElement::Value(val) => val.value,
-                    ArrayElement::Variadic(v) => v.value,
-                    ArrayElement::Missing(_) => continue,
-                };
-                walk_closures_in_expr(elem_expr, outer_scope, ctx, None);
-            }
-        }
-        Expression::LegacyArray(arr) => {
-            for elem in arr.elements.iter() {
-                let elem_expr = match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        walk_closures_in_expr(kv.key, outer_scope, ctx, None);
-                        kv.value
-                    }
-                    ArrayElement::Value(val) => val.value,
-                    ArrayElement::Variadic(v) => v.value,
-                    ArrayElement::Missing(_) => continue,
-                };
-                walk_closures_in_expr(elem_expr, outer_scope, ctx, None);
+        Expression::Array(_) | Expression::LegacyArray(_) => {
+            let elements =
+                crate::parser::array_literal_elements(expr).expect("an array literal has elements");
+            for elem in elements.iter() {
+                if let Some(key) = crate::parser::array_element_key(elem) {
+                    walk_closures_in_expr(key, outer_scope, ctx, None);
+                }
+                if let Some(value) = crate::parser::array_element_value(elem) {
+                    walk_closures_in_expr(value, outer_scope, ctx, None);
+                }
             }
         }
         Expression::Binary(bin) => {
@@ -650,7 +634,7 @@ pub(crate) fn seed_closure_params(
             &pname,
         )
         .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
-        .map(|t| super::scope_state::resolve_docblock_param_type(&t, ctx));
+        .map(|t| super::param_seeding::resolve_docblock_param_type(&t, ctx));
 
         let effective_type = crate::docblock::resolve_effective_type_typed(
             native_type.as_ref(),

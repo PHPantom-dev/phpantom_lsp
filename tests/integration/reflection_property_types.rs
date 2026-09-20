@@ -6,41 +6,7 @@
 //! reflected class is known and the property name is a literal, which is the
 //! shape reflection-based accessors are written in.
 
-use crate::common::create_test_backend_with_full_stubs;
-use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
-
-/// The resolved type of the assignment on the line that assigns `var`, read
-/// off the hover response.
-fn assigned_type(backend: &Backend, uri: &str, content: &str, var: &str) -> String {
-    let needle = format!("{var} = ");
-    let line = content
-        .lines()
-        .position(|l| l.trim_start().starts_with(&needle))
-        .unwrap_or_else(|| panic!("no assignment to {var} in the fixture")) as u32;
-    let indent = content
-        .lines()
-        .nth(line as usize)
-        .map_or(0, |l| (l.len() - l.trim_start().len() + 1) as u32);
-    let hover = backend
-        .handle_hover(
-            uri,
-            content,
-            Position {
-                line,
-                character: indent,
-            },
-        )
-        .unwrap_or_else(|| panic!("no hover on the assignment to {var}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("Expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no assignment in hover for {var}: {}", markup.value))
-}
+use crate::common::{assert_assigned_types_on, create_test_backend_with_full_stubs};
 
 fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
     let backend = create_test_backend_with_full_stubs();
@@ -53,9 +19,7 @@ fn assert_assigned_types(content: &str, expected: &[(&str, &str)]) {
         .write()
         .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
     backend.update_ast(uri, content);
-    for (var, want) in expected {
-        assert_eq!(&assigned_type(&backend, uri, content, var), want, "{var}");
-    }
+    assert_assigned_types_on(&backend, uri, content, expected);
 }
 
 const FIXTURE: &str = r#"<?php

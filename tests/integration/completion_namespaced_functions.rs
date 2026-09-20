@@ -11,52 +11,14 @@
 //! - `filter_current_file_functions` works with FQN-based filtering
 
 use crate::common::{
-    create_psr4_workspace, create_test_backend, create_test_backend_with_function_stubs,
+    complete_at, create_psr4_workspace, create_test_backend,
+    create_test_backend_with_function_stubs, labels,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
 use phpantom_lsp::types::FunctionInfo;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a file and request completion at the given line/character.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => vec![],
-    }
-}
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 /// Register a namespaced helper function in the global_functions map.
 fn register_namespaced_function(

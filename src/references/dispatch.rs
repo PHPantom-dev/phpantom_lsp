@@ -249,11 +249,15 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
+                let Some(source) = self.symbol_map_source(uri, content) else {
+                    return Vec::new();
+                };
+
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
                 let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text.as_str(content),
+                    subject_text.as_str(source),
                     *is_static,
                     span_start,
                     member_name,
@@ -270,7 +274,7 @@ impl Backend {
                         .reference_file_content(uri)
                         .map(|file_content| {
                             self.resolve_subject_to_fqns(
-                                subject_text.as_str(&file_content),
+                                subject_text.as_str(source),
                                 *is_static,
                                 &self.file_context(uri),
                                 span_start,

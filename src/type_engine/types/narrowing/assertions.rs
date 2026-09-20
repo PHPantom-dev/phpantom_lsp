@@ -99,34 +99,20 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 ctx,
             )
         }
-        Call::Method(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(
-                &class_info,
-                method_name,
-                &method_call.argument_list,
-                expr_to_subject_key(method_call.object),
-                ctx,
-            )
-        }
-        Call::NullSafeMethod(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(
-                &class_info,
-                method_name,
-                &method_call.argument_list,
-                expr_to_subject_key(method_call.object),
-                ctx,
-            )
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which says nothing about its assertions.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_method_assertion_info(object, method, argument_list, ctx),
     }
 }
 
@@ -177,6 +163,26 @@ fn resolve_instance_receiver_class(
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
     (ctx.class_loader)(&first.type_string.to_string())
+}
+
+/// The assertions an instance method call carries, for either arrow.
+fn instance_method_assertion_info<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallAssertionInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class_info = resolve_instance_receiver_class(object, ctx)?;
+    build_method_assertion_info(
+        &class_info,
+        bytes_to_str(ident.value),
+        argument_list,
+        expr_to_subject_key(object),
+        ctx,
+    )
 }
 
 /// Build [`CallAssertionInfo`] for a method call once the receiver class
@@ -847,31 +853,36 @@ pub(in crate::type_engine) fn extract_conditional_return_call<'a>(
                 ctx,
             )
         }
-        Call::Method(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
-        Call::NullSafeMethod(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which the conditional return does not read.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_conditional_return(object, method, argument_list, ctx),
     }
+}
+
+/// The conditional return an instance method call carries, for either
+/// arrow.
+fn instance_conditional_return<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallReturnInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class = resolve_instance_receiver_class(object, ctx)?;
+    conditional_return_from_chain(&class, bytes_to_str(ident.value), argument_list, ctx)
 }
 
 /// Find the definition of `method_name` whose return type is conditional,

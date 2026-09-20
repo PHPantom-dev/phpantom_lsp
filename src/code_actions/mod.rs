@@ -131,8 +131,10 @@ use crate::Backend;
 
 pub(crate) use docblock_edit::{DocblockAbove, find_docblock_above_line};
 pub(crate) use helpers::{
-    CodeActionData, create_file_edit, detect_indent_from_members, find_identical_occurrences,
-    indent_of_line_at, indent_unit, make_code_action_data, single_edit, single_file_edit,
+    CodeActionData, create_file_edit, detect_indent_from_members, document_changes_edit,
+    find_identical_occurrences, indent_of_line_at, indent_unit, make_code_action_data,
+    multi_file_edit, occurrence_replacement_edit, single_edit, single_file_edit,
+    sort_edits_by_position,
 };
 
 impl Backend {
@@ -280,9 +282,10 @@ impl Backend {
             Err(_) => return (action, None),
         };
 
-        let content = match self.get_file_content(&data.uri) {
-            Some(c) => c,
-            None => return (action, None),
+        // A template's action was planned against its virtual PHP, so the
+        // resolve reads the same text.
+        let Some(content) = self.analysable_content(&data.uri) else {
+            return (action, None);
         };
 
         // Parse the file once and share it across the resolve handler below.

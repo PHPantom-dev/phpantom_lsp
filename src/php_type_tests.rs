@@ -2149,7 +2149,14 @@ fn top_level_class_names_union_with_null() {
 
 #[test]
 fn top_level_class_names_scalar_excluded() {
+    assert!(PhpType::parse("string").top_level_class_names().is_empty());
     let names = PhpType::parse("string|int").top_level_class_names();
+    assert!(names.is_empty());
+}
+
+#[test]
+fn top_level_class_names_void_excluded() {
+    let names = PhpType::parse("void").top_level_class_names();
     assert!(names.is_empty());
 }
 

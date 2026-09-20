@@ -1,37 +1,7 @@
-use crate::common::{create_test_backend, create_test_backend_with_full_stubs};
-use tower_lsp::LanguageServer;
+use crate::common::{
+    complete_response_at, create_test_backend, create_test_backend_with_full_stubs,
+};
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a document and request completion at the given line/character.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Option<CompletionResponse> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    backend.completion(completion_params).await.unwrap()
-}
 
 fn assert_has_member(items: &[CompletionItem], member: &str) {
     let names: Vec<&str> = items
@@ -70,7 +40,7 @@ async fn test_var_array_int_customer_named_annotation() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -94,7 +64,7 @@ async fn test_var_array_int_customer_no_varname_annotation() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -117,7 +87,7 @@ async fn test_var_array_int_customer_empty_array_access() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -140,7 +110,7 @@ async fn test_var_array_single_param_customer_access() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -163,7 +133,7 @@ async fn test_var_list_customer_access() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -187,7 +157,7 @@ async fn test_var_list_customer_no_varname_access() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -209,7 +179,7 @@ async fn test_inferred_array_new_object_access() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 6, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 6, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -232,7 +202,7 @@ async fn test_inline_array_literal_static_call_access() {
         "[Customer::first()][0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 24).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 24).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -259,7 +229,7 @@ async fn test_end_of_method_chain_returning_array() {
         "end(Customer::get()->all())->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 11, 29).await;
+    let result = complete_response_at(&backend, &uri, text, 11, 29).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -283,7 +253,7 @@ async fn test_variable_assigned_from_end_array_generic() {
         "$last->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 8, 7).await;
+    let result = complete_response_at(&backend, &uri, text, 8, 7).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -308,7 +278,7 @@ async fn test_var_array_generic_with_unknown_value_rhs() {
         "$thing[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 8, 11).await;
+    let result = complete_response_at(&backend, &uri, text, 8, 11).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -339,7 +309,7 @@ async fn test_method_return_array_access_bracket_type() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 11, 24).await;
+    let result = complete_response_at(&backend, &uri, text, 11, 24).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getLabel");
 }
@@ -365,7 +335,7 @@ async fn test_method_return_array_access_generic_type() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 11, 24).await;
+    let result = complete_response_at(&backend, &uri, text, 11, 24).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getLabel");
 }
@@ -390,7 +360,7 @@ async fn test_static_method_return_array_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 10, 30).await;
+    let result = complete_response_at(&backend, &uri, text, 10, 30).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getLabel");
 }
@@ -426,7 +396,7 @@ async fn test_method_return_template_class_string_array_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 17, 48).await;
+    let result = complete_response_at(&backend, &uri, text, 17, 48).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "attrName");
 }
@@ -452,7 +422,7 @@ async fn test_method_return_list_array_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 11, 24).await;
+    let result = complete_response_at(&backend, &uri, text, 11, 24).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getLabel");
 }
@@ -485,7 +455,7 @@ async fn test_property_generic_array_bracket_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 10, 39).await;
+    let result = complete_response_at(&backend, &uri, text, 10, 39).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "contains");
     assert_has_member(&items, "count");
@@ -523,7 +493,7 @@ async fn test_property_collection_generic_bracket_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 18, 42).await;
+    let result = complete_response_at(&backend, &uri, text, 18, 42).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getLocale");
@@ -548,7 +518,7 @@ async fn test_variable_generic_array_bracket_access_var_annotation() {
         "$orders['abc']->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 7, 16).await;
+    let result = complete_response_at(&backend, &uri, text, 7, 16).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "id");
     assert_has_member(&items, "getTotal");
@@ -576,7 +546,7 @@ async fn test_object_property_generic_array_bracket_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 10, 24).await;
+    let result = complete_response_at(&backend, &uri, text, 10, 24).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "label");
     assert_has_member(&items, "render");
@@ -607,7 +577,7 @@ async fn test_property_generic_array_bracket_access_then_method_chain() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 12, 38).await;
+    let result = complete_response_at(&backend, &uri, text, 12, 38).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "value");
 }
@@ -636,7 +606,7 @@ async fn test_property_generic_array_string_literal_key_access() {
         "}\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 10, 41).await;
+    let result = complete_response_at(&backend, &uri, text, 10, 41).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "contains");
     assert_has_member(&items, "count");
@@ -670,7 +640,7 @@ async fn test_array_access_object_offset_get_no_generics() {
         "$list[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 11, 10).await;
+    let result = complete_response_at(&backend, &uri, text, 11, 10).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getImage");
 }
@@ -707,7 +677,7 @@ async fn test_array_access_own_template_self_reference_resolves_to_bound() {
         "$list[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 16, 10).await;
+    let result = complete_response_at(&backend, &uri, text, 16, 10).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getImage");
 }
@@ -732,7 +702,7 @@ async fn test_iterator_to_array_inline_array_access() {
         "iterator_to_array($iter)[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 6, 29).await;
+    let result = complete_response_at(&backend, &uri, text, 6, 29).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
     assert_has_member(&items, "getEmail");
@@ -752,7 +722,7 @@ async fn test_iterator_to_array_inline_nested_array_access() {
         "iterator_to_array($it)[0][0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 5, 30).await;
+    let result = complete_response_at(&backend, &uri, text, 5, 30).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "name");
 }
@@ -770,7 +740,7 @@ async fn test_array_filter_inline_array_access() {
         "array_filter($customers)[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 5, 29).await;
+    let result = complete_response_at(&backend, &uri, text, 5, 29).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getEmail");
 }
@@ -791,7 +761,7 @@ async fn test_array_map_inline_array_access_uses_callback_return_type() {
         "array_map(fn ($c): Invoice => new Invoice(), $customers)[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 8, 61).await;
+    let result = complete_response_at(&backend, &uri, text, 8, 61).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getTotal");
 }
@@ -812,7 +782,7 @@ async fn test_array_func_call_as_argument_keeps_element_type() {
         "array_values(iterator_to_array($iter))[0]->\n",
     );
 
-    let result = complete_at(&backend, &uri, text, 5, 43).await;
+    let result = complete_response_at(&backend, &uri, text, 5, 43).await;
     let items = unwrap_items(result);
     assert_has_member(&items, "getEmail");
 }

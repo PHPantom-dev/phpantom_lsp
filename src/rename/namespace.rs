@@ -12,6 +12,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::{document_changes_edit, multi_file_edit};
 use crate::composer;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
@@ -152,14 +153,8 @@ impl Backend {
                 None => continue,
             };
 
-            let parsed_uri = match Url::parse(file_uri) {
-                Ok(u) => u,
-                Err(e) => {
-                    tracing::warn!(
-                        "rename: dropping edits for file with unparseable URI {file_uri:?}: {e}"
-                    );
-                    continue;
-                }
+            let Some(parsed_uri) = super::parse_edit_target_uri(file_uri) else {
+                continue;
             };
 
             let mut file_edits: Vec<TextEdit> = Vec::new();
@@ -229,30 +224,23 @@ impl Backend {
             && !ops.is_empty()
             && self.supports_file_rename.load(Ordering::Acquire)
         {
-            let mut doc_ops: Vec<DocumentChangeOperation> = Vec::new();
+            let renames = ops.iter().map(|(old_uri, new_uri)| {
+                ResourceOp::Rename(RenameFile {
+                    old_uri: old_uri.clone(),
+                    new_uri: new_uri.clone(),
+                    options: None,
+                    annotation_id: None,
+                })
+            });
 
-            // Add directory/file rename operations first.
-            for (old_uri, new_uri) in &ops {
-                doc_ops.push(DocumentChangeOperation::Op(ResourceOp::Rename(
-                    RenameFile {
-                        old_uri: old_uri.clone(),
-                        new_uri: new_uri.clone(),
-                        options: None,
-                        annotation_id: None,
-                    },
-                )));
-            }
-
-            // Convert text edits to document changes. Rewrite URIs
-            // that fall inside a renamed directory.
-            for (uri, edits) in changes {
-                // A directory operation carries every file beneath it,
-                // so its edits have to follow.  The remainder has to
-                // start at a path separator or `src/Internal` would also
-                // claim `src/InternalOther/Thing.php`.  A per-file
-                // operation matches outright and leaves the remainder
-                // empty; a file no operation names keeps its own URI,
-                // which is what leaves a skipped file edited in place.
+            // A directory operation carries every file beneath it, so its
+            // edits have to follow.  The remainder has to start at a path
+            // separator or `src/Internal` would also claim
+            // `src/InternalOther/Thing.php`.  A per-file operation matches
+            // outright and leaves the remainder empty; a file no operation
+            // names keeps its own URI, which is what leaves a skipped file
+            // edited in place.
+            let edits = changes.into_iter().map(|(uri, edits)| {
                 let target_uri = ops
                     .iter()
                     .find_map(|(old_u, new_u)| {
@@ -263,29 +251,13 @@ impl Backend {
                         Url::parse(&format!("{}{}", new_u.as_str(), rest)).ok()
                     })
                     .unwrap_or(uri);
+                (target_uri, edits)
+            });
 
-                let text_doc_edit = TextDocumentEdit {
-                    text_document: OptionalVersionedTextDocumentIdentifier {
-                        uri: target_uri,
-                        version: None,
-                    },
-                    edits: edits.into_iter().map(OneOf::Left).collect(),
-                };
-                doc_ops.push(DocumentChangeOperation::Edit(text_doc_edit));
-            }
-
-            return Ok(Some(WorkspaceEdit {
-                changes: None,
-                document_changes: Some(DocumentChanges::Operations(doc_ops)),
-                change_annotations: None,
-            }));
+            return Ok(Some(document_changes_edit(renames, edits)));
         }
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
+        Ok(Some(multi_file_edit(changes)))
     }
 
     /// Collect text edits for `namespace` declaration lines where the
@@ -339,8 +311,15 @@ impl Backend {
         }
     }
 
-    /// Collect text edits for `use` statement lines that reference the
-    /// old namespace prefix.
+    /// Collect text edits for `use` statements that reference the old
+    /// namespace prefix.
+    ///
+    /// Reads each statement as a whole via [`scan_use_statements`], so a
+    /// plain import wrapped across several lines with no braces (legal
+    /// PHP, since whitespace between tokens is free) is not silently
+    /// skipped the way a per-line scan would miss it.
+    ///
+    /// [`scan_use_statements`]: crate::diagnostics::use_statements::scan_use_statements
     fn collect_use_statement_edits(
         &self,
         content: &str,
@@ -348,25 +327,19 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) {
+        use crate::diagnostics::use_statements::{scan_use_statements, use_statement_body};
+
         let old_prefix_lower = old_prefix.to_lowercase();
-        for (line_idx, line) in content.lines().enumerate() {
-            let trimmed = line.trim();
-            let Some(rest) = trimmed.strip_prefix("use ") else {
+        for stmt in scan_use_statements(content) {
+            let decl = &content[stmt.keyword_start..stmt.end];
+            let Some(body) = use_statement_body(decl) else {
                 continue;
             };
-            let rest = rest.trim();
-            // Handle `use function` and `use const` prefixes.
-            let rest = rest
-                .strip_prefix("function ")
-                .or_else(|| rest.strip_prefix("const "))
-                .unwrap_or(rest)
-                .trim();
-
-            let rest = rest.strip_suffix(';').unwrap_or(rest).trim();
+            let body_start = stmt.keyword_start + (decl.len() - body.len());
 
             // Handle group use: `use App\Old\{Foo, Bar};`
-            if let Some(brace_pos) = rest.find('{') {
-                let group_prefix = rest[..brace_pos].trim_end_matches('\\').trim();
+            if let Some(brace_pos) = body.find('{') {
+                let group_prefix = body[..brace_pos].trim_end_matches('\\').trim();
                 let group_lower = group_prefix.to_lowercase();
 
                 if group_lower == old_prefix_lower
@@ -378,9 +351,7 @@ impl Backend {
                         format!("{}{}", new_prefix, &group_prefix[old_prefix.len()..])
                     };
 
-                    let line_start_byte = line_start_byte_offset(content, line_idx);
-                    let prefix_offset_in_line = line.find(group_prefix).unwrap_or(0);
-                    let prefix_start = line_start_byte + prefix_offset_in_line;
+                    let prefix_start = body_start + body.find(group_prefix).unwrap_or(0);
                     let prefix_end = prefix_start + group_prefix.len();
 
                     edits.push(TextEdit {
@@ -395,11 +366,10 @@ impl Backend {
             }
 
             // Simple use: `use App\Old\Foo;` or `use App\Old\Foo as Bar;`
-            let (fqn_part, _alias_part) = if let Some(as_pos) = rest.find(" as ") {
-                (rest[..as_pos].trim(), Some(&rest[as_pos + 4..]))
-            } else {
-                (rest, None)
-            };
+            let rest = body.strip_suffix(';').unwrap_or(body).trim();
+            let fqn_part = rest
+                .find(" as ")
+                .map_or(rest, |as_pos| rest[..as_pos].trim());
 
             let fqn_lower = fqn_part.to_lowercase();
             if fqn_lower == old_prefix_lower
@@ -411,9 +381,7 @@ impl Backend {
                     format!("{}{}", new_prefix, &fqn_part[old_prefix.len()..])
                 };
 
-                let line_start_byte = line_start_byte_offset(content, line_idx);
-                let fqn_offset_in_line = line.find(fqn_part).unwrap_or(0);
-                let fqn_start = line_start_byte + fqn_offset_in_line;
+                let fqn_start = body_start + body.find(fqn_part).unwrap_or(0);
                 let fqn_end = fqn_start + fqn_part.len();
 
                 edits.push(TextEdit {

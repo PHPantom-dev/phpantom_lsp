@@ -104,7 +104,7 @@ pub(super) fn residual_warnings(
                      because nothing here resolves it to the symbol that moved.",
                     needle.text
                 ),
-                file: Some(super::relative_display(root, &hit.path)),
+                file: Some(super::run::relative_display(root, &hit.path)),
                 line: Some(hit.line),
             }
         })

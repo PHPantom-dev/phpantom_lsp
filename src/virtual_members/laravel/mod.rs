@@ -115,9 +115,10 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+pub(crate) mod file_contributions;
 mod folio;
 pub(crate) mod gates;
-mod helpers;
+pub(crate) mod helpers;
 mod higher_order_proxy;
 mod macros;
 mod model_extraction;
@@ -350,41 +351,20 @@ pub(crate) fn try_swap_custom_collection(
         Some(name) => name.to_string(),
         None => return cls,
     };
-    let model_class = find_class_in(all_classes, &model_name)
-        .cloned()
+    let model_class = crate::class_lookup::find_class_by_name(all_classes, &model_name)
+        .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
         .or_else(|| class_loader(&model_name).map(Arc::unwrap_or_clone));
 
     if let Some(ref mc) = model_class
         && let Some(coll_type) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
     {
         let coll_name = coll_type.to_string();
-        find_class_in(all_classes, &coll_name)
-            .cloned()
+        crate::class_lookup::find_class_by_name(all_classes, &coll_name)
+            .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
             .or_else(|| class_loader(&coll_name).map(Arc::unwrap_or_clone))
             .unwrap_or(cls)
     } else {
         cls
-    }
-}
-
-/// Find a class in a slice by name (short or FQN).
-///
-/// Minimal local lookup used by the collection-swap helper.  Prefers
-/// namespace-aware matching when the name contains backslashes.
-fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'a ClassInfo> {
-    let short = name.rsplit('\\').next().unwrap_or(name);
-
-    if name.contains('\\') {
-        let expected_ns = name.rsplit_once('\\').map(|(ns, _)| ns);
-        all_classes
-            .iter()
-            .find(|c| c.name == short && c.file_namespace.as_deref() == expected_ns)
-            .map(|c| c.as_ref())
-    } else {
-        all_classes
-            .iter()
-            .find(|c| c.name == short)
-            .map(|c| c.as_ref())
     }
 }
 

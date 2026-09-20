@@ -1198,6 +1198,23 @@ pub(crate) fn extract_string_literal<'c>(
     Some((&content[start..end], start, end))
 }
 
+/// [`extract_string_literal`] in the shape a span-emitting caller wants:
+/// the literal's content and the offset it starts at, as a `u32`.
+pub(crate) fn string_literal_at<'c>(
+    expr: &Expression<'_>,
+    content: &'c str,
+) -> Option<(&'c str, u32)> {
+    string_literal_at_range(expr, content).map(|(text, start, _)| (text, start))
+}
+
+/// [`string_literal_at`], with the offset the content ends at as well.
+pub(crate) fn string_literal_at_range<'c>(
+    expr: &Expression<'_>,
+    content: &'c str,
+) -> Option<(&'c str, u32, u32)> {
+    extract_string_literal(expr, content).map(|(text, start, end)| (text, start as u32, end as u32))
+}
+
 /// Walk statements, returning `Break` as soon as the visitor signals early exit.
 fn walk_stmt_exprs(
     stmt: &Statement<'_>,
@@ -1227,19 +1244,12 @@ fn walk_stmt_exprs(
         }
         Statement::If(if_stmt) => {
             walk_expr_depth(if_stmt.condition, f)?;
-            for s in if_stmt.body.statements() {
-                walk_stmt_exprs(s, f)?;
-            }
-            for stmts in if_stmt.body.else_if_statements() {
-                for s in stmts {
+            crate::parser::try_for_each_if_branch(if_stmt, |statements| {
+                for s in statements {
                     walk_stmt_exprs(s, f)?;
                 }
-            }
-            if let Some(else_stmts) = if_stmt.body.else_statements() {
-                for s in else_stmts {
-                    walk_stmt_exprs(s, f)?;
-                }
-            }
+                ControlFlow::Continue(())
+            })?;
         }
         Statement::While(w) => {
             walk_expr_depth(w.condition, f)?;

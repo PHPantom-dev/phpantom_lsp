@@ -22,7 +22,8 @@ use crate::code_actions::implement_methods::{
     native_param_hint,
 };
 use crate::php_type::PhpType;
-use crate::text_position::position_to_offset;
+use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_scan::{is_ident_byte, scan_ident_backward, skip_block_comment, skip_line_comment};
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, PhpVersion, PropertyInfo, PropertySource,
     Visibility,
@@ -49,25 +50,7 @@ pub(crate) fn collect_overridable_methods(
     partial: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<(MethodInfo, String, bool)> {
-    let own_names: HashSet<String> = class
-        .methods
-        .iter()
-        .map(|m| m.name.to_lowercase())
-        .collect();
-
-    let mut results: Vec<(MethodInfo, String, bool)> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-    let mut visited: HashSet<String> = HashSet::new();
-
-    let mut collector = MethodCollector {
-        partial,
-        class_loader,
-        own_names: &own_names,
-        seen: &mut seen,
-        visited: &mut visited,
-        results: &mut results,
-        from_own_trait: false,
-    };
+    let mut collector = OverrideCollector::<MethodInfo>::new(class, partial, class_loader);
 
     collector.collect_from_parent_chain(&class.parent_class, 0);
 
@@ -85,24 +68,152 @@ pub(crate) fn collect_overridable_methods(
     collector.from_own_trait = true;
     collector.collect_from_traits(&class.used_traits, 0);
 
-    results
+    collector.results
 }
 
-struct MethodCollector<'a> {
+/// One member kind's view of the classes an override collector walks.
+///
+/// The walk itself (parent chain, traits, interfaces, de-duplication
+/// against the editing class's own members and against members already
+/// collected from a nearer ancestor) is the same for methods,
+/// properties, and constants.  Only which members a class contributes,
+/// which of those can still be redeclared, and what gets recorded
+/// differ, so those three are all this trait carries.
+trait OverridableMember: Clone + Sized {
+    /// What the collector records for one accepted member.
+    type Row;
+
+    /// The members of `class` of this kind.
+    fn members(class: &ClassInfo) -> &[Arc<Self>];
+
+    fn name(&self) -> &str;
+
+    /// Whether the editing class can redeclare this member.
+    ///
+    /// `from_own_trait` is `true` while walking a trait the editing
+    /// class uses directly, where the trait's copy loses to the class's
+    /// own declaration.
+    fn is_overridable(&self, from_own_trait: bool) -> bool;
+
+    fn row(&self, declaring: &str, from_own_trait: bool) -> Self::Row;
+}
+
+impl OverridableMember for MethodInfo {
+    /// The bool (`skip_override_attr`) is `true` for methods that come
+    /// from a directly-used trait, where `#[\Override]` would be a
+    /// compile error.
+    type Row = (MethodInfo, String, bool);
+
+    fn members(class: &ClassInfo) -> &[Arc<Self>] {
+        &class.methods
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_overridable(&self, from_own_trait: bool) -> bool {
+        // A `final` method inherited through the parent chain cannot be
+        // redeclared at all; one reached via a directly-used trait can.
+        self.visibility != Visibility::Private
+            && !self.name.starts_with("__")
+            && !self.is_virtual
+            && (!self.is_final || from_own_trait)
+    }
+
+    fn row(&self, declaring: &str, from_own_trait: bool) -> Self::Row {
+        (self.clone(), declaring.to_string(), from_own_trait)
+    }
+}
+
+impl OverridableMember for PropertyInfo {
+    type Row = (PropertyInfo, String, bool);
+
+    fn members(class: &ClassInfo) -> &[Arc<Self>] {
+        &class.properties
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_overridable(&self, _from_own_trait: bool) -> bool {
+        self.visibility != Visibility::Private && !self.is_virtual
+    }
+
+    fn row(&self, declaring: &str, from_own_trait: bool) -> Self::Row {
+        (self.clone(), declaring.to_string(), from_own_trait)
+    }
+}
+
+impl OverridableMember for ConstantInfo {
+    type Row = (ConstantInfo, String);
+
+    fn members(class: &ClassInfo) -> &[Arc<Self>] {
+        &class.constants
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_overridable(&self, _from_own_trait: bool) -> bool {
+        self.visibility != Visibility::Private && !self.is_enum_case
+    }
+
+    fn row(&self, declaring: &str, _from_own_trait: bool) -> Self::Row {
+        (self.clone(), declaring.to_string())
+    }
+}
+
+/// Walks a class's ancestry collecting the members of one kind that the
+/// class can still declare itself.
+struct OverrideCollector<'a, M: OverridableMember> {
     partial: &'a str,
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own_names: &'a HashSet<String>,
-    seen: &'a mut HashSet<String>,
-    visited: &'a mut HashSet<String>,
-    results: &'a mut Vec<(MethodInfo, String, bool)>,
-    /// Whether the members currently being collected come from a trait the
-    /// editing class uses directly.  Such a method is redeclarable even when
-    /// `final` (the trait's copy loses to the class's own declaration), and
-    /// `#[\Override]` on it is a compile error.
+    /// Lowercased names the editing class already declares.
+    own_names: HashSet<String>,
+    /// Lowercased names already collected, so the nearest ancestor's
+    /// declaration wins.
+    seen: HashSet<String>,
+    /// Class-likes already walked, which also breaks inheritance cycles.
+    visited: HashSet<String>,
+    results: Vec<M::Row>,
+    /// Whether trait members count.  Traits could not declare constants
+    /// before PHP 8.2.
+    walk_traits: bool,
+    /// Whether interface members count.  A class may only redeclare an
+    /// interface constant from PHP 8.1, and interfaces cannot declare
+    /// properties at all.
+    walk_interfaces: bool,
+    /// Whether the members currently being collected come from a trait
+    /// the editing class uses directly.  Recorded on each row, since
+    /// `#[\Override]` on such a member is a compile error.
     from_own_trait: bool,
 }
 
-impl MethodCollector<'_> {
+impl<'a, M: OverridableMember> OverrideCollector<'a, M> {
+    fn new(
+        class: &ClassInfo,
+        partial: &'a str,
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        Self {
+            partial,
+            class_loader,
+            own_names: M::members(class)
+                .iter()
+                .map(|m| m.name().to_lowercase())
+                .collect(),
+            seen: HashSet::new(),
+            visited: HashSet::new(),
+            results: Vec::new(),
+            walk_traits: true,
+            walk_interfaces: true,
+            from_own_trait: false,
+        }
+    }
+
     fn collect_from_parent_chain(&mut self, parent_name: &Option<crate::atom::Atom>, depth: usize) {
         if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
             return;
@@ -128,7 +239,7 @@ impl MethodCollector<'_> {
     }
 
     fn collect_from_traits(&mut self, traits: &[crate::atom::Atom], depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+        if !self.walk_traits || depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
             return;
         }
         for tname in traits {
@@ -144,7 +255,7 @@ impl MethodCollector<'_> {
     }
 
     fn collect_from_interface(&mut self, iface_name: &str, depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
+        if !self.walk_interfaces || depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
             return;
         }
         if !self.visited.insert(iface_name.to_string()) {
@@ -161,32 +272,21 @@ impl MethodCollector<'_> {
 
     fn push_from_class(&mut self, class: &ClassInfo) {
         let declaring = class.fqn().to_string();
-        for method in &class.methods {
-            if method.visibility == Visibility::Private {
-                continue;
-            }
-            if method.name.starts_with("__") {
-                continue;
-            }
-            if method.is_virtual {
-                continue;
-            }
-            // A `final` method inherited through the parent chain cannot be
-            // redeclared at all; one reached via a directly-used trait can.
-            if method.is_final && !self.from_own_trait {
+        for member in M::members(class) {
+            if !member.is_overridable(self.from_own_trait) {
                 continue;
             }
             if !self.partial.is_empty()
-                && !starts_with_ignore_ascii_case(&method.name, self.partial)
+                && !starts_with_ignore_ascii_case(member.name(), self.partial)
             {
                 continue;
             }
-            let lower = method.name.to_lowercase();
+            let lower = member.name().to_lowercase();
             if self.own_names.contains(&lower) || !self.seen.insert(lower) {
                 continue;
             }
             self.results
-                .push(((**method).clone(), declaring.clone(), self.from_own_trait));
+                .push(member.row(&declaring, self.from_own_trait));
         }
     }
 }
@@ -203,6 +303,27 @@ pub(crate) struct OverrideCompletionOpts<'a> {
     /// than only the member name.  Used at the class-body root where the
     /// user has not typed any modifier yet.
     pub include_declaration: bool,
+}
+
+/// The `#[\Override]` insertion edit an override completion adds above
+/// its declaration, once the target PHP version supports the attribute
+/// for the member kind being overridden — `None` below that version.
+///
+/// Shared by the method, property, and constant builders, which only
+/// differ in which version threshold they gate on.
+fn override_attribute_edit(
+    php_version: PhpVersion,
+    min_version: PhpVersion,
+    line_start: Position,
+    indent: &str,
+) -> Option<TextEdit> {
+    (php_version >= min_version).then(|| TextEdit {
+        range: Range {
+            start: line_start,
+            end: line_start,
+        },
+        new_text: format!("{indent}#[\\Override]\n"),
+    })
 }
 
 fn visibility_keyword(visibility: Visibility) -> &'static str {
@@ -223,17 +344,12 @@ pub(crate) fn build_override_completions(
     methods: &[(MethodInfo, String, bool)],
     opts: &OverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= METHOD_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        METHOD_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
 
     let mut items = Vec::new();
     for (method, declaring, skip_override_attr) in methods {
@@ -397,114 +513,16 @@ pub(crate) fn collect_overridable_properties(
     partial: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<(PropertyInfo, String, bool)> {
-    let own: HashSet<String> = class
-        .properties
-        .iter()
-        .map(|p| p.name.to_lowercase())
-        .collect();
+    let mut collector = OverrideCollector::<PropertyInfo>::new(class, partial, class_loader);
+    // Interfaces cannot declare properties.
+    collector.walk_interfaces = false;
 
-    let mut results = Vec::new();
-    let mut seen = HashSet::new();
-    let mut visited = HashSet::new();
-    let mut parent_name = class.parent_class;
-    let mut depth = 0usize;
-    while let Some(ref pname) = parent_name {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            break;
-        }
-        if !visited.insert(pname.to_string()) {
-            break;
-        }
-        let Some(parent) = class_loader(pname) else {
-            break;
-        };
-        let declaring = parent.fqn().to_string();
-        for prop in &parent.properties {
-            if prop.visibility == Visibility::Private || prop.is_virtual {
-                continue;
-            }
-            if !partial.is_empty() && !starts_with_ignore_ascii_case(&prop.name, partial) {
-                continue;
-            }
-            let lower = prop.name.to_lowercase();
-            if own.contains(&lower) || !seen.insert(lower) {
-                continue;
-            }
-            results.push(((**prop).clone(), declaring.clone(), false));
-        }
-        let mut collector = PropertyCollector {
-            partial,
-            class_loader,
-            own: &own,
-            seen: &mut seen,
-            visited: &mut visited,
-            results: &mut results,
-            skip_override_attr: false,
-        };
-        collector.collect_from_traits(&parent.used_traits, depth + 1);
-        parent_name = parent.parent_class;
-        depth += 1;
-    }
+    collector.collect_from_parent_chain(&class.parent_class, 0);
 
-    let mut collector = PropertyCollector {
-        partial,
-        class_loader,
-        own: &own,
-        seen: &mut seen,
-        visited: &mut visited,
-        results: &mut results,
-        skip_override_attr: true,
-    };
+    collector.from_own_trait = true;
     collector.collect_from_traits(&class.used_traits, 0);
 
-    results
-}
-
-struct PropertyCollector<'a> {
-    partial: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own: &'a HashSet<String>,
-    seen: &'a mut HashSet<String>,
-    visited: &'a mut HashSet<String>,
-    results: &'a mut Vec<(PropertyInfo, String, bool)>,
-    skip_override_attr: bool,
-}
-
-impl PropertyCollector<'_> {
-    fn collect_from_traits(&mut self, traits: &[crate::atom::Atom], depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            return;
-        }
-        for tname in traits {
-            if !self.visited.insert(tname.to_string()) {
-                continue;
-            }
-            let Some(tr) = (self.class_loader)(tname) else {
-                continue;
-            };
-            self.push_from_trait(&tr);
-            self.collect_from_traits(&tr.used_traits, depth + 1);
-        }
-    }
-
-    fn push_from_trait(&mut self, tr: &ClassInfo) {
-        let declaring = tr.fqn().to_string();
-        for prop in &tr.properties {
-            if prop.visibility == Visibility::Private || prop.is_virtual {
-                continue;
-            }
-            if !self.partial.is_empty() && !starts_with_ignore_ascii_case(&prop.name, self.partial)
-            {
-                continue;
-            }
-            let lower = prop.name.to_lowercase();
-            if self.own.contains(&lower) || !self.seen.insert(lower) {
-                continue;
-            }
-            self.results
-                .push(((**prop).clone(), declaring.clone(), self.skip_override_attr));
-        }
-    }
+    collector.results
 }
 
 /// Collect public/protected constants the class can still redeclare, from
@@ -519,116 +537,18 @@ pub(crate) fn collect_overridable_constants(
     php_version: PhpVersion,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<(ConstantInfo, String)> {
-    let own: HashSet<String> = class
-        .constants
-        .iter()
-        .map(|c| c.name.to_lowercase())
-        .collect();
+    let mut collector = OverrideCollector::<ConstantInfo>::new(class, partial, class_loader);
+    collector.walk_traits = php_version >= TRAIT_CONST_MIN;
+    collector.walk_interfaces = php_version >= INTERFACE_CONST_OVERRIDE_MIN;
 
-    let mut collector = ConstantCollector {
-        partial,
-        class_loader,
-        own: &own,
-        seen: HashSet::new(),
-        visited: HashSet::new(),
-        results: Vec::new(),
-    };
+    collector.collect_from_parent_chain(&class.parent_class, 0);
 
-    let mut parent_name = class.parent_class;
-    let mut depth = 0usize;
-    while let Some(ref pname) = parent_name {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            break;
-        }
-        if !collector.visited.insert(pname.to_string()) {
-            break;
-        }
-        let Some(parent) = class_loader(pname) else {
-            break;
-        };
-        collector.push_from(&parent);
-        if php_version >= INTERFACE_CONST_OVERRIDE_MIN {
-            for iface in &parent.interfaces {
-                collector.collect_from_interface(iface, depth + 1);
-            }
-        }
-        if php_version >= TRAIT_CONST_MIN {
-            collector.collect_from_traits(&parent.used_traits, depth + 1);
-        }
-        parent_name = parent.parent_class;
-        depth += 1;
+    for iface in &class.interfaces {
+        collector.collect_from_interface(iface, 0);
     }
-
-    if php_version >= INTERFACE_CONST_OVERRIDE_MIN {
-        for iface in &class.interfaces {
-            collector.collect_from_interface(iface, 0);
-        }
-    }
-    if php_version >= TRAIT_CONST_MIN {
-        collector.collect_from_traits(&class.used_traits, 0);
-    }
+    collector.collect_from_traits(&class.used_traits, 0);
 
     collector.results
-}
-
-struct ConstantCollector<'a> {
-    partial: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    own: &'a HashSet<String>,
-    seen: HashSet<String>,
-    visited: HashSet<String>,
-    results: Vec<(ConstantInfo, String)>,
-}
-
-impl ConstantCollector<'_> {
-    fn push_from(&mut self, owner: &ClassInfo) {
-        let declaring = owner.fqn().to_string();
-        for c in &owner.constants {
-            if c.visibility == Visibility::Private || c.is_enum_case {
-                continue;
-            }
-            if !self.partial.is_empty() && !starts_with_ignore_ascii_case(&c.name, self.partial) {
-                continue;
-            }
-            let lower = c.name.to_lowercase();
-            if self.own.contains(&lower) || !self.seen.insert(lower) {
-                continue;
-            }
-            self.results.push(((**c).clone(), declaring.clone()));
-        }
-    }
-
-    fn collect_from_interface(&mut self, iface_name: &str, depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            return;
-        }
-        if !self.visited.insert(iface_name.to_string()) {
-            return;
-        }
-        let Some(iface) = (self.class_loader)(iface_name) else {
-            return;
-        };
-        self.push_from(&iface);
-        for parent_iface in &iface.interfaces {
-            self.collect_from_interface(parent_iface, depth + 1);
-        }
-    }
-
-    fn collect_from_traits(&mut self, traits: &[crate::atom::Atom], depth: usize) {
-        if depth > crate::types::MAX_INHERITANCE_DEPTH as usize {
-            return;
-        }
-        for tname in traits {
-            if !self.visited.insert(tname.to_string()) {
-                continue;
-            }
-            let Some(tr) = (self.class_loader)(tname) else {
-                continue;
-            };
-            self.push_from(&tr);
-            self.collect_from_traits(&tr.used_traits, depth + 1);
-        }
-    }
 }
 
 /// Build property-name override completions (`$title` already typed `$`).
@@ -639,17 +559,12 @@ pub(crate) fn build_property_override_completions(
     props: &[(PropertyInfo, String, bool)],
     opts: &NameOverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= PROPERTY_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        PROPERTY_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
     let mut items = Vec::new();
     for (prop, declaring, skip_override_attr) in props {
         let type_str = prop
@@ -680,42 +595,91 @@ pub(crate) fn build_property_override_completions(
                 visibility_keyword(prop.visibility)
             );
         }
-        let label = match (&type_str, default) {
-            (Some(t), Some(d)) => format!("${}: {} = {}", prop.name, t, d),
-            (Some(t), None) => format!("${}: {}", prop.name, t),
-            (None, Some(d)) => format!("${} = {}", prop.name, d),
-            (None, None) => format!("${}", prop.name),
-        };
-        let detail_kind = if *skip_override_attr {
-            "trait"
-        } else {
-            "override"
-        };
-        items.push(CompletionItem {
-            label,
-            kind: Some(CompletionItemKind::PROPERTY),
-            detail: Some(format!("{detail_kind} · {}", short_name(declaring))),
-            filter_text: Some(prop.name.to_string()),
-            sort_text: Some(format!("0_{}", prop.name.to_ascii_lowercase())),
-            insert_text: Some(insert.clone()),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                range: opts.replace_range,
-                new_text: insert,
-            })),
-            additional_text_edits: if *skip_override_attr {
-                None
-            } else {
-                override_edit.clone().map(|e| vec![e])
+        items.push(build_name_override_item(
+            NameOverrideItem {
+                name: &prop.name,
+                sigil: "$",
+                type_str: type_str.as_deref(),
+                default,
+                declaring,
+                kind: CompletionItemKind::PROPERTY,
+                detail_kind: if *skip_override_attr {
+                    "trait"
+                } else {
+                    "override"
+                },
+                insert,
+                // A trait property is not overridden, so `#[\Override]`
+                // on the redeclaration would be a compile error.
+                override_edit: if *skip_override_attr {
+                    None
+                } else {
+                    override_edit.clone()
+                },
             },
-            label_details: Some(CompletionItemLabelDetails {
-                detail: None,
-                description: Some(short_name(declaring).to_string()),
-            }),
-            ..CompletionItem::default()
-        });
+            opts.replace_range,
+        ));
     }
     items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     items
+}
+
+/// A name-style override completion: a property or a constant, which
+/// differ only in the sigil their label carries, the item kind, and how
+/// their declaration is spelled.  Methods are not one of these — their
+/// item is a multi-line snippet with a parameter list.
+struct NameOverrideItem<'a> {
+    /// Member name, without the `$` a property label carries.
+    name: &'a str,
+    /// `"$"` for a property, empty for a constant.
+    sigil: &'a str,
+    type_str: Option<&'a str>,
+    default: Option<&'a str>,
+    declaring: &'a str,
+    kind: CompletionItemKind,
+    /// The word before the declaring class on the item's detail line.
+    detail_kind: &'a str,
+    /// The text to insert, already spelled for the cursor position.
+    insert: String,
+    override_edit: Option<TextEdit>,
+}
+
+fn build_name_override_item(item: NameOverrideItem<'_>, replace_range: Range) -> CompletionItem {
+    let NameOverrideItem {
+        name,
+        sigil,
+        type_str,
+        default,
+        declaring,
+        kind,
+        detail_kind,
+        insert,
+        override_edit,
+    } = item;
+    let label = match (type_str, default) {
+        (Some(t), Some(d)) => format!("{sigil}{name}: {t} = {d}"),
+        (Some(t), None) => format!("{sigil}{name}: {t}"),
+        (None, Some(d)) => format!("{sigil}{name} = {d}"),
+        (None, None) => format!("{sigil}{name}"),
+    };
+    CompletionItem {
+        label,
+        kind: Some(kind),
+        detail: Some(format!("{detail_kind} · {}", short_name(declaring))),
+        filter_text: Some(name.to_string()),
+        sort_text: Some(format!("0_{}", name.to_ascii_lowercase())),
+        insert_text: Some(insert.clone()),
+        text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+            range: replace_range,
+            new_text: insert,
+        })),
+        additional_text_edits: override_edit.map(|e| vec![e]),
+        label_details: Some(CompletionItemLabelDetails {
+            detail: None,
+            description: Some(short_name(declaring).to_string()),
+        }),
+        ..CompletionItem::default()
+    }
 }
 
 fn property_default_value(prop: &PropertyInfo) -> Option<&str> {
@@ -746,17 +710,12 @@ pub(crate) fn build_constant_override_completions(
     constants: &[(ConstantInfo, String)],
     opts: &NameOverrideCompletionOpts<'_>,
 ) -> Vec<CompletionItem> {
-    let override_edit = if opts.php_version >= CONSTANT_OVERRIDE_ATTR_MIN {
-        Some(TextEdit {
-            range: Range {
-                start: opts.line_start,
-                end: opts.line_start,
-            },
-            new_text: format!("{}#[\\Override]\n", opts.indent),
-        })
-    } else {
-        None
-    };
+    let override_edit = override_attribute_edit(
+        opts.php_version,
+        CONSTANT_OVERRIDE_ATTR_MIN,
+        opts.line_start,
+        opts.indent,
+    );
     let mut items = Vec::new();
     for (c, declaring) in constants {
         let type_str = c
@@ -790,30 +749,20 @@ pub(crate) fn build_constant_override_completions(
                 ),
             };
         }
-        let label = match (&type_str, default) {
-            (Some(t), Some(d)) => format!("{}: {} = {}", c.name, t, d),
-            (Some(t), None) => format!("{}: {}", c.name, t),
-            (None, Some(d)) => format!("{} = {}", c.name, d),
-            (None, None) => c.name.to_string(),
-        };
-        items.push(CompletionItem {
-            label,
-            kind: Some(CompletionItemKind::CONSTANT),
-            detail: Some(format!("override · {}", short_name(declaring))),
-            filter_text: Some(c.name.to_string()),
-            sort_text: Some(format!("0_{}", c.name.to_ascii_lowercase())),
-            insert_text: Some(insert.clone()),
-            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                range: opts.replace_range,
-                new_text: insert,
-            })),
-            additional_text_edits: override_edit.clone().map(|e| vec![e]),
-            label_details: Some(CompletionItemLabelDetails {
-                detail: None,
-                description: Some(short_name(declaring).to_string()),
-            }),
-            ..CompletionItem::default()
-        });
+        items.push(build_name_override_item(
+            NameOverrideItem {
+                name: &c.name,
+                sigil: "",
+                type_str: type_str.as_deref(),
+                default,
+                declaring,
+                kind: CompletionItemKind::CONSTANT,
+                detail_kind: "override",
+                insert,
+                override_edit: override_edit.clone(),
+            },
+            opts.replace_range,
+        ));
     }
     items.sort_by(|a, b| a.sort_text.cmp(&b.sort_text));
     items
@@ -860,26 +809,6 @@ pub(crate) fn extract_method_name_partial(
     ))
 }
 
-fn offset_to_position(content: &str, byte_offset: usize) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i >= byte_offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
-    }
-    Position {
-        line,
-        character: col,
-    }
-}
-
 /// Whether the cursor is after the `function` keyword (not `const`/`case`).
 pub(crate) fn is_after_function_keyword(content: &str, position: Position) -> bool {
     after_keyword(content, position, "function")
@@ -889,10 +818,7 @@ pub(crate) fn is_after_function_keyword(content: &str, position: Position) -> bo
 pub(crate) fn is_after_const_keyword(content: &str, position: Position) -> bool {
     let bytes = content.as_bytes();
     let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
@@ -905,18 +831,11 @@ pub(crate) fn is_after_const_keyword(content: &str, position: Position) -> bool 
 fn after_keyword(content: &str, position: Position, keyword: &str) -> bool {
     let bytes = content.as_bytes();
     let cursor = (position_to_offset(content, position) as usize).min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }
     check_keyword_ending_at_bytes(bytes, i, keyword.as_bytes())
-}
-
-fn is_ident_byte(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_'
 }
 
 fn check_keyword_ending_at_bytes(bytes: &[u8], pos: usize, keyword: &[u8]) -> bool {
@@ -1052,7 +971,7 @@ pub(crate) fn is_class_body_member_start(content: &str, body_start: usize, curso
                 continue;
             }
             b'\'' | b'"' => {
-                let end = skip_quoted(bytes, i);
+                let end = crate::text_scan::skip_string_forward(bytes, i);
                 if end > cursor {
                     return false;
                 }
@@ -1113,31 +1032,8 @@ pub(crate) fn is_class_body_member_start(content: &str, body_start: usize, curso
 pub(crate) fn class_body_partial_starts_with_dollar(content: &str, cursor: usize) -> bool {
     let bytes = content.as_bytes();
     let cursor = cursor.min(bytes.len());
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let i = scan_ident_backward(bytes, cursor);
     i > 0 && bytes[i - 1] == b'$'
-}
-
-/// Offset just past the end of the `//` or `#` comment starting at `i`.
-fn skip_line_comment(bytes: &[u8], i: usize) -> usize {
-    match bytes[i..].iter().position(|&b| b == b'\n') {
-        Some(n) => i + n + 1,
-        None => bytes.len(),
-    }
-}
-
-/// Offset just past the end of the `/* … */` comment starting at `i`.
-fn skip_block_comment(bytes: &[u8], i: usize) -> usize {
-    let mut k = i + 2;
-    while k + 1 < bytes.len() {
-        if bytes[k] == b'*' && bytes[k + 1] == b'/' {
-            return k + 2;
-        }
-        k += 1;
-    }
-    bytes.len()
 }
 
 /// Offset just past the closing `]` of the `#[…]` attribute at `i`,
@@ -1148,7 +1044,7 @@ fn skip_attribute(bytes: &[u8], i: usize) -> usize {
     while k < bytes.len() {
         match bytes[k] {
             b'\'' | b'"' => {
-                k = skip_quoted(bytes, k);
+                k = crate::text_scan::skip_string_forward(bytes, k);
                 continue;
             }
             b'[' => brackets += 1,
@@ -1158,21 +1054,6 @@ fn skip_attribute(bytes: &[u8], i: usize) -> usize {
                     return k + 1;
                 }
             }
-            _ => {}
-        }
-        k += 1;
-    }
-    bytes.len()
-}
-
-/// Offset just past the closing quote of the string literal at `i`.
-fn skip_quoted(bytes: &[u8], i: usize) -> usize {
-    let quote = bytes[i];
-    let mut k = i + 1;
-    while k < bytes.len() {
-        match bytes[k] {
-            b'\\' => k += 1,
-            b if b == quote => return k + 1,
             _ => {}
         }
         k += 1;
@@ -1236,10 +1117,7 @@ pub(crate) fn is_member_declaration_name_position_at_offset(content: &str, curso
 }
 
 fn is_function_or_const_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let mut i = scan_ident_backward(bytes, cursor);
 
     let after_ident = i;
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
@@ -1305,10 +1183,7 @@ fn brace_opens_enum(bytes: &[u8], brace_pos: usize) -> bool {
 
 fn is_property_declaration_name_position_at_offset(bytes: &[u8], cursor: usize) -> bool {
     // Skip partial name.
-    let mut i = cursor;
-    while i > 0 && is_ident_byte(bytes[i - 1]) {
-        i -= 1;
-    }
+    let i = scan_ident_backward(bytes, cursor);
     // Must be immediately after `$`.
     if i == 0 || bytes[i - 1] != b'$' {
         return false;

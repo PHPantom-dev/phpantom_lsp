@@ -3,7 +3,7 @@
 //! checkout or `composer` run), the server must refresh its indexes so
 //! completion, definition, etc. reflect the new state on disk.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{complete_at, create_psr4_workspace};
 use phpantom_lsp::Backend;
 use std::fs;
 use tower_lsp::LanguageServer;
@@ -13,45 +13,6 @@ const COMPOSER_JSON: &str = r#"{
     "name": "test/project",
     "autoload": { "psr-4": { "App\\": "app/" } }
 }"#;
-
-/// Open a consuming file and request class-name completion at a position.
-async fn complete_at(
-    backend: &Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
 
 /// FQNs of completion items (stored in the `detail` field).
 fn fqns(items: &[CompletionItem]) -> Vec<String> {

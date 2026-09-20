@@ -206,18 +206,14 @@ impl Backend {
                         seen_fqns.insert(fqn.clone());
 
                         ranked.push(RankedSymbol {
-                            symbol: SymbolInformation {
-                                name: fqn.clone(),
+                            symbol: make_symbol(
+                                fqn.clone(),
                                 kind,
                                 tags,
-                                deprecated: None,
-                                location: Location {
-                                    uri: Url::parse(file_uri)
-                                        .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                                    range: Range::new(pos, pos),
-                                },
-                                container_name: class.file_namespace.map(|a| a.to_string()),
-                            },
+                                file_uri,
+                                pos,
+                                class.file_namespace.map(|a| a.to_string()),
+                            ),
                             tier,
                         });
                     }
@@ -245,18 +241,14 @@ impl Backend {
                             .map(|_| vec![SymbolTag::DEPRECATED]);
 
                         ranked.push(RankedSymbol {
-                            symbol: SymbolInformation {
-                                name: format!("{}::{}", fqn, method.name),
-                                kind: SymbolKind::METHOD,
+                            symbol: make_symbol(
+                                format!("{}::{}", fqn, method.name),
+                                SymbolKind::METHOD,
                                 tags,
-                                deprecated: None,
-                                location: Location {
-                                    uri: Url::parse(file_uri)
-                                        .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                                    range: Range::new(pos, pos),
-                                },
-                                container_name: Some(fqn.clone()),
-                            },
+                                file_uri,
+                                pos,
+                                Some(fqn.clone()),
+                            ),
                             tier,
                         });
                     }
@@ -287,18 +279,14 @@ impl Backend {
                             .map(|_| vec![SymbolTag::DEPRECATED]);
 
                         ranked.push(RankedSymbol {
-                            symbol: SymbolInformation {
-                                name: format!("{}::${}", fqn, prop.name),
-                                kind: SymbolKind::PROPERTY,
+                            symbol: make_symbol(
+                                format!("{}::${}", fqn, prop.name),
+                                SymbolKind::PROPERTY,
                                 tags,
-                                deprecated: None,
-                                location: Location {
-                                    uri: Url::parse(file_uri)
-                                        .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                                    range: Range::new(pos, pos),
-                                },
-                                container_name: Some(fqn.clone()),
-                            },
+                                file_uri,
+                                pos,
+                                Some(fqn.clone()),
+                            ),
                             tier,
                         });
                     }
@@ -332,18 +320,14 @@ impl Backend {
                         };
 
                         ranked.push(RankedSymbol {
-                            symbol: SymbolInformation {
-                                name: format!("{}::{}", fqn, constant.name),
+                            symbol: make_symbol(
+                                format!("{}::{}", fqn, constant.name),
                                 kind,
                                 tags,
-                                deprecated: None,
-                                location: Location {
-                                    uri: Url::parse(file_uri)
-                                        .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                                    range: Range::new(pos, pos),
-                                },
-                                container_name: Some(fqn.clone()),
-                            },
+                                file_uri,
+                                pos,
+                                Some(fqn.clone()),
+                            ),
                             tier,
                         });
                     }
@@ -390,18 +374,14 @@ impl Backend {
                     .map(|_| vec![SymbolTag::DEPRECATED]);
 
                 ranked.push(RankedSymbol {
-                    symbol: SymbolInformation {
-                        name: display_name,
-                        kind: SymbolKind::FUNCTION,
+                    symbol: make_symbol(
+                        display_name,
+                        SymbolKind::FUNCTION,
                         tags,
-                        deprecated: None,
-                        location: Location {
-                            uri: Url::parse(file_uri)
-                                .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                            range: Range::new(pos, pos),
-                        },
-                        container_name: func.namespace.clone(),
-                    },
+                        file_uri,
+                        pos,
+                        func.namespace.clone(),
+                    ),
                     tier,
                 });
             }
@@ -499,18 +479,7 @@ impl Backend {
                 seen_fqns.insert(fqn.to_owned());
 
                 ranked.push(RankedSymbol {
-                    symbol: SymbolInformation {
-                        name: fqn.to_owned(),
-                        kind,
-                        tags,
-                        deprecated: None,
-                        location: Location {
-                            uri: Url::parse(file_uri)
-                                .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
-                            range: Range::new(pos, pos),
-                        },
-                        container_name,
-                    },
+                    symbol: make_symbol(fqn.to_owned(), kind, tags, file_uri, pos, container_name),
                     tier,
                 });
             }
@@ -534,25 +503,27 @@ impl Backend {
                     None => continue,
                 };
 
-                let uri = match Url::parse(file_uri) {
-                    Ok(u) => u,
-                    Err(_) => continue,
-                };
+                // A classmap entry whose path will not parse as a URI
+                // names nothing an editor could open, so it is dropped
+                // rather than listed at a placeholder location.
+                if Url::parse(file_uri).is_err() {
+                    continue;
+                }
 
                 seen_fqns.insert(fqn.to_owned());
 
+                // A class known only from the Composer classmap has not
+                // been parsed, so the file's start is all the position
+                // there is to offer.
                 ranked.push(RankedSymbol {
-                    symbol: SymbolInformation {
-                        name: fqn.to_owned(),
-                        kind: SymbolKind::CLASS,
-                        tags: None,
-                        deprecated: None,
-                        location: Location {
-                            uri,
-                            range: Range::new(Position::new(0, 0), Position::new(0, 0)),
-                        },
-                        container_name: namespace_from_fqn(fqn),
-                    },
+                    symbol: make_symbol(
+                        fqn.to_owned(),
+                        SymbolKind::CLASS,
+                        None,
+                        file_uri,
+                        Position::new(0, 0),
+                        namespace_from_fqn(fqn),
+                    ),
                     tier,
                 });
             }
@@ -595,21 +566,45 @@ fn namespace_from_fqn(fqn: &str) -> Option<String> {
     fqn.rfind('\\').map(|i| fqn[..i].to_string())
 }
 
-/// Build a `SymbolInformation` for a global constant.
+/// Build a `SymbolInformation` pointing at one position in a file.
+///
+/// Every workspace symbol is a point rather than a span: the editor's
+/// symbol list shows the name and jumps to where it is declared, so the
+/// range is the declaration's own offset twice over. A URI that will not
+/// parse yields a placeholder rather than dropping the symbol, so a
+/// malformed entry costs the one result instead of the whole answer.
 #[allow(deprecated)] // SymbolInformation::deprecated is deprecated in the LSP types crate
-fn make_constant_symbol(name: &str, info: &DefineInfo, pos: Position) -> SymbolInformation {
+fn make_symbol(
+    name: String,
+    kind: SymbolKind,
+    tags: Option<Vec<SymbolTag>>,
+    file_uri: &str,
+    pos: Position,
+    container_name: Option<String>,
+) -> SymbolInformation {
     SymbolInformation {
-        name: name.to_string(),
-        kind: SymbolKind::CONSTANT,
-        tags: None,
+        name,
+        kind,
+        tags,
         deprecated: None,
         location: Location {
-            uri: Url::parse(&info.file_uri)
-                .unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
+            uri: Url::parse(file_uri).unwrap_or_else(|_| Url::parse("file:///unknown").unwrap()),
             range: Range::new(pos, pos),
         },
-        container_name: namespace_from_fqn(name),
+        container_name,
     }
+}
+
+/// Build a `SymbolInformation` for a global constant.
+fn make_constant_symbol(name: &str, info: &DefineInfo, pos: Position) -> SymbolInformation {
+    make_symbol(
+        name.to_string(),
+        SymbolKind::CONSTANT,
+        None,
+        &info.file_uri,
+        pos,
+        namespace_from_fqn(name),
+    )
 }
 
 #[cfg(test)]

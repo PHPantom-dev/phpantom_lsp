@@ -220,6 +220,7 @@ mod argument_count;
 mod blade_call_site;
 mod blade_component_tags;
 mod blade_directives;
+mod blade_imbalance;
 mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
@@ -228,6 +229,7 @@ pub(crate) mod cross_file;
 mod deprecated;
 mod docblock_native_mismatch;
 mod enum_errors;
+pub(crate) mod existence_guards;
 mod external;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
@@ -254,6 +256,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
+pub(crate) mod use_statements;
 pub(crate) mod workspace;
 
 use std::sync::Arc;
@@ -262,6 +265,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::type_engine::resolver::LendsLoaders;
 
 /// Callback invoked after each Phase 2 collector in
 /// [`Backend::collect_slow_diagnostics_observed`]: receives the
@@ -445,22 +449,13 @@ impl Backend {
 
         if let Some(ctx) = &file_ctx {
             let class_loader = self.class_loader(&ctx.file);
-            let function_loader_cl = self.function_loader(&ctx.file);
-            let constant_loader_cl = self.constant_loader(&ctx.file);
-            let config_resolver = |key: &str| self.resolve_config_type(key);
-            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-            let loaders = crate::type_engine::resolver::Loaders {
-                function_loader: Some(&function_loader_cl),
-                constant_loader: Some(&constant_loader_cl),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let owned_loaders = self.diagnostic_loaders(&ctx.file);
             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
                 &class_loader,
                 Some(self),
-                loaders,
+                owned_loaders.loaders(),
                 Some(&self.resolved_class_cache),
             );
         }
@@ -1089,8 +1084,8 @@ impl Backend {
         // A Blade file's symbol map is built from the preprocessed virtual
         // PHP, so every offset in it — including the subject's — indexes that
         // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php(uri);
-        let content = virtual_php.as_deref().unwrap_or(content);
+        let virtual_php = self.blade_virtual_php_arc(uri);
+        let content = virtual_php.as_ref().map_or(content, |php| php.as_str());
 
         let (subject_text, is_static) = {
             let maps = self.symbol_maps.read();
@@ -1098,12 +1093,10 @@ impl Backend {
             // The subject is stored as a range into the text the map was
             // built from, so a map built from older text would slice the
             // wrong bytes (or none at all).
-            if !map.matches_source(content) {
-                return None;
-            }
+            let source = map.source(content)?;
             let subject = map.gate_subject(span_start)?;
             (
-                subject.subject_text.as_str(content).to_string(),
+                subject.subject_text.as_str(source).to_string(),
                 subject.is_static,
             )
         };
@@ -1138,10 +1131,6 @@ impl Backend {
 
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
-
-/// How long to wait for a client to acknowledge a diagnostic refresh
-/// before giving up on it.
-const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Backend {
     /// Deliver diagnostics for a single file.
@@ -1181,9 +1170,8 @@ impl Backend {
             let content = content.to_string();
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_fast_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1220,9 +1208,8 @@ impl Backend {
                     &backend.resolved_class_cache,
                 );
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_slow_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_slow_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1446,20 +1433,34 @@ impl Backend {
     /// directly.  LSP has no per-document refresh, so this invalidates
     /// the client's whole workspace result set: only call it when
     /// something actually changed (see [`Self::assemble_and_push`]).
+    ///
+    /// The refresh is signalled to a pump task rather than sent here.
+    /// `workspace/diagnostic/refresh` is a server-to-client *request*,
+    /// and tower-lsp panics the serve loop — killing the whole server —
+    /// if the client's response arrives after the future awaiting it was
+    /// dropped, so it must never be raced against a timeout or awaited
+    /// from anything cancellable.  The pump owns each request from send
+    /// to response; callers return immediately, a busy client parks
+    /// nothing but the pump itself, and signals landing while a refresh
+    /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
         if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
             return;
         }
-        if let Some(client) = &self.client {
-            // A server-to-client request, so a client that is busy (or
-            // that never answers at all) would otherwise park this task
-            // indefinitely, and the background workspace pass awaits
-            // this as it streams results.  A refresh is best-effort
-            // (the editor re-pulls on its own schedule too), so timing
-            // out costs nothing.
-            let _ =
-                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
+        let Some(client) = &self.client else {
+            return;
+        };
+        if !self.diag.refresh_pump_started.swap(true, Ordering::AcqRel) {
+            let client = client.clone();
+            let notify = std::sync::Arc::clone(&self.diag.refresh_notify);
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    let _ = client.workspace_diagnostic_refresh().await;
+                }
+            });
         }
+        self.diag.refresh_notify.notify_one();
     }
 
     /// Assemble a URI's diagnostics and ask the editor to re-pull when
@@ -1790,24 +1791,11 @@ impl Backend {
         // Always push empty diagnostics to clear any Phase 1 snapshot.
         client.publish_diagnostics(uri, Vec::new(), None).await;
 
-        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            // Tell the editor to re-pull diagnostics.  We spawn this
-            // as a detached task instead of awaiting it because
-            // workspace_diagnostic_refresh is a server-to-client
-            // *request* that blocks until the client responds.  When
-            // the editor closes many files in a burst, each didClose
-            // handler would await a response while the client is busy
-            // sending more messages, deadlocking the tower-lsp
-            // service loop.  The detached task still gets the same cap
-            // as `request_diagnostic_refresh`, so a client that never
-            // answers leaves no task parked for the session.
-            let client = client.clone();
-            tokio::spawn(async move {
-                let _ =
-                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
-                        .await;
-            });
-        }
+        // Tell the editor to re-pull diagnostics.  Signalling the pump
+        // returns immediately, so a burst of didClose notifications
+        // cannot deadlock the service loop the way awaiting each
+        // response here would.
+        self.request_diagnostic_refresh().await;
 
         // Recompute the file's workspace diagnostics from disk so the
         // closed file's entry reflects the saved state (the startup

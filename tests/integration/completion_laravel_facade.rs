@@ -9,8 +9,7 @@
 //! it directly (`Container::class`) or through a container binding key
 //! (`'thing.container'`) the alias table resolves.
 
-use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER_JSON: &str = r#"{
@@ -147,38 +146,8 @@ async fn complete_labels(consumer: &str, line: u32, character: u32) -> Vec<Strin
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
     let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: consumer.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    }
-    .into_iter()
-    .map(|i| i.label)
-    .collect()
+    open_php(&backend, &uri, consumer).await;
+    complete_labels_at_opened(&backend, &uri, line, character).await
 }
 
 const UNDOCUMENTED_CONSUMER: &str = "\

@@ -8,11 +8,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{APP_PSR4_COMPOSER, create_psr4_workspace, open_document, workspace_uri};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
 
     const HELPER: &str = "<?php\nnamespace App\\Helpers;\n\
 class CurrencyHelper {\n\
@@ -25,14 +23,13 @@ class CurrencyHelper {\n\
     /// by the test workspace having no Laravel installed.
     async fn diagnose(view: &str) -> Vec<String> {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            APP_PSR4_COMPOSER,
             &[
                 ("app/Helpers/CurrencyHelper.php", HELPER),
                 ("resources/views/page.blade.php", view),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", view).await;
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -109,14 +106,13 @@ class CurrencyHelper {\n\
                     <p>text</p>\n\
                     {{ CurrencyHelper::formatPrice(1) }}\n";
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            APP_PSR4_COMPOSER,
             &[
                 ("app/Helpers/CurrencyHelper.php", HELPER),
                 ("resources/views/page.blade.php", view),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", view).await;
 
         let hover = backend
@@ -154,14 +150,13 @@ class CurrencyHelper {\n\
             "@use('App\\Helpers\\CurrencyHelper')\n{{ CurrencyHelper::formatPrice(1) }}\n",
         ] {
             let (backend, _dir) = create_psr4_workspace(
-                COMPOSER,
+                APP_PSR4_COMPOSER,
                 &[
                     ("app/Helpers/CurrencyHelper.php", HELPER),
                     ("resources/views/page.blade.php", view),
                 ],
             );
-            let root = backend.workspace_root().read().clone().unwrap();
-            let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+            let uri = workspace_uri(&backend, "resources/views/page.blade.php");
             open_document(&backend, &uri, "blade", view).await;
             let virtual_php = backend.blade_virtual_php(uri.as_str()).unwrap();
             let mut diags = Vec::new();
@@ -180,14 +175,13 @@ class CurrencyHelper {\n\
     async fn a_genuinely_unused_import_is_reported() {
         let view = "@php\nuse App\\Helpers\\CurrencyHelper;\n@endphp\n<p>nothing</p>\n";
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            APP_PSR4_COMPOSER,
             &[
                 ("app/Helpers/CurrencyHelper.php", HELPER),
                 ("resources/views/page.blade.php", view),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         open_document(&backend, &uri, "blade", view).await;
         let virtual_php = backend.blade_virtual_php(uri.as_str()).unwrap();
         let mut diags = Vec::new();

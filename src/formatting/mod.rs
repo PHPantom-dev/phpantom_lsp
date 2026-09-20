@@ -241,22 +241,47 @@ fn resolve_from_bin_dir(
     })
 }
 
+/// The workspace-level inputs every formatting entry point reads off the
+/// `Backend`.
+pub(super) struct FormattingInputs {
+    pub(super) config: crate::config::Config,
+    pub(super) workspace_root: Option<PathBuf>,
+}
+
+impl FormattingInputs {
+    /// The root `composer.json` and the bin directory it declares.
+    ///
+    /// Reads from disk, so only the strategy resolvers call it (once per
+    /// request, or once per run), never the per-file formatting path.
+    pub(super) fn composer(&self) -> (Option<ComposerPackage>, Option<String>) {
+        let composer_json = self
+            .workspace_root
+            .as_deref()
+            .and_then(composer::read_composer_package);
+        let bin_dir = composer_json.as_ref().map(composer::get_bin_dir);
+        (composer_json, bin_dir)
+    }
+}
+
 impl Backend {
+    pub(super) fn formatting_inputs(&self) -> FormattingInputs {
+        FormattingInputs {
+            config: self.config(),
+            workspace_root: self.workspace.workspace_root.read().clone(),
+        }
+    }
+
     /// Resolve the workspace's formatting strategy from `.phpantom.toml`,
     /// the root `composer.json`, and the workspace root.
     ///
     /// Reads `composer.json` from disk, so call it once per request (or
     /// once per run), not per file.
     pub(crate) fn resolve_formatting_strategy(&self) -> FormattingStrategy {
-        let config = self.config();
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        let composer_json = workspace_root
-            .as_deref()
-            .and_then(composer::read_composer_package);
-        let bin_dir = composer_json.as_ref().map(composer::get_bin_dir);
+        let inputs = self.formatting_inputs();
+        let (composer_json, bin_dir) = inputs.composer();
         resolve_strategy(
-            workspace_root.as_deref(),
-            &config.formatting,
+            inputs.workspace_root.as_deref(),
+            &inputs.config.formatting,
             composer_json.as_ref(),
             bin_dir.as_deref(),
         )
@@ -275,14 +300,13 @@ impl Backend {
         content: &str,
         cancelled: &AtomicBool,
     ) -> Result<Option<String>, String> {
-        let config = self.config();
-        let workspace_root = self.workspace.workspace_root.read().clone();
+        let inputs = self.formatting_inputs();
         format_content(
             strategy,
             content,
             file_path,
-            workspace_root.as_deref(),
-            &config.formatting,
+            inputs.workspace_root.as_deref(),
+            &inputs.config.formatting,
             self.php_version(),
             cancelled,
         )
@@ -359,30 +383,13 @@ pub(crate) fn compute_edits(original: &str, formatted: &str) -> Vec<TextEdit> {
         return Vec::new();
     }
 
-    let line_count = original.lines().count();
-    let last_line_idx = if line_count == 0 { 0 } else { line_count - 1 };
-    // LSP columns are UTF-16 code units, not bytes.
-    let last_line_len = original
-        .lines()
-        .last()
-        .map_or(0, |l| l.encode_utf16().count());
-
-    let (end_line, end_char) = if original.ends_with('\n') {
-        (last_line_idx + 1, 0)
-    } else {
-        (last_line_idx, last_line_len)
-    };
-
     vec![TextEdit {
         range: Range {
             start: Position {
                 line: 0,
                 character: 0,
             },
-            end: Position {
-                line: end_line as u32,
-                character: end_char as u32,
-            },
+            end: crate::text_position::offset_to_position(original, original.len()),
         },
         new_text: formatted.to_string(),
     }]
