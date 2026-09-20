@@ -72,7 +72,7 @@ pub(crate) use calls::{
 };
 pub(crate) use instantiation::{
     TemplateBindingMode, array_element_binding, classify_template_binding, extract_array_position,
-    extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
+    remap_inherited_ctor_subs, type_contains_name,
 };
 
 /// The type of a member access whose name PHP only works out at runtime.

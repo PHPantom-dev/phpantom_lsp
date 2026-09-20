@@ -5,6 +5,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::extract_generic_arg_from_ancestor;
+
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
@@ -21,7 +23,7 @@ use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 use super::array_access::{class_string_inner_binding, insert_or_union};
 use super::instantiation::{
     TemplateBindingMode, array_element_binding, candidate_binding_modes, classify_template_binding,
-    extract_array_position, extract_generic_arg_from_ancestor,
+    extract_array_position,
 };
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
@@ -223,7 +225,7 @@ fn apply_template_binding_mode(
                     &resolved_type,
                     wrapper_name,
                     tpl_position,
-                    rctx,
+                    rctx.class_loader,
                 )
             {
                 insert_or_union(subs, tpl_name.to_string(), concrete);

@@ -529,6 +529,28 @@ class Demo
         });
     }
 
+    public function eloquentRelationContexts(bool $bakerQuery): void
+    {
+        // Custom relations preserve their ancestor's related-model binding.
+        Bakery::whereHas('leadBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
+        Bakery::WHEREHAS('headBaker', fn ($q) => $q->active()); // PHP methods ignore case.
+        Bakery::with(['leadBaker' => function (Relation $q) {
+            $q->getModel()->getName(); // → Baker::getName(); $q is BakerRelation<Bakery, Baker>.
+        }]);
+        BlogPost::query()->with(['author' => ['posts' => function ($q) {
+            $q->getModel()->getTitle(); // → BlogPost::getTitle(); the terminal eager relation is HasMany.
+        }]]);
+
+        if ($bakerQuery) {
+            $query = Bakery::query();
+            $relation = 'headBaker';
+        } else {
+            $query = BlogAuthor::query();
+            $relation = 'posts';
+        }
+        $query->whereHas($relation, fn ($q) => $q->where('id', '>', 0)); // → BakerBuilder<Baker>|Builder<BlogPost>
+    }
+
     // ── Laravel Config & Env Navigation ─────────────────────────────────────
 
     /**

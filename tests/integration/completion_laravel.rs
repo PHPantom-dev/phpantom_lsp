@@ -15820,3 +15820,166 @@ class MPFilterTest {
         labels
     );
 }
+
+#[tokio::test]
+async fn test_relation_callback_context_reaches_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///relation-context.php").unwrap();
+    for (call, expected, direct) in [
+        (
+            "SpecialStock::whereHas('custom', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('fixed', function ($contextQuery) { BODY });",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('either', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "SpecialStock::whereHas('relationUnion', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$builderUnion->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$modelUnion->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+        (
+            "$generic->whereHas('target', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "$reordered->whereHas('team', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "OwnCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "TraitCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "AliasedCallback::whereHas('team', fn ($contextQuery) => BODY);",
+            &["warehouseName"][..],
+            true,
+        ),
+        (
+            "Stock::WHEREHAS('team', fn ($contextQuery) => BODY);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::query()->WhereHas('team', function ($contextQuery) { BODY });",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::with(['team' => fn ($contextQuery) => BODY]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::query()?->WITH(relations: ['team' => function (Relation $contextQuery) { BODY }]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Team::with(['stocks' => ['warehouse' => fn ($contextQuery) => BODY]]);",
+            &["warehouseName"][..],
+            false,
+        ),
+        (
+            "Team::query()->with(array('stocks.warehouse' => function ($contextQuery) { BODY }));",
+            &["warehouseName"][..],
+            false,
+        ),
+        (
+            "Stock::with((['team' => fn ($contextQuery) => BODY]));",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "Stock::with(['team' => (function ($contextQuery) { BODY })]);",
+            &["teamName"][..],
+            false,
+        ),
+        (
+            "$builderUnion->with(['team' => fn ($contextQuery) => BODY]);",
+            &["teamName", "warehouseName"][..],
+            false,
+        ),
+    ] {
+        let source = format!(
+            r#"{fixture}
+namespace BuilderRelationAudit {{
+    use Illuminate\Database\Eloquent\Builder;
+    use Illuminate\Database\Eloquent\Relations\Relation;
+    /**
+     * @param Builder<Stock>|Builder<OtherStock> $builderUnion
+     * @param GenericStock<Team> $generic
+     * @param ReorderedBuilder<string, Stock> $reordered
+     */
+    function contextCalls(Builder $builderUnion, Stock|OtherStock $modelUnion, GenericStock $generic, ReorderedBuilder $reordered): void {{ {call} }}
+}}
+"#
+        );
+        let receiver = if direct {
+            "$contextQuery->"
+        } else {
+            "$contextQuery->getModel()->"
+        };
+        let content = source.replace("BODY", receiver);
+        let position = crate::common::position_after(&content, receiver);
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        for name in expected {
+            assert!(
+                methods.contains(name),
+                "{call}: missing {name}, got {methods:?}"
+            );
+        }
+        let valid = if direct {
+            "$contextQuery->warehouseName()"
+        } else {
+            "$contextQuery->getModel()"
+        };
+        for (expression, errors) in [(valid, 0), ("$contextQuery->missingContextMethod()", 1)] {
+            let body = if call.contains("fn (") {
+                expression.to_string()
+            } else {
+                format!("{expression};")
+            };
+            let content = source.replace("BODY", &body);
+            let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+                &backend,
+                uri.as_str(),
+                &content,
+            );
+            assert_eq!(diagnostics.len(), errors, "{call}: {diagnostics:?}");
+            if errors != 0 {
+                assert!(diagnostics[0].message.contains("missingContextMethod"));
+            }
+        }
+    }
+}

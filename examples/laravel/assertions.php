@@ -299,6 +299,53 @@ $seen = [];
 });
 check('Morph relation objects retain candidate builders and the type string', $seen === [[\App\Models\LoafBuilder::class, \App\Models\Loaf::class]]);
 
+$seen = [];
+\App\Models\Bakery::whereHas('leadBaker', function ($query) use (&$seen) {
+    $seen[] = get_class($query->active());
+});
+$query = \App\Models\Bakery::with(['leadBaker' => function ($relation) use (&$seen) {
+    $seen[] = [get_class($relation), get_class($relation->getModel()), is_string($relation->getModel()->getName())];
+}]);
+$query->getEagerLoads()['leadBaker']((new \App\Models\Bakery())->leadBaker());
+check('Custom relation names retain their related builder and eager relation', $seen === [
+    \App\Models\BakerBuilder::class,
+    [\App\Models\BakerRelation::class, \App\Models\Baker::class, true],
+]);
+$seen = [];
+\App\Models\Bakery::WHEREHAS('headBaker', function ($query) use (&$seen) {
+    $seen[] = get_class($query);
+});
+\App\Models\Bakery::query()->WhereHas('headBaker', function ($query) use (&$seen) {
+    $seen[] = get_class($query);
+});
+check('Relation query methods ignore letter case', $seen === [\App\Models\BakerBuilder::class, \App\Models\BakerBuilder::class]);
+$seen = [];
+$query = \App\Models\BlogPost::query()->with(['author' => ['posts' => function ($relation) use (&$seen) {
+    $model = $relation->getModel();
+    $model->title = 'Example';
+    $seen[] = [get_class($relation), get_class($model), $model->getTitle()];
+}]]);
+$query->getEagerLoads()['author.posts']((new \App\Models\BlogAuthor())->posts());
+check('Nested eager arrays use the terminal relationship', $seen === [[\Illuminate\Database\Eloquent\Relations\HasMany::class, \App\Models\BlogPost::class, 'Example']]);
+$seen = [];
+foreach ([[\App\Models\Bakery::query(), 'headBaker'], [\App\Models\BlogAuthor::query(), 'posts']] as [$query, $relation]) {
+    $query->whereHas($relation, function ($related) use (&$seen) {
+        $seen[] = [get_class($related->where('id', '>', 0)), get_class($related->getModel())];
+    });
+}
+check('Receiver alternatives each contribute their own related model and builder', $seen === [
+    [\App\Models\BakerBuilder::class, \App\Models\Baker::class],
+    [\Illuminate\Database\Eloquent\Builder::class, \App\Models\BlogPost::class],
+]);
+$ownCallback = new class extends \App\Models\Bakery {
+    /** @param \Closure(\App\Models\Loaf): mixed $callback */
+    public static function whereHas($relation, ?\Closure $callback = null, $operator = '>=', $count = 1)
+    {
+        return $callback(new \App\Models\Loaf());
+    }
+};
+check('Application declarations control their callback contract', $ownCallback::whereHas('headBaker', fn ($model) => get_class($model)) === \App\Models\Loaf::class);
+
 // Check both callback invocations without executing the eager-load SQL.
 $callbackClasses = [];
 $query = \App\Models\BlogAuthor::withWhereHas('posts', function ($related) use (&$callbackClasses) {

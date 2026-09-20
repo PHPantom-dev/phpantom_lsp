@@ -333,6 +333,19 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     Argument::Positional(a) => a.value,
                     Argument::Named(a) => a.value,
                 };
+                if let Some(entries) = eager_callback_arguments(call, arg_idx, scope, ctx) {
+                    for entry in entries {
+                        if try_enter_closure_expr(
+                            entry.expression,
+                            scope,
+                            ctx,
+                            Some(&entry.parameters),
+                        ) {
+                            return true;
+                        }
+                    }
+                    continue;
+                }
                 let inferred = infer_callable_params_for_call(call, arg_idx, scope, ctx);
                 let inferred_opt = if inferred.is_empty() {
                     None
