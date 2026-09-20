@@ -185,7 +185,7 @@ lsp.add_server {
   name = "phpantom",
   language = "PHP",
   file_patterns = { "%.php$" },
-  command = { "/usr/bin/phpantom_lsp", "--stdio" }.
+  command = { "/path/to/phpantom_lsp" }.
   transport = "stdio",
   requests_per_second = 16,
   incremental_changes = false,
