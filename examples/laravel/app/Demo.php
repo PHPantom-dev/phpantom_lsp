@@ -491,6 +491,12 @@ class Demo
         });
         Bakery::query()->whereHas('headBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
 
+        // The same constraint runs on a builder and the eager-loaded relation.
+        Bakery::withWhereHas(callback: function (Builder|Relation $q) {
+            $q->where('weight_grams', '>', 500); // → LoafBuilder<Loaf>|HasMany<Loaf, Bakery>
+        }, relation: 'baguettes');
+        BlogPost::withWhereRelation('author.posts', fn ($q) => $q->where('published', true)); // → Builder<BlogPost>|HasMany<BlogPost, BlogAuthor>
+
         // Morph candidates choose the callback builder and keep the type string.
         Review::whereHasMorph('reviewable', Loaf::class, function (Builder $q, string $type) {
             $q->stale();                     // → LoafBuilder<Loaf>

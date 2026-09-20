@@ -4,8 +4,7 @@
 // relationship-query-callbacks.php at c328727e6103c1147d1c64cc96b3aedfda26bc20.
 // Framework declarations retain Laravel's callable signatures; none of the
 // model-specific expectations are supplied by the stubs themselves.
-// Known gaps retain the desired type with the corpus's SKIP marker. Arrow
-// callbacks are covered in completion_laravel.rs because this runner replaces
+// Arrow callbacks are covered in completion_laravel.rs because this runner replaces
 // the whole assertion line, which would erase an enclosing arrow expression.
 
 namespace Illuminate\Support\Traits {
@@ -26,6 +25,10 @@ namespace Illuminate\Database\Query {
     }
 }
 
+namespace Illuminate\Contracts\Database\Eloquent {
+    interface Builder {}
+}
+
 namespace Illuminate\Database\Eloquent {
     class Model {
         /** @return Builder<static> */
@@ -42,7 +45,7 @@ namespace Illuminate\Database\Eloquent {
      * @template TModel of Model
      * @mixin \Illuminate\Database\Query\Builder
      */
-    class Builder {
+    class Builder implements \Illuminate\Contracts\Database\Eloquent\Builder {
         use \Illuminate\Support\Traits\ForwardsCalls;
 
         /** @return $this */
@@ -109,6 +112,10 @@ namespace Illuminate\Database\Eloquent {
          * @return $this
          */
         public function withWhereHas($relation, ?\Closure $callback = null, $operator = '>=', $count = 1) { return $this; }
+
+        /** @return $this */
+        public function withWhereRelation($relation, $column, $operator = null, $value = null) { return $this; }
+
 
         /**
          * @template TRelatedModel of Model
@@ -205,7 +212,7 @@ namespace Illuminate\Database\Eloquent\Relations {
      * @template TResult
      * @mixin \Illuminate\Database\Eloquent\Builder<TRelatedModel>
      */
-    class Relation {
+    class Relation implements \Illuminate\Contracts\Database\Eloquent\Builder {
         use \Illuminate\Support\Traits\ForwardsCalls;
     }
     /**
@@ -229,6 +236,8 @@ namespace Illuminate\Database\Eloquent\Relations {
 }
 
 namespace BuilderRelationAudit {
+    use Illuminate\Database\Eloquent\Relations\Relation;
+    use Illuminate\Contracts\Database\Eloquent\Builder as BuilderContract;
     use Illuminate\Database\Eloquent\Builder;
     use Illuminate\Database\Eloquent\Builder as Query;
     use Illuminate\Database\Eloquent\Model;
@@ -399,15 +408,42 @@ namespace BuilderRelationAudit {
 
     function eagerRelations(): void {
         Team::withWhereHas('stocks', function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query); // SKIP: eager callback needs the builder/relation union
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query);
         });
         Team::withWhereHas('stocks.warehouse', function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query); // SKIP: eager callback needs the builder/relation union
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Warehouse>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Warehouse, BuilderRelationAudit\Stock>', $query);
         });
         Team::withWhereHas('stocks:id', function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query); // SKIP: eager callback needs the builder/relation union
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\Team>', $query);
         });
         assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::withWhereHas('stocks', null));
+        Stock::withWhereHas(callback: function (Builder|Relation $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query->where('active', true));
+            assertType('BuilderRelationAudit\Team', $query->where('active', true)->firstOrFail());
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query->orderBy('id'));
+            assertType('int', $query->count());
+        }, relation: 'team');
+        Stock::withWhereHas('plainTeam', function (BuilderContract $query) {
+            assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\PlainTeam, BuilderRelationAudit\Stock>', $query);
+        });
+        Team::withWhereHas('stocks.team:id', function ($query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+        });
+        ChildTeam::withWhereHas('stocks', function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>|Illuminate\Database\Eloquent\Relations\HasMany<BuilderRelationAudit\Stock, BuilderRelationAudit\ChildTeam>', $query);
+        });
+        Stock::query()->withWhereRelation(column: function (Builder|Relation $query) {
+            assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>|Illuminate\Database\Eloquent\Relations\BelongsTo<BuilderRelationAudit\Team, BuilderRelationAudit\Stock>', $query);
+        }, relation: 'team');
+        Team::withWhereHas('stocks', function (Warehouse $query) {
+            assertType('BuilderRelationAudit\Warehouse', $query);
+        });
+        Team::whereHas('stocks', function ($query) {
+            assertType('Illuminate\Database\Eloquent\Builder<BuilderRelationAudit\Stock>', $query->where('id', 1));
+        });
+        assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', Team::withWhereRelation('stocks', 'id', '>', 0));
+
     }
 
     /**

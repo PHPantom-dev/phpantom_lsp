@@ -14993,6 +14993,55 @@ async fn test_morph_callback_candidates_reach_completion_and_diagnostics() {
 }
 
 #[tokio::test]
+async fn test_eager_callback_union_reaches_completion_and_diagnostics() {
+    let fixture = include_str!("../phpstan_nsrt/laravel-builder-relations.php");
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///eager-callbacks.php").unwrap();
+    for call in [
+        "Stock::withWhereHas('team', fn ($eagerQuery) => BODY);",
+        "Stock::query()->withWhereHas(callback: function (Builder|Relation $eagerQuery) { BODY }, relation: 'team');",
+        "Team::withWhereHas('stocks.team:id', fn ($eagerQuery) => BODY);",
+        "Stock::withWhereRelation('team', function (Builder|Relation $eagerQuery) { BODY });",
+        "Stock::query()?->withWhereRelation(column: fn ($eagerQuery) => BODY, relation: 'team');",
+    ] {
+        let source = format!(
+            "{fixture}\nnamespace BuilderRelationAudit {{ use Illuminate\\Database\\Eloquent\\Builder; use Illuminate\\Database\\Eloquent\\Relations\\Relation; {call} }}"
+        );
+        let content = source.replace("BODY", "$eagerQuery->where('id', 1)->");
+        let position = crate::common::position_after(&content, "$eagerQuery->where('id', 1)->");
+        let items =
+            crate::common::complete_at(&backend, &uri, &content, position.line, position.character)
+                .await;
+        let methods = method_names(&items);
+        assert!(methods.contains(&"active"), "{call}: {methods:?}");
+        assert!(methods.contains(&"where"), "{call}: {methods:?}");
+        let body = if call.contains("fn (") {
+            "$eagerQuery->where('id', 1)->firstOrFail()->teamName()"
+        } else {
+            "$eagerQuery->where('id', 1)->firstOrFail()->teamName();"
+        };
+        let content = source.replace("BODY", body);
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert!(diagnostics.is_empty(), "{call}: {diagnostics:?}");
+        let content = content.replace(
+            "firstOrFail()->teamName()",
+            "firstOrFail()->missingEagerModelMethod()",
+        );
+        let diagnostics = crate::common::unknown_member_diagnostics_with_scope_cache(
+            &backend,
+            uri.as_str(),
+            &content,
+        );
+        assert_eq!(diagnostics.len(), 1, "{call}: {diagnostics:?}");
+        assert!(diagnostics[0].message.contains("missingEagerModelMethod"));
+    }
+}
+
+#[tokio::test]
 async fn test_where_has_closure_resolves_to_related_model() {
     // Brand::whereHas('orders', function ($q) { $q-> })
     //   => $q should be Builder<Order> (the related model), not Builder<Brand>.

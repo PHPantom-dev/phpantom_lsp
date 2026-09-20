@@ -274,6 +274,34 @@ check(
     $callbackClasses === [\Illuminate\Database\Eloquent\Builder::class, \Illuminate\Database\Eloquent\Relations\HasMany::class]
 );
 
+foreach (['withWhereHas', 'withWhereRelation'] as $method) {
+    $seen = [];
+    $constraint = function (\Illuminate\Database\Eloquent\Builder|\Illuminate\Database\Eloquent\Relations\Relation $query) use (&$seen) {
+        $seen[] = [get_class($query), get_class($query->where('weight_grams', '>', 500)), get_class($query->getModel())];
+    };
+    $query = \App\Models\Bakery::$method('baguettes', $constraint);
+    $query->getEagerLoads()['baguettes']((new \App\Models\Bakery())->baguettes());
+    check("$method preserves the custom builder and relation through fluent calls", $seen === [
+        [\App\Models\LoafBuilder::class, \App\Models\LoafBuilder::class, \App\Models\Loaf::class],
+        [\Illuminate\Database\Eloquent\Relations\HasMany::class, \Illuminate\Database\Eloquent\Relations\HasMany::class, \App\Models\Loaf::class],
+    ]);
+}
+$seen = [];
+$query = \App\Models\BlogPost::withWhereRelation('author.posts', function ($query) use (&$seen) {
+    $seen[] = [get_class($query), get_class($query->getModel())];
+});
+$terminal = (new \App\Models\BlogAuthor())->posts();
+$query->getEagerLoads()['author.posts']($terminal);
+check('Dotted eager callbacks use the terminal relation and declaring model', $seen === [
+    [\Illuminate\Database\Eloquent\Builder::class, \App\Models\BlogPost::class],
+    [\Illuminate\Database\Eloquent\Relations\HasMany::class, \App\Models\BlogPost::class],
+] && $terminal->getParent() instanceof \App\Models\BlogAuthor);
+$seen = [];
+$query = \App\Models\Bakery::withWhereHas(callback: function ($query) use (&$seen) {
+    $seen[] = get_class($query);
+}, relation: 'baguettes:id,weight_grams');
+check('withWhereHas strips column selections for its existence query', $seen === [\App\Models\LoafBuilder::class]);
+
 $morphCallbacks = [];
 \App\Models\Review::whereHasMorph('reviewable', [\App\Models\BlogPost::class, \App\Models\Loaf::class], function ($related, $type) use (&$morphCallbacks) {
     $morphCallbacks[] = [get_class($related), get_class($related->getModel()), $type];

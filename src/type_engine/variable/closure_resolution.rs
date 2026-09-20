@@ -23,7 +23,7 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
-    model_builder_type, resolve_relation_chain,
+    model_builder_type, resolve_relation_chain_details,
 };
 
 thread_local! {
@@ -755,6 +755,11 @@ fn inferred_type_is_more_specific(
             .iter()
             .all(|part| inferred_type_is_more_specific(explicit_hint, part, class_loader));
     }
+    if let TypeKind::Union(parts) = explicit_hint.kind() {
+        return parts
+            .iter()
+            .any(|part| inferred_type_is_more_specific(part, inferred, class_loader));
+    }
     // The explicit hint must be a bare name (no generic args).
     let explicit_base = match explicit_hint.kind() {
         TypeKind::Named(name) => name.as_str(),
@@ -841,12 +846,20 @@ fn try_relation_query_override(
     // `Builder<Model>` instance.
     let model = find_model_from_receivers(receivers, class_loader)?;
 
-    let related = resolve_relation_chain(&model, relation_name, class_loader, None)
-        .and_then(|name| class_loader(&name));
+    // Only withWhereHas strips a column-selection suffix for its existence
+    // query; withWhereRelation passes the relation name through unchanged.
+    let chain = if method_name == "withWhereHas" {
+        relation_name
+            .split_once(':')
+            .map_or(relation_name, |(name, _)| name)
+    } else {
+        relation_name
+    };
+    let related = resolve_relation_chain_details(&model, chain, class_loader, None);
     if let Some(candidates) = candidates {
         let fallback = related
             .as_ref()
-            .map(|model| model_builder_type(model, class_loader))
+            .map(|relation| model_builder_type(&relation.model, class_loader))
             .unwrap_or_else(|| {
                 PhpType::generic(
                     ELOQUENT_BUILDER_FQN,
@@ -859,7 +872,15 @@ fn try_relation_query_override(
             class_loader,
         )]);
     }
-    Some(vec![model_builder_type(related.as_deref()?, class_loader)])
+    let related = related?;
+    let builder = model_builder_type(&related.model, class_loader);
+    Some(vec![
+        if matches!(method_name, "withWhereHas" | "withWhereRelation") {
+            PhpType::union(vec![builder, related.relation_type])
+        } else {
+            builder
+        },
+    ])
 }
 
 /// Map candidate class-strings through the same builder selector as model

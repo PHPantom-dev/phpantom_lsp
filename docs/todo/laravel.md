@@ -247,28 +247,6 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L59. Infer both callback receivers for withWhereHas
-
-**Impact: Medium · Complexity: Medium-High**
-
-`withWhereHas('stocks', …)` calls the constraint with `Builder<Stock>` for
-the existence query and `HasMany<Stock, Team>` for eager loading. We infer
-only the builder. Dotted paths likewise lose the final relation type, and
-the `stocks:id` column-selection form fails relation lookup entirely,
-falling back to unbound `Builder<mixed>|Relation<mixed, mixed, mixed>`.
-
-**Reproducer:** The `eagerRelations()` assertions in
-`tests/phpstan_nsrt/laravel-builder-relations.php`. The Laravel runtime
-assertions also verify both invocations without executing eager-load SQL.
-
-**Where to change:** Extend the shared relation-chain resolver to retain
-the terminal instantiated relation and its declaring model, then use the
-builder/relation union for this callback. Strip the column suffix where
-Laravel accepts it, preserve custom builders, and bind named arguments.
-The callback's ordinary fluent methods must preserve that union. Cover
-explicit `Builder|Relation` hints and the `withWhereRelation` counterpart;
-ordinary `whereHas` must continue to receive just the related builder.
-
 #### L45. `*_count` properties are offered on every relationship
 
 **Impact: Low-Medium · Complexity: High**
