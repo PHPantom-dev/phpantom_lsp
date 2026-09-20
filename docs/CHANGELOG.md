@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.
 - **Relation callbacks keep custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
 - **Model instance queries keep custom builders.** Starting a query with `newQuery()`, `newModelQuery()`, or `newQueryWithoutScopes()` now keeps the model's custom builder and its model type through later calls. Contributed by @shuvroroy.
 - **`filter_var()` and `filter_input()` return types.** The filter now decides the result, so `filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]])` is `int<1, max>|false` instead of `mixed`, and `FILTER_NULL_ON_FAILURE` turns the `false` into `null`.

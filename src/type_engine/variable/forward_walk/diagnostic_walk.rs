@@ -468,7 +468,6 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let obj_span = mc.object.span();
-            let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
             walk_closures_in_call_args(
                 &mc.argument_list.arguments,
                 Some(call),
@@ -481,7 +480,6 @@ pub(crate) fn walk_closures_in_call<'b>(
                             name,
                             arg_idx,
                             &mc.argument_list,
-                            first_arg.as_deref(),
                             outer_scope,
                             ctx,
                         )
@@ -500,7 +498,6 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let obj_span = mc.object.span();
-            let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
             walk_closures_in_call_args(
                 &mc.argument_list.arguments,
                 Some(call),
@@ -513,7 +510,6 @@ pub(crate) fn walk_closures_in_call<'b>(
                             name,
                             arg_idx,
                             &mc.argument_list,
-                            first_arg.as_deref(),
                             outer_scope,
                             ctx,
                         )
@@ -531,7 +527,6 @@ pub(crate) fn walk_closures_in_call<'b>(
             } else {
                 None
             };
-            let first_arg = extract_first_arg_string_fw(&sc.argument_list.arguments, ctx.content);
             walk_closures_in_call_args(
                 &sc.argument_list.arguments,
                 Some(call),
@@ -544,7 +539,6 @@ pub(crate) fn walk_closures_in_call<'b>(
                             name,
                             arg_idx,
                             &sc.argument_list,
-                            first_arg.as_deref(),
                             outer_scope,
                             ctx,
                         )
