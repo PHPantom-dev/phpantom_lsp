@@ -3,5 +3,5 @@
 
 pub(crate) mod eager_population;
 pub(crate) mod file_access;
-pub(crate) mod laravel_scan;
+pub(crate) mod laravel;
 pub(crate) mod requests;

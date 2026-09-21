@@ -380,6 +380,19 @@ impl Backend {
         // parse-error vector for every file ever opened (or deleted from
         // disk) stays resident for the whole session.
         self.parse_errors.write().remove(uri);
+        // A template's lowered PHP, source map, and injected variables are
+        // recorded for every indexed template, not just open ones, so a
+        // deleted or renamed template has to give them up here rather than
+        // only when the editor closes it.  Left behind, they stay in the
+        // template lists the Blade refresh passes enumerate.
+        self.blade_virtual_content.write().remove(uri);
+        self.blade_source_maps.write().remove(uri);
+        self.blade_uris.write().remove(uri);
+        self.blade_injected_vars.write().remove(uri);
+        // The config keys a file declares at runtime (`Config::set(...)`)
+        // are otherwise only refreshed when the file is re-parsed, which a
+        // deleted file never is.
+        self.laravel_runtime_config_keys.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.

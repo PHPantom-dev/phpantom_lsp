@@ -36,7 +36,7 @@ use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::CtxLoaders;
 use crate::types::ResolvedType;
 use crate::types::*;
 use crate::virtual_members::laravel::{
@@ -149,20 +149,17 @@ impl Backend {
         // 3. Resolve the subject to all candidate classes.
         //    When a variable is assigned different types in conditional
         //    branches (e.g. if/else), multiple candidates are returned.
-        let rctx = ResolutionCtx {
-            current_class: current_class.as_ref(),
-            all_classes: &ctx.classes,
+        let rctx = self.resolution_ctx_at(
+            current_class.as_ref(),
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         let candidates = ResolvedType::into_arced_classes(
             crate::type_engine::resolver::resolve_target_classes(subject, access_kind, &rctx),
         );

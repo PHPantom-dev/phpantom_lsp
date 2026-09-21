@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// PHP parsing and AST extraction.
 ///
@@ -764,8 +765,10 @@ fn extract_string_literal_value(
 /// content string.  The arena and program are populated on the first
 /// [`with_parsed_program`] call whose content matches.
 struct ParseCacheEntry {
-    /// Owned copy of the source text.  Must outlive `program_ptr`.
-    content: String,
+    /// The source text, shared with the caller that installed the cache
+    /// when it already held it behind an `Arc`.  Must outlive
+    /// `program_ptr`.
+    content: Arc<String>,
     /// LocalArena that owns all AST nodes.  `None` until the first
     /// `with_parsed_program` call triggers a lazy parse.
     arena: Option<mago_allocator::LocalArena>,
@@ -950,22 +953,37 @@ pub(crate) fn try_for_each_if_branch<B>(
 pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
     // If there's already an active cache (nested call), just return a
     // no-op guard — the outermost guard owns the lifetime.
-    let already_active = PARSE_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
+    if parse_cache_active() {
+        return ParseCacheGuard { owns_cache: false };
+    }
+    with_parse_cache_arc(Arc::new(content.to_string()))
+}
+
+/// [`with_parse_cache`] for a caller that already holds the content
+/// behind an `Arc`, which the cache then shares instead of copying.
+///
+/// Every LSP request passes through here, so the copy would otherwise be
+/// paid once per request whether or not anything goes on to parse.
+pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard {
+    if parse_cache_active() {
         return ParseCacheGuard { owns_cache: false };
     }
 
-    // Store only the content string.  The actual parse is deferred
-    // until the first `with_parsed_program` call that hits the cache.
+    // Store only the content.  The actual parse is deferred until the
+    // first `with_parsed_program` call that hits the cache.
     PARSE_CACHE.with(|cell| {
         *cell.borrow_mut() = Some(ParseCacheEntry {
-            content: content.to_string(),
+            content,
             arena: None,
             program_ptr: None,
         });
     });
 
     ParseCacheGuard { owns_cache: true }
+}
+
+fn parse_cache_active() -> bool {
+    PARSE_CACHE.with(|cell| cell.borrow().is_some())
 }
 
 /// Parse `content` with the mago-syntax parser and pass the resulting
@@ -992,7 +1010,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let cache_state: u8 = PARSE_CACHE.with(|cell| {
         let borrow = cell.borrow();
         match borrow.as_ref() {
-            Some(e) if e.content == content => {
+            Some(e) if e.content.as_str() == content => {
                 if e.program_ptr.is_some() {
                     2
                 } else {
@@ -1045,7 +1063,7 @@ pub(crate) fn with_parsed_program<T: Default>(
                 // the reference.
                 let program: &Program<'_> =
                     unsafe { &*(entry.program_ptr.unwrap().cast::<Program<'_>>()) };
-                f(program, &entry.content)
+                f(program, entry.content.as_str())
             })
         }));
 

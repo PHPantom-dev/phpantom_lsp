@@ -58,9 +58,9 @@ use crate::blade::signature::matching_paren;
 
 use super::reindent::{
     AttributeValue, DISABLE_MARKER, DirectiveHead, ENABLE_MARKER, OPAQUE_ELEMENTS,
-    PRESERVED_ELEMENTS, attribute_head, boundary_before, directive_head, echo_delimiters, find,
-    find_byte, find_closing_tag, find_marker_comment, is_component_name, is_echo_start, tag_name,
-    word_end,
+    PRESERVED_ELEMENTS, attribute_head, directive_head, echo_delimiters, find, find_byte,
+    find_closing_tag, find_directive, find_marker_comment, is_component_name, is_echo_start,
+    tag_name,
 };
 
 /// What the embedded formatter needs to format one fragment: the
@@ -285,23 +285,10 @@ impl Scanner<'_> {
         }
     }
 
-    /// The next `@name` at or after `from`, honouring Blade's word-boundary
-    /// rule. A delimiter written inside a string literal counts, because
-    /// Blade's own scan for one is a non-greedy regex that knows nothing
-    /// about PHP: this has to agree with the reindenter and with the
-    /// compiler about where a block ends.
+    /// The next `@name` at or after `from`, by the reindenter's own rule so
+    /// the two agree about where a block ends.
     fn find_directive(&self, from: usize, limit: usize, name: &str) -> Option<Range<usize>> {
-        let mut i = from;
-        while let Some(at) = find(self.bytes, i, limit, b"@") {
-            i = at + 1;
-            if boundary_before(self.bytes, at)
-                && self.src[at + 1..].starts_with(name)
-                && word_end(self.bytes, at + 1) == at + 1 + name.len()
-            {
-                return Some(at..at + 1 + name.len());
-            }
-        }
-        None
+        find_directive(self.src, self.bytes, from, limit, name)
     }
 
     // ── Markup ──────────────────────────────────────────────────────

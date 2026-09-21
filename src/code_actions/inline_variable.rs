@@ -719,7 +719,7 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_fixtures::apply_edits;
+    use crate::text_position::apply_text_edits as apply_edits;
 
     /// Helper: given PHP source with a cursor marker `/*|*/`, run the
     /// inline variable action and return the resulting edits (if offered).

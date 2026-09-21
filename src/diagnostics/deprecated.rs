@@ -24,7 +24,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
+use crate::type_engine::resolver::{
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
+};
 use crate::types::AccessKind;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
@@ -212,18 +214,18 @@ impl Backend {
 
                             let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
-                                    current_class: enclosing_class,
-                                    all_classes: local_classes,
-                                    content,
-                                    cursor_offset: span.start,
-                                    class_loader: &class_loader,
-                                    backend: Some(self),
-                                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                                    resolved_class_cache: Some(cache),
-                                    function_loader: Some(&function_loader),
-                                    scope_var_resolver: None,
                                     is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                    preserve_static: false,
+                                    ..self.resolution_ctx_at(
+                                        enclosing_class,
+                                        local_classes,
+                                        content,
+                                        span.start,
+                                        CtxLoaders::new(
+                                            &class_loader,
+                                            &function_loader,
+                                            &laravel_macro_this_resolver,
+                                        ),
+                                    )
                                 };
 
                                 resolve_variable_subject(subject_str, access_kind, &rctx)

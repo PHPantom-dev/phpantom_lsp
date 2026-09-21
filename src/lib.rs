@@ -1866,7 +1866,7 @@ impl Backend {
         // background indexer stores.  Missing the canonical spelling would
         // leave a stale symbol map that also blocks re-parsing (the
         // workspace-index walk skips files that already have one).
-        for (uri_str, path, _) in changes {
+        for (uri_str, path, change_type) in changes {
             let canonical_uri = crate::util::path_to_uri(path);
             let spellings = if canonical_uri == *uri_str {
                 vec![uri_str.as_str()]
@@ -1887,6 +1887,13 @@ impl Backend {
                 // at runtime.  A file that was merely changed re-registers
                 // them when it is re-parsed below.
                 self.laravel_runtime_config_keys.write().remove(uri);
+                // The Laravel registries a file fed (macros, storage drivers,
+                // commands, morph aliases, gates, provider resources) are
+                // refreshed only when the file is parsed, which a deleted
+                // file never is again.
+                if *change_type == FileChangeType::DELETED {
+                    self.forget_laravel_file_contributions(uri);
+                }
             }
         }
 

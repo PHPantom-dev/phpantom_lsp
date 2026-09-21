@@ -427,48 +427,17 @@ impl Backend {
                 }
             }
         } else {
-            let next = std::sync::atomic::AtomicUsize::new(0);
-            let thread_count = std::thread::available_parallelism()
-                .map(std::num::NonZeroUsize::get)
-                .unwrap_or(4)
-                .min(snapshot.len());
-            let worker_results = std::thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(thread_count);
-                for _ in 0..thread_count {
-                    let next = &next;
-                    let snapshot = &snapshot;
-                    let scan_file = &scan_file;
-                    handles.push(
-                        std::thread::Builder::new()
-                            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                            .spawn_scoped(scope, move || {
-                                let mut matches = Vec::new();
-                                loop {
-                                    let index =
-                                        next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    let Some((file_uri, symbol_map)) = snapshot.get(index) else {
-                                        break;
-                                    };
-                                    self.request_scan_file_done();
-                                    matches.extend(scan_file(file_uri, symbol_map));
-                                }
-                                matches
-                            })
-                            .expect("spawn member reference worker"),
-                    );
+            let worker_results =
+                crate::parallel::map_indexed("member-references", snapshot.len(), |_, index| {
+                    let (file_uri, symbol_map) = &snapshot[index];
+                    self.request_scan_file_done();
+                    let matches = scan_file(file_uri, symbol_map);
+                    (!matches.is_empty()).then_some(matches)
+                });
+            for (_, matches) in worker_results {
+                for (query_index, location) in matches {
+                    locations[query_index].push(location);
                 }
-                handles
-                    .into_iter()
-                    .flat_map(|handle| {
-                        handle.join().unwrap_or_else(|_| {
-                            tracing::error!("member reference worker panicked");
-                            Vec::new()
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            });
-            for (query_index, location) in worker_results {
-                locations[query_index].push(location);
             }
         }
 

@@ -12,7 +12,7 @@ use crate::types::*;
 
 use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
@@ -546,20 +546,17 @@ impl Backend {
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &file_ctx.classes,
+            &file_ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader_cl),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader_cl,
+                &laravel_macro_this_resolver,
+            ),
+        );
 
         let parsed = SubjectExpr::parse(expr);
 

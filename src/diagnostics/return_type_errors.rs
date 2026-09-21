@@ -21,7 +21,7 @@ use crate::atom::bytes_to_str;
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{LendsLoaders, Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
@@ -247,20 +247,13 @@ fn evaluate_declared_return(
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = crate::type_engine::resolver::ResolutionCtx {
-        current_class: Some(current_class),
+    let ctx = backend.resolution_ctx_at(
+        Some(current_class),
         all_classes,
         content,
-        cursor_offset: 0,
-        class_loader,
-        backend: Some(backend),
-        laravel_macro_this_resolver: None,
-        function_loader: Some(function_loader),
-        resolved_class_cache: Some(&backend.resolved_class_cache),
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+        0,
+        CtxLoaders::without_macro_this(class_loader, function_loader),
+    );
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }

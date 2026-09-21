@@ -479,6 +479,31 @@ mod tests {
         );
     }
 
+    /// A deleted file is never re-parsed, so the per-file eviction has to
+    /// forget its keys rather than leave them to the next refresh.
+    #[test]
+    fn a_deleted_file_takes_its_runtime_writes_with_it() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let uri = "file:///project/tests/FixtureTest.php";
+
+        backend.update_ast(
+            uri,
+            &Arc::new("<?php\nConfig::set('filesystems.disks.ondemand', []);\n".to_string()),
+        );
+        assert!(
+            backend
+                .runtime_config_keys()
+                .contains("filesystems.disks.ondemand")
+        );
+
+        backend.clear_file_maps(uri);
+        assert!(
+            backend.runtime_config_keys().is_empty(),
+            "clearing the file's maps should drop the keys it declared"
+        );
+    }
+
     #[test]
     fn config_prefix_from_uri_normal() {
         assert_eq!(

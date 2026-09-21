@@ -1031,13 +1031,13 @@ impl<'a> WalkOptions<'a> {
 /// classmap must not depend on that; sorting also makes the result
 /// reproducible across runs, which the readdir order it replaces was not.
 fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
-    use ignore::{WalkBuilder, WalkState};
+    use ignore::WalkState;
 
     // Two PSR-4 prefixes can map to the same directory, so the walk is
     // over the distinct roots; the attribution below still hands the
     // files to every root that named them.
     let mut roots_by_path: HashMap<&Path, Vec<usize>> = HashMap::new();
-    let mut builder: Option<WalkBuilder> = None;
+    let mut distinct_roots: Vec<&Path> = Vec::new();
     for (index, dir) in roots.iter().enumerate() {
         if !dir.is_dir() {
             continue;
@@ -1046,39 +1046,27 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
             std::collections::hash_map::Entry::Occupied(mut e) => e.get_mut().push(index),
             std::collections::hash_map::Entry::Vacant(e) => {
                 e.insert(vec![index]);
-                match &mut builder {
-                    Some(builder) => {
-                        builder.add(dir);
-                    }
-                    None => builder = Some(WalkBuilder::new(dir)),
-                }
+                distinct_roots.push(dir);
             }
         }
     }
 
     let mut out: Vec<Vec<PathBuf>> = vec![Vec::new(); roots.len()];
-    let Some(mut builder) = builder else {
+    let Some((first_root, other_roots)) = distinct_roots.split_first() else {
         return out;
     };
 
-    let skip_dirs = std::sync::Arc::clone(&opts.skip_dirs);
-    let filter_excludes = std::sync::Arc::clone(&opts.filters);
-    builder
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .hidden(true)
-        .parents(true)
-        .ignore(true)
-        .follow_links(opts.follow_links)
-        .threads(thread_count())
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir && skip_dirs.iter().any(|dir| dir == entry.path()) {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        });
+    let mut builder = super::workspace_walk_builder(
+        first_root,
+        std::sync::Arc::clone(&opts.skip_dirs),
+        std::sync::Arc::clone(&opts.filters),
+        false,
+        opts.follow_links,
+    );
+    for dir in other_roots {
+        builder.add(dir);
+    }
+    builder.threads(thread_count());
 
     let (tx, rx) = std::sync::mpsc::channel::<(usize, PathBuf)>();
     let skip_paths = opts.skip_paths;

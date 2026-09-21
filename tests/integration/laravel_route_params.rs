@@ -6,7 +6,8 @@
 //! `signedRoute()`, and `temporarySignedRoute()`.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php, position_after, response_labels,
+    LARAVEL_SRC_COMPOSER, create_initialized_psr4_workspace, open_php_file, position_after,
+    response_labels,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -31,17 +32,14 @@ Route::apiResource('categories', CategoryController::class)
 /// Open a workspace holding `ROUTES` plus a consumer file, and complete at the
 /// first position after `needle` in the consumer.
 async fn labels_after(consumer: &str, needle: &str) -> Vec<String> {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, _routes_uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[("routes/web.php", ROUTES), ("src/Runner.php", consumer)],
-    );
-    backend.initialized(InitializedParams {}).await;
+        "routes/web.php",
+    )
+    .await;
 
-    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php")).unwrap();
-    open_php(&backend, &routes_uri, ROUTES).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Runner.php")).unwrap();
-    open_php(&backend, &uri, consumer).await;
+    let uri = open_php_file(&backend, "src/Runner.php").await;
 
     let result = backend
         .completion(CompletionParams {

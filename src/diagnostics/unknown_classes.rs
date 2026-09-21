@@ -22,10 +22,11 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 
+use super::existence_guards::compute_existence_guards;
 use super::helpers::{
-    ByteRange, FileDiagnosticContext, compute_existence_guards, compute_use_line_ranges,
-    is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
+    ByteRange, FileDiagnosticContext, is_offset_in_ranges, make_diagnostic, resolve_to_fqn,
 };
+use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for unknown-class diagnostics so that code
 /// actions can match on it.

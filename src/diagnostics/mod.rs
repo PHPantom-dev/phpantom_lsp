@@ -229,6 +229,7 @@ pub(crate) mod cross_file;
 mod deprecated;
 mod docblock_native_mismatch;
 mod enum_errors;
+pub(crate) mod existence_guards;
 mod external;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
@@ -255,6 +256,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
+pub(crate) mod use_statements;
 pub(crate) mod workspace;
 
 use std::sync::Arc;

@@ -3,10 +3,9 @@
 //! plus go-to-definition from a key to the rule that declares it.
 
 use crate::common::{
-    FORM_REQUEST_STUB, create_psr4_workspace, definition_locations, goto_definition_at,
-    split_cursor,
+    FORM_REQUEST_STUB, complete_at_opened, create_psr4_workspace, definition_locations,
+    goto_definition_at, item_labels, open_php_at, split_cursor,
 };
-use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Shared stubs ───────────────────────────────────────────────────────────
@@ -160,34 +159,12 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
 /// Open `content` at `open_path` and return the completion labels at the
 /// cursor, which is marked in the source by `§`.
 async fn complete_labels(open_path: &str, content: &str) -> Vec<String> {
-    complete_items(open_path, content)
-        .await
-        .into_iter()
-        .map(|item| item.label)
-        .collect()
+    item_labels(complete_items(open_path, content).await)
 }
 
 async fn complete_items(open_path: &str, content: &str) -> Vec<CompletionItem> {
     let (backend, _dir, uri, position) = open_at_cursor(open_path, content).await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position,
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    }
+    complete_at_opened(&backend, &uri, position.line, position.character).await
 }
 
 /// Resolve go-to-definition at the `§` cursor and return the target URI and
@@ -222,17 +199,7 @@ async fn open_at_cursor(
     files.push((open_path, stripped.as_str()));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: stripped.clone(),
-            },
-        })
-        .await;
+    let uri = open_php_at(&backend, &dir, open_path, &stripped).await;
 
     (backend, dir, uri, position)
 }

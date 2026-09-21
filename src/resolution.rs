@@ -43,6 +43,7 @@ use crate::class_loader_memo;
 use crate::composer;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
+use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 use crate::types::{ClassInfo, FacadeAccessor, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
@@ -1452,6 +1453,46 @@ impl Backend {
         }
     }
 
+    /// Build a [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
+    /// for `cursor_offset` in a file.
+    ///
+    /// Fills the fields every request handler repeats: this backend and
+    /// its resolved-class cache, no forward-walker scope, and a cursor
+    /// that is neither inside a static method nor preserving `static`.
+    /// The handful of callers that differ override just those fields
+    /// with struct-update syntax, e.g. a diagnostic pass that already
+    /// knows whether the span sits in a static method:
+    ///
+    /// ```text
+    /// ResolutionCtx {
+    ///     is_in_static_method: symbol_map.is_in_static_method(span.start),
+    ///     ..self.resolution_ctx_at(current_class, classes, content, span.start, loaders)
+    /// }
+    /// ```
+    pub(crate) fn resolution_ctx_at<'a>(
+        &'a self,
+        current_class: Option<&'a ClassInfo>,
+        all_classes: &'a [Arc<ClassInfo>],
+        content: &'a str,
+        cursor_offset: u32,
+        loaders: CtxLoaders<'a>,
+    ) -> ResolutionCtx<'a> {
+        ResolutionCtx {
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader: loaders.class_loader,
+            backend: Some(self),
+            laravel_macro_this_resolver: loaders.laravel_macro_this_resolver,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: loaders.function_loader,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        }
+    }
+
     /// Return a function-loader closure bound to a [`FileContext`].
     ///
     /// This is the convenience wrapper for the common case where the
@@ -1501,7 +1542,6 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
         use crate::class_lookup::find_class_at_offset;
-        use crate::type_engine::resolver::ResolutionCtx;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
@@ -1523,20 +1563,17 @@ impl Backend {
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 

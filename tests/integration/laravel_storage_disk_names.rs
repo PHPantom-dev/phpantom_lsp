@@ -1,6 +1,8 @@
 //! End-to-end coverage for Laravel storage disk names backed by config keys.
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, position_after};
+use crate::common::{
+    complete_labels_at_opened, create_psr4_workspace, open_php_at, position_after,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -31,17 +33,7 @@ async fn open_workspace(source: &str) -> (Backend, tempfile::TempDir, Url) {
     );
     backend.initialized(InitializedParams {}).await;
 
-    let uri = Url::from_file_path(dir.path().join("app/DiskConsumer.php")).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: source.to_string(),
-            },
-        })
-        .await;
+    let uri = open_php_at(&backend, &dir, "app/DiskConsumer.php", source).await;
 
     (backend, dir, uri)
 }

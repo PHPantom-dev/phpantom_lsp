@@ -340,6 +340,15 @@ impl ProviderScans {
         true
     }
 
+    /// Drop one provider's scan, for a file deleted from disk.  Its FQN stays
+    /// registered, so a file that declares the provider again rejoins the
+    /// table the moment it parses.  Returns whether anything was dropped.
+    pub fn remove(&mut self, uri: &str) -> bool {
+        let before = self.scans.len();
+        self.scans.retain(|scan| scan.uri != uri);
+        self.scans.len() != before
+    }
+
     /// The merged table every consumer reads, with aliases resolved against
     /// the complete set of bindings.
     pub fn merged(&self) -> ProviderResources {

@@ -10,7 +10,7 @@
 //! path (no `did_open` on the provider or migration, and no follow-up edit)
 //! to prove the macro-added column is present from the very first load.
 
-use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_initialized_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -82,7 +82,7 @@ class Consumer {
 
 #[tokio::test]
 async fn blueprint_macro_column_is_present_from_the_first_startup_load() {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir) = create_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -101,10 +101,7 @@ async fn blueprint_macro_column_is_present_from_the_first_startup_load() {
     // before opening any file. Neither the provider nor the migration is
     // opened here, so nothing besides `initialized()` can have populated the
     // macro or schema index.
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER_PHP).await;
+    let uri = open_initialized_php(&backend, "src/Consumer.php").await;
 
     let position = Position {
         line: 5,

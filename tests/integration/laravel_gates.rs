@@ -8,8 +8,9 @@
 //! check names — is flagged.
 
 use crate::common::{
-    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_psr4_workspace, definition_locations,
-    goto_definition_at, hover_text_at, open_php_str, position_after,
+    LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
+    create_psr4_workspace, definition_locations, goto_definition_at, hover_text_at,
+    open_initialized_php, open_php_str, position_after,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -84,7 +85,7 @@ class LegacyVideoPolicy
 /// Build a workspace with the provider, both models, both policies, and
 /// `src/Consumer.php`.
 async fn workspace(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -95,13 +96,10 @@ async fn workspace(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir,
             ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
     (backend, dir, uri)
 }
 
@@ -392,7 +390,7 @@ class PostPolicy extends BasePolicy
     public function update($user, Post $post): bool { return true; }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -404,12 +402,10 @@ class PostPolicy extends BasePolicy
             ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -461,7 +457,7 @@ class PostPolicy
     public function update($user, Post $post): bool { return true; }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -472,12 +468,10 @@ class PostPolicy
             ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -695,7 +689,7 @@ use Illuminate\\Database\\Eloquent\\Model;
 #[UsePolicy(LegacyVideoPolicy::class)]
 class Post extends Model {}
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -706,12 +700,10 @@ class Post extends Model {}
             ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -812,13 +804,11 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) =
+    let (backend, _dir) =
         create_psr4_workspace(LARAVEL_SRC_COMPOSER, &[("src/Consumer.php", consumer)]);
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
+    let uri = open_initialized_php(&backend, "src/Consumer.php")
+        .await
         .to_string();
-    open_php_str(&backend, &uri, consumer).await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -853,7 +843,7 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         PERMISSION_COMPOSER_JSON,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
@@ -864,12 +854,10 @@ class Consumer {
             ("src/Policies/LegacyVideoPolicy.php", VIDEO_POLICY_PHP),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -912,19 +900,17 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             ("src/Providers/AuthServiceProvider.php", provider),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
@@ -981,19 +967,17 @@ class Consumer {
     }
 }
 ";
-    let (backend, dir) = create_psr4_workspace(
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
         LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", providers),
             ("src/Providers/AuthServiceProvider.php", two_in_one_file),
             ("src/Consumer.php", consumer),
         ],
-    );
-    backend.initialized(InitializedParams {}).await;
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
-        .to_string();
-    open_php_str(&backend, &uri, consumer).await;
+        "src/Consumer.php",
+    )
+    .await;
+    let uri = uri.to_string();
 
     // Both files' abilities are indexed, and the file shared by two providers
     // contributed each of its registrations once.
@@ -1043,12 +1027,9 @@ class Consumer {
     // Re-running discovery finds the provider still named by the class index
     // but no longer readable.  The policies remain, so abilities still
     // resolve — the run simply loses the file's own registrations.
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php"))
-        .unwrap()
+    let uri = open_initialized_php(&backend, "src/Consumer.php")
+        .await
         .to_string();
-    open_php_str(&backend, &uri, consumer).await;
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(&uri, consumer, &mut diags);
     // Whether `manage-billing` survived the deletion is not the point; that

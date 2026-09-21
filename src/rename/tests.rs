@@ -7,7 +7,7 @@
 //! public `Backend` API exposes.
 
 use crate::Backend;
-use crate::test_fixtures::apply_edits;
+use crate::text_position::apply_text_edits as apply_edits;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
@@ -65,7 +65,7 @@ async fn rename_result(
 
 fn seed_macro_index(backend: &Backend, uri: &Url, text: &str) {
     let mut index = backend.laravel_macros.write();
-    index.set_file(
+    index.files.set_file(
         uri.to_string(),
         extract_macro_registrations(text, Some(*backend.workspace.php_version.lock())),
     );

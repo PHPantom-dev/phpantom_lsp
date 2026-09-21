@@ -15,9 +15,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
-use super::helpers::{
-    ByteRange, compute_use_line_ranges, compute_use_statement_spans, find_use_statement,
-    is_offset_in_ranges, make_tagged_diagnostic,
+use super::helpers::{ByteRange, is_offset_in_ranges, make_tagged_diagnostic};
+use super::use_statements::{
+    compute_use_line_ranges, compute_use_statement_spans, find_use_statement,
 };
 
 impl Backend {
@@ -405,7 +405,7 @@ fn find_use_statement_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diagnostics::helpers::find_use_member;
+    use crate::diagnostics::use_statements::find_use_member;
 
     /// Helper: no use-statement or declaration ranges to exclude.
     fn referenced(content: &str, alias: &str) -> bool {

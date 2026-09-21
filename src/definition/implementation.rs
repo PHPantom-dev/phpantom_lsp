@@ -42,7 +42,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::config::IndexingStrategy;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::{LineIndex, line_start_byte_offset, position_to_offset};
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::CtxLoaders;
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, ResolvedType};
 use crate::util::{collect_php_files, short_name};
 
@@ -531,20 +531,17 @@ impl Backend {
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
         // Resolve the subject to candidate classes.
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
 
         let candidates = ResolvedType::into_arced_classes(
             crate::type_engine::resolver::resolve_target_classes(&subject, access_kind, &rctx),

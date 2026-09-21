@@ -12,7 +12,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::{ResolutionCtx, resolve_target_classes};
+use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
 use crate::types::{ClassInfo, CompletionTarget, FileContext, ResolvedType};
 
 impl Backend {
@@ -64,20 +64,17 @@ impl Backend {
         // cache key can include the actual resolved types. This prevents
         // stale results if a variable (e.g. `$model`) changes type
         // within the same file.
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         let mut resolved = if suppress {
             vec![]
         } else {
@@ -92,20 +89,17 @@ impl Backend {
                     self.parse_php(&patched).into_iter().map(Arc::new).collect();
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_current = find_class_at_offset(&patched_classes, patched_offset);
-                let patched_rctx = ResolutionCtx {
-                    current_class: patched_current,
-                    all_classes: &patched_classes,
-                    content: &patched,
-                    cursor_offset: patched_offset,
-                    class_loader: &class_loader,
-                    backend: Some(self),
-                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    function_loader: Some(&function_loader),
-                    scope_var_resolver: None,
-                    is_in_static_method: false,
-                    preserve_static: false,
-                };
+                let patched_rctx = self.resolution_ctx_at(
+                    patched_current,
+                    &patched_classes,
+                    &patched,
+                    patched_offset,
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
+                    ),
+                );
                 resolved =
                     resolve_target_classes(&target.subject, target.access_kind, &patched_rctx);
             }

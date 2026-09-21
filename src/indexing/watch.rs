@@ -543,6 +543,86 @@ mod tests {
         }
     }
 
+    /// A template's lowered PHP and source map are recorded for every
+    /// indexed template, not only the open ones, so a watched deletion has
+    /// to drop them the way `did_close` does.
+    #[test]
+    fn deleting_a_template_drops_its_lowered_php_and_source_map() {
+        let dir = tempfile::tempdir().unwrap();
+        let template = dir.path().join("resources/views/welcome.blade.php");
+        let url = Url::from_file_path(&template).unwrap();
+        let uri = url.to_string();
+
+        let backend = Backend::new_test();
+        backend.update_ast(&uri, "<div>{{ $name }}</div>\n");
+        assert!(backend.blade_virtual_content.read().contains_key(&uri));
+        assert!(backend.blade_source_maps.read().contains_key(&uri));
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: url,
+                typ: FileChangeType::DELETED,
+            }],
+        };
+        backend.apply_watched_file_changes(&params, dir.path());
+
+        assert!(!backend.blade_virtual_content.read().contains_key(&uri));
+        assert!(!backend.blade_source_maps.read().contains_key(&uri));
+    }
+
+    /// The registrations a provider contributes are replaced when the file
+    /// is parsed, which a file deleted from disk never is again, so the
+    /// deletion itself has to take them away.
+    #[test]
+    fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = dir.path().join("app/Providers/AuthServiceProvider.php");
+        let url = Url::from_file_path(&provider).unwrap();
+        let uri = url.to_string();
+
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        backend.update_ast(
+            &uri,
+            "<?php\n\
+             namespace App\\Providers;\n\
+             use Illuminate\\Support\\Facades\\Gate;\n\
+             use Illuminate\\Support\\Str;\n\
+             class AuthServiceProvider {\n\
+                 public function boot(): void {\n\
+                     Gate::define('edit-post', fn ($user) => true);\n\
+                     Str::macro('shout', fn (string $s): string => strtoupper($s));\n\
+                 }\n\
+             }\n",
+        );
+        assert!(
+            backend
+                .laravel_gates
+                .read()
+                .definition("edit-post")
+                .is_some()
+        );
+        assert!(backend.laravel_macros.read().files.has_uri(&uri));
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: url,
+                typ: FileChangeType::DELETED,
+            }],
+        };
+        backend.apply_watched_file_changes(&params, dir.path());
+
+        assert!(
+            backend
+                .laravel_gates
+                .read()
+                .definition("edit-post")
+                .is_none()
+        );
+        assert!(!backend.laravel_gates.read().files.has_uri(&uri));
+        assert!(!backend.laravel_macros.read().files.has_uri(&uri));
+    }
+
     /// A running Laravel application compiles Blade templates into
     /// storage/framework/views and rewrites the bootstrap/cache manifests
     /// on every request it serves; those events must not reach the

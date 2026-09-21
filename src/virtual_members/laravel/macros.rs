@@ -31,6 +31,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use mago_syntax::parser::parse_file_content;
 
+use super::file_contributions::FileContributions;
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
 use crate::types::{ClassInfo, MethodInfo, PhpVersion};
@@ -501,14 +502,14 @@ pub(crate) fn extract_date_factory_class(content: &str) -> Option<String> {
 /// the class each macro attaches to.
 ///
 /// Stored on [`Backend`](crate::Backend) and built for Laravel projects after
-/// indexing.  `by_uri` is the source of truth (one entry per contributing
+/// indexing.  `files` is the source of truth (one entry per contributing
 /// file, so an edit to a file can replace just that file's registrations);
 /// `merged` is the derived lookup map used when injecting members onto a
 /// loaded class.  Each macro is stored as both a static and an instance
 /// method so that `Str::slug()` and `$collection->toUpper()` both resolve.
 #[derive(Default)]
 pub(crate) struct LaravelMacroIndex {
-    by_uri: HashMap<String, Vec<MacroRegistration>>,
+    pub(crate) files: FileContributions<Vec<MacroRegistration>>,
     merged: HashMap<String, Vec<Arc<MethodInfo>>>,
     /// Source location of each macro's `::macro('name', ...)` registration,
     /// keyed by `(target FQN, macro name)`.  Powers go-to-definition, which
@@ -521,26 +522,9 @@ pub(crate) struct LaravelMacroIndex {
 }
 
 impl LaravelMacroIndex {
-    /// Replace the registrations contributed by `uri`.  Passing an empty
-    /// vector removes the file's contributions.  Call [`Self::rebuild`]
-    /// afterwards to refresh the merged lookup map (deferred so a bulk build
-    /// rebuilds once rather than per file).
-    pub(crate) fn set_file(&mut self, uri: String, regs: Vec<MacroRegistration>) {
-        if regs.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, regs);
-        }
-    }
-
     /// Rebuild the merged lookup map from the per-file registrations.
     pub(crate) fn rebuild(&mut self) {
         self.rebuild_merged();
-    }
-
-    /// Whether `uri` currently contributes any registrations.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
     }
 
     /// Whether the merged map has no macros at all.
@@ -617,7 +601,7 @@ impl LaravelMacroIndex {
             "Illuminate\\Database\\Schema\\Builder",
         ];
         let mut map = HashMap::new();
-        for regs in self.by_uri.values() {
+        for regs in self.files.values() {
             for reg in regs {
                 if BLUEPRINT_FQNS
                     .iter()
@@ -642,7 +626,7 @@ impl LaravelMacroIndex {
     /// macro rather than in a route file.
     pub(crate) fn macro_closures_on(&self, targets: &[&str]) -> HashMap<String, (String, u32)> {
         let mut map = HashMap::new();
-        for (uri, regs) in self.by_uri.iter() {
+        for (uri, regs) in self.files.iter() {
             for reg in regs {
                 let Some(offset) = reg.closure_offset else {
                     continue;
@@ -661,14 +645,14 @@ impl LaravelMacroIndex {
         map
     }
 
-    /// Rebuild `merged` from `by_uri`.  For each registration the macro is
+    /// Rebuild `merged` from `files`.  For each registration the macro is
     /// added as both a static and an instance method; duplicates
     /// (same name + staticness on the same target) keep the first seen.
     fn rebuild_merged(&mut self) {
         let mut merged: HashMap<String, Vec<Arc<MethodInfo>>> = HashMap::new();
         let mut locations: HashMap<(String, String), (String, u32)> = HashMap::new();
         let mut reverse_locations: HashMap<(String, u32), Vec<(String, String)>> = HashMap::new();
-        for (uri, regs) in self.by_uri.iter() {
+        for (uri, regs) in self.files.iter() {
             for reg in regs {
                 // A `mixin()`-derived registration points its location at the
                 // mixin method's own file; a plain macro's location is the file

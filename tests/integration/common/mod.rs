@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod lsp_transport;
+
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use std::fs;
@@ -30,6 +32,20 @@ pub async fn open_document(backend: &Backend, uri: &Url, language_id: &str, text
 /// [`open_document`] for a PHP file.
 pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
     open_document(backend, uri, "php", text).await;
+}
+
+/// [`open_php`] for the file at `relative` inside a workspace directory
+/// (the one [`create_psr4_workspace`] hands back), with `content` as the
+/// buffer the editor opens it with, and hand back the URI it opened as.
+pub async fn open_php_at(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    relative: &str,
+    content: &str,
+) -> Url {
+    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+    open_php(backend, &uri, content).await;
+    uri
 }
 
 // ─── Completion ─────────────────────────────────────────────────────────────
@@ -68,7 +84,7 @@ fn response_items(response: Option<CompletionResponse>) -> Option<Vec<Completion
     }
 }
 
-fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
+pub fn item_labels(items: Vec<CompletionItem>) -> Vec<String> {
     items.into_iter().map(|item| item.label).collect()
 }
 
@@ -1461,6 +1477,36 @@ pub async fn open_blade_template(backend: &Backend, relative: &str) -> Url {
 pub async fn open_initialized_blade_template(backend: &Backend, relative: &str) -> Url {
     backend.initialized(InitializedParams {}).await;
     open_blade_template(backend, relative).await
+}
+
+/// Open the PHP file at `relative` in the backend's workspace from disk,
+/// the way an editor opening it would, and hand back its URI.
+pub async fn open_php_file(backend: &Backend, relative: &str) -> Url {
+    let path = workspace_path(backend, relative);
+    let text = fs::read_to_string(&path).unwrap();
+    let uri = Url::from_file_path(&path).unwrap();
+    open_php(backend, &uri, &text).await;
+    uri
+}
+
+/// [`open_php_file`] with the workspace scan already run, so provider
+/// registrations, route files, and the other Laravel discoveries are in
+/// place before the file opens.
+pub async fn open_initialized_php(backend: &Backend, relative: &str) -> Url {
+    backend.initialized(InitializedParams {}).await;
+    open_php_file(backend, relative).await
+}
+
+/// [`create_psr4_workspace`] followed by [`open_initialized_php`] on
+/// `open_path`: the fixture the Laravel discovery suites start from.
+pub async fn create_initialized_psr4_workspace(
+    composer_json: &str,
+    files: &[(&str, &str)],
+    open_path: &str,
+) -> (Backend, tempfile::TempDir, Url) {
+    let (backend, dir) = create_psr4_workspace(composer_json, files);
+    let uri = open_initialized_php(&backend, open_path).await;
+    (backend, dir, uri)
 }
 
 // ─── Diagnostics ────────────────────────────────────────────────────────────

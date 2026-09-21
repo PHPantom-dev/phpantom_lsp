@@ -321,7 +321,7 @@ impl Backend {
     /// PHP, since whitespace between tokens is free) is not silently
     /// skipped the way a per-line scan would miss it.
     ///
-    /// [`scan_use_statements`]: crate::diagnostics::helpers::scan_use_statements
+    /// [`scan_use_statements`]: crate::diagnostics::use_statements::scan_use_statements
     fn collect_use_statement_edits(
         &self,
         content: &str,
@@ -329,7 +329,7 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) {
-        use crate::diagnostics::helpers::{scan_use_statements, use_statement_body};
+        use crate::diagnostics::use_statements::{scan_use_statements, use_statement_body};
 
         let old_prefix_lower = old_prefix.to_lowercase();
         for stmt in scan_use_statements(content) {

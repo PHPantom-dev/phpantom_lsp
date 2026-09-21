@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -14,19 +14,6 @@ fn lens_titles(lenses: &[CodeLens]) -> Vec<&str> {
         .iter()
         .filter_map(|l| l.command.as_ref().map(|c| c.title.as_str()))
         .collect()
-}
-
-async fn open_doc(backend: &phpantom_lsp::Backend, uri: Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
 }
 
 #[tokio::test]
@@ -74,7 +61,7 @@ final class LargeTestCase {
         &[("src/LargeTestCase.php", content)],
     );
     let uri = Url::from_file_path(dir.path().join("src/LargeTestCase.php")).unwrap();
-    open_doc(&backend, uri.clone(), content).await;
+    open_php(&backend, &uri, content).await;
 
     // Drive workspace indexing through the public LSP path, as a real client
     // would before requesting lenses from an index reported as ready.
@@ -148,7 +135,7 @@ function persistUnrelated(Unrelated $value): void {
         &[("src/Order.php", order), ("src/Unrelated.php", unrelated)],
     );
     let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
-    open_doc(&backend, uri.clone(), order).await;
+    open_php(&backend, &uri, order).await;
 
     backend
         .references(ReferenceParams {
@@ -240,7 +227,7 @@ function persist(Order $order): void {
     ));
 
     let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
-    open_doc(&backend, uri.clone(), content).await;
+    open_php(&backend, &uri, content).await;
     backend
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -309,7 +296,7 @@ makeWidget();
         &[("src/functions.php", content)],
     );
     let uri = Url::from_file_path(dir.path().join("src/functions.php")).unwrap();
-    open_doc(&backend, uri.clone(), content).await;
+    open_php(&backend, &uri, content).await;
     backend
         .references(ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -406,7 +393,7 @@ class User extends Model {}
     ] {
         let uri = Url::from_file_path(dir.path().join(path)).unwrap();
         let text = std::fs::read_to_string(dir.path().join(path)).unwrap();
-        open_doc(&backend, uri, &text).await;
+        open_php(&backend, &uri, &text).await;
     }
 
     let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();

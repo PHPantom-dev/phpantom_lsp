@@ -115,6 +115,7 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+pub(crate) mod file_contributions;
 mod folio;
 pub(crate) mod gates;
 pub(crate) mod helpers;
@@ -187,7 +188,7 @@ pub(crate) use storage::{
 };
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
-pub(crate) use view_data::{SharedViewVar, composer_class_vars};
+pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};

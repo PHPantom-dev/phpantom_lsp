@@ -39,7 +39,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::text_position::ranges_overlap;
+use crate::text_position::{byte_offset_to_utf16_col, ranges_overlap};
 
 use super::split_phpstan_tip;
 
@@ -246,8 +246,8 @@ fn build_fix_prefixed_edit(
     let byte_col = find_occurrence(line_text, prefixed)?;
 
     // Convert byte offsets to UTF-16 code unit offsets for LSP.
-    let start_char = byte_offset_to_utf16(line_text, byte_col);
-    let end_char = byte_offset_to_utf16(line_text, byte_col + prefixed.len());
+    let start_char = byte_offset_to_utf16_col(line_text, byte_col);
+    let end_char = byte_offset_to_utf16_col(line_text, byte_col + prefixed.len());
 
     Some(TextEdit {
         range: Range {
@@ -299,12 +299,6 @@ fn find_occurrence(line: &str, name: &str) -> Option<usize> {
     }
 
     None
-}
-
-/// Convert a byte offset within a line to a UTF-16 code unit offset.
-fn byte_offset_to_utf16(line: &str, byte_offset: usize) -> u32 {
-    let prefix = &line[..byte_offset.min(line.len())];
-    prefix.encode_utf16().count() as u32
 }
 
 // ── Stale detection ─────────────────────────────────────────────────────────
@@ -644,24 +638,6 @@ mod tests {
             build_fix_prefixed_edit(content, 5, "_PHPStan_test\\SomeClass", "\\SomeClass")
                 .is_none()
         );
-    }
-
-    // ── byte_offset_to_utf16 ───────────────────────────────────────
-
-    #[test]
-    fn utf16_ascii_line() {
-        assert_eq!(byte_offset_to_utf16("new _PHPStan_foo\\SomeClass()", 4), 4);
-        assert_eq!(
-            byte_offset_to_utf16("new _PHPStan_foo\\SomeClass()", 25),
-            25
-        );
-    }
-
-    #[test]
-    fn utf16_with_multibyte_before() {
-        // "é" is 2 bytes in UTF-8 but 1 UTF-16 code unit.
-        let line = "é_PHPStan_test\\Cls";
-        assert_eq!(byte_offset_to_utf16(line, 2), 1); // after "é"
     }
 
     // ── is_fix_prefixed_class_stale ────────────────────────────────
