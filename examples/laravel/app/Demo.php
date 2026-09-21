@@ -27,6 +27,7 @@ use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
@@ -179,6 +180,14 @@ class Demo
         Loaf::query()->whereKey(1)->first()->getWeight();     // → Loaf|null
         Loaf::query()->stale()->get();                        // → Collection<Loaf>
         Baker::query()->active()->firstOrFail()->getName();   // → Baker
+
+        // Inherited methods and forwarded query methods keep the custom builder.
+        Loaf::query()->where('crust', 'sourdough')->orderBy('id')->stale(); // → LoafBuilder
+        Loaf::where('crust', 'sourdough')->orderBy('id')->stale();          // → LoafBuilder
+        Baker::query()->whereIn('id', [1])->lockForUpdate()->active();     // → BakerBuilder<Baker>
+        (new Loaf())->newQuery()->orderBy('id')->stale();                 // → LoafBuilder
+        (new Baker())->newQueryWithoutScopes()->active();                // → BakerBuilder<Baker>
+        (new Baker())->newModelQuery()->firstOrFail()->getName();         // → Baker
 
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
@@ -464,10 +473,20 @@ class Demo
             $query->where('published', true); // resolves to Builder<BlogPost>
         });
 
-        // Dot-notation relation chain
-        BlogPost::whereHas('author', function ($q) {
-            $q->where('active', true);    // resolves to Builder<BlogAuthor>
+        // Each dotted segment is resolved on the preceding related model.
+        BlogPost::whereHas('author.posts', function ($q) {
+            $q->where('published', true);    // resolves to Builder<BlogPost>
         });
+
+        // has() takes its callback in the fifth argument; arrow functions
+        // receive the final related model's builder too.
+        BlogAuthor::has('posts.author', '>=', 1, 'and', fn ($q) => $q->active()); // → Builder<BlogAuthor>
+
+        // The related model chooses the builder, including with a bare hint.
+        Bakery::whereHas('baguettes', function (Builder $q) {
+            $q->stale();                     // → LoafBuilder<Loaf>
+        });
+        Bakery::query()->whereHas('headBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
     }
 
 

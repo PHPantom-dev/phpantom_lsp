@@ -33,11 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Eloquent query examples and inference coverage.** The Laravel playground demonstrates custom builders surviving query chains and callbacks following dotted relationships. An audit against the PHPStan Laravel extensions now guards these behaviours with editor and runtime assertions; the remaining inference gaps are tracked as focused follow-up work. Contributed by @shuvroroy.
 - **Extract interface is offered only to editors that can create files.** The action writes the new interface to a file of its own, which an editor has to say it accepts (the `create` resource operation) before a server may send it. Editors that do not are no longer shown an action they cannot apply.
 - **Updated the bundled mago toolchain to 1.47.5.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.
 
 ### Fixed
 
+- **Relation callbacks retain custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
+- **Model instance queries keep custom builders.** Starting a query with `newQuery()`, `newModelQuery()`, or `newQueryWithoutScopes()` now retains the model’s custom builder and its model type through subsequent calls. Contributed by @shuvroroy.
 - **Hover, completion, go-to-definition, signature help, and inlay hints parse the document once per request.** The type engine reads the syntax tree from several places while resolving an expression, and only diagnostics and code actions were sharing one parse between them; every other request re-parsed the whole file once per resolution step, which on a large file made a hover noticeably slower than the diagnostics for the same line.
 - **A deleted service provider no longer keeps its macros, gates, commands, morph aliases, and storage drivers registered.** What a file contributes to those Laravel indexes was replaced only when the file was parsed again, which a file removed from disk never is, so a `Str::macro()` or `Gate::define()` that lived only in a since-deleted provider stayed available for the rest of the session. They now go with the file, along with the container bindings and resource paths the provider registered.
 - **Variables shared through the fully qualified `View` facade reach templates.** A provider writing `\Illuminate\Support\Facades\View::share('appName', …)` rather than importing the facade was skipped when shared view variables were collected, so `$appName` was unknown in every template. The qualified spelling now counts the same as the short one.

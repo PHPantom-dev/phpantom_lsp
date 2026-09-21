@@ -663,7 +663,11 @@ pub(crate) fn seed_closure_params(
         let use_inferred_over_explicit = if let Some(ref eff) = effective_type
             && let Some(inferred) = inferred_for_idx
         {
-            super::super::closure_resolution::inferred_type_is_more_specific_pub(eff, inferred)
+            super::super::closure_resolution::inferred_type_is_more_specific_pub(
+                eff,
+                inferred,
+                ctx.class_loader,
+            )
         } else {
             false
         };
