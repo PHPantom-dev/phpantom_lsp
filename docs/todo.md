@@ -35,6 +35,8 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| B323 | [An external formatter that prints nothing empties the document](todo/bugs.md#b323-an-external-formatter-that-prints-nothing-empties-the-document)              | High        | Low         |
+| B324 | ["Extract variable (all occurrences)" can emit overlapping edits](todo/bugs.md#b324-extract-variable-all-occurrences-can-emit-overlapping-edits)                | Medium      | Low         |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
@@ -187,6 +189,7 @@ unlikely to move the needle for most users.
 | P52 | [The diagnostic benchmarks measure a path no consumer takes](todo/performance.md#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes)                            | Medium      | Low         |
 | P53 | [The deprecated collector deep-copies a class per member access](todo/performance.md#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)                    | Medium      | Low         |
 | P51 | [CI-gated scaling and memory invariants](todo/performance.md#p51-ci-gated-scaling-and-memory-invariants)                                                                    | Medium      | Low-Medium  |
+| P57 | [Narrowing deep-copies a class every time it crosses the `Arc` boundary](todo/performance.md#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary)      | Medium      | Medium-High |
 | P17 | [`mago-names` resolution on the parse hot path](todo/performance.md#p17-mago-names-resolution-on-the-parse-hot-path)                                                        | Medium      | High        |
 | P18 | [Subtype result caching](todo/performance.md#p18-subtype-result-caching) (per-request HashMap for hierarchy walks)                                                          | Medium      | High        |
 | P47 | [The resolved-class cache lock caps concurrent class resolution](todo/performance.md#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution)                     | Medium      | Very High   |
@@ -194,6 +197,7 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
 | P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
+| P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |
 | P54 | [Property narrowing re-walks the whole body once per subject](todo/performance.md#p54-property-narrowing-re-walks-the-whole-body-once-per-subject)                          | Low         | Medium      |

@@ -212,4 +212,155 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+## 1. Fold the PHPStan and PHPCS workers onto the generic Mago worker
+
+`diagnostics/external/mago.rs` already carries the generic form:
+`mago_worker` takes the `ExternalToolWorker`, a label, a service
+predicate, and a file runner, and both Mago commands are two-line
+delegations to it. `phpstan_worker` (`diagnostics/external/phpstan.rs`)
+and `phpcs_worker` (`diagnostics/external/phpcs.rs`) are hand-written
+copies of the same loop, around eighty-five lines each, and the module
+header in `diagnostics/external/mod.rs` already describes the shape as
+shared. The four `schedule_*` functions are four copies of the same two
+statements.
+
+Generalise `mago_worker` into an `external_tool_worker` on `Backend`
+whose per-tool parameters are the binary resolution (the only real
+difference, plus the Mago-only `enabled_services` gate) and the runner,
+move it to `diagnostics/external/mod.rs`, and reduce all four workers and
+all four schedule functions to delegations.
+
+**Files:** `src/diagnostics/external/mod.rs`,
+`src/diagnostics/external/mago.rs`,
+`src/diagnostics/external/phpstan.rs`,
+`src/diagnostics/external/phpcs.rs`.
+
+## 2. Convert offsets through `LineIndex` in code lens and inlay hints
+
+`text_position.rs` documents `offset_to_position` as O(offset) and
+`LineIndex` as the fix for converting many offsets from one piece of
+content. `document_symbols.rs`, `folding.rs`, and `semantic_tokens.rs`
+all build a `LineIndex` once per request. `code_lens.rs` and
+`inlay_hints.rs` do not: they call `offset_to_position` once per member,
+per lens, and per hint, and `code_lens.rs::line_indent` adds a second
+backwards scan of the same prefix. Both are refreshed on every committed
+change (`backend/documents.rs` asks for a code-lens and an inlay-hint
+re-pull after each one), so a large file pays a full-content scan per
+item on every keystroke.
+
+Build the index once at the top of `handle_code_lens` and of the inlay
+hint collection and thread it through the builders. Derive the indent
+from the line start the index already knows rather than scanning
+backwards for a newline.
+
+**Files:** `src/code_lens.rs`, `src/inlay_hints.rs`.
+
+## 3. Index `BladeBlockIndex` by parent instead of scanning every template
+
+`blade/block_index.rs::descendants` walks "who extends what I have found
+so far" by scanning every template in the project once per frontier
+entry, and tracks the visited set in a `Vec<String>` searched with
+`iter().any`. `is_rendered_by_a_template` scans every template's include
+list, and it runs once per `@extends` hop inside `blade_render_scope`.
+`blade_block_references` nests the two. In a real Laravel application
+most pages extend one layout, so the visited set grows to roughly the
+template count and the whole thing is quadratic — on the completion path
+(`blade_block_name_candidates`), the diagnostics path
+(`diagnostics/blade_sections.rs`), and find-references alike.
+
+Give `Templates` a parent-to-children map and an included-view set built
+alongside `by_view`/`view_by_uri` (and kept current in
+`refresh_blade_block_index`), and make the visited set a `HashSet`.
+
+**Files:** `src/blade/block_index.rs`.
+
+## 4. Run `codeLens/resolve` through the shared request guards
+
+Every other request reaches `Backend::with_file_content`, which installs
+the chain-resolution cache, the type-engine resolvers, the per-request
+parse cache, and the panic guard. `code_lens_resolve` in `server.rs`
+calls `resolve_code_lens_item` directly, so a lens resolve runs with none
+of them, and it fetches the file with `get_file_content`, which deep-copies
+the whole buffer — whose own doc comment says to prefer the `Arc`
+variant in hot paths. The editor sends one resolve per visible lens, so a
+screenful repeats both costs.
+
+`resolve_code_action` already does this correctly by installing the parse
+cache and the resolver guard itself; give the lens resolve the same
+treatment (or route it through a shared helper) and switch it to
+`get_file_content_arc`.
+
+**Files:** `src/code_lens.rs`, `src/server.rs`.
+
+## 5. One reader for `vendor/composer/installed.json`
+
+The Composer-1-array vs Composer-2-`{"packages": …}` dispatch is written
+out three times, byte for byte: `composer.rs::extract_path_repo_psr4_mappings`,
+`classmap_scanner/discovery.rs::vendor_package_roots`, and the workspace
+scan further down the same file. A fourth, differently-spelled copy sits
+in `virtual_members/laravel/macros.rs`.
+
+Add a reader to `composer.rs` that returns the packages and the
+`vendor/composer` directory, and route all four through it.
+
+**Files:** `src/composer.rs`, `src/classmap_scanner/discovery.rs`,
+`src/virtual_members/laravel/macros.rs`.
+
+## 6. Give `VarResolutionCtx` a constructor
+
+`VarResolutionCtx` has fifteen fields and twelve call sites write the
+whole literal out, nine of whose fields are the same constant in every
+one of them. Two of the sites are inside `type_engine/resolver/context.rs`
+itself: `with_cursor_offset` and `with_match_arm_narrowing` each restate
+all fifteen to change one. `cond_narrowing/apply.rs::build_var_ctx` is a
+local extraction of exactly this, with a comment saying why, that nothing
+outside that module can reach.
+
+Add a constructor (or a `Default` plus struct-update syntax) beside the
+existing `impl VarResolutionCtx`, rewrite the twelve sites to name only
+the fields they actually choose, and make `build_var_ctx` a thin wrapper
+over it.
+
+**Files:** `src/type_engine/resolver/context.rs`, and the call sites in
+`src/blade/{call_site_inference,shared_vars,typed_receiver}.rs`,
+`src/type_engine/variable/resolution.rs`,
+`src/type_engine/resolver/property_narrowing.rs`,
+`src/diagnostics/{match_type_errors,return_type_errors,property_type_errors}.rs`,
+`src/diagnostics/type_errors/mod.rs`,
+`src/code_actions/phpstan/fix_return_type/inference.rs`.
+
+## 7. Collapse the duplicated condition extractors in `cond_narrowing`
+
+Four of the sentinel-comparison extractors in
+`cond_narrowing/predicates.rs` share the same nine-line "compare against
+the sentinel on either side, then take the other operand's subject key"
+block, and `extract_isset_vars` / `extract_not_isset_vars` are
+nineteen-line functions that differ by a single `!`. In
+`cond_narrowing/null_narrowing.rs` the same six-line strip-null block
+appears six times. `cond_narrowing/emptiness.rs` opens
+`refine_non_empty_type` and `refine_empty_type` with the same eleven-line
+union distribution.
+
+`cond_narrowing/scope_edits.rs` is already the home for shared scope
+edits and shows the pattern to follow. Extract a subject-key helper, a
+sentinel-comparison helper parameterised by the sentinel predicate and
+the polarity, an isset helper parameterised by the wanted polarity, the
+strip-null block, and the union distribution. Keep the deliberate
+asymmetry between the null-equality and non-null extractors: they cover
+complementary polarities, not the same one.
+
+**Files:** `src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs`,
+`.../null_narrowing.rs`, `.../emptiness.rs`, `.../scope_edits.rs`.
+
+## 8. One `SUPERGLOBALS` list
+
+`diagnostics/undefined_variables/mod.rs` and
+`diagnostics/unused_variables.rs` each declare the same thirteen-entry
+`SUPERGLOBALS` constant; only the doc comment differs. Adding a
+superglobal currently means remembering both files.
+
+Move it to `diagnostics/helpers.rs` and import it from both.
+
+**Files:** `src/diagnostics/helpers.rs`,
+`src/diagnostics/undefined_variables/mod.rs`,
+`src/diagnostics/unused_variables.rs`.
