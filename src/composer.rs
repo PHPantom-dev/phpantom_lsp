@@ -604,6 +604,39 @@ pub fn normalise_path(path: &str) -> String {
     }
 }
 
+/// The file each PSR-4 mapping that covers `class_name` would place it
+/// at, in mapping order (longest prefix first).
+///
+/// An empty prefix is the root fallback mapping and covers every class.
+fn psr4_candidate_paths<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &'a Path,
+    class_name: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    mappings.iter().filter_map(move |mapping| {
+        let relative = if mapping.prefix.is_empty() {
+            class_name
+        } else {
+            class_name.strip_prefix(&mapping.prefix)?
+        };
+        Some(
+            workspace_root
+                .join(&mapping.base_path)
+                .join(format!("{}.php", relative.replace('\\', "/"))),
+        )
+    })
+}
+
+/// Where PSR-4 places `class_name`, whether or not the file exists yet:
+/// the path a class moved or created under that name has to take.
+pub(crate) fn psr4_path_for_class(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    class_name: &str,
+) -> Option<PathBuf> {
+    psr4_candidate_paths(mappings, workspace_root, class_name).next()
+}
+
 /// Resolve a fully-qualified PHP class name to a file path using PSR-4 mappings.
 ///
 /// The `class_name` should be the namespace-qualified name (e.g.
@@ -617,35 +650,11 @@ pub fn resolve_class_path(
     workspace_root: &Path,
     class_name: &str,
 ) -> Option<PathBuf> {
-    let name = class_name;
-
     // Skip built-in type keywords that are never real classes
-    if crate::php_type::is_keyword_type(name) {
+    if crate::php_type::is_keyword_type(class_name) {
         return None;
     }
-
-    // Try each mapping (already sorted longest-prefix-first)
-    for mapping in mappings {
-        let relative = if mapping.prefix.is_empty() {
-            // Empty prefix matches everything (root namespace fallback)
-            Some(name)
-        } else {
-            name.strip_prefix(&mapping.prefix)
-        };
-
-        if let Some(relative_class) = relative {
-            let relative_path = relative_class.replace('\\', "/");
-            let file_path = workspace_root
-                .join(&mapping.base_path)
-                .join(format!("{}.php", relative_path));
-
-            if file_path.is_file() {
-                return Some(file_path);
-            }
-        }
-    }
-
-    None
+    psr4_candidate_paths(mappings, workspace_root, class_name).find(|path| path.is_file())
 }
 
 /// The part of `namespace` that lies below a PSR-4 mapping's prefix, or

@@ -4,7 +4,6 @@
 //! The `LanguageServer` trait methods in `server.rs` delegate straight here.
 
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
@@ -103,6 +102,10 @@ impl Backend {
                     let start =
                         crate::text_position::position_to_byte_offset(&current, range.start);
                     let end = crate::text_position::position_to_byte_offset(&current, range.end);
+                    // A range whose start lies after its end would panic
+                    // `replace_range`, and this runs on the service loop
+                    // where a panic takes the whole server down.
+                    let (start, end) = (start.min(end), start.max(end));
                     current.replace_range(start..end, &change.text);
                 } else {
                     // Full content replacement (fallback)
@@ -144,13 +147,8 @@ impl Backend {
                 })
                 .await;
 
-                if committed == Some(true)
-                    && refresh_backend
-                        .supports_code_lens_refresh
-                        .load(Ordering::Acquire)
-                    && let Some(ref client) = refresh_backend.client
-                {
-                    let _ = client.code_lens_refresh().await;
+                if committed == Some(true) {
+                    refresh_backend.request_code_lens_refresh().await;
                 }
             });
             return;
@@ -210,27 +208,10 @@ impl Backend {
                 // holds were computed from the pre-edit map (the
                 // semanticTokens request usually races ahead of this
                 // background parse), so ask for a re-pull.
-                if committed == Some(true)
-                    && let Some(ref client) = refresh_backend.client
-                {
-                    if refresh_backend
-                        .supports_semantic_tokens_refresh
-                        .load(Ordering::Acquire)
-                    {
-                        let _ = client.semantic_tokens_refresh().await;
-                    }
-                    if refresh_backend
-                        .supports_inlay_hint_refresh
-                        .load(Ordering::Acquire)
-                    {
-                        let _ = client.inlay_hint_refresh().await;
-                    }
-                    if refresh_backend
-                        .supports_code_lens_refresh
-                        .load(Ordering::Acquire)
-                    {
-                        let _ = client.code_lens_refresh().await;
-                    }
+                if committed == Some(true) {
+                    refresh_backend.request_semantic_tokens_refresh().await;
+                    refresh_backend.request_inlay_hint_refresh().await;
+                    refresh_backend.request_code_lens_refresh().await;
                 }
             });
         }
@@ -341,11 +322,7 @@ impl Backend {
         // (or missing ones) are corrected.
         if did_work {
             self.request_diagnostic_refresh().await;
-            if self.supports_code_lens_refresh.load(Ordering::Acquire)
-                && let Some(ref client) = self.client
-            {
-                let _ = client.code_lens_refresh().await;
-            }
+            self.request_code_lens_refresh().await;
         }
     }
 }

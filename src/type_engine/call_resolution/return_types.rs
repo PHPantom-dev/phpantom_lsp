@@ -12,6 +12,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::{is_self_or_static, resolve_class_keyword};
 use crate::php_type::{PhpType, TypeKind};
+use crate::text_scan::{ScanStep, scan_top_level};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::type_engine::variable::array_func_rules::{
     array_func_element_type, array_func_raw_type,
@@ -1406,77 +1407,9 @@ fn join_operand_types(left: Option<PhpType>, right: Option<PhpType>) -> Option<P
     }
 }
 
-/// What a top-level scan makes of the byte it is looking at.
-enum ScanStep {
-    /// Step over this many bytes without interpreting them further.
-    Skip(usize),
-    /// Stop and report this offset.
-    Stop,
-    /// Stop and report nothing: what was found rules the whole scan out.
-    Abort,
-}
-
-/// Walk `text`'s top level, calling `at_depth_zero` on every byte that is
-/// not inside a quote or a bracket.
-///
-/// Quoting (`'…'` and `"…"`, with backslash escapes) and nesting (`(`,
-/// `[`, `{`) are handled here, so a scanner only has to say what it makes
-/// of the operators it is looking for.
-///
-/// Returns the offset the visitor stopped at, or `None` when it aborted or
-/// the scan ran to the end.
-fn scan_top_level(text: &str, at_depth_zero: impl Fn(&[u8], usize) -> ScanStep) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let mut depth: u32 = 0;
-    let mut quote: Option<u8> = None;
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if let Some(q) = quote {
-            if b == b'\\' {
-                i += 2;
-                continue;
-            }
-            if b == q {
-                quote = None;
-            }
-            i += 1;
-            continue;
-        }
-        match b {
-            b'\'' | b'"' => {
-                quote = Some(b);
-                i += 1;
-                continue;
-            }
-            b'(' | b'[' | b'{' => {
-                depth += 1;
-                i += 1;
-                continue;
-            }
-            b')' | b']' | b'}' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-                continue;
-            }
-            _ => {}
-        }
-        if depth > 0 {
-            i += 1;
-            continue;
-        }
-        match at_depth_zero(bytes, i) {
-            ScanStep::Skip(n) => i += n.max(1),
-            ScanStep::Stop => return Some(i),
-            ScanStep::Abort => return None,
-        }
-    }
-    None
-}
-
 /// Whether `text` joins its parts with a top-level `.` concatenation.
 fn contains_top_level_concat(text: &str) -> bool {
-    scan_top_level(text, |bytes, i| match bytes[i] {
+    scan_top_level(text.as_bytes(), |bytes, i| match bytes[i] {
         b'?' if bytes[i..].starts_with(b"?->") => ScanStep::Skip(3),
         b'-' if bytes[i..].starts_with(b"->") => ScanStep::Skip(2),
         // `...` (spread/variadic) is not concatenation.
@@ -1494,7 +1427,7 @@ fn contains_top_level_concat(text: &str) -> bool {
 /// resolve the same way. The assignment form `??=` is not an expression
 /// operator and is left alone.
 fn split_top_level_coalesce(text: &str) -> Option<(&str, &str)> {
-    let at = scan_top_level(text, |bytes, i| {
+    let at = scan_top_level(text.as_bytes(), |bytes, i| {
         if !bytes[i..].starts_with(b"??") {
             ScanStep::Skip(1)
         } else if bytes[i..].starts_with(b"??=") {
@@ -1515,7 +1448,7 @@ fn split_top_level_coalesce(text: &str) -> Option<(&str, &str)> {
 /// top-level `?:` is found — including a full ternary (`$a ? $b : $c`),
 /// which is left to the caller's other paths.
 fn split_top_level_elvis(text: &str) -> Option<(&str, &str)> {
-    let at = scan_top_level(text, |bytes, i| {
+    let at = scan_top_level(text.as_bytes(), |bytes, i| {
         if bytes[i] == b'?'
             && !bytes[i..].starts_with(b"?->")
             && text[i + 1..].trim_start().starts_with(':')
@@ -1540,7 +1473,7 @@ fn operand_is_single(operand: &str) -> bool {
     if operand.is_empty() {
         return false;
     }
-    scan_top_level(operand, |bytes, i| match bytes[i] {
+    scan_top_level(operand.as_bytes(), |bytes, i| match bytes[i] {
         // `->` and `?->` continue the chain, so they are stepped over
         // whole; a bare `-` or `?` is subtraction or a ternary.
         b'-' if bytes[i..].starts_with(b"->") => ScanStep::Skip(2),

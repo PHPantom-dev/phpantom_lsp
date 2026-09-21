@@ -660,20 +660,8 @@ impl Backend {
             // still-filling index: hints resolved against classes that were
             // not parsed yet, and lenses showed reference counts that were
             // stale zeros.  Now that it's complete, ask for a re-pull.
-            if progress_backend
-                .supports_inlay_hint_refresh
-                .load(Ordering::Acquire)
-                && let Some(ref client) = progress_backend.client
-            {
-                let _ = client.inlay_hint_refresh().await;
-            }
-            if progress_backend
-                .supports_code_lens_refresh
-                .load(Ordering::Acquire)
-                && let Some(ref client) = progress_backend.client
-            {
-                let _ = client.code_lens_refresh().await;
-            }
+            progress_backend.request_inlay_hint_refresh().await;
+            progress_backend.request_code_lens_refresh().await;
 
             // With the whole workspace parsed, eagerly resolve every
             // class so interactive requests hit a warm cache.  This

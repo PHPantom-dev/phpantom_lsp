@@ -870,14 +870,10 @@ trait RouteSink {
     fn route(&mut self, route: RouteEntry, site: RouteSite<'_>);
 
     /// The name prefix of a group whose own name is not statically known.
-    fn open_prefix(&mut self, prefix: String) {
-        let _ = prefix;
-    }
+    fn open_prefix(&mut self, _prefix: String) {}
 
     /// A route name registered under such a group, recorded whole.
-    fn open_suffix(&mut self, name: String) {
-        let _ = name;
-    }
+    fn open_suffix(&mut self, _name: String) {}
 }
 
 /// Where a route name was written: the file being walked and the offset the

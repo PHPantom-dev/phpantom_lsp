@@ -356,10 +356,10 @@ fn type_after_increment_decrement(ty: &PhpType, operation: IncrementDecrementKin
                     }
                 }
             }
-            match transformed.len() {
-                0 => ty.clone(),
-                1 => transformed.into_iter().next().unwrap(),
-                _ => PhpType::union(transformed),
+            if transformed.is_empty() {
+                ty.clone()
+            } else {
+                PhpType::union(transformed)
             }
         }
         TypeKind::Nullable(inner) => {

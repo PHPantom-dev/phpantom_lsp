@@ -51,8 +51,7 @@ use std::ops::Range;
 pub(super) use elements::{OPAQUE_ELEMENTS, PRESERVED_ELEMENTS, is_component_name};
 use scanner::Scanner;
 pub(super) use scanner::{
-    AttributeValue, DirectiveHead, attribute_head, directive_head, echo_delimiters, find,
-    find_byte, find_closing_tag, find_directive, find_marker_comment, is_echo_start, tag_name,
+    AttributeValue, attribute_head, find_closing_tag, find_directive, find_marker_comment, tag_name,
 };
 use walker::{Walker, finish_file};
 

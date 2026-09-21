@@ -23,6 +23,74 @@ impl<T> Contribution for Vec<T> {
     }
 }
 
+/// A registry built from per-file contributions: the contributions
+/// themselves and the derived lookups `rebuild` recomputes from them.
+pub(crate) trait Registry {
+    type Contribution: Contribution;
+    fn files(&self) -> &FileContributions<Self::Contribution>;
+    fn files_mut(&mut self) -> &mut FileContributions<Self::Contribution>;
+    fn rebuild(&mut self);
+}
+
+macro_rules! impl_registry {
+    ($index:ty, $contribution:ty) => {
+        impl Registry for $index {
+            type Contribution = $contribution;
+
+            fn files(&self) -> &FileContributions<Self::Contribution> {
+                &self.files
+            }
+
+            fn files_mut(&mut self) -> &mut FileContributions<Self::Contribution> {
+                &mut self.files
+            }
+
+            fn rebuild(&mut self) {
+                <$index>::rebuild(self)
+            }
+        }
+    };
+}
+
+impl_registry!(super::LaravelGateIndex, super::gates::GateScan);
+impl_registry!(super::LaravelMorphMapIndex, super::MorphMapScan);
+impl_registry!(
+    super::LaravelCommandIndex,
+    Vec<super::commands::CommandEntry>
+);
+impl_registry!(
+    super::LaravelStorageDriverIndex,
+    Vec<super::storage::StorageDriverRegistration>
+);
+
+/// Replace what `uri` contributes to `registry` after an edit.
+///
+/// `may_contribute` is the caller's cheap pre-filter on the new content
+/// (a byte search for the registration token, a file-name rule).  A file
+/// that neither contributed before nor passes it is left alone without
+/// running `scan`; one that contributed before is always rescanned, so a
+/// registration the edit removed goes with it.  Returns whether the
+/// registry was touched, for the caller's own downstream invalidation.
+pub(crate) fn refresh_file<R: Registry>(
+    registry: &parking_lot::RwLock<R>,
+    uri: &str,
+    may_contribute: bool,
+    scan: impl FnOnce() -> R::Contribution,
+) -> bool {
+    let was_contributor = registry.read().files().has_uri(uri);
+    if !was_contributor && !may_contribute {
+        return false;
+    }
+    let contribution = scan();
+    if !was_contributor && contribution.is_empty() {
+        return false;
+    }
+    let mut registry = registry.write();
+    registry.files_mut().set_file(uri.to_string(), contribution);
+    registry.rebuild();
+    true
+}
+
 /// One contribution per contributing file, keyed by the file's URI.
 pub(crate) struct FileContributions<C> {
     by_uri: HashMap<String, C>,

@@ -24,9 +24,10 @@ use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::composer;
+use crate::inheritance::find_declaring_ancestor;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, ClassInfo, MAX_INHERITANCE_DEPTH};
+use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
 
@@ -35,7 +36,6 @@ struct MemberPrototypeSearch<'a> {
     kind: MemberKind,
     uri: &'a str,
     content: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 }
 
 impl Backend {
@@ -503,124 +503,10 @@ impl Backend {
             kind,
             uri,
             content,
-            class_loader,
         };
-
-        if let Some(loc) = self.find_member_prototype_in_traits(&class.used_traits, &search, 0) {
-            return Some(loc);
-        }
-
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(parent_name) = current.parent_class else {
-                break;
-            };
-            let Some(parent) = class_loader(&parent_name).map(Arc::unwrap_or_clone) else {
-                break;
-            };
-
-            if self.class_declares_member(&parent, &search)
-                && let Some(loc) = self.member_location(&parent_name, &parent, &search)
-            {
-                return Some(loc);
-            }
-
-            if let Some(loc) = self.find_member_prototype_in_traits(&parent.used_traits, &search, 0)
-            {
-                return Some(loc);
-            }
-
-            current = parent;
-        }
-
-        if matches!(search.kind, MemberKind::Method | MemberKind::Constant) {
-            return self.find_member_prototype_in_interfaces(class, &search);
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_traits(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = (search.class_loader)(trait_name).map(Arc::unwrap_or_clone)
-            else {
-                continue;
-            };
-            if self.class_declares_member(&trait_info, search)
-                && let Some(loc) = self.member_location(trait_name, &trait_info, search)
-            {
-                return Some(loc);
-            }
-            if let Some(loc) =
-                self.find_member_prototype_in_traits(&trait_info.used_traits, search, depth + 1)
-            {
-                return Some(loc);
-            }
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interfaces(
-        &self,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let cls = current?;
-            for iface_name in &cls.interfaces {
-                if let Some(loc) = self.find_member_prototype_in_interface(iface_name, search, 0) {
-                    return Some(loc);
-                }
-            }
-            current = cls
-                .parent_class
-                .as_deref()
-                .and_then(|parent| (search.class_loader)(parent).map(Arc::unwrap_or_clone));
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interface(
-        &self,
-        iface_name: &str,
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-        let iface = (search.class_loader)(iface_name).map(Arc::unwrap_or_clone)?;
-        if self.class_declares_member(&iface, search)
-            && let Some(loc) = self.member_location(iface_name, &iface, search)
-        {
-            return Some(loc);
-        }
-
-        for parent in &iface.interfaces {
-            if let Some(loc) = self.find_member_prototype_in_interface(parent, search, depth + 1) {
-                return Some(loc);
-            }
-        }
-
-        if let Some(parent) = iface.parent_class
-            && let Some(loc) = self.find_member_prototype_in_interface(&parent, search, depth + 1)
-        {
-            return Some(loc);
-        }
-
-        None
+        let declares = |candidate: &ClassInfo| self.class_declares_member(candidate, &search);
+        let (name, declaring) = find_declaring_ancestor(class, class_loader, &declares)?;
+        self.member_location(&name, &declaring, &search)
     }
 
     fn class_declares_member(&self, class: &ClassInfo, search: &MemberPrototypeSearch<'_>) -> bool {

@@ -2,7 +2,8 @@
 //! `$policies` registrations in the service providers.
 
 use crate::Backend;
-use crate::virtual_members::laravel::file_contributions::Contribution;
+use crate::virtual_members::laravel::file_contributions::refresh_file;
+use crate::virtual_members::laravel::scan_gate_registrations;
 
 impl Backend {
     /// Build the authorization gate index by scanning the project's
@@ -22,25 +23,7 @@ impl Backend {
         // provider scan below, so it has to survive the fresh index.
         index
             .set_runtime_permission_package(self.laravel_gates.read().runtime_permission_package());
-        let mut scanned = 0usize;
-
-        for fqn in self.laravel_provider_fqns() {
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
-                continue;
-            };
-            if index.files.has_uri(&uri) {
-                continue;
-            }
-            let Some(content) = self.get_file_content(&uri) else {
-                continue;
-            };
-            scanned += 1;
-            let scan = crate::virtual_members::laravel::scan_gate_registrations(&content);
-            if scan.is_empty() {
-                continue;
-            }
-            index.files.set_file(uri, scan);
-        }
+        let scanned = self.scan_providers_into(&mut index.files, scan_gate_registrations);
 
         index.rebuild();
         let ability_count = index.definition_names().len();
@@ -63,21 +46,11 @@ impl Backend {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
-        let was_contributor = self.laravel_gates.read().files.has_uri(uri);
         let bytes = content.as_bytes();
         let has_token = memchr::memmem::find(bytes, b"Gate").is_some()
             || memchr::memmem::find(bytes, b"$policies").is_some();
-        if !was_contributor && !has_token {
-            return;
-        }
-
-        let scan = crate::virtual_members::laravel::scan_gate_registrations(content);
-        if !was_contributor && scan.is_empty() {
-            return;
-        }
-
-        let mut index = self.laravel_gates.write();
-        index.files.set_file(uri.to_string(), scan);
-        index.rebuild();
+        refresh_file(&self.laravel_gates, uri, has_token, || {
+            scan_gate_registrations(content)
+        });
     }
 }

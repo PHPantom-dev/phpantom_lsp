@@ -70,14 +70,11 @@
 use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of;
-use crate::types::{ClassInfo, ClassLikeKind, Visibility};
+use crate::inheritance::ancestors;
+use crate::types::{ClassInfo, ClassLikeKind, MAX_TRAIT_DEPTH, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
 pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
-
-/// Guard against a cycle in a malformed or mid-edit hierarchy.  Matches
-/// the depth cap the other hierarchy walks in the codebase use.
-const MAX_HIERARCHY_DEPTH: u32 = 20;
 
 /// Which kind of member a lookup turned out to be, so the message can
 /// name it without re-deriving it from the access syntax.
@@ -380,15 +377,17 @@ fn declaring_class(
             {
                 return Some(raw);
             }
-            ancestors(&raw, class_loader).find(|ancestor| {
-                declares_through_own_traits(
-                    ancestor,
-                    member_name,
-                    is_static,
-                    is_method_call,
-                    class_loader,
-                )
-            })
+            ancestors(&raw, class_loader)
+                .map(|(_, ancestor)| ancestor)
+                .find(|ancestor| {
+                    declares_through_own_traits(
+                        ancestor,
+                        member_name,
+                        is_static,
+                        is_method_call,
+                        class_loader,
+                    )
+                })
         }
         // A protected member is visible to everything below the class
         // that introduced it, so the owner is the *furthest* level that
@@ -400,7 +399,7 @@ fn declaring_class(
             if declares_non_privately(&raw, member_name, is_static, is_method_call, class_loader) {
                 owner = Some(Arc::clone(&raw));
             }
-            for ancestor in ancestors(&raw, class_loader) {
+            for (_, ancestor) in ancestors(&raw, class_loader) {
                 if declares_non_privately(
                     &ancestor,
                     member_name,
@@ -485,7 +484,7 @@ fn trait_declares(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u32,
 ) -> Option<Visibility> {
-    if depth > MAX_HIERARCHY_DEPTH {
+    if depth > MAX_TRAIT_DEPTH {
         return None;
     }
     let used = class_loader(trait_name)?;
@@ -516,7 +515,7 @@ fn private_ancestor_declaration(
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Rejection> {
-    for ancestor in ancestors(merged, class_loader) {
+    for (_, ancestor) in ancestors(merged, class_loader) {
         let Some((visibility, kind)) =
             declared_member(&ancestor, member_name, is_static, is_method_call)
         else {
@@ -535,31 +534,6 @@ fn private_ancestor_declaration(
         });
     }
     None
-}
-
-/// The raw ancestors of a class, nearest first.
-///
-/// Lazy on purpose.  The caller that looks for a private ancestor member
-/// stops at the first level that has one, and this runs on every member
-/// the assembled class does not carry — the ordinary state of code being
-/// typed — so materialising the whole chain would allocate a vector per
-/// access to read one entry of it.
-fn ancestors<'a>(
-    class: &Arc<ClassInfo>,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> impl Iterator<Item = Arc<ClassInfo>> + 'a {
-    let mut next = class.parent_class;
-    let mut depth = 0u32;
-    std::iter::from_fn(move || {
-        let name = next?;
-        depth += 1;
-        if depth > MAX_HIERARCHY_DEPTH {
-            return None;
-        }
-        let ancestor = class_loader(&name)?;
-        next = ancestor.parent_class;
-        Some(ancestor)
-    })
 }
 
 /// The visibility and kind `class` declares `member_name` with, matching

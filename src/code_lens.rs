@@ -7,10 +7,11 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::atom::Atom;
 use crate::definition::member::MemberKind;
+use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::offset_to_position;
-use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, Visibility};
+use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Shown while a declaration's references are being counted, so the lens
 /// keeps its line instead of vanishing and shifting the file, and reads as
@@ -110,7 +111,7 @@ impl Backend {
                     },
                 };
 
-                let proto = self.find_prototype(class, &class_fqn, &method.name, uri, content);
+                let proto = self.find_prototype(class, &method.name, uri, content);
                 if !method.name.starts_with("__")
                     && proto.is_none()
                     && let Some(lens) = self.build_member_reference_lens(
@@ -545,214 +546,32 @@ impl Backend {
         })
     }
 
-    /// Search the inheritance hierarchy for the closest ancestor that
-    /// declares a method with the given name.
+    /// The closest ancestor that declares a method with the given name,
+    /// as a navigation target.
     ///
-    /// Priority order: parent class chain, then used traits, then
-    /// implemented interfaces. Returns `None` when no ancestor
-    /// declares the method.
+    /// Returns `None` when no ancestor declares the method.
     fn find_prototype(
         &self,
         class: &ClassInfo,
-        _class_fqn: &str,
         method_name: &str,
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
-        // ── 1. Walk the parent class chain ──────────────────────────────
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => break,
-            };
-            // Check methods declared directly on this parent (not
-            // inherited) so we find the actual declaration site.
-            if parent
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let declares = |candidate: &ClassInfo| {
+            candidate
                 .methods
                 .iter()
                 .any(|m| m.name == method_name && !m.is_virtual)
-                && let Some(proto) = self.build_prototype(
-                    &parent_name,
-                    &parent,
-                    method_name,
-                    false,
-                    current_uri,
-                    current_content,
-                )
-            {
-                return Some(proto);
-            }
-            current = parent;
-        }
-
-        // ── 2. Check used traits ────────────────────────────────────────
-        if let Some(proto) = self.find_prototype_in_traits(
-            &class.used_traits,
+        };
+        let (ancestor_name, ancestor) = find_declaring_ancestor(class, &class_loader, &declares)?;
+        self.build_prototype(
+            &ancestor_name,
+            &ancestor,
             method_name,
             current_uri,
             current_content,
-            0,
-        ) {
-            return Some(proto);
-        }
-
-        // ── 3. Check implemented interfaces ─────────────────────────────
-        if let Some(proto) =
-            self.find_prototype_in_interfaces(class, method_name, current_uri, current_content)
-        {
-            return Some(proto);
-        }
-
-        None
-    }
-
-    /// Search a list of traits for a method declaration.
-    ///
-    /// Recursively checks traits used by each trait, up to a depth limit.
-    fn find_prototype_in_traits(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-        depth: usize,
-    ) -> Option<Prototype> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let trait_info = match self.find_or_load_class(trait_name) {
-                Some(t) => t,
-                None => continue,
-            };
-            if trait_info
-                .methods
-                .iter()
-                .any(|m| m.name == method_name && !m.is_virtual)
-                && let Some(proto) = self.build_prototype(
-                    trait_name,
-                    &trait_info,
-                    method_name,
-                    false,
-                    current_uri,
-                    current_content,
-                )
-            {
-                return Some(proto);
-            }
-            if let Some(proto) = self.find_prototype_in_traits(
-                &trait_info.used_traits,
-                method_name,
-                current_uri,
-                current_content,
-                depth + 1,
-            ) {
-                return Some(proto);
-            }
-        }
-
-        None
-    }
-
-    /// Search implemented interfaces (including those inherited from
-    /// parents) for a method declaration.
-    fn find_prototype_in_interfaces(
-        &self,
-        class: &ClassInfo,
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-    ) -> Option<Prototype> {
-        // Collect all interface names from the class and its parent chain.
-        let mut all_iface_names: Vec<crate::atom::Atom> = class.interfaces.clone();
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => break,
-            };
-            for iface in &parent.interfaces {
-                if !all_iface_names.contains(iface) {
-                    all_iface_names.push(*iface);
-                }
-            }
-            current = parent;
-        }
-
-        for iface_name in &all_iface_names {
-            if let Some(proto) = self.find_prototype_in_interface(
-                iface_name,
-                method_name,
-                current_uri,
-                current_content,
-            ) {
-                return Some(proto);
-            }
-        }
-
-        None
-    }
-
-    /// Check a single interface (and its own extends chain) for the
-    /// method declaration.
-    fn find_prototype_in_interface(
-        &self,
-        iface_name: &str,
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-    ) -> Option<Prototype> {
-        let iface = self.find_or_load_class(iface_name)?;
-        if iface
-            .methods
-            .iter()
-            .any(|m| m.name == method_name && !m.is_virtual)
-            && let Some(proto) = self.build_prototype(
-                iface_name,
-                &iface,
-                method_name,
-                true,
-                current_uri,
-                current_content,
-            )
-        {
-            return Some(proto);
-        }
-
-        // Walk the interface's own extends chain (interfaces can extend
-        // other interfaces via `parent_class` and `interfaces`).
-        for parent_iface in &iface.interfaces {
-            if let Some(proto) = self.find_prototype_in_interface(
-                parent_iface,
-                method_name,
-                current_uri,
-                current_content,
-            ) {
-                return Some(proto);
-            }
-        }
-        if let Some(parent_name) = iface.parent_class
-            && let Some(proto) = self.find_prototype_in_interface(
-                &parent_name,
-                method_name,
-                current_uri,
-                current_content,
-            )
-        {
-            return Some(proto);
-        }
-
-        None
+        )
     }
 
     /// Build the LSP `Command` that navigates to (or opens) a target
@@ -812,7 +631,6 @@ impl Backend {
         ancestor_fqn: &str,
         ancestor_class: &ClassInfo,
         method_name: &str,
-        is_interface: bool,
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
@@ -828,13 +646,9 @@ impl Backend {
             name_offset,
         )?;
 
-        // Determine whether to treat this as an interface based on the
-        // ancestor's kind (the caller's hint is a fallback).
-        let is_iface = ancestor_class.kind == ClassLikeKind::Interface || is_interface;
-
         Some(Prototype {
             ancestor_name: ancestor_class.name.to_string(),
-            is_interface: is_iface,
+            is_interface: ancestor_class.kind == ClassLikeKind::Interface,
             file_uri,
             position,
         })

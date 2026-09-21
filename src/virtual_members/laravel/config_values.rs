@@ -152,10 +152,10 @@ impl ConfigValue {
                         members.push(ty);
                     }
                 }
-                match members.len() {
-                    0 => PhpType::mixed(),
-                    1 => members.into_iter().next().unwrap(),
-                    _ => PhpType::union(members),
+                if members.is_empty() {
+                    PhpType::mixed()
+                } else {
+                    PhpType::union(members)
                 }
             }
             ConfigValue::EnvDefault(inner) => inner.to_php_type(),

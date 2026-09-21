@@ -201,11 +201,10 @@ pub(crate) fn strip_false_from_scope(var_name: &str, scope: &mut ScopeState) {
         if let TypeKind::Union(members) = ty.kind() {
             let non_false: Vec<PhpType> =
                 members.iter().filter(|m| !is_false(m)).cloned().collect();
-            rt.type_string = match non_false.len() {
-                0 => return None,
-                1 => non_false.into_iter().next().unwrap(),
-                _ => PhpType::union(non_false),
-            };
+            if non_false.is_empty() {
+                return None;
+            }
+            rt.type_string = PhpType::union(non_false);
         }
         Some(rt)
     });

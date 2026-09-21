@@ -231,7 +231,9 @@ use where_property::{build_where_property_methods_for_class, lowercase_method_na
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
@@ -247,7 +249,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
+    PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -478,14 +480,16 @@ fn custom_collection_for_model(
     model: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
-    let mut current = class_loader(model)?;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
-            return collection.base_name().map(str::to_owned);
-        }
-        current = class_loader(current.parent_class.as_ref()?)?;
-    }
-    None
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_collection.as_ref())
+            .and_then(|collection| collection.base_name())
+            .map(str::to_owned)
+    };
+    let model_class = class_loader(model)?;
+    declared(&model_class)
+        .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
 /// Build the replacement type for a custom collection class, matching its

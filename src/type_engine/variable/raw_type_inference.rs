@@ -208,10 +208,10 @@ fn join_key_types(key_types: Vec<PhpType>) -> PhpType {
     // Unlike a value union, the alternatives here are worth keeping as
     // written: a `Foo::class` key is a `class-string<Foo>`, and widening it
     // to `string` costs a `array<class-string, …>` parameter its match.
-    match key_types.len() {
-        0 => array_key_type(),
-        1 => key_types.into_iter().next().unwrap(),
-        _ => PhpType::union(key_types),
+    if key_types.is_empty() {
+        array_key_type()
+    } else {
+        PhpType::union(key_types)
     }
 }
 
