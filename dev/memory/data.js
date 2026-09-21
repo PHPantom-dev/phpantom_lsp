@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790032538079,
+  "lastUpdate": 1790033262131,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28423,6 +28423,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "46b90daa66b227eaf9d64f61e371170eabeea5db",
+          "message": "The document outline no longer goes blank for a file with a multi-byte\ncharacter in a comment right before a symbol's name",
+          "timestamp": "2026-09-22T01:10:08+02:00",
+          "tree_id": "91bf03c3f7c5c0ca5e0a03babb1d9c19110324b4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/46b90daa66b227eaf9d64f61e371170eabeea5db"
+        },
+        "date": 1790033254072,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.2,
             "unit": "MiB"
           }
         ]
