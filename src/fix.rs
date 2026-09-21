@@ -44,7 +44,7 @@ use crate::analyse::{
 };
 use crate::code_actions::build_line_deletion_edit;
 use crate::parser::with_parse_cache;
-use crate::text_position::position_to_byte_offset;
+use crate::text_position::apply_text_edits;
 use crate::virtual_members::with_active_resolved_class_cache;
 
 /// Options for the fix command.
@@ -196,23 +196,6 @@ pub fn fix_unused_imports(
     let new_content = apply_text_edits(content, &edits);
 
     (new_content, fixes)
-}
-
-/// Apply a sorted (reverse order) list of non-overlapping `TextEdit`s
-/// to a string, returning the modified content.
-fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
-    let mut result = content.to_string();
-
-    for edit in edits {
-        let start = position_to_byte_offset(&result, edit.range.start);
-        let end = position_to_byte_offset(&result, edit.range.end);
-
-        if start <= end && end <= result.len() {
-            result.replace_range(start..end, &edit.new_text);
-        }
-    }
-
-    result
 }
 
 /// Run the fix command and return the process exit code.

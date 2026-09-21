@@ -114,6 +114,25 @@ impl Backend {
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
     }
 
+    /// Drop what a file deleted from disk contributed to the Laravel
+    /// registries.
+    ///
+    /// Each registry keys a file's registrations by its URI and replaces
+    /// them whenever the file is parsed, which a deleted file never is
+    /// again.  Re-running the passes against empty content hands them what
+    /// the file now contributes and lets each keep its own downstream
+    /// invalidation (evicting the classes a macro attached to, dropping the
+    /// storage disk type, marking the pivot index dirty).
+    pub(crate) fn forget_laravel_file_contributions(&self, uri: &str) {
+        self.refresh_laravel_macros(uri, "");
+        self.refresh_laravel_storage_drivers(uri, "");
+        self.refresh_laravel_pivots(uri, "");
+        self.refresh_laravel_command_index(uri);
+        self.refresh_laravel_morph_map(uri, "");
+        self.refresh_laravel_gates(uri, "");
+        self.forget_laravel_provider_resources(uri);
+    }
+
     fn is_in_vendor_dir(&self, path: &std::path::Path) -> bool {
         self.workspace
             .vendor_dir_paths

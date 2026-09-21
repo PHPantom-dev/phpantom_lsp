@@ -98,6 +98,18 @@ impl Backend {
         Some((identity, resources))
     }
 
+    /// Drop a deleted provider file's registrations from the merged table.
+    pub(super) fn forget_laravel_provider_resources(&self, uri: &str) {
+        let merged = {
+            let mut scans = self.laravel_provider_scans.write();
+            if !scans.is_built() || !scans.remove(uri) {
+                return;
+            }
+            scans.merged()
+        };
+        self.publish_provider_resources(merged);
+    }
+
     /// Publish a freshly merged provider-resource table, dropping the caches
     /// that were derived from the previous one.
     fn publish_provider_resources(

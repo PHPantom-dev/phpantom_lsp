@@ -7,7 +7,7 @@
 //! and LSP `Position`/`Range` values (UTF-16 code units per the LSP
 //! spec).
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).
@@ -274,9 +274,59 @@ pub(crate) fn byte_range_to_lsp_range(content: &str, start: usize, end: usize) -
     }
 }
 
+/// Apply non-overlapping `TextEdit`s to `content` and return the result.
+///
+/// Edits are applied bottom-to-top so an earlier edit never shifts the
+/// positions of a later one; columns are UTF-16 code units, as in LSP.
+/// An edit whose range is inverted is skipped rather than applied.
+pub(crate) fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
+    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.range
+            .start
+            .line
+            .cmp(&a.range.start.line)
+            .then(b.range.start.character.cmp(&a.range.start.character))
+    });
+    let mut result = content.to_string();
+    for edit in sorted {
+        let start = position_to_byte_offset(&result, edit.range.start);
+        let end = position_to_byte_offset(&result, edit.range.end);
+        if start <= end {
+            result.replace_range(start..end, &edit.new_text);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_apply_bottom_up_with_utf16_columns() {
+        let content = "ń = 1;\nfoo();\n";
+        let edits = vec![
+            TextEdit {
+                range: Range::new(Position::new(0, 4), Position::new(0, 5)),
+                new_text: "2".into(),
+            },
+            TextEdit {
+                range: Range::new(Position::new(1, 0), Position::new(1, 3)),
+                new_text: "bar".into(),
+            },
+        ];
+        assert_eq!(apply_text_edits(content, &edits), "ń = 2;\nbar();\n");
+    }
+
+    #[test]
+    fn an_inverted_range_is_skipped() {
+        let edits = vec![TextEdit {
+            range: Range::new(Position::new(0, 3), Position::new(0, 1)),
+            new_text: "x".into(),
+        }];
+        assert_eq!(apply_text_edits("abcd", &edits), "abcd");
+    }
 
     #[test]
     fn utf16_col_of_ascii_line_is_the_byte_offset() {

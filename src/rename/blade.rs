@@ -101,26 +101,7 @@ mod tests {
     fn rewrite(template: &str, moved: &dyn Fn(&str) -> Option<String>) -> String {
         let mut edits = Vec::new();
         collect_use_directive_edits(template, moved, &mut edits);
-        let mut result = template.to_string();
-        let lines: Vec<&str> = template.lines().collect();
-        // Applied last-first so an earlier edit's offsets stay valid.
-        edits.sort_by_key(|edit| {
-            std::cmp::Reverse((edit.range.start.line, edit.range.start.character))
-        });
-        for edit in &edits {
-            let offset = |position: tower_lsp::lsp_types::Position| {
-                lines[..position.line as usize]
-                    .iter()
-                    .map(|line| line.len() + 1)
-                    .sum::<usize>()
-                    + position.character as usize
-            };
-            result.replace_range(
-                offset(edit.range.start)..offset(edit.range.end),
-                &edit.new_text,
-            );
-        }
-        result
+        crate::text_position::apply_text_edits(template, &edits)
     }
 
     #[test]

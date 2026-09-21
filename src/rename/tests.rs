@@ -7,7 +7,7 @@
 //! public `Backend` API exposes.
 
 use crate::Backend;
-use crate::test_fixtures::apply_edits;
+use crate::text_position::apply_text_edits as apply_edits;
 use crate::virtual_members::laravel::extract_macro_registrations;
 use std::sync::atomic::Ordering;
 use tower_lsp::LanguageServer;
