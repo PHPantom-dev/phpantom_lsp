@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789898952069,
+  "lastUpdate": 1789952824282,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28151,6 +28151,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6ff4fffeff78e64b489f7ec0959c015b2395e8bf",
+          "message": "A deleted file's runtime config keys no longer count as declared",
+          "timestamp": "2026-09-21T02:49:46+02:00",
+          "tree_id": "1b1ab499529d7976866c0d38f6fd9dc63bd4ec71",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6ff4fffeff78e64b489f7ec0959c015b2395e8bf"
+        },
+        "date": 1789952816202,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.4,
             "unit": "MiB"
           }
         ]
