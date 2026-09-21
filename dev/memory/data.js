@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1789962634889,
+  "lastUpdate": 1789972993743,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28287,6 +28287,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "cffc63756359d237018a3c50a1e7a4fcc971279a",
+          "message": "Laravel container keys resolve the same however many requests are in\nflight",
+          "timestamp": "2026-09-21T08:25:35+02:00",
+          "tree_id": "2e5dfef1b8ea9413ecd36caa708d4ad71ac7a07d",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cffc63756359d237018a3c50a1e7a4fcc971279a"
+        },
+        "date": 1789972986124,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.8,
             "unit": "MiB"
           }
         ]
