@@ -286,7 +286,7 @@ pub(crate) fn find_identical_occurrences(
                 results.push((abs_start, abs_end));
             }
         }
-        search_from = search_from + pos + 1;
+        search_from = search_from + pos + needle.len();
     }
     results
 }

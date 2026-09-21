@@ -1063,6 +1063,51 @@ fn find_occurrences_respects_scope_boundary() {
     );
 }
 
+#[test]
+fn find_occurrences_does_not_overlap_self_adjacent_matches() {
+    // `$a . $a . $a` contains two textual matches of "$a . $a" that overlap
+    // by one "$a". The scan must resume past the *end* of an accepted
+    // match, not one byte past its start, so the overlapping second match
+    // is never reported alongside the first.
+    let content = "<?php\n$x = $a . $a . $a;\n";
+    let needle = "$a . $a";
+    let first = content.find(needle).unwrap();
+    let occurrences = find_identical_occurrences(
+        content,
+        needle,
+        first,
+        first + needle.len(),
+        0,
+        content.len(),
+    );
+    for (start, end) in &occurrences {
+        assert!(
+            *start >= first + needle.len(),
+            "occurrence at {start}..{end} overlaps the original selection at {first}..{}",
+            first + needle.len()
+        );
+    }
+}
+
+#[test]
+fn find_occurrences_handles_multibyte_selection_start() {
+    // A selection beginning with a multibyte character must not cause the
+    // scan to resume mid-character on the next iteration.
+    let content = "<?php\necho Ünit::TAX; echo Ünit::TAX;\n";
+    let needle = "Ünit::TAX";
+    let first = content.find(needle).unwrap();
+    let occurrences = find_identical_occurrences(
+        content,
+        needle,
+        first,
+        first + needle.len(),
+        0,
+        content.len(),
+    );
+    assert_eq!(occurrences.len(), 1);
+    assert!(occurrences[0].0 > first);
+}
+
 // ── Multi-occurrence extract integration test ────────────────────
 
 #[test]

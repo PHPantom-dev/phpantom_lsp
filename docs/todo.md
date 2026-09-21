@@ -36,7 +36,6 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | B323 | [An external formatter that prints nothing empties the document](todo/bugs.md#b323-an-external-formatter-that-prints-nothing-empties-the-document)              | High        | Low         |
-| B324 | ["Extract variable (all occurrences)" can emit overlapping edits](todo/bugs.md#b324-extract-variable-all-occurrences-can-emit-overlapping-edits)                | Medium      | Low         |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
