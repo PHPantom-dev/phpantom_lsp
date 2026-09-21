@@ -161,7 +161,7 @@ unlikely to move the needle for most users.
 | L32 | [Config-backed named-resource strings](todo/laravel.md#l32-config-backed-named-resource-strings) (log channels, cache stores, guards, connections, rate limiters)           | Medium      | Medium      |
 | L49 | [Unguarded Eloquent mass assignment diagnostic](todo/laravel.md#l49-unguarded-eloquent-mass-assignment-diagnostic)                                                          | Medium      | Medium      |
 | L17 | [Additional string contexts without booting](todo/laravel.md#l17-additional-string-contexts-without-booting) (middleware, assets, validation, Inertia)                     | Medium      | Medium-High |
-| L54 | [Audit custom-builder and relation-closure inference against the PHPStan extensions](todo/laravel.md#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions) | Medium      | Medium-High |
+| L59 | [Infer both callback receivers for withWhereHas](todo/laravel.md#l59-infer-both-callback-receivers-for-withwherehas)                                                        | Medium      | Medium-High |
 | L31 | [String-key rename, highlight, and semantic tokens](todo/laravel.md#l31-string-key-rename-highlight-and-semantic-tokens)                                                    | Low-Medium  | Medium      |
 | L42 | [Morph alias completion in array positions](todo/laravel.md#l42-morph-alias-completion-in-array-positions)                                                                  | Low-Medium  | Medium      |
 | L3  | `$dates` array (deprecated)                                                                                                                  | Low-Medium  | Medium      |
