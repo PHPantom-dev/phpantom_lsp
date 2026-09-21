@@ -203,23 +203,13 @@ pub(crate) fn vendor_package_roots(
     explicit_deps: &HashSet<String>,
 ) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return Vec::new();
-    };
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return Vec::new();
-    };
-    let composer_dir = vendor_path.join("composer");
+    let composer_dir = &installed.composer_dir;
     let mut roots = Vec::new();
-    for package in packages {
+    for package in &installed.packages {
         let pkg_name = package
             .get("name")
             .and_then(|n| n.as_str())
@@ -408,30 +398,15 @@ pub fn scan_vendor_packages_with_skip(
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
 
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return WorkspaceScanResult::default();
     };
-
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return WorkspaceScanResult::default();
-    };
-
-    // installed.json has two formats:
-    //   Composer 1: top-level array of packages
-    //   Composer 2: { "packages": [...] }
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return WorkspaceScanResult::default();
-    };
-
-    // The directory containing installed.json — install-path values
-    // are relative to this directory.
-    let composer_dir = vendor_path.join("composer");
+    let packages = installed.packages.as_slice();
+    // install-path values are relative to the directory containing
+    // installed.json.
+    let composer_dir = installed.composer_dir;
 
     // Phase 1: read every package's autoload section and resolve the
     // paths it declares, without walking any of them.  Packages are

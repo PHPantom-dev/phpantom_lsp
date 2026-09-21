@@ -19,7 +19,7 @@ use crate::types::ClassInfo;
 use crate::util::short_name;
 
 use crate::type_engine::conditional_resolution::extract_class_string_from_expr;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::VarResolutionCtx;
 
 /// Resolve the class a `::class` literal names, after `self`/`static`/
 /// `parent` have already been substituted, and append it to `results`.
@@ -61,21 +61,16 @@ pub(in crate::type_engine) fn resolve_class_string_targets(
         "resolve_class_string_targets",
         |program, _content| {
             let ctx = VarResolutionCtx {
-                var_name,
-                current_class,
-                all_classes,
-                content,
-                cursor_offset,
-                class_loader,
                 backend,
-                loaders: Loaders::default(),
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
-                enclosing_return_type: None,
-                top_level_scope: None,
-                branch_aware: false,
-                match_arm_narrowing: Default::default(),
-                scope_var_resolver: None,
-                scope_proofs: None,
+                ..VarResolutionCtx::new(
+                    var_name,
+                    current_class,
+                    all_classes,
+                    content,
+                    cursor_offset,
+                    class_loader,
+                )
             };
             resolve_class_string_in_statements(program.statements.iter(), &ctx)
         },

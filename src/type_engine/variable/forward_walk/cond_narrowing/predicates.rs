@@ -1,102 +1,105 @@
 use super::*;
 
+/// The subject key an expression names: a plain variable, or the member
+/// path or array offset that stands in for one.
+///
+/// `$x`, `$this->handle` and `$row['name']` are all subjects a condition
+/// can prove something about, so every extractor in this module reads its
+/// operands through here.
+pub(crate) fn expr_to_subject(expr: &Expression<'_>) -> Option<String> {
+    expr_to_var_name(expr).or_else(|| narrowing::expr_to_subject_key(expr))
+}
+
+/// Which side of an equality a branch is narrowing.
+#[derive(Clone, Copy)]
+enum Sentinel {
+    /// The subject *is* the sentinel, as written: `$x === null`.
+    Is,
+    /// The subject is *not* the sentinel: `$x !== null`, or a negated
+    /// `=== null`.
+    IsNot,
+}
+
+/// The subject of a comparison against a sentinel value (`null`, `false`).
+///
+/// The two polarities are deliberately not mirror images. `IsNot` also
+/// reads the negation of the equality form (`!($x === null)` proves the
+/// same as `$x !== null`), while `Is` reads only the equality as written:
+/// its complement is already covered by `IsNot`, and the extractors are
+/// called in pairs on the same condition.
+fn extract_sentinel_check(
+    expr: &Expression<'_>,
+    sentinel: Sentinel,
+    is_sentinel: fn(&Expression<'_>) -> bool,
+) -> Option<String> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    let Expression::Binary(bin) = inner else {
+        return None;
+    };
+    let equal = matches!(
+        bin.operator,
+        BinaryOperator::Identical(_) | BinaryOperator::Equal(_)
+    );
+    let not_equal = matches!(
+        bin.operator,
+        BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_)
+    );
+    let wanted = match sentinel {
+        Sentinel::Is => equal && !negated,
+        Sentinel::IsNot => (not_equal && !negated) || (equal && negated),
+    };
+    if !wanted {
+        return None;
+    }
+    if is_sentinel(bin.rhs) {
+        return expr_to_subject(bin.lhs);
+    }
+    if is_sentinel(bin.lhs) {
+        return expr_to_subject(bin.rhs);
+    }
+    None
+}
+
+/// Extract the subjects of an `isset(…)` call, `wanted` saying whether the
+/// call read is the negated one (`!isset($x)`) or the plain one.
+///
+/// Handles simple variables (`$x`) and property/array access keys
+/// (`$obj->prop`, `$arr["key"]`). Returns an empty vec when the expression
+/// is not an `isset()` call of the wanted polarity.
+fn extract_isset_subjects(expr: &Expression<'_>, wanted_negated: bool) -> Vec<String> {
+    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
+    if negated != wanted_negated {
+        return vec![];
+    }
+    // `isset()` is a language construct, parsed as Expression::Construct(Construct::Isset).
+    let Expression::Construct(Construct::Isset(isset)) = inner else {
+        return vec![];
+    };
+    isset
+        .values
+        .iter()
+        .filter_map(|value| expr_to_subject(value))
+        .collect()
+}
+
 /// Extract variable name from `$x !== null` or `null !== $x` patterns.
 pub(crate) fn extract_non_null_check_var(expr: &Expression<'_>) -> Option<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    match inner {
-        Expression::Binary(bin) => {
-            let is_not_identical = matches!(bin.operator, BinaryOperator::NotIdentical(_));
-            let is_not_equal = matches!(bin.operator, BinaryOperator::NotEqual(_));
-            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
-            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
-
-            // `$x !== null` or `null !== $x`
-            if (is_not_identical || is_not_equal) && !negated
-                || (is_identical || is_equal) && negated
-            {
-                if is_null_expr(bin.rhs) {
-                    return expr_to_var_name(bin.lhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
-                }
-                if is_null_expr(bin.lhs) {
-                    return expr_to_var_name(bin.rhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+    extract_sentinel_check(expr, Sentinel::IsNot, is_null_expr)
 }
 
 /// Extract all variable names from an `isset(…)` call (non-negated).
-/// Handles simple variables (`$x`) and property/array access keys
-/// (`$obj->prop`, `$arr["key"]`).  Returns an empty vec when the
-/// expression is not an `isset()` call, or when it is negated.
 pub(crate) fn extract_isset_vars(expr: &Expression<'_>) -> Vec<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    if negated {
-        return vec![];
-    }
-    // `isset()` is a language construct, parsed as Expression::Construct(Construct::Isset).
-    let Expression::Construct(Construct::Isset(isset)) = inner else {
-        return vec![];
-    };
-    let mut vars = Vec::new();
-    for value in isset.values.iter() {
-        if let Some(name) =
-            expr_to_var_name(value).or_else(|| narrowing::expr_to_subject_key(value))
-        {
-            vars.push(name);
-        }
-    }
-    vars
+    extract_isset_subjects(expr, false)
 }
 
 /// Extract all variable names from a `!isset(…)` call (negated isset).
-/// Returns an empty vec when the expression is not a negated `isset()`.
 pub(crate) fn extract_not_isset_vars(expr: &Expression<'_>) -> Vec<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    if !negated {
-        return vec![];
-    }
-    // `isset()` is a language construct, parsed as Expression::Construct(Construct::Isset).
-    let Expression::Construct(Construct::Isset(isset)) = inner else {
-        return vec![];
-    };
-    let mut vars = Vec::new();
-    for value in isset.values.iter() {
-        if let Some(name) =
-            expr_to_var_name(value).or_else(|| narrowing::expr_to_subject_key(value))
-        {
-            vars.push(name);
-        }
-    }
-    vars
+    extract_isset_subjects(expr, true)
 }
 
 /// Extract variable name from `$x === null` or `null === $x` patterns.
 pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    match inner {
-        Expression::Binary(bin) => {
-            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
-            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
-
-            if (is_identical || is_equal) && !negated {
-                if is_null_expr(bin.rhs) {
-                    return expr_to_var_name(bin.lhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
-                }
-                if is_null_expr(bin.lhs) {
-                    return expr_to_var_name(bin.rhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+    extract_sentinel_check(expr, Sentinel::Is, is_null_expr)
 }
 
 /// Extract the subject of an identity comparison against a class
@@ -134,9 +137,7 @@ pub(super) fn extract_class_constant_identity<'b>(
         if !matches!(candidate, Expression::Access(Access::ClassConstant(_))) {
             continue;
         }
-        if let Some(name) =
-            expr_to_var_name(other).or_else(|| narrowing::expr_to_subject_key(other))
-        {
+        if let Some(name) = expr_to_subject(other) {
             return Some((name, candidate));
         }
     }
@@ -153,8 +154,7 @@ pub(crate) fn extract_not_empty_var(expr: &Expression<'_>) -> Option<String> {
         && prefix.operator.is_not()
         && let Expression::Construct(Construct::Empty(empty)) = prefix.operand
     {
-        return expr_to_var_name(empty.value)
-            .or_else(|| narrowing::expr_to_subject_key(empty.value));
+        return expr_to_subject(empty.value);
     }
     None
 }
@@ -168,13 +168,10 @@ pub(crate) fn extract_not_empty_var(expr: &Expression<'_>) -> Option<String> {
 pub(crate) fn extract_falsy_check_var(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            expr_to_var_name(prefix.operand)
-                .or_else(|| narrowing::expr_to_subject_key(prefix.operand))
+            expr_to_subject(prefix.operand)
         }
         // `empty($x)` — language construct, parsed as Expression::Construct(Construct::Empty).
-        Expression::Construct(Construct::Empty(empty)) => {
-            expr_to_var_name(empty.value).or_else(|| narrowing::expr_to_subject_key(empty.value))
-        }
+        Expression::Construct(Construct::Empty(empty)) => expr_to_subject(empty.value),
         _ => None,
     }
 }
@@ -186,26 +183,7 @@ pub(crate) fn extract_falsy_check_var(expr: &Expression<'_>) -> Option<String> {
 /// `pg_connect()`, …) that returns `T|false` and is guarded with a
 /// strict equality check rather than `!$x`/`empty($x)`.
 pub(crate) fn extract_false_equality_check_var(expr: &Expression<'_>) -> Option<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    match inner {
-        Expression::Binary(bin) => {
-            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
-            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
-
-            if (is_identical || is_equal) && !negated {
-                if is_false_expr(bin.rhs) {
-                    return expr_to_var_name(bin.lhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
-                }
-                if is_false_expr(bin.lhs) {
-                    return expr_to_var_name(bin.rhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+    extract_sentinel_check(expr, Sentinel::Is, is_false_expr)
 }
 
 /// Extract variable name from `$x !== false` or `false !== $x` patterns.
@@ -215,30 +193,7 @@ pub(crate) fn extract_false_equality_check_var(expr: &Expression<'_>) -> Option<
 /// ruled out. The loose form (`$x != false`) rules out every falsy value,
 /// so treating it as `false` alone is a subset of what it proves.
 pub(crate) fn extract_non_false_check_var(expr: &Expression<'_>) -> Option<String> {
-    let (inner, negated) = narrowing::unwrap_condition_negation(expr);
-    match inner {
-        Expression::Binary(bin) => {
-            let is_not_identical = matches!(bin.operator, BinaryOperator::NotIdentical(_));
-            let is_not_equal = matches!(bin.operator, BinaryOperator::NotEqual(_));
-            let is_identical = matches!(bin.operator, BinaryOperator::Identical(_));
-            let is_equal = matches!(bin.operator, BinaryOperator::Equal(_));
-
-            if (is_not_identical || is_not_equal) && !negated
-                || (is_identical || is_equal) && negated
-            {
-                if is_false_expr(bin.rhs) {
-                    return expr_to_var_name(bin.lhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.lhs));
-                }
-                if is_false_expr(bin.lhs) {
-                    return expr_to_var_name(bin.rhs)
-                        .or_else(|| narrowing::expr_to_subject_key(bin.rhs));
-                }
-            }
-            None
-        }
-        _ => None,
-    }
+    extract_sentinel_check(expr, Sentinel::IsNot, is_false_expr)
 }
 
 /// The empty value a condition compares a subject against.
@@ -275,7 +230,7 @@ pub(crate) fn extract_empty_value_check(
         (_, Some(kind)) => (bin.rhs, kind),
         _ => return None,
     };
-    let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
+    let name = expr_to_subject(subject)?;
     Some((name, empty, non_empty))
 }
 
@@ -308,7 +263,7 @@ pub(crate) fn extract_literal_identity_check(
         (_, Some(ty)) => (bin.rhs, ty),
         _ => return None,
     };
-    let name = expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))?;
+    let name = expr_to_subject(subject)?;
     Some((name, literal, equal))
 }
 

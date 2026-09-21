@@ -256,6 +256,42 @@ pub(super) fn strip_null_from_array_element(
     strip_null_from_scope(access_key, scope);
 }
 
+/// Strip `null` from whatever a condition proved non-null, whether that
+/// is a plain subject or one element of an array.
+pub(super) fn strip_null_from_subject(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match split_array_access_key(var_name) {
+        Some((base, key)) => strip_null_from_array_element(var_name, base, key, scope, ctx),
+        None => {
+            seed_synthetic_key_if_needed(var_name, scope, ctx);
+            strip_null_from_scope(var_name, scope);
+        }
+    }
+}
+
+/// Like [`strip_null_from_subject`], but an array element is narrowed on
+/// the base variable's shape only.
+///
+/// This is what a guard clause leaves behind: the synthetic `$a["k"]`
+/// entry belongs to the branch that was taken, while the shape refinement
+/// is what the code past the guard reads.
+pub(super) fn strip_null_from_subject_shape(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match split_array_access_key(var_name) {
+        Some((base, key)) => strip_null_from_array_shape_key(base, key, scope),
+        None => {
+            seed_synthetic_key_if_needed(var_name, scope, ctx);
+            strip_null_from_scope(var_name, scope);
+        }
+    }
+}
+
 pub(crate) fn strip_null_from_array_shape_key(
     base_var: &str,
     key_name: &str,

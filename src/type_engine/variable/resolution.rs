@@ -350,22 +350,17 @@ pub(crate) fn resolve_variable_types(
     let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
         let active_cache = crate::virtual_members::active_resolved_class_cache();
         let ctx = VarResolutionCtx {
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
             backend,
             loaders,
             resolved_class_cache: active_cache,
-            enclosing_return_type: None,
-            top_level_scope: None,
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
-
-            scope_var_resolver: None,
-            scope_proofs: None,
+            ..VarResolutionCtx::new(
+                var_name,
+                current_class,
+                all_classes,
+                content,
+                cursor_offset,
+                class_loader,
+            )
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
@@ -790,21 +785,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     let ctx_with_tls;
     let ctx: &VarResolutionCtx<'_> = if top_level_scope.is_some() && ctx.top_level_scope.is_none() {
         ctx_with_tls = VarResolutionCtx {
-            var_name: ctx.var_name,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope,
-            branch_aware: ctx.branch_aware,
-            match_arm_narrowing: ctx.match_arm_narrowing.clone(),
-            scope_var_resolver: ctx.scope_var_resolver,
-            scope_proofs: ctx.scope_proofs,
+            ..ctx.clone()
         };
         &ctx_with_tls
     } else {

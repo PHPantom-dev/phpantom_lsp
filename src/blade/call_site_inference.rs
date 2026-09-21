@@ -1031,21 +1031,17 @@ impl Backend {
                 let current_class = enclosing.unwrap_or(&default_class);
                 let loaders = Loaders::with_function(Some(&function_loader_cl));
                 let var_ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class,
-                    all_classes: &file_ctx.classes,
-                    content,
-                    cursor_offset: site.offset,
-                    class_loader: &class_loader,
                     backend: Some(self),
                     loaders,
                     resolved_class_cache: Some(&self.resolved_class_cache),
-                    enclosing_return_type: None,
-                    branch_aware: false,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        current_class,
+                        &file_ctx.classes,
+                        content,
+                        site.offset,
+                        &class_loader,
+                    )
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
@@ -1234,21 +1230,17 @@ impl Backend {
                         let current_class = enclosing.unwrap_or(&default_class);
                         let loaders = Loaders::with_function(Some(&function_loader_cl));
                         let var_ctx = VarResolutionCtx {
-                            var_name: "",
-                            top_level_scope: None,
-                            current_class,
-                            all_classes: &file_ctx.classes,
-                            content,
-                            cursor_offset: offset,
-                            class_loader: &class_loader,
                             backend: Some(self),
                             loaders,
                             resolved_class_cache: Some(&self.resolved_class_cache),
-                            enclosing_return_type: None,
-                            branch_aware: false,
-                            match_arm_narrowing: HashMap::new(),
-                            scope_var_resolver: None,
-                            scope_proofs: None,
+                            ..VarResolutionCtx::new(
+                                "",
+                                current_class,
+                                &file_ctx.classes,
+                                content,
+                                offset,
+                                &class_loader,
+                            )
                         };
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,

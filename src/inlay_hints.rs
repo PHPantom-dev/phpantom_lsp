@@ -22,7 +22,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{CallSite, UntypedClosureSite};
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::{LineIndex, position_to_offset};
 use crate::types::{ClassLikeKind, FileContext};
 
 impl Backend {
@@ -71,6 +71,11 @@ impl Backend {
         let range_start = position_to_offset(content, virtual_range.start);
         let range_end = position_to_offset(content, virtual_range.end);
 
+        // One line table for the whole request: every hint converts an
+        // offset from this content, and `offset_to_position` is O(offset)
+        // on each call.
+        let index = LineIndex::new(content);
+
         let mut hints = Vec::new();
 
         for call_site in &symbol_map.call_sites {
@@ -85,7 +90,7 @@ impl Backend {
 
             self.emit_parameter_hints(
                 call_site,
-                content,
+                &index,
                 (range_start, range_end),
                 &ctx,
                 &mut hints,
@@ -95,7 +100,7 @@ impl Backend {
         // ── Closure / arrow function hints ──────────────────────────
         if !symbol_map.untyped_closure_sites.is_empty() {
             self.emit_closure_hints(
-                content,
+                &index,
                 &symbol_map.untyped_closure_sites,
                 &symbol_map.call_sites,
                 (range_start, range_end),
@@ -106,7 +111,7 @@ impl Backend {
 
         self.emit_implementation_count_hints(
             uri,
-            content,
+            &index,
             &ctx,
             (range_start, range_end),
             &mut hints,
@@ -138,7 +143,7 @@ impl Backend {
     fn emit_implementation_count_hints(
         &self,
         uri: &str,
-        content: &str,
+        index: &LineIndex,
         ctx: &FileContext,
         range: (u32, u32),
         hints: &mut Vec<InlayHint>,
@@ -170,7 +175,7 @@ impl Backend {
             );
             push_count_hint(
                 hints,
-                line_end_position(content, class.keyword_offset as usize),
+                line_end_position(index, class.keyword_offset as usize),
                 implementation_label(implementors.len()),
             );
         }
@@ -184,11 +189,13 @@ impl Backend {
     fn emit_parameter_hints(
         &self,
         call_site: &CallSite,
-        content: &str,
+        index: &LineIndex,
         range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,
     ) {
+        let content = index.content();
+
         // The call site's start offset gives the resolver its cursor context.
         let resolved = match self.resolve_callable_target_at_offset(
             &call_site.call_expression,
@@ -304,7 +311,7 @@ impl Backend {
                 continue;
             }
 
-            let hint_position = offset_to_position(content, arg_offset as usize);
+            let hint_position = index.position(arg_offset as usize);
 
             hints.push(InlayHint {
                 position: hint_position,
@@ -326,13 +333,14 @@ impl Backend {
     /// arrow functions whose types can be inferred from the callable context.
     fn emit_closure_hints(
         &self,
-        content: &str,
+        index: &LineIndex,
         sites: &[UntypedClosureSite],
         call_sites: &[CallSite],
         range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,
     ) {
+        let content = index.content();
         let (range_start, range_end) = range;
         for site in sites {
             // Quick range check: use close_paren_offset if available,
@@ -409,7 +417,7 @@ impl Backend {
                             continue;
                         }
 
-                        let hint_position = offset_to_position(content, param_offset as usize);
+                        let hint_position = index.position(param_offset as usize);
 
                         hints.push(InlayHint {
                             position: hint_position,
@@ -432,7 +440,7 @@ impl Backend {
                 let shortened = ret_type.shorten();
                 let type_str = shortened.to_string();
                 if !type_str.is_empty() && !shortened.is_mixed() {
-                    let hint_position = offset_to_position(content, close_paren as usize);
+                    let hint_position = index.position(close_paren as usize);
 
                     hints.push(InlayHint {
                         position: hint_position,
@@ -475,7 +483,8 @@ fn offset_in_range(offset: u32, range: (u32, u32)) -> bool {
     offset >= range.0 && offset <= range.1
 }
 
-fn line_end_position(content: &str, byte_offset: usize) -> Position {
+fn line_end_position(index: &LineIndex, byte_offset: usize) -> Position {
+    let content = index.content();
     let line_end = content[byte_offset..]
         .find('\n')
         .map(|i| byte_offset + i)
@@ -484,7 +493,7 @@ fn line_end_position(content: &str, byte_offset: usize) -> Position {
     // Delegate to the canonical converter so the `character` column is
     // counted in UTF-16 code units (per the LSP spec), consistent with
     // every other position the server emits.
-    offset_to_position(content, line_end)
+    index.position(line_end)
 }
 
 /// Check whether the argument at `arg_offset` is a simple variable whose

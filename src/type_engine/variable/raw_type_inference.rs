@@ -631,21 +631,18 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
-        var_name: "",
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: body_offset,
-        class_loader: ctx.class_loader,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        branch_aware: false,
-        match_arm_narrowing: std::collections::HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            "",
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            body_offset,
+            ctx.class_loader,
+        )
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)

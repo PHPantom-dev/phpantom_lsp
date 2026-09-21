@@ -10,7 +10,7 @@ use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::{SymbolKind, SymbolMap};
-use crate::text_position::offset_to_position;
+use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Shown while a declaration's references are being counted, so the lens
@@ -37,12 +37,10 @@ fn class_declaration_name_offset(symbol_map: Option<&SymbolMap>, class: &ClassIn
         .unwrap_or(class.keyword_offset)
 }
 
-fn line_indent(content: &str, byte_offset: usize) -> u32 {
-    let line_start = content[..byte_offset]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    content[line_start..]
+/// The column the line containing `byte_offset` starts its content at,
+/// so a lens sits above the declaration rather than in the left margin.
+fn line_indent(index: &LineIndex, line: usize) -> u32 {
+    index.content()[index.line_start(line)..]
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .count() as u32
@@ -72,6 +70,11 @@ impl Backend {
         };
         let symbol_map = self.symbol_maps.read().get(uri).cloned();
 
+        // One line table for the whole request: every lens converts at
+        // least one offset from this content, and `offset_to_position` is
+        // O(offset) on each call.
+        let index = LineIndex::new(content);
+
         let mut lenses = Vec::new();
 
         for class in &classes {
@@ -79,14 +82,14 @@ impl Backend {
 
             if let Some(lens) = self.build_declaration_reference_lens(
                 uri,
-                content,
+                &index,
                 class_declaration_name_offset(symbol_map.as_deref(), class),
                 &ReferenceIndexKey::class(&class_fqn),
             ) {
                 lenses.push(lens);
             }
 
-            if let Some(lens) = self.build_covers_lens(class, uri, content) {
+            if let Some(lens) = self.build_covers_lens(class, uri, &index) {
                 lenses.push(lens);
             }
 
@@ -98,17 +101,15 @@ impl Backend {
                     continue;
                 }
 
-                let pos = offset_to_position(content, method.name_offset as usize);
-                let indent = line_indent(content, method.name_offset as usize);
+                let line = index.line_of(method.name_offset as usize);
+                let indent = line_indent(&index, line);
+                let position = Position {
+                    line: line as u32,
+                    character: indent,
+                };
                 let range = Range {
-                    start: Position {
-                        line: pos.line,
-                        character: indent,
-                    },
-                    end: Position {
-                        line: pos.line,
-                        character: indent,
-                    },
+                    start: position,
+                    end: position,
                 };
 
                 let proto = self.find_prototype(class, &method.name, uri, content);
@@ -116,7 +117,7 @@ impl Backend {
                     && proto.is_none()
                     && let Some(lens) = self.build_member_reference_lens(
                         uri,
-                        content,
+                        &index,
                         method.name_offset,
                         class_fqn,
                         method.name,
@@ -154,7 +155,7 @@ impl Backend {
                 let member_name = property.name.strip_prefix('$').unwrap_or(&property.name);
                 if let Some(lens) = self.build_member_reference_lens(
                     uri,
-                    content,
+                    &index,
                     property.name_offset,
                     class_fqn,
                     crate::atom::atom(member_name),
@@ -170,7 +171,7 @@ impl Backend {
                 }
                 if let Some(lens) = self.build_member_reference_lens(
                     uri,
-                    content,
+                    &index,
                     constant.name_offset,
                     class_fqn,
                     constant.name,
@@ -196,7 +197,7 @@ impl Backend {
                     _ => continue,
                 };
                 if let Some(lens) =
-                    self.build_declaration_reference_lens(uri, content, span.start, &key)
+                    self.build_declaration_reference_lens(uri, &index, span.start, &key)
                 {
                     lenses.push(lens);
                 }
@@ -218,7 +219,7 @@ impl Backend {
     fn build_declaration_reference_lens(
         &self,
         origin_uri: &str,
-        content: &str,
+        index: &LineIndex,
         declaration_offset: u32,
         key: &ReferenceIndexKey,
     ) -> Option<CodeLens> {
@@ -228,7 +229,7 @@ impl Backend {
 
         let candidate_count = self.indexed_reference_count(key)?;
         let origin_url = Url::parse(origin_uri).ok()?;
-        let position = offset_to_position(content, declaration_offset as usize);
+        let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
             Position::new(position.line, 0),
@@ -259,7 +260,7 @@ impl Backend {
     fn build_member_reference_lens(
         &self,
         origin_uri: &str,
-        content: &str,
+        index: &LineIndex,
         declaration_offset: u32,
         class_fqn: Atom,
         member: Atom,
@@ -270,7 +271,7 @@ impl Backend {
         }
         let candidate_count = self.indexed_member_reference_count(&member)?;
         let origin_url = Url::parse(origin_uri).ok()?;
-        let position = offset_to_position(content, declaration_offset as usize);
+        let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
             Position::new(position.line, 0),
@@ -395,46 +396,35 @@ impl Backend {
         else {
             return lens;
         };
-        let locations = match kind {
-            "phpReferences" => {
-                let Some(content) = self.get_file_content(uri) else {
-                    return lens;
-                };
-                let Some(locations) =
-                    self.find_references_from_workspace_index(uri, &content, position, false)
-                else {
-                    return lens;
-                };
-                locations
-            }
-            "phpMemberReferences" => {
-                let Some(offset) = data
-                    .get("offset")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|offset| u32::try_from(offset).ok())
-                else {
-                    return lens;
-                };
-                let Some(class_fqn) = data.get("classFqn").and_then(serde_json::Value::as_str)
-                else {
-                    return lens;
-                };
-                let Some(member) = data.get("member").and_then(serde_json::Value::as_str) else {
-                    return lens;
-                };
-                let Some(is_static) = data.get("isStatic").and_then(serde_json::Value::as_bool)
-                else {
-                    return lens;
-                };
-                self.resolve_member_ref_locations(
-                    uri,
-                    offset,
-                    crate::atom::atom(class_fqn),
-                    crate::atom::atom(member),
-                    is_static,
-                )
-            }
-            _ => return lens,
+        // Both kinds resolve references, which needs the type engine, the
+        // chain cache and a parse of the file. Going through the shared
+        // request helper installs all of them (and the panic guard) once,
+        // and hands over the buffer without copying it.
+        let locations =
+            self.with_file_content("codeLens/resolve", uri, None, |content, _| match kind {
+                "phpReferences" => {
+                    self.find_references_from_workspace_index(uri, content, position, false)
+                }
+                "phpMemberReferences" => {
+                    let offset = data
+                        .get("offset")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|offset| u32::try_from(offset).ok())?;
+                    let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
+                    let member = data.get("member").and_then(serde_json::Value::as_str)?;
+                    let is_static = data.get("isStatic").and_then(serde_json::Value::as_bool)?;
+                    Some(self.resolve_member_ref_locations(
+                        uri,
+                        offset,
+                        crate::atom::atom(class_fqn),
+                        crate::atom::atom(member),
+                        is_static,
+                    ))
+                }
+                _ => None,
+            });
+        let Some(locations) = locations.flatten() else {
+            return lens;
         };
         let Ok(origin_uri) = Url::parse(uri) else {
             return lens;
@@ -455,7 +445,12 @@ impl Backend {
     /// classes that do can be located on disk any more.  Also `None` while
     /// the workspace is still indexing, since
     /// [`Backend::find_covering_test_classes`] cannot answer until then.
-    fn build_covers_lens(&self, class: &ClassInfo, uri: &str, content: &str) -> Option<CodeLens> {
+    fn build_covers_lens(
+        &self,
+        class: &ClassInfo,
+        uri: &str,
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
         if class.keyword_offset == 0 {
             return None;
         }
@@ -464,8 +459,7 @@ impl Backend {
             .find_covering_test_classes(&class.fqn())
             .into_iter()
             .filter_map(|(test_fqn, test_uri)| {
-                let location =
-                    self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, content)?;
+                let location = self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, index)?;
                 Some((test_fqn, location))
             })
             .collect();
@@ -473,17 +467,14 @@ impl Backend {
             return None;
         }
 
-        let pos = offset_to_position(content, class.keyword_offset as usize);
-        let indent = line_indent(content, class.keyword_offset as usize);
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
         let range = Range {
-            start: Position {
-                line: pos.line,
-                character: indent,
-            },
-            end: Position {
-                line: pos.line,
-                character: indent,
-            },
+            start: position,
+            end: position,
         };
 
         let command = if let [(test_fqn, location)] = locations.as_slice() {
@@ -520,7 +511,7 @@ impl Backend {
         test_fqn: &str,
         test_uri: &str,
         current_uri: &str,
-        current_content: &str,
+        current_index: &LineIndex,
     ) -> Option<Location> {
         let test_class = self.find_or_load_class(test_fqn)?;
         if test_class.keyword_offset == 0 {
@@ -529,12 +520,12 @@ impl Backend {
 
         // The search already told us which file declares it, so read that
         // rather than looking the class up by name a second time.
-        let file_content = if test_uri == current_uri {
-            current_content.to_string()
+        let offset = test_class.keyword_offset as usize;
+        let position = if test_uri == current_uri {
+            current_index.position(offset)
         } else {
-            self.get_file_content(test_uri)?
+            offset_to_position(&self.get_file_content(test_uri)?, offset)
         };
-        let position = offset_to_position(&file_content, test_class.keyword_offset as usize);
         let uri: Url = test_uri.parse().ok()?;
 
         Some(Location {

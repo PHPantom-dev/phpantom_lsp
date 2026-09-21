@@ -102,6 +102,15 @@ impl<'a> LineIndex<'a> {
         }
     }
 
+    /// Byte offset of the first character of the 0-based `line`, or the
+    /// content length when `line` is past the last one.
+    pub(crate) fn line_start(&self, line: usize) -> usize {
+        self.line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.content.len())
+    }
+
     /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
     /// column). Offsets past the end of the content clamp to the content
     /// length, matching [`offset_to_position`]. An offset inside a

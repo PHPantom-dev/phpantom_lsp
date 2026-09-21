@@ -8,7 +8,6 @@
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_syntax::cst::expression::Expression;
@@ -336,21 +335,17 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
-                var_name: "",
-                top_level_scope: None,
-                current_class,
-                all_classes,
-                content,
-                cursor_offset: start as u32,
-                class_loader,
                 backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
-                enclosing_return_type: None,
-                branch_aware: true,
-                match_arm_narrowing: HashMap::new(),
-                scope_var_resolver: None,
-                scope_proofs: None,
+                ..VarResolutionCtx::new(
+                    "",
+                    current_class,
+                    all_classes,
+                    content,
+                    start as u32,
+                    class_loader,
+                )
             };
 
             let ty = resolve_expression_type(expr, &var_ctx).unwrap_or_else(PhpType::untyped);
