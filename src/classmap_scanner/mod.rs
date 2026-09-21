@@ -85,7 +85,7 @@ pub use discovery::{
     scan_psr4_directories_with_skip, scan_vendor_packages, scan_vendor_packages_with_skip,
     scan_workspace_fallback, scan_workspace_fallback_full,
 };
-pub use filters::IndexFilters;
+pub use filters::{IndexFilters, workspace_walk_builder};
 pub use lexer::{find_classes, find_symbols};
 
 // ─── File reading ────────────────────────────────────────────────────────────

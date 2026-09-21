@@ -34,6 +34,20 @@ pub async fn open_php(backend: &Backend, uri: &Url, text: &str) {
     open_document(backend, uri, "php", text).await;
 }
 
+/// [`open_php`] for the file at `relative` inside a workspace directory
+/// (the one [`create_psr4_workspace`] hands back), with `content` as the
+/// buffer the editor opens it with, and hand back the URI it opened as.
+pub async fn open_php_at(
+    backend: &Backend,
+    dir: &tempfile::TempDir,
+    relative: &str,
+    content: &str,
+) -> Url {
+    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+    open_php(backend, &uri, content).await;
+    uri
+}
+
 // ─── Completion ─────────────────────────────────────────────────────────────
 
 /// Send a `textDocument/completion` request for a document that is already
