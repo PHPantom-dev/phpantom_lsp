@@ -2075,10 +2075,10 @@ impl Backend {
 
             progress_backend.request_diagnostic_refresh().await;
 
-            // Files opened before the index finished were rendering
-            // member/class reference counts computed from a still-filling
-            // index (stale zeros); now that it's complete, ask the editor
-            // to re-pull inlay hints for those hints to catch up.
+            // Files opened before the index finished were annotated from a
+            // still-filling index: hints resolved against classes that were
+            // not parsed yet, and lenses showed reference counts that were
+            // stale zeros.  Now that it's complete, ask for a re-pull.
             if progress_backend
                 .supports_inlay_hint_refresh
                 .load(Ordering::Acquire)

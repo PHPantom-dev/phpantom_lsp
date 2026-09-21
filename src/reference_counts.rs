@@ -3,18 +3,16 @@
 //! A count shown next to a declaration has to mean "references to *this*
 //! symbol", which is the search Find References runs: resolve the receiver
 //! of every candidate access and keep the ones whose type is in the
-//! declaring class' hierarchy.  That search is far too slow for the
-//! inlay-hint and CodeLens request paths (hundreds of milliseconds for one
-//! member on a large project), so exact locations are computed on a background
-//! thread and served from this bounded cache.  Inlay hints read their count;
-//! CodeLens reuses the locations when the user opens the reference list.
+//! declaring class' hierarchy.  That search is far too slow for the CodeLens
+//! request path (hundreds of milliseconds for one member on a large
+//! project), so exact locations are computed on a background thread and
+//! served from this bounded cache; the lens titles its count from them and
+//! hands them straight to the client when the user opens the reference list.
 //!
-//! A hint is emitted only for a member whose count is already cached, and
-//! a cached value keeps being served once it goes stale so the annotation
-//! does not blink out between edits.  Clickable lenses require fresh locations
-//! and are omitted for refresh-capable clients until recomputation finishes.
-//! The reference index marks entries stale rather than dropping them, and the
-//! next annotation request queues them for recomputation.
+//! Clickable lenses require fresh locations and are omitted for
+//! refresh-capable clients until recomputation finishes.  The reference
+//! index marks entries stale rather than dropping them, and the next lens
+//! request queues them for recomputation.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
@@ -103,7 +101,7 @@ pub(crate) struct MemberRefCounts {
     /// that starts extending something can be told from one that only
     /// changed a method body.
     class_shapes: RwLock<HashMap<String, u64>>,
-    /// Set while a background computation runs, so a burst of inlay-hint
+    /// Set while a background computation runs, so a burst of CodeLens
     /// requests schedules one job rather than one each.
     computing: AtomicBool,
     /// Serialises exact searches started by background refreshes and lazy
@@ -250,7 +248,7 @@ impl MemberRefCounts {
     }
 
     /// Whether anything is cached at all.  Nothing is, until a declaration
-    /// hint has been asked for, and the reference index skips its
+    /// lens has been asked for, and the reference index skips its
     /// invalidation bookkeeping until then.
     pub(crate) fn is_empty(&self) -> bool {
         self.counts.read().by_member.is_empty()
@@ -347,24 +345,6 @@ impl Backend {
             class.used_traits.hash(&mut hasher);
         }
         Some(hasher.finish())
-    }
-
-    /// The cached reference count for a member declaration, queuing a
-    /// background computation when there is none or the cached one is
-    /// stale.
-    pub(crate) fn member_ref_count_cached(
-        &self,
-        uri: &str,
-        offset: u32,
-        class_fqn: Atom,
-        member: Atom,
-        is_static: bool,
-    ) -> Option<u32> {
-        let cached = self.member_ref_counts.get(class_fqn, member, is_static);
-        if cached.as_ref().is_none_or(|cached| cached.count_stale) {
-            self.queue_member_references(uri, offset, class_fqn, member, is_static);
-        }
-        cached.map(|cached| cached.count)
     }
 
     /// Fresh exact locations for a member declaration, if already cached.
@@ -488,9 +468,8 @@ impl Backend {
     /// Compute every queued member reference count.
     ///
     /// Returns `true` when at least one count changed, which is the signal
-    /// to ask the editor to re-pull inlay hints.  Runs the search Find
-    /// References runs, so the number matches what the user gets when they
-    /// follow it.
+    /// to ask the editor to re-pull lenses.  Runs the search Find References
+    /// runs, so the number matches what the user gets when they follow it.
     pub(crate) fn compute_pending_member_ref_counts(&self) -> bool {
         let _compute_guard = self.member_ref_counts.compute_lock.lock();
         // Taken rather than drained: a request that arrives while this
@@ -511,7 +490,7 @@ impl Backend {
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
-        // A declaration may have moved or gone since the hint was requested.
+        // A declaration may have moved or gone since the lens was requested.
         // Exclude stale offsets before preparing the shared semantic scan so
         // they cannot fall back to counting every member of that name.
         let valid_pending: Vec<_> = pending
@@ -559,7 +538,7 @@ impl Backend {
     }
 
     /// Run the queued member reference counts on a background thread and
-    /// ask the editor to re-pull inlay hints once they land.
+    /// ask the editor to re-pull lenses once they land.
     ///
     /// At most one computation runs at a time. Requests that arrive while it
     /// runs join the same burst, which is drained before one editor refresh.
@@ -601,13 +580,10 @@ impl Backend {
 
             match changed {
                 Some(true) => {
-                    if let Some(ref client) = backend.client {
-                        if backend.supports_inlay_hint_refresh.load(Ordering::Acquire) {
-                            let _ = client.inlay_hint_refresh().await;
-                        }
-                        if backend.supports_code_lens_refresh.load(Ordering::Acquire) {
-                            let _ = client.code_lens_refresh().await;
-                        }
+                    if let Some(ref client) = backend.client
+                        && backend.supports_code_lens_refresh.load(Ordering::Acquire)
+                    {
+                        let _ = client.code_lens_refresh().await;
                     }
                 }
                 Some(false) => {}
@@ -629,8 +605,9 @@ pub(crate) fn new_member_ref_counts() -> Arc<MemberRefCounts> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::{
-        InlayHint, InlayHintLabel, InlayHintParams, Position, Range, TextDocumentIdentifier, Url,
+        CodeLens, CodeLensParams, Position, Range, TextDocumentIdentifier, Url,
     };
 
     const URI: &str = "file:///test.php";
@@ -644,42 +621,34 @@ mod tests {
         backend
             .workspace_indexed
             .store(true, std::sync::atomic::Ordering::Release);
+        // The cache exists for the warm lens a refresh-capable client is
+        // shown once the background search lands, which is the path these
+        // tests measure.
+        backend
+            .supports_code_lens_refresh
+            .store(true, std::sync::atomic::Ordering::Release);
     }
 
     fn parse(backend: &Backend, content: &str) {
         parse_extra(backend, URI, content);
     }
 
-    fn hints_for(backend: &Backend, uri: &str, content: &str) -> Vec<InlayHint> {
-        let range = Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: content.lines().count() as u32,
-                character: 0,
-            },
-        };
-        backend
-            .handle_inlay_hints(uri, content, range)
-            .unwrap_or_default()
+    fn lenses_for(backend: &Backend, uri: &str, content: &str) -> Vec<CodeLens> {
+        backend.handle_code_lens(uri, content).unwrap_or_default()
     }
 
-    fn hints(backend: &Backend, content: &str) -> Vec<InlayHint> {
-        hints_for(backend, URI, content)
+    fn lenses(backend: &Backend, content: &str) -> Vec<CodeLens> {
+        lenses_for(backend, URI, content)
     }
 
-    fn count_on_line(hints: &[InlayHint], line: u32) -> Option<String> {
-        hints
+    /// The title of the lens on `line`, absent while the declaration's
+    /// references are still being computed.
+    fn count_on_line(lenses: &[CodeLens], line: u32) -> Option<String> {
+        lenses
             .iter()
-            .find(|hint| hint.position.line == line)
-            .map(|hint| match &hint.label {
-                InlayHintLabel::String(label) => label.clone(),
-                InlayHintLabel::LabelParts(parts) => {
-                    parts.iter().map(|part| part.value.as_str()).collect()
-                }
-            })
+            .find(|lens| lens.range.start.line == line)
+            .and_then(|lens| lens.command.as_ref())
+            .map(|command| command.title.clone())
     }
 
     #[test]
@@ -731,7 +700,7 @@ function persist(Order $order): void {
         let backend = Backend::new_test();
         parse_extra(&backend, ORDER_URI, ORDER);
         parse_extra(&backend, CONSUMER_URI, CONSUMER);
-        hints_for(&backend, ORDER_URI, ORDER);
+        lenses_for(&backend, ORDER_URI, ORDER);
 
         crate::type_engine::variable::resolution::reset_test_scope_cache_hits();
         backend.compute_pending_member_ref_counts();
@@ -782,7 +751,7 @@ function run(Service $service): void {
         let save_offset = SERVICE.find("save").unwrap() as u32;
         assert!(
             backend
-                .member_ref_count_cached(
+                .member_ref_locations_cached(
                     SERVICE_URI,
                     save_offset,
                     class_fqn,
@@ -811,7 +780,7 @@ function run(Service $service): void {
         let cancel_offset = SERVICE.find("cancel").unwrap() as u32;
         assert!(
             backend
-                .member_ref_count_cached(
+                .member_ref_locations_cached(
                     SERVICE_URI,
                     cancel_offset,
                     class_fqn,
@@ -853,11 +822,11 @@ function run(Service $service): void {
     fn an_edit_that_adds_an_access_recomputes_the_count() {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);
-        hints(&backend, ONE_CALL);
+        lenses(&backend, ONE_CALL);
         backend.compute_pending_member_ref_counts();
         assert_eq!(
-            count_on_line(&hints(&backend, ONE_CALL), 2).as_deref(),
-            Some(" 1 reference")
+            count_on_line(&lenses(&backend, ONE_CALL), 2).as_deref(),
+            Some("1 reference")
         );
         let declaration_offset = ONE_CALL.find("save").unwrap() as u32;
         assert_eq!(
@@ -890,16 +859,13 @@ function run(Service $service): void {
             "stale locations must not be served to a clickable lens"
         );
 
-        // The count the editor already has keeps being served until the
-        // new one is ready, so the annotation does not blink out.
-        assert_eq!(
-            count_on_line(&hints(&backend, &edited), 2).as_deref(),
-            Some(" 1 reference")
-        );
+        // A lens the user can click has to list what it counted, so it is
+        // withheld rather than shown with the pre-edit references.
+        assert_eq!(count_on_line(&lenses(&backend, &edited), 2), None);
         assert!(backend.compute_pending_member_ref_counts());
         assert_eq!(
-            count_on_line(&hints(&backend, &edited), 2).as_deref(),
-            Some(" 2 references")
+            count_on_line(&lenses(&backend, &edited), 2).as_deref(),
+            Some("2 references")
         );
         assert_eq!(
             backend
@@ -986,29 +952,34 @@ function run(Service $service): void {
     }
 
     #[test]
-    fn an_edit_that_leaves_the_accesses_alone_recomputes_nothing() {
+    fn an_edit_that_leaves_the_accesses_alone_keeps_the_count() {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);
-        hints(&backend, ONE_CALL);
+        lenses(&backend, ONE_CALL);
         backend.compute_pending_member_ref_counts();
 
         // The first edit is the one that records what the file's classes
         // inherit, so start measuring from the second.
         let edited = format!("{ONE_CALL}// a trailing comment\n");
         parse(&backend, &edited);
-        hints(&backend, &edited);
+        lenses(&backend, &edited);
         backend.compute_pending_member_ref_counts();
 
         let edited_again = format!("{edited}// another trailing comment\n");
         parse(&backend, &edited_again);
-        assert_eq!(
-            count_on_line(&hints(&backend, &edited_again), 2).as_deref(),
-            Some(" 1 reference")
-        );
+
+        let cached = backend
+            .member_ref_counts
+            .get(crate::atom::atom("Order"), crate::atom::atom("save"), false)
+            .expect("the computed count should survive the edit");
+        assert_eq!(cached.count, 1);
         assert!(
-            !backend.member_ref_counts.has_pending(),
-            "an edit that touches no access should not queue a recomputation"
+            !cached.count_stale,
+            "an edit that touches no access should not invalidate the count"
         );
+        // Exact locations are another matter: any edit can move them, so
+        // the clickable lens recomputes before it is shown again.
+        assert!(cached.locations_stale);
     }
 
     #[tokio::test]
@@ -1016,25 +987,16 @@ function run(Service $service): void {
         let backend = Backend::new_test();
         parse(&backend, ONE_CALL);
 
-        let params = InlayHintParams {
+        let params = CodeLensParams {
             text_document: TextDocumentIdentifier {
                 uri: Url::parse(URI).unwrap(),
             },
-            range: Range {
-                start: Position {
-                    line: 0,
-                    character: 0,
-                },
-                end: Position {
-                    line: ONE_CALL.lines().count() as u32,
-                    character: 0,
-                },
-            },
             work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
         };
 
         let first = backend
-            .inlay_hint_request(params.clone())
+            .code_lens(params.clone())
             .await
             .unwrap()
             .unwrap_or_default();
@@ -1051,12 +1013,8 @@ function run(Service $service): void {
             tokio::time::sleep(std::time::Duration::from_millis(10)).await;
         }
 
-        let second = backend
-            .inlay_hint_request(params)
-            .await
-            .unwrap()
-            .unwrap_or_default();
-        assert_eq!(count_on_line(&second, 2).as_deref(), Some(" 1 reference"));
+        let second = backend.code_lens(params).await.unwrap().unwrap_or_default();
+        assert_eq!(count_on_line(&second, 2).as_deref(), Some("1 reference"));
     }
 
     #[test]
@@ -1074,11 +1032,11 @@ function persist(Order $order): void {
 }
 "#;
         parse(&backend, unrelated);
-        hints(&backend, unrelated);
+        lenses(&backend, unrelated);
         backend.compute_pending_member_ref_counts();
         assert_eq!(
-            count_on_line(&hints(&backend, unrelated), 2).as_deref(),
-            Some(" 0 references")
+            count_on_line(&lenses(&backend, unrelated), 2).as_deref(),
+            Some("0 references")
         );
 
         let inherited = unrelated.replace(
@@ -1086,11 +1044,11 @@ function persist(Order $order): void {
             "class Order extends Model {",
         );
         parse(&backend, &inherited);
-        hints(&backend, &inherited);
+        lenses(&backend, &inherited);
         assert!(backend.compute_pending_member_ref_counts());
         assert_eq!(
-            count_on_line(&hints(&backend, &inherited), 2).as_deref(),
-            Some(" 1 reference")
+            count_on_line(&lenses(&backend, &inherited), 2).as_deref(),
+            Some("1 reference")
         );
     }
 
@@ -1142,19 +1100,19 @@ function useA(): void {
         // consumer files are scanned under one chain-cache activation —
         // the scenario where a text-only cache key leaks a resolution from
         // one file's `use` scope into the other's.
-        hints_for(&backend, URI_A, pen_a);
-        hints_for(&backend, URI_B, &pen_b);
+        lenses_for(&backend, URI_A, pen_a);
+        lenses_for(&backend, URI_B, &pen_b);
         backend.compute_pending_member_ref_counts();
 
         assert_eq!(
-            count_on_line(&hints_for(&backend, URI_A, pen_a), 8).as_deref(),
-            Some(" 1 reference"),
+            count_on_line(&lenses_for(&backend, URI_A, pen_a), 8).as_deref(),
+            Some("1 reference"),
             "App\\A\\Pen::write must only count ConsumerA's call, not ConsumerB's \
              identically-spelled `Pen::make()->write()` against `App\\B\\Pen`"
         );
         assert_eq!(
-            count_on_line(&hints_for(&backend, URI_B, &pen_b), 8).as_deref(),
-            Some(" 1 reference"),
+            count_on_line(&lenses_for(&backend, URI_B, &pen_b), 8).as_deref(),
+            Some("1 reference"),
             "App\\B\\Pen::write must only count ConsumerB's call"
         );
     }

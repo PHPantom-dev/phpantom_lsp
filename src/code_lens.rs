@@ -823,3 +823,157 @@ impl Backend {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::Ordering;
+
+    /// Open a file and return its lenses once the member references the
+    /// first request queued have been computed.
+    fn declaration_lenses(backend: &Backend, uri: &str, content: &str) -> Vec<CodeLens> {
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+        backend.update_ast(uri, content);
+        backend.workspace_indexed.store(true, Ordering::Release);
+        backend
+            .supports_code_lens_refresh
+            .store(true, Ordering::Release);
+
+        backend.handle_code_lens(uri, content);
+        backend.compute_pending_member_ref_counts();
+        backend.handle_code_lens(uri, content).unwrap_or_default()
+    }
+
+    /// The title of the lens on `line`, resolved the way a client that
+    /// displays it would.
+    fn title_on_line(backend: &Backend, lenses: &[CodeLens], line: u32) -> Option<String> {
+        let lens = lenses.iter().find(|lens| lens.range.start.line == line)?;
+        backend
+            .resolve_code_lens_item(lens.clone())
+            .command
+            .map(|command| command.title)
+    }
+
+    #[test]
+    fn a_function_nothing_calls_is_reported_as_zero() {
+        let backend = Backend::new_test();
+
+        let lenses = declaration_lenses(
+            &backend,
+            "file:///helpers.php",
+            "<?php\nfunction unused(): void {}\n",
+        );
+
+        assert_eq!(
+            title_on_line(&backend, &lenses, 1).as_deref(),
+            Some("0 references"),
+            "a file with no classes at all still reports its functions"
+        );
+    }
+
+    #[test]
+    fn a_magic_method_gets_no_reference_lens() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+class User {
+    public function __construct() {}
+    public function save(): void {}
+}
+"#;
+
+        let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+        assert!(lenses.iter().any(|lens| lens.range.start.line == 1));
+        assert!(lenses.iter().any(|lens| lens.range.start.line == 3));
+        assert!(!lenses.iter().any(|lens| lens.range.start.line == 2));
+    }
+
+    #[test]
+    fn a_member_lens_ignores_a_member_of_the_same_name_on_another_class() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+class User {
+    public int $id = 0;
+    public function save(): void {}
+}
+class Order {
+    public int $id = 0;
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    echo $order->id;
+    $order->save();
+}
+"#;
+
+        let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+        assert_eq!(
+            title_on_line(&backend, &lenses, 2).as_deref(),
+            Some("0 references")
+        );
+        assert_eq!(
+            title_on_line(&backend, &lenses, 3).as_deref(),
+            Some("0 references")
+        );
+        assert_eq!(
+            title_on_line(&backend, &lenses, 6).as_deref(),
+            Some("1 reference")
+        );
+        assert_eq!(
+            title_on_line(&backend, &lenses, 7).as_deref(),
+            Some("1 reference")
+        );
+    }
+
+    #[test]
+    fn a_member_lens_counts_references_through_a_subclass() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order extends Model {
+}
+function persist(Order $order, Model $model): void {
+    $order->save();
+    $model->save();
+}
+"#;
+
+        let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+        assert_eq!(
+            title_on_line(&backend, &lenses, 2).as_deref(),
+            Some("2 references")
+        );
+    }
+
+    #[test]
+    fn a_class_lens_ignores_a_class_of_the_same_name_in_another_namespace() {
+        let backend = Backend::new_test();
+        let content = r#"<?php
+class Widget {}
+namespace App;
+class Widget {}
+function build(): void {
+    $first = new \App\Widget();
+    $second = new \App\Widget();
+}
+"#;
+
+        let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+        assert_eq!(
+            title_on_line(&backend, &lenses, 1).as_deref(),
+            Some("0 references")
+        );
+        assert_eq!(
+            title_on_line(&backend, &lenses, 3).as_deref(),
+            Some("2 references")
+        );
+    }
+}

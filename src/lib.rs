@@ -584,7 +584,7 @@ pub struct Backend {
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
     /// subcommands, which parse every file but never issue a
-    /// find-references, rename, or inlay-hints request, so populating
+    /// find-references, rename, or CodeLens request, so populating
     /// the index would be pure wasted CPU and short-lived allocation.
     pub(crate) skip_reference_index: bool,
     /// Per-file parse errors from the Mago parser.
@@ -937,12 +937,12 @@ pub struct Backend {
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
-    /// `workspace.inlayHint.refreshSupport` capability.  The reference
-    /// counts shown on declarations are computed in the background, so
-    /// without a refresh the editor keeps the hints it pulled before they
-    /// were ready.
+    /// `workspace.inlayHint.refreshSupport` capability.  Hints resolve
+    /// against the workspace index and a background parse, so without a
+    /// refresh the editor keeps the ones it pulled before either was
+    /// ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Exact member references shared by declaration inlay hints and lenses.
+    /// Exact member references behind the declaration CodeLens.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull

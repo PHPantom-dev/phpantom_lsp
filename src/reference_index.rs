@@ -94,7 +94,7 @@ impl ReferenceIndexKey {
 /// per-file `Arc<str>`) mapped to the number of spans in that URI that
 /// reference the key's name — the two facts consumers actually read
 /// (`reference_candidate_uris_for_keys` needs the URI set,
-/// `inlay_hints::ref_count` needs the count). Declarations and the
+/// `indexed_reference_count` needs the count). Declarations and the
 /// alias keys a reference is merely searchable under contribute a URI
 /// but no count, so a class is never credited with the references to a
 /// namesake in another namespace. The per-span `start`/`end` offsets and

@@ -341,6 +341,90 @@ makeWidget();
     }
 }
 
+/// The title of the reference lens on `line`, resolved the way a client
+/// that displays it does.
+async fn resolved_reference_title(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    line: u32,
+) -> Option<String> {
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == line)?;
+    backend
+        .code_lens_resolve(lens)
+        .await
+        .unwrap()
+        .command
+        .map(|command| command.title)
+}
+
+/// Drive workspace indexing the way a client does before asking for lenses.
+async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Url, position: Position) {
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_function_lens_counts_unqualified_calls_from_a_namespaced_file() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service =
+        "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &uri, helpers).await;
+    warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 1).await.as_deref(),
+        Some("2 references"),
+        "an unqualified call in a namespaced file falls back to the global function"
+    );
+}
+
+#[tokio::test]
+async fn a_function_lens_ignores_the_case_a_call_is_spelled_with() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service = "<?php\nnamespace App;\nfunction run(): void {\n    HELPER();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &uri, helpers).await;
+    warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 1).await.as_deref(),
+        Some("1 reference"),
+        "PHP function names are case-insensitive"
+    );
+}
+
 /// A method PHP or Laravel can reach through a static call is indexed under
 /// the static member key, so the lens must not answer a conclusive zero from
 /// the instance key alone.
