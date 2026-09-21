@@ -54,4 +54,24 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B322. A method that implements or overrides a prototype gets no reference count
+
+**Impact: Low-Medium · Complexity: Low**
+
+`handle_code_lens` builds the reference lens for a method only when
+`find_prototype` came back empty, so a method that implements an
+interface or overrides a parent loses its count and keeps only the
+`◆ Interface::method` navigation lens. Deleting the `implements` clause
+makes the count reappear, which is how the reporter of github #412 found
+it: the very methods a project most wants a usage count for, the ones
+behind a contract, are the ones that never show one.
+
+The two lenses answer different questions and both fit on the line, the
+way a property carrying a count and a class carrying an implementation
+count already coexist. The gate reads as a guard against a second
+resolution pass rather than a deliberate layout choice, and the counts
+are already answered from the reference index, so keeping both is not
+the work the gate seems to be avoiding.
+
+**Where to look:** `src/code_lens.rs` (`handle_code_lens`, the
+`proto.is_none()` condition on `build_member_reference_lens`).

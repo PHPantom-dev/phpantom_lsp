@@ -24,19 +24,11 @@ use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::composer;
-use crate::inheritance::find_declaring_ancestor;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
-
-struct MemberPrototypeSearch<'a> {
-    member_name: &'a str,
-    kind: MemberKind,
-    uri: &'a str,
-    content: &'a str,
-}
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -316,35 +308,14 @@ impl Backend {
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
                 .map(|loc| vec![loc]),
 
-            SymbolKind::MemberDeclaration { name, is_static } => {
-                // If this method/property overrides a parent or implements
-                // an interface member, jump to the prototype declaration.
-                let ctx = self.file_context(uri);
-                let class_loader = self.class_loader(&ctx);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-                if let Some(cls) = current_class
-                    && let Some(kind) = self.infer_member_declaration_kind(cls, name, *is_static)
-                    && let Some(loc) = self.resolve_member_declaration_prototype(
-                        uri,
-                        content,
-                        cls,
-                        name,
-                        kind,
-                        &class_loader,
-                    )
-                {
-                    return Some(vec![loc]);
-                }
-
-                if let Some(cls) = current_class
-                    && let Some(locs) =
-                        self.resolve_reverse_implementation(uri, content, cls, name, &class_loader)
-                    && !locs.is_empty()
-                {
-                    return Some(locs);
-                }
-
+            SymbolKind::MemberDeclaration { name, .. } => {
+                // Return self-location so editors detect "definition ==
+                // cursor" and offer Find Usages instead of navigating.
+                // Navigating to the interface or abstract prototype from a
+                // declaration site makes the concrete method's usages
+                // unreachable; the `implements`/`extends` clause and the
+                // `textDocument/implementation` command handle prototype
+                // navigation.
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
@@ -451,96 +422,6 @@ impl Backend {
             | SymbolKind::CastType
             | SymbolKind::Comment => None,
         }
-    }
-
-    fn infer_member_declaration_kind(
-        &self,
-        class: &ClassInfo,
-        member_name: &str,
-        is_static: bool,
-    ) -> Option<MemberKind> {
-        if is_static
-            && class
-                .constants
-                .iter()
-                .any(|c| c.name == member_name && c.visibility != crate::types::Visibility::Private)
-        {
-            return Some(MemberKind::Constant);
-        }
-
-        if class.methods.iter().any(|m| {
-            m.name == member_name
-                && m.is_static == is_static
-                && !m.is_virtual
-                && m.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Method);
-        }
-
-        if class.properties.iter().any(|p| {
-            p.name == member_name
-                && p.is_static == is_static
-                && !p.is_virtual
-                && p.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Property);
-        }
-
-        None
-    }
-
-    fn resolve_member_declaration_prototype(
-        &self,
-        uri: &str,
-        content: &str,
-        class: &ClassInfo,
-        member_name: &str,
-        kind: MemberKind,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Option<Location> {
-        let search = MemberPrototypeSearch {
-            member_name,
-            kind,
-            uri,
-            content,
-        };
-        let declares = |candidate: &ClassInfo| self.class_declares_member(candidate, &search);
-        let (name, declaring) = find_declaring_ancestor(class, class_loader, &declares)?;
-        self.member_location(&name, &declaring, &search)
-    }
-
-    fn class_declares_member(&self, class: &ClassInfo, search: &MemberPrototypeSearch<'_>) -> bool {
-        match search.kind {
-            MemberKind::Method => class.methods.iter().any(|m| {
-                m.name == search.member_name
-                    && !m.is_virtual
-                    && m.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Property => class.properties.iter().any(|p| {
-                p.name == search.member_name
-                    && !p.is_virtual
-                    && p.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Constant => class.constants.iter().any(|c| {
-                c.name == search.member_name && c.visibility != crate::types::Visibility::Private
-            }),
-        }
-    }
-
-    fn member_location(
-        &self,
-        class_name: &str,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let offset = class.member_name_offset(search.member_name, search.kind.as_str())?;
-        let (target_uri, target_content) =
-            self.find_class_file_content(class_name, search.uri, search.content)?;
-        let parsed_uri = Url::parse(&target_uri).ok()?;
-        Some(point_location(
-            parsed_uri,
-            crate::text_position::offset_to_position(&target_content, offset as usize),
-        ))
     }
 
     /// Return the declaration's own location for a symbol that has nowhere
