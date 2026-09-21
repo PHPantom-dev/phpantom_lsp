@@ -27,6 +27,7 @@ use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
 use Illuminate\Contracts\Filesystem\Filesystem;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Client\PendingRequest;
@@ -179,6 +180,14 @@ class Demo
         Loaf::query()->whereKey(1)->first()->getWeight();     // → Loaf|null
         Loaf::query()->stale()->get();                        // → Collection<Loaf>
         Baker::query()->active()->firstOrFail()->getName();   // → Baker
+
+        // Inherited methods and forwarded query methods keep the custom builder.
+        Loaf::query()->where('crust', 'sourdough')->orderBy('id')->stale(); // → LoafBuilder
+        Loaf::where('crust', 'sourdough')->orderBy('id')->stale();          // → LoafBuilder
+        Baker::query()->whereIn('id', [1])->lockForUpdate()->active();     // → BakerBuilder<Baker>
+        (new Loaf())->newQuery()->orderBy('id')->stale();                 // → LoafBuilder
+        (new Baker())->newQueryWithoutScopes()->active();                // → BakerBuilder<Baker>
+        (new Baker())->newModelQuery()->firstOrFail()->getName();         // → Baker
 
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
@@ -464,12 +473,61 @@ class Demo
             $query->where('published', true); // resolves to Builder<BlogPost>
         });
 
-        // Dot-notation relation chain
-        BlogPost::whereHas('author', function ($q) {
-            $q->where('active', true);    // resolves to Builder<BlogAuthor>
+        // Each dotted segment is resolved on the preceding related model.
+        BlogPost::whereHas('author.posts', function ($q) {
+            $q->where('published', true);    // resolves to Builder<BlogPost>
+        });
+
+        // has() takes its callback in the fifth argument; arrow functions
+        // receive the final related model's builder too.
+        BlogAuthor::has('posts.author', '>=', 1, 'and', fn ($q) => $q->active()); // → Builder<BlogAuthor>
+
+        // Named arguments may put the callback before the relation.
+        BlogAuthor::has(callback: fn ($q) => $q->active(), relation: 'posts.author'); // → Builder<BlogAuthor>
+
+        // The related model chooses the builder, including with a bare hint.
+        Bakery::whereHas('baguettes', function (Builder $q) {
+            $q->stale();                     // → LoafBuilder<Loaf>
+        });
+        Bakery::query()->whereHas('headBaker', fn ($q) => $q->active()); // → BakerBuilder<Baker>
+
+        // The same constraint runs on a builder and the eager-loaded relation.
+        Bakery::withWhereHas(callback: function (Builder|Relation $q) {
+            $q->where('weight_grams', '>', 500); // → LoafBuilder<Loaf>|HasMany<Loaf, Bakery>
+        }, relation: 'baguettes');
+        BlogPost::withWhereRelation('author.posts', fn ($q) => $q->where('published', true)); // → Builder<BlogPost>|HasMany<BlogPost, BlogAuthor>
+
+        // Morph candidates choose the callback builder and keep the type string.
+        Review::whereHasMorph('reviewable', Loaf::class, function (Builder $q, string $type) {
+            $q->stale();                     // → LoafBuilder<Loaf>
+            echo $type;                     // → string
         });
     }
 
+    public function eloquentRelationArguments(bool $includeBaker): void
+    {
+        $name = 'headBaker';
+        $bakery = new Bakery();
+        Bakery::whereHas($name, fn ($q) => $q->active());                 // → BakerBuilder<Baker>
+        Bakery::whereHas($bakery->headBaker(), fn ($q) => $q->active());  // → BakerBuilder<Baker>
+        Bakery::orWhereRelation($name, fn ($q) => $q->active());
+        Bakery::whereDoesntHaveRelation($bakery->headBaker(), fn ($q) => $q->active());
+        Bakery::orWhereDoesntHaveRelation(column: fn ($q) => $q->active(), relation: $name);
+
+        // Each possible name contributes its builder and eager relation.
+        $relation = $includeBaker ? 'headBaker' : 'baguettes';
+        Bakery::withWhereHas($relation, fn ($q) => $q->where('id', '>', 0));
+
+        // Direct eager callbacks receive a relation and retain its related model.
+        Bakery::query()->with(callback: function (Relation $q) {
+            $q->where('active', true)->getModel()->getName();             // → string (Baker::getName())
+        }, relations: $name);                                            // → HasOne<Baker, Bakery>
+
+        Review::whereHasMorph((new Review())->reviewable(), Loaf::class, function ($q, $type) {
+            $q->stale();                                                 // → LoafBuilder<Loaf>
+            echo $type;                                                 // → string
+        });
+    }
 
     // ── Laravel Config & Env Navigation ─────────────────────────────────────
 

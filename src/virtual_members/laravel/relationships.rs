@@ -16,14 +16,9 @@ use crate::util::{short_name, strip_fqn_prefix};
 
 use super::helpers::{camel_to_snake, snake_to_camel};
 
-/// Methods on `Builder` / `QueriesRelationships` that accept a relation
-/// name string as the first argument and a closure typed as
-/// `Closure(Builder<TRelatedModel>): mixed` as the second argument
-/// (or at the listed position).
-///
-/// When one of these methods is detected, the closure parameter
-/// inference overrides `TModel` with the related model resolved from
-/// the relation name string.
+/// Eloquent query methods whose constraint receiver depends on a relation
+/// argument. Argument binding locates each method's relation and callback;
+/// callable inference refines the builder, eager relation, or both.
 pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "has",
     "orHas",
@@ -31,10 +26,25 @@ pub(crate) const RELATION_QUERY_METHODS: &[&str] = &[
     "orDoesntHave",
     "whereHas",
     "orWhereHas",
+    "with",
     "withWhereHas",
+    "withWhereRelation",
     "whereDoesntHave",
     "orWhereDoesntHave",
     "whereRelation",
+    "orWhereRelation",
+    "whereDoesntHaveRelation",
+    "orWhereDoesntHaveRelation",
+    "hasMorph",
+    "doesntHaveMorph",
+    "whereHasMorph",
+    "orWhereHasMorph",
+    "whereDoesntHaveMorph",
+    "orWhereDoesntHaveMorph",
+    "whereMorphRelation",
+    "orWhereMorphRelation",
+    "whereMorphDoesntHaveRelation",
+    "orWhereMorphDoesntHaveRelation",
 ];
 
 /// Fully-qualified relationship class names used by
@@ -501,30 +511,46 @@ pub(crate) fn resolve_relation_chain(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&super::super::ResolvedClassCache>,
 ) -> Option<String> {
-    let segments: Vec<&str> = chain.split('.').collect();
-    if segments.is_empty() {
-        return None;
-    }
+    resolve_relation_chain_details(model, chain, class_loader, cache)
+        .map(|relation| relation.model.fqn().to_string())
+}
 
+/// The terminal relationship and related model of a dotted relation path.
+pub(crate) struct ResolvedRelation {
+    /// The final related model, used to select its query builder.
+    pub model: Arc<ClassInfo>,
+    /// The relationship with self references bound to its declaring model.
+    pub relation_type: PhpType,
+}
+
+/// Resolve a dotted path while retaining the terminal relationship's type.
+/// Eager constraints receive this relationship, constructed on the model at
+/// the preceding segment, as well as its builder for the existence query.
+pub(crate) fn resolve_relation_chain_details(
+    model: &ClassInfo,
+    chain: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&super::super::ResolvedClassCache>,
+) -> Option<ResolvedRelation> {
+    let mut segments = chain.split('.').peekable();
     let mut current_class = resolve_class_with_inheritance(model, class_loader, cache);
-    for segment in &segments {
+    while let Some(segment) = segments.next() {
         let segment = segment.trim();
         if segment.is_empty() {
             return None;
         }
-
-        let method = current_class.get_method(segment)?;
-
-        // Body-inferred relationship types are already stored in
-        // `return_type` by the parser, so no fallback is needed.
-        let return_type = method.return_type.as_ref()?;
+        let return_type = current_class.get_method(segment)?.return_type.as_ref()?;
         let related_type = extract_related_type_for_chain(return_type, &current_class)?;
-
-        let resolved = resolve_related_fqn(&related_type, &current_class, class_loader)?;
-        current_class = resolve_class_with_inheritance(&resolved, class_loader, cache);
+        let related = resolve_related_fqn(&related_type, &current_class, class_loader)?;
+        if segments.peek().is_none() {
+            return Some(ResolvedRelation {
+                model: related,
+                relation_type: return_type.replace_self_bound(&current_class.fqn(), None),
+            });
+        }
+        current_class = resolve_class_with_inheritance(&related, class_loader, cache);
     }
-
-    Some(current_class.fqn().to_string())
+    None
 }
 
 /// Resolve a class fully (with inheritance and virtual members) so that
