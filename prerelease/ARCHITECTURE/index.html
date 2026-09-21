@@ -3270,8 +3270,8 @@ sit next to.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>src/
 <a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── lib.rs                  # Backend struct, state, module declarations, shared constants (PARSE_WORKER_STACK_SIZE, …)
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …) + workspace init/indexing
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── backend.rs, backend/    # Backend construction and file access
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
 <a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>├── config.rs               # .phpantom.toml / workspace configuration
 <a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│
 <a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   # Data model
