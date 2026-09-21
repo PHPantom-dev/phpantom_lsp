@@ -3214,60 +3214,47 @@ through a separate flag, so the cached value has to carry both.</p>
 path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
-<h2 id="p55-every-edit-re-reads-every-member-reference-candidate-file">P55. Every edit re-reads every member-reference candidate file<a class="headerlink" href="#p55-every-edit-re-reads-every-member-reference-candidate-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p><code>reindex_references_for_symbol_maps_batch</code> and
-<code>evict_reference_index_uri</code> both call
-<code>MemberRefCounts::invalidate_locations_all</code>, so any reparse marks the
-exact locations of <em>every</em> cached member declaration stale, not just the
-ones the edited file contributed to. The count side is invalidated far
-more selectively: <code>member_contributions</code> compares each file's old and
-new per-member contribution and only the members whose contribution
-actually changed become <code>count_stale</code>, which is what lets an edit that
-touches no access recompute nothing.</p>
-<p>Locations are blanket-invalidated because a receiver's type can change
-without changing any indexed member name or count (the
-<code>Order $value</code> → <code>Buyer $value</code> case), and a clickable lens must never
-point at a range the edit moved. But the consequence is that the
-declaration CodeLens path re-queues every public member of the open file
-on every keystroke, and <code>member_declaration_references_batch</code> then calls
-<code>reference_file_content_arc</code> for each candidate file. That falls through
-to <code>get_file_content_arc</code>, which is an uncached
-<code>std::fs::read_to_string</code> for any file not open in the editor. On a
-large application a common member name (<code>handle</code>, <code>get</code>, <code>name</code>) is a
-candidate in thousands of files, so a typing pause costs thousands of
-file reads even though the expensive part, the per-file
-<code>ResolvedMemberFile</code> semantic layer, is still warm and reused.</p>
+<h2 id="p55-a-signature-edit-re-resolves-every-member-reference-candidate-file">P55. A signature edit re-resolves every member-reference candidate file<a class="headerlink" href="#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
+<p>An edit that only reparses files now rescans those files alone: a cached
+member result records which files went stale, and the recomputation
+searches those and merges the rest of the cached locations back in.
+Typing inside a method body costs no workspace search at all.</p>
+<p>A change to a <em>signature</em> is still a blanket invalidation, from the
+<code>any_signature_changed || any_function_changed</code> branch of <code>update_ast</code>.
+That branch is correct and cannot be narrowed by which classes changed:
+a chain such as <code>$b-&gt;makeC()-&gt;handle()</code> resolves its receiver through a
+class the file never names, so the files whose receivers a change can
+affect are not the files that mention it. The cost lands in two places:</p>
+<ul>
+<li>The branch clears <code>resolved_members</code>, so the next search rebuilds the
+  per-file receiver layer for every candidate file rather than reusing
+  it. On a large application, with a common member name (<code>handle</code>,
+  <code>get</code>, <code>name</code>) a candidate in thousands of files, one such burst is
+  tens of CPU-seconds even though most of those files were not touched.</li>
+<li><code>member_declaration_references_batch</code> calls
+  <code>reference_file_content_arc</code> per candidate file, which falls through
+  to <code>get_file_content_arc</code>, an uncached <code>std::fs::read_to_string</code> for
+  any file not open in the editor.</li>
+</ul>
 <h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
-<p>Two independent halves, either of which helps on its own:</p>
-<ol>
-<li>
-<p><strong>Narrow the invalidation.</strong> Split the blanket call into the two
-   causes it currently conflates. Offsets only shift in the files that
-   were reparsed, so a location cache entry needs invalidating when one
-   of its own locations names a rebuilt URI. The receiver-type case
-   belongs where the type change is already detected: <code>update_ast</code>
-   clears <code>resolved_members</code> when <code>any_signature_changed ||
-   any_function_changed</code>, and the location cache should be invalidated
-   from the same branch. Check what that flag covers before relying on
-   it — a docblock-only <code>@return</code> edit changes receiver types too, and
-   serving a stale clickable location is worse than the current cost.</p>
-</li>
-<li>
 <p><strong>Make the warm semantic layer self-sufficient.</strong> <code>ResolvedMemberFile</code>
-   already packs the resolved receiver atoms per symbol-span index; it
-   does not carry the LSP <code>Range</code> for the access, which is the only
-   other thing <code>scan_file</code> needs the file's text for. Storing the range
-   alongside the targets (16 bytes per access) would let a warm
-   candidate file be filtered without reading it at all.</p>
-</li>
-</ol>
-<p><strong>Where to look:</strong> <code>invalidate_locations_all</code> and
-<code>member_declaration_references</code> in <code>reference_counts.rs</code>,
-<code>reindex_references_for_symbol_maps_batch</code> and <code>ResolvedMemberFile</code> in
-<code>reference_index.rs</code>, <code>member_declaration_references_batch</code> in
-<code>references/members.rs</code>, and <code>get_file_content_arc</code> in
-<code>backend/file_access.rs</code>.</p>
+already packs the resolved receiver atoms per symbol-span index; it does
+not carry the LSP <code>Range</code> for the access, which is the only other thing
+<code>scan_file</code> needs the file's text for. Storing the range alongside the
+targets (16 bytes per access) would let a warm candidate file be
+filtered without reading it at all, which also removes the file reads
+above.</p>
+<p>That leaves the layer being cleared wholesale on a signature change.
+Before narrowing it, measure how much of a burst is the rebuild and how
+much is the scan: the layer is shared with Find References, so a
+narrowing that gets it wrong shows up as missing references, not as a
+slow lens.</p>
+<p><strong>Where to look:</strong> <code>Staleness</code> and <code>compute_pending_member_ref_counts</code>
+in <code>reference_counts.rs</code>, <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>,
+<code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
+<code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>, and
+<code>get_file_content_arc</code> in <code>backend/file_access.rs</code>.</p>
 
 
 
