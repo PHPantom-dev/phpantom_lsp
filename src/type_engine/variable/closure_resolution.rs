@@ -22,7 +22,8 @@ use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::ResolutionCtx;
 use crate::virtual_members::laravel::{
-    ELOQUENT_BUILDER_FQN, RELATION_QUERY_METHODS, extends_eloquent_model, resolve_relation_chain,
+    ELOQUENT_BUILDER_FQN, ELOQUENT_MODEL_FQN, RELATION_QUERY_METHODS, extends_eloquent_model,
+    model_builder_type, resolve_relation_chain_details,
 };
 
 thread_local! {
@@ -729,7 +730,7 @@ fn resolve_closure_this_type(
 /// Check whether the inferred callable-signature type is a more specific
 /// version of the explicit type hint.
 ///
-/// Returns `true` in two situations:
+/// Returns `true` when generic or element information refines the hint:
 ///
 /// * The explicit hint is a bare class name (e.g. `Collection`) and the
 ///   inferred type is the same class with generic arguments (e.g.
@@ -742,7 +743,23 @@ fn resolve_closure_this_type(
 ///   `list<User>`, `User[]`).  A closure passed to `array_map()` over
 ///   `list<array{Foo, string}>` may declare its parameter as plain
 ///   `array`; the call site still knows the shape.
-fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -> bool {
+/// * The inferred generic class is a subclass of the explicit bare class,
+///   such as a custom Eloquent builder passed to a `Builder` parameter.
+fn inferred_type_is_more_specific(
+    explicit_hint: &PhpType,
+    inferred: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if let TypeKind::Union(parts) = inferred.kind() {
+        return parts
+            .iter()
+            .all(|part| inferred_type_is_more_specific(explicit_hint, part, class_loader));
+    }
+    if let TypeKind::Union(parts) = explicit_hint.kind() {
+        return parts
+            .iter()
+            .any(|part| inferred_type_is_more_specific(part, inferred, class_loader));
+    }
     // The explicit hint must be a bare name (no generic args).
     let explicit_base = match explicit_hint.kind() {
         TypeKind::Named(name) => name.as_str(),
@@ -767,6 +784,13 @@ fn inferred_type_is_more_specific(explicit_hint: &PhpType, inferred: &PhpType) -
     let inferred_short = crate::util::short_name(inferred_base);
 
     explicit_short.eq_ignore_ascii_case(inferred_short)
+        || class_loader(explicit_base).is_some_and(|explicit| {
+            crate::class_lookup::is_subtype_of_typed(
+                inferred,
+                &PhpType::named(explicit.fqn()),
+                class_loader,
+            )
+        })
 }
 
 /// Whether an array type carries element information worth keeping over a
@@ -794,24 +818,25 @@ fn describes_elements(ty: &PhpType, allow_iterable: bool) -> bool {
 /// Check whether `method_name` is a relation-query method (e.g.
 /// `whereHas`, `orWhereHas`, `whereDoesntHave`, etc.) and the receiver
 /// is an Eloquent model or `Builder<Model>`.  If so, resolve the
-/// relation chain from the first argument string and return
-/// `Builder<FinalRelatedModel>` as the closure parameter type.
+/// relation chain from the bound relation string and return
+/// the final related model’s builder as the closure parameter type.
 ///
 /// Returns `None` when the override does not apply (not a relation-query
 /// method, receiver is not a model, relation chain cannot be resolved),
 /// in which case the caller falls through to normal callable param
 /// inference.
 fn try_relation_query_override(
-    receiver_classes: &[Arc<ClassInfo>],
+    receivers: &[ResolvedType],
     method_name: &str,
-    first_arg_text: Option<&str>,
+    relation_name: Option<&str>,
+    candidates: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
     if !RELATION_QUERY_METHODS.contains(&method_name) {
         return None;
     }
 
-    let relation_name = first_arg_text?;
+    let relation_name = relation_name?;
     if relation_name.is_empty() {
         return None;
     }
@@ -819,17 +844,103 @@ fn try_relation_query_override(
     // Determine the base model from the receiver.  The receiver may be
     // the model itself (static call: `Brand::whereHas(...)`) or a
     // `Builder<Model>` instance.
-    let model = find_model_from_receivers(receiver_classes, class_loader)?;
+    let model = find_model_from_receivers(receivers, class_loader)?;
 
-    // Walk the dot-separated relation chain to find the final related model.
-    let related_fqn = resolve_relation_chain(&model, relation_name, class_loader, None)?;
+    // Only withWhereHas strips a column-selection suffix for its existence
+    // query; withWhereRelation passes the relation name through unchanged.
+    let chain = if method_name == "withWhereHas" {
+        relation_name
+            .split_once(':')
+            .map_or(relation_name, |(name, _)| name)
+    } else {
+        relation_name
+    };
+    let related = resolve_relation_chain_details(&model, chain, class_loader, None);
+    if let Some(candidates) = candidates {
+        let fallback = related
+            .as_ref()
+            .map(|relation| model_builder_type(&relation.model, class_loader))
+            .unwrap_or_else(|| {
+                PhpType::generic(
+                    ELOQUENT_BUILDER_FQN,
+                    vec![PhpType::named(atom(ELOQUENT_MODEL_FQN))],
+                )
+            });
+        return Some(vec![morph_candidate_builders(
+            candidates,
+            &fallback,
+            class_loader,
+        )]);
+    }
+    let related = related?;
+    let builder = model_builder_type(&related.model, class_loader);
+    Some(vec![
+        if matches!(method_name, "withWhereHas" | "withWhereRelation") {
+            PhpType::union(vec![builder, related.relation_type])
+        } else {
+            builder
+        },
+    ])
+}
 
-    let builder_type = PhpType::generic(
-        ELOQUENT_BUILDER_FQN,
-        vec![PhpType::named(atom(&related_fqn))],
-    );
+/// Map candidate class-strings through the same builder selector as model
+/// queries. Unknown candidates contribute the declared relation's fallback;
+/// they must not erase known candidates from a mixed array.
+fn morph_candidate_builders(
+    candidates: &PhpType,
+    fallback: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    match candidates.kind() {
+        TypeKind::Union(parts) => PhpType::union(
+            parts
+                .iter()
+                .map(|part| morph_candidate_builders(part, fallback, class_loader))
+                .collect(),
+        ),
+        TypeKind::ClassString(Some(model)) => morph_model_builders(model, fallback, class_loader),
+        TypeKind::Literal(value) => value
+            .string_content()
+            .and_then(|name| {
+                class_loader(&name).filter(|model| {
+                    model
+                        .fqn()
+                        .eq_ignore_ascii_case(name.trim_start_matches('\\'))
+                })
+            })
+            .filter(|model| {
+                model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
+            })
+            .map(|model| model_builder_type(&model, class_loader))
+            .unwrap_or_else(|| fallback.clone()),
+        _ => candidates
+            .iterable_element_type()
+            .map(|element| morph_candidate_builders(&element, fallback, class_loader))
+            .unwrap_or_else(|| fallback.clone()),
+    }
+}
 
-    Some(vec![builder_type])
+fn morph_model_builders(
+    model: &PhpType,
+    fallback: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    if let TypeKind::Union(parts) = model.kind() {
+        return PhpType::union(
+            parts
+                .iter()
+                .map(|part| morph_model_builders(part, fallback, class_loader))
+                .collect(),
+        );
+    }
+    model
+        .base_name()
+        .and_then(class_loader)
+        .filter(|model| {
+            model.fqn() == ELOQUENT_MODEL_FQN || extends_eloquent_model(model, class_loader)
+        })
+        .map(|model| model_builder_type(&model, class_loader))
+        .unwrap_or_else(|| fallback.clone())
 }
 
 /// Build a `PhpType` representing the receiver class for `$this`/`static`
@@ -925,30 +1036,46 @@ fn extract_generic_args_from_methods(class: &ClassInfo, class_fqn: &str) -> Opti
     None
 }
 
-/// Given a list of receiver classes, find the underlying Eloquent model:
+/// Given resolved receivers, find the underlying Eloquent model:
 /// the receiver itself when it is a model class, or the model extracted
 /// from a `Builder<Model>` receiver.
 fn find_model_from_receivers(
-    receiver_classes: &[Arc<ClassInfo>],
+    receivers: &[ResolvedType],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Arc<ClassInfo>> {
-    for cls in receiver_classes {
-        // Direct model class.
+    for receiver in receivers {
+        let Some(cls) = receiver.class_info.as_ref() else {
+            continue;
+        };
         if extends_eloquent_model(cls, class_loader) {
             return Some(Arc::clone(cls));
         }
-
-        // Builder<Model> — extract the model name from the Builder's
-        // method return types.  After generic substitution, methods like
-        // `where()` return `Builder<Brand>`, so we can extract `Brand`
-        // from any method's return type that is `Builder<X>`.
-        let cls_fqn = cls.fqn();
-        if (cls.name == "Builder" || cls_fqn == ELOQUENT_BUILDER_FQN)
-            && let Some(model_type) = extract_model_from_builder(cls)
-            && let Some(model_cls) = model_type.base_name().and_then(class_loader)
-            && extends_eloquent_model(&model_cls, class_loader)
+        if cls.fqn() != ELOQUENT_BUILDER_FQN
+            && !crate::virtual_members::laravel::helpers::extends_eloquent_builder(
+                cls,
+                class_loader,
+            )
         {
-            return Some(model_cls);
+            continue;
+        }
+        // Read the receiver's retained generic context before recovering it
+        // from declarations; custom builders need not declare TModel at all.
+        let model_type = match receiver.type_string.kind() {
+            TypeKind::Generic(g) => g.args.first().cloned(),
+            _ => None,
+        }
+        .or_else(|| {
+            cls.get_method("getModel")
+                .and_then(|method| method.return_type.clone())
+        })
+        .or_else(|| extract_model_from_builder(cls));
+        if let Some(model) = model_type
+            .as_ref()
+            .and_then(PhpType::base_name)
+            .and_then(class_loader)
+            && extends_eloquent_model(&model, class_loader)
+        {
+            return Some(model);
         }
     }
     None
@@ -979,12 +1106,19 @@ fn extract_model_from_builder(builder: &ClassInfo) -> Option<PhpType> {
 // can perform callable parameter inference without duplicating the logic.
 
 pub(in crate::type_engine) fn try_relation_query_override_pub(
-    receiver_classes: &[Arc<ClassInfo>],
+    receivers: &[ResolvedType],
     method_name: &str,
-    first_arg_text: Option<&str>,
+    relation_name: Option<&str>,
+    candidates: Option<&PhpType>,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
-    try_relation_query_override(receiver_classes, method_name, first_arg_text, class_loader)
+    try_relation_query_override(
+        receivers,
+        method_name,
+        relation_name,
+        candidates,
+        class_loader,
+    )
 }
 
 pub(in crate::type_engine) fn build_receiver_self_type_pub(
@@ -997,6 +1131,7 @@ pub(in crate::type_engine) fn build_receiver_self_type_pub(
 pub(in crate::type_engine) fn inferred_type_is_more_specific_pub(
     explicit_hint: &PhpType,
     inferred: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> bool {
-    inferred_type_is_more_specific(explicit_hint, inferred)
+    inferred_type_is_more_specific(explicit_hint, inferred, class_loader)
 }

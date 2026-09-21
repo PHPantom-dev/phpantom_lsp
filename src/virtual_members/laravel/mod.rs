@@ -214,7 +214,9 @@ pub(crate) use relationships::class_has_relation_method_ci;
 pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
-pub(crate) use relationships::{RELATION_QUERY_METHODS, resolve_relation_chain};
+pub(crate) use relationships::{
+    RELATION_QUERY_METHODS, resolve_relation_chain, resolve_relation_chain_details,
+};
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
     extract_related_type_typed,
@@ -232,6 +234,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::model_builder_type;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
