@@ -640,7 +640,7 @@ impl LanguageServer for Backend {
         self.resolved_class_cache.write().clear();
         self.auth_user_type_cache.write().clear();
         *self.storage_disk_type_cache.write() = None;
-        *self.laravel_aliases.write() = None;
+        self.laravel_aliases.invalidate();
 
         // Scan project source for the remaining Laravel indexes (macros
         // were already scanned above, before the schema index load, so

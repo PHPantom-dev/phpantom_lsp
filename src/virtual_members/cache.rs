@@ -250,8 +250,7 @@ impl ResolvedCacheInner {
     /// single assignment (never across the build itself), so taking it
     /// under the cache lock cannot deadlock.
     pub(crate) fn container_alias_concrete_fqn(&self, key: &str) -> Option<String> {
-        let aliases = self.laravel_aliases.read();
-        aliases.as_ref()?.container.get(key).cloned()
+        self.laravel_aliases.peek()?.container.get(key).cloned()
     }
 
     /// Share the `Backend`'s alias slot into this cache.  Called once at

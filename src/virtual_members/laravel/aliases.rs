@@ -91,13 +91,95 @@ pub(crate) struct ContainerBindingSite {
 /// The slot the built [`LaravelAliases`] live in, shared by handle between the
 /// [`Backend`] that builds them and the resolved-class cache, so a virtual
 /// member provider (which sees the cache but not the `Backend`) can read the
-/// container table. `None` until something first asks for it.
-pub(crate) type LaravelAliasSlot = Arc<RwLock<Option<Arc<LaravelAliases>>>>;
+/// container table. Empty until something first asks for it.
+///
+/// The tables are published only once they are complete, and only one thread
+/// builds them at a time: a half-built table is indistinguishable from a
+/// project that binds nothing, so a reader that saw one would report a real
+/// container key as unbound (no hover, no go-to-definition, and a resolution
+/// that silently falls through to `mixed`).
+#[derive(Debug, Default)]
+pub(crate) struct LaravelAliasCell {
+    tables: RwLock<Option<Arc<LaravelAliases>>>,
+    /// Serializes builds, so a thread arriving mid-build waits for the
+    /// finished tables instead of starting a second build of its own.
+    build: parking_lot::Mutex<()>,
+    /// Bumped by every [`invalidate`](LaravelAliasCell::invalidate). A build
+    /// that spans one is discarded rather than published, so the edit that
+    /// invalidated it is not lost to the tables that were already in flight.
+    generation: std::sync::atomic::AtomicU64,
+}
+
+impl LaravelAliasCell {
+    /// The built tables, or `None` when nothing has built them yet. Never
+    /// waits on an in-flight build: the callers that cannot build (they hold
+    /// the resolved-class cache, not the `Backend`) have their own fallback.
+    pub(crate) fn peek(&self) -> Option<Arc<LaravelAliases>> {
+        self.tables.read().clone()
+    }
+
+    /// Stand in for a build, so a test can hand a consumer the tables a real
+    /// project's framework source and providers would have produced.
+    #[cfg(test)]
+    pub(crate) fn publish_for_test(&self, tables: Arc<LaravelAliases>) {
+        *self.tables.write() = Some(tables);
+    }
+
+    /// Discard the built tables so the next reader rebuilds them.
+    pub(crate) fn invalidate(&self) {
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
+        *self.tables.write() = None;
+    }
+}
+
+/// The handle the [`Backend`] and the resolved-class cache share.
+pub(crate) type LaravelAliasSlot = Arc<LaravelAliasCell>;
 
 /// An empty alias slot, shared into the resolved-class cache at
 /// [`Backend`] construction.
 pub(crate) fn new_alias_slot() -> LaravelAliasSlot {
-    Arc::new(RwLock::new(None))
+    Arc::new(LaravelAliasCell::default())
+}
+
+thread_local! {
+    /// The alias cells this thread is part-way through building, keyed by
+    /// cell address. Keyed rather than a plain flag so a nested build of a
+    /// *different* project's tables (one process holds many `Backend`s) still
+    /// runs instead of being handed an empty answer.
+    static BUILDING_ALIASES: std::cell::RefCell<Vec<usize>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Marks `cell` as building on this thread for as long as it is alive.
+struct BuildMarker(usize);
+
+impl BuildMarker {
+    fn enter(cell: usize) -> Self {
+        BUILDING_ALIASES.with(|building| building.borrow_mut().push(cell));
+        Self(cell)
+    }
+
+    fn is_building(cell: usize) -> bool {
+        BUILDING_ALIASES.with(|building| building.borrow().contains(&cell))
+    }
+}
+
+impl Drop for BuildMarker {
+    fn drop(&mut self) {
+        BUILDING_ALIASES.with(|building| {
+            let mut building = building.borrow_mut();
+            if let Some(index) = building.iter().rposition(|cell| *cell == self.0) {
+                building.remove(index);
+            }
+        });
+    }
+}
+
+/// The empty tables a re-entrant build is answered with.
+fn empty_aliases() -> Arc<LaravelAliases> {
+    static EMPTY: std::sync::OnceLock<Arc<LaravelAliases>> = std::sync::OnceLock::new();
+    Arc::clone(EMPTY.get_or_init(|| Arc::new(LaravelAliases::default())))
 }
 
 impl Backend {
@@ -221,15 +303,40 @@ impl Backend {
     /// framework source and cached on the [`Backend`]. Rebuilt after a
     /// reindex (the cache is cleared alongside the other resolution caches).
     fn laravel_aliases(&self) -> Arc<LaravelAliases> {
-        if let Some(cached) = self.laravel_aliases.read().clone() {
+        use std::sync::atomic::Ordering;
+
+        if let Some(cached) = self.laravel_aliases.peek() {
             return cached;
         }
-        // Seed with an empty table to break re-entry: the build reads framework
-        // source via `find_or_load_class`, whose miss path falls back to
-        // `resolve_laravel_alias`, which would otherwise re-enter this builder.
-        *self.laravel_aliases.write() = Some(Arc::new(LaravelAliases::default()));
-        let built = Arc::new(build_laravel_aliases(self));
-        *self.laravel_aliases.write() = Some(Arc::clone(&built));
+
+        let cell = Arc::as_ptr(&self.laravel_aliases) as usize;
+        // Break re-entry: the build reads framework source via
+        // `find_or_load_class`, whose miss path falls back to
+        // `resolve_laravel_alias` and lands back here on this same thread.
+        // The names it looks up are class FQNs, never alias keys, so empty
+        // tables are the right answer for the nested call — and it must not
+        // wait on the build its own caller is running.
+        if BuildMarker::is_building(cell) {
+            return empty_aliases();
+        }
+
+        let _build = self.laravel_aliases.build.lock();
+        // Another thread may have published while we waited for the lock.
+        if let Some(cached) = self.laravel_aliases.peek() {
+            return cached;
+        }
+
+        let generation = self.laravel_aliases.generation.load(Ordering::Acquire);
+        let built = {
+            let _marker = BuildMarker::enter(cell);
+            Arc::new(build_laravel_aliases(self))
+        };
+        // An invalidation that landed mid-build read state the project has
+        // already moved past: hand the tables to this caller, but leave the
+        // slot empty so the next reader builds them against what arrived.
+        if self.laravel_aliases.generation.load(Ordering::Acquire) == generation {
+            *self.laravel_aliases.tables.write() = Some(Arc::clone(&built));
+        }
         built
     }
 }

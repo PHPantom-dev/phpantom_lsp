@@ -1746,7 +1746,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
     probe("laravel_aliases", &mut || {
-        *backend.laravel_aliases.write() = None
+        backend.laravel_aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
         backend.laravel_macro_seeds.write().clear();
