@@ -935,6 +935,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b322-a-method-that-implements-or-overrides-a-prototype-gets-no-reference-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B322. A method that implements or overrides a prototype gets no reference count
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1512,6 +1529,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b322-a-method-that-implements-or-overrides-a-prototype-gets-no-reference-count" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B322. A method that implements or overrides a prototype gets no reference count
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1570,7 +1604,23 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b322-a-method-that-implements-or-overrides-a-prototype-gets-no-reference-count">B322. A method that implements or overrides a prototype gets no reference count<a class="headerlink" href="#b322-a-method-that-implements-or-overrides-a-prototype-gets-no-reference-count" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<p><code>handle_code_lens</code> builds the reference lens for a method only when
+<code>find_prototype</code> came back empty, so a method that implements an
+interface or overrides a parent loses its count and keeps only the
+<code>◆ Interface::method</code> navigation lens. Deleting the <code>implements</code> clause
+makes the count reappear, which is how the reporter of github #412 found
+it: the very methods a project most wants a usage count for, the ones
+behind a contract, are the ones that never show one.</p>
+<p>The two lenses answer different questions and both fit on the line, the
+way a property carrying a count and a class carrying an implementation
+count already coexist. The gate reads as a guard against a second
+resolution pass rather than a deliberate layout choice, and the counts
+are already answered from the reference index, so keeping both is not
+the work the gate seems to be avoiding.</p>
+<p><strong>Where to look:</strong> <code>src/code_lens.rs</code> (<code>handle_code_lens</code>, the
+<code>proto.is_none()</code> condition on <code>build_member_reference_lens</code>).</p>
 
 
 
