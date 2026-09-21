@@ -3255,6 +3255,63 @@ in <code>reference_counts.rs</code>, <code>ResolvedMemberFile</code> in <code>re
 <code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
 <code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>, and
 <code>get_file_content_arc</code> in <code>backend/file_access.rs</code>.</p>
+<hr />
+<h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>A <code>ClassInfo</code>'s members are <code>SharedVec</code>s, so the struct is often called
+cheap to clone, but it still owns a <code>method_index</code> with one entry per
+method plus a dozen other <code>Vec</code>/<code>AtomMap</code> fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.</p>
+<p>The narrowing layer pays that on every crossing, in both directions:</p>
+<ul>
+<li><code>ResolvedType::apply_narrowing</code> collects <code>arc.as_ref().clone()</code> for
+  every candidate on the way in, and pushes survivors back through
+  <code>from_class</code>, which wraps each copy in a <em>fresh</em> <code>Arc</code>. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every <code>instanceof</code>,
+  <code>assert</code>, <code>in_array</code>, and identity guard the forward walk sees.</li>
+<li><code>apply_property_narrowing</code> unwraps the whole vector with
+  <code>Arc::unwrap_or_clone</code> and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  <code>Vec&lt;ClassInfo&gt;</code>. The <code>Arc</code>s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.</li>
+<li><code>resolved_type_with_lookup</code> clones a class out of the index only to
+  hand it to <code>from_both</code>, which allocates a new <code>Arc</code> around the copy.
+  Fifteen call sites, essentially every method-call return type.</li>
+<li><code>narrowing/resolve.rs</code>, <code>narrowing/instanceof.rs</code>, and
+  <code>narrowing/assertions.rs</code> repeat the pattern, the last one deep-copying
+  a <code>MethodInfo</code> out of its <code>Arc</code>.</li>
+</ul>
+<p><code>ResolvedType::from_arc</code> and <code>from_both_arc</code> already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+<code>Vec&lt;ClassInfo&gt;</code> to <code>Vec&lt;Arc&lt;ClassInfo&gt;&gt;</code> — <code>apply_narrowing</code>'s closure,
+the <code>results</code> parameters in <code>narrowing::{instanceof,assertions,guards}</code>,
+<code>resolve_class_names_to_union</code>, and <code>ClassInfo::push_unique</code> — so a class
+is only allocated where one is genuinely constructed.
+<code>apply_property_narrowing</code>'s unwrap/rewrap then disappears.</p>
+<p>This is the same defect as <a href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access">P53</a>
+on a different path, and it is worth measuring the two together.</p>
+<p><strong>Where to look:</strong> <code>apply_narrowing</code>, <code>from_class</code>, <code>from_arc</code>,
+<code>from_both</code>, and <code>from_both_arc</code> in <code>types/resolved_type.rs</code>;
+<code>apply_property_narrowing</code> in <code>type_engine/resolver/property_narrowing.rs</code>;
+<code>resolved_type_with_lookup</code> in
+<code>type_engine/variable/rhs_resolution/mod.rs</code>;
+<code>type_engine/types/narrowing/{resolve,instanceof,assertions}.rs</code>.</p>
+<h2 id="p58-a-member-completion-cache-hit-copies-the-whole-item-list">P58. A member-completion cache hit copies the whole item list<a class="headerlink" href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The member-completion cache exists so that each keystroke in
+<code>$model-&gt;wh…</code> reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached <code>Vec&lt;CompletionItem&gt;</code> wholesale, which for an
+Eloquent model is several hundred items each carrying several <code>String</code>s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.</p>
+<p>Store an <code>Arc&lt;Vec&lt;CompletionItem&gt;&gt;</code> and have the filter take a slice,
+cloning only the items that survive.</p>
+<p><strong>Where to look:</strong> <code>member_completion_cache</code> and
+<code>filter_member_completion_items</code> in
+<code>completion/handler/member_access.rs</code>.</p>
 
 
 

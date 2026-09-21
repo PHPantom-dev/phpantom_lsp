@@ -1809,7 +1809,127 @@ multi-week rewrites that would stall the sprint indefinitely).</p>
 </ul>
 <hr />
 <h1 id="outstanding-items">Outstanding items<a class="headerlink" href="#outstanding-items" title="Permanent link">&para;</a></h1>
-<p>No outstanding items.</p>
+<h2 id="1-fold-the-phpstan-and-phpcs-workers-onto-the-generic-mago-worker">1. Fold the PHPStan and PHPCS workers onto the generic Mago worker<a class="headerlink" href="#1-fold-the-phpstan-and-phpcs-workers-onto-the-generic-mago-worker" title="Permanent link">&para;</a></h2>
+<p><code>diagnostics/external/mago.rs</code> already carries the generic form:
+<code>mago_worker</code> takes the <code>ExternalToolWorker</code>, a label, a service
+predicate, and a file runner, and both Mago commands are two-line
+delegations to it. <code>phpstan_worker</code> (<code>diagnostics/external/phpstan.rs</code>)
+and <code>phpcs_worker</code> (<code>diagnostics/external/phpcs.rs</code>) are hand-written
+copies of the same loop, around eighty-five lines each, and the module
+header in <code>diagnostics/external/mod.rs</code> already describes the shape as
+shared. The four <code>schedule_*</code> functions are four copies of the same two
+statements.</p>
+<p>Generalise <code>mago_worker</code> into an <code>external_tool_worker</code> on <code>Backend</code>
+whose per-tool parameters are the binary resolution (the only real
+difference, plus the Mago-only <code>enabled_services</code> gate) and the runner,
+move it to <code>diagnostics/external/mod.rs</code>, and reduce all four workers and
+all four schedule functions to delegations.</p>
+<p><strong>Files:</strong> <code>src/diagnostics/external/mod.rs</code>,
+<code>src/diagnostics/external/mago.rs</code>,
+<code>src/diagnostics/external/phpstan.rs</code>,
+<code>src/diagnostics/external/phpcs.rs</code>.</p>
+<h2 id="2-convert-offsets-through-lineindex-in-code-lens-and-inlay-hints">2. Convert offsets through <code>LineIndex</code> in code lens and inlay hints<a class="headerlink" href="#2-convert-offsets-through-lineindex-in-code-lens-and-inlay-hints" title="Permanent link">&para;</a></h2>
+<p><code>text_position.rs</code> documents <code>offset_to_position</code> as O(offset) and
+<code>LineIndex</code> as the fix for converting many offsets from one piece of
+content. <code>document_symbols.rs</code>, <code>folding.rs</code>, and <code>semantic_tokens.rs</code>
+all build a <code>LineIndex</code> once per request. <code>code_lens.rs</code> and
+<code>inlay_hints.rs</code> do not: they call <code>offset_to_position</code> once per member,
+per lens, and per hint, and <code>code_lens.rs::line_indent</code> adds a second
+backwards scan of the same prefix. Both are refreshed on every committed
+change (<code>backend/documents.rs</code> asks for a code-lens and an inlay-hint
+re-pull after each one), so a large file pays a full-content scan per
+item on every keystroke.</p>
+<p>Build the index once at the top of <code>handle_code_lens</code> and of the inlay
+hint collection and thread it through the builders. Derive the indent
+from the line start the index already knows rather than scanning
+backwards for a newline.</p>
+<p><strong>Files:</strong> <code>src/code_lens.rs</code>, <code>src/inlay_hints.rs</code>.</p>
+<h2 id="3-index-bladeblockindex-by-parent-instead-of-scanning-every-template">3. Index <code>BladeBlockIndex</code> by parent instead of scanning every template<a class="headerlink" href="#3-index-bladeblockindex-by-parent-instead-of-scanning-every-template" title="Permanent link">&para;</a></h2>
+<p><code>blade/block_index.rs::descendants</code> walks "who extends what I have found
+so far" by scanning every template in the project once per frontier
+entry, and tracks the visited set in a <code>Vec&lt;String&gt;</code> searched with
+<code>iter().any</code>. <code>is_rendered_by_a_template</code> scans every template's include
+list, and it runs once per <code>@extends</code> hop inside <code>blade_render_scope</code>.
+<code>blade_block_references</code> nests the two. In a real Laravel application
+most pages extend one layout, so the visited set grows to roughly the
+template count and the whole thing is quadratic — on the completion path
+(<code>blade_block_name_candidates</code>), the diagnostics path
+(<code>diagnostics/blade_sections.rs</code>), and find-references alike.</p>
+<p>Give <code>Templates</code> a parent-to-children map and an included-view set built
+alongside <code>by_view</code>/<code>view_by_uri</code> (and kept current in
+<code>refresh_blade_block_index</code>), and make the visited set a <code>HashSet</code>.</p>
+<p><strong>Files:</strong> <code>src/blade/block_index.rs</code>.</p>
+<h2 id="4-run-codelensresolve-through-the-shared-request-guards">4. Run <code>codeLens/resolve</code> through the shared request guards<a class="headerlink" href="#4-run-codelensresolve-through-the-shared-request-guards" title="Permanent link">&para;</a></h2>
+<p>Every other request reaches <code>Backend::with_file_content</code>, which installs
+the chain-resolution cache, the type-engine resolvers, the per-request
+parse cache, and the panic guard. <code>code_lens_resolve</code> in <code>server.rs</code>
+calls <code>resolve_code_lens_item</code> directly, so a lens resolve runs with none
+of them, and it fetches the file with <code>get_file_content</code>, which deep-copies
+the whole buffer — whose own doc comment says to prefer the <code>Arc</code>
+variant in hot paths. The editor sends one resolve per visible lens, so a
+screenful repeats both costs.</p>
+<p><code>resolve_code_action</code> already does this correctly by installing the parse
+cache and the resolver guard itself; give the lens resolve the same
+treatment (or route it through a shared helper) and switch it to
+<code>get_file_content_arc</code>.</p>
+<p><strong>Files:</strong> <code>src/code_lens.rs</code>, <code>src/server.rs</code>.</p>
+<h2 id="5-one-reader-for-vendorcomposerinstalledjson">5. One reader for <code>vendor/composer/installed.json</code><a class="headerlink" href="#5-one-reader-for-vendorcomposerinstalledjson" title="Permanent link">&para;</a></h2>
+<p>The Composer-1-array vs Composer-2-<code>{"packages": …}</code> dispatch is written
+out three times, byte for byte: <code>composer.rs::extract_path_repo_psr4_mappings</code>,
+<code>classmap_scanner/discovery.rs::vendor_package_roots</code>, and the workspace
+scan further down the same file. A fourth, differently-spelled copy sits
+in <code>virtual_members/laravel/macros.rs</code>.</p>
+<p>Add a reader to <code>composer.rs</code> that returns the packages and the
+<code>vendor/composer</code> directory, and route all four through it.</p>
+<p><strong>Files:</strong> <code>src/composer.rs</code>, <code>src/classmap_scanner/discovery.rs</code>,
+<code>src/virtual_members/laravel/macros.rs</code>.</p>
+<h2 id="6-give-varresolutionctx-a-constructor">6. Give <code>VarResolutionCtx</code> a constructor<a class="headerlink" href="#6-give-varresolutionctx-a-constructor" title="Permanent link">&para;</a></h2>
+<p><code>VarResolutionCtx</code> has fifteen fields and twelve call sites write the
+whole literal out, nine of whose fields are the same constant in every
+one of them. Two of the sites are inside <code>type_engine/resolver/context.rs</code>
+itself: <code>with_cursor_offset</code> and <code>with_match_arm_narrowing</code> each restate
+all fifteen to change one. <code>cond_narrowing/apply.rs::build_var_ctx</code> is a
+local extraction of exactly this, with a comment saying why, that nothing
+outside that module can reach.</p>
+<p>Add a constructor (or a <code>Default</code> plus struct-update syntax) beside the
+existing <code>impl VarResolutionCtx</code>, rewrite the twelve sites to name only
+the fields they actually choose, and make <code>build_var_ctx</code> a thin wrapper
+over it.</p>
+<p><strong>Files:</strong> <code>src/type_engine/resolver/context.rs</code>, and the call sites in
+<code>src/blade/{call_site_inference,shared_vars,typed_receiver}.rs</code>,
+<code>src/type_engine/variable/resolution.rs</code>,
+<code>src/type_engine/resolver/property_narrowing.rs</code>,
+<code>src/diagnostics/{match_type_errors,return_type_errors,property_type_errors}.rs</code>,
+<code>src/diagnostics/type_errors/mod.rs</code>,
+<code>src/code_actions/phpstan/fix_return_type/inference.rs</code>.</p>
+<h2 id="7-collapse-the-duplicated-condition-extractors-in-cond_narrowing">7. Collapse the duplicated condition extractors in <code>cond_narrowing</code><a class="headerlink" href="#7-collapse-the-duplicated-condition-extractors-in-cond_narrowing" title="Permanent link">&para;</a></h2>
+<p>Four of the sentinel-comparison extractors in
+<code>cond_narrowing/predicates.rs</code> share the same nine-line "compare against
+the sentinel on either side, then take the other operand's subject key"
+block, and <code>extract_isset_vars</code> / <code>extract_not_isset_vars</code> are
+nineteen-line functions that differ by a single <code>!</code>. In
+<code>cond_narrowing/null_narrowing.rs</code> the same six-line strip-null block
+appears six times. <code>cond_narrowing/emptiness.rs</code> opens
+<code>refine_non_empty_type</code> and <code>refine_empty_type</code> with the same eleven-line
+union distribution.</p>
+<p><code>cond_narrowing/scope_edits.rs</code> is already the home for shared scope
+edits and shows the pattern to follow. Extract a subject-key helper, a
+sentinel-comparison helper parameterised by the sentinel predicate and
+the polarity, an isset helper parameterised by the wanted polarity, the
+strip-null block, and the union distribution. Keep the deliberate
+asymmetry between the null-equality and non-null extractors: they cover
+complementary polarities, not the same one.</p>
+<p><strong>Files:</strong> <code>src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs</code>,
+<code>.../null_narrowing.rs</code>, <code>.../emptiness.rs</code>, <code>.../scope_edits.rs</code>.</p>
+<h2 id="8-one-superglobals-list">8. One <code>SUPERGLOBALS</code> list<a class="headerlink" href="#8-one-superglobals-list" title="Permanent link">&para;</a></h2>
+<p><code>diagnostics/undefined_variables/mod.rs</code> and
+<code>diagnostics/unused_variables.rs</code> each declare the same thirteen-entry
+<code>SUPERGLOBALS</code> constant; only the doc comment differs. Adding a
+superglobal currently means remembering both files.</p>
+<p>Move it to <code>diagnostics/helpers.rs</code> and import it from both.</p>
+<p><strong>Files:</strong> <code>src/diagnostics/helpers.rs</code>,
+<code>src/diagnostics/undefined_variables/mod.rs</code>,
+<code>src/diagnostics/unused_variables.rs</code>.</p>
 
 
 

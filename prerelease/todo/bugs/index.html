@@ -935,6 +935,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B323. An external formatter that prints nothing empties the document
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b324-extract-variable-all-occurrences-can-emit-overlapping-edits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B324. "Extract variable (all occurrences)" can emit overlapping edits
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1512,6 +1540,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B323. An external formatter that prints nothing empties the document
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b324-extract-variable-all-occurrences-can-emit-overlapping-edits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B324. "Extract variable (all occurrences)" can emit overlapping edits
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
     </ul>
@@ -1570,7 +1626,51 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b323-an-external-formatter-that-prints-nothing-empties-the-document">B323. An external formatter that prints nothing empties the document<a class="headerlink" href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Low</strong></p>
+<p>The stdin-driven formatters (Pint, php-cs-fixer) return the child's
+stdout verbatim from <code>run_tool</code> in <code>formatting/external.rs</code>, with no
+check that anything came back. <code>format_content</code> then sees a formatted
+text that differs from the original, and <code>compute_edits</code> turns that into
+a single <code>TextEdit</code> covering the whole document whose replacement is the
+empty string. Formatting the file deletes it.</p>
+<p>Two paths produce an empty stdout while the exit code stays <code>0</code>, so
+nothing upstream reports a failure:</p>
+<ul>
+<li><code>process.rs</code> drains the child with <code>let _ = s.read_to_string(&amp;mut buf)</code>.
+  A single non-UTF-8 byte anywhere in the output leaves <code>buf</code> empty and
+  throws the error away.</li>
+<li>The same function collects the drain threads with
+  <code>.and_then(|h| h.join().ok()).unwrap_or_default()</code>, so a panicking
+  reader thread also yields <code>""</code>.</li>
+</ul>
+<p>The configured Pint command is a free-form string, and a wrapper that
+formats in place and prints nothing is a common way to write one. That
+is enough on its own: exit <code>0</code>, no stdout, document wiped.</p>
+<p>The sibling-file arm is already defensive about partial results; the
+stdin arm needs the same care. Reject an empty result for a non-empty
+input, and make the drain threads propagate a read failure as an error
+instead of an empty string. <code>run_pint_on_blade</code> has the same hole.</p>
+<h3 id="b324-extract-variable-all-occurrences-can-emit-overlapping-edits">B324. "Extract variable (all occurrences)" can emit overlapping edits<a class="headerlink" href="#b324-extract-variable-all-occurrences-can-emit-overlapping-edits" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>find_identical_occurrences</code> (<code>code_actions/helpers.rs</code>) resumes its scan
+one byte past the <em>start</em> of the match it just accepted rather than past
+its end, so a selection that can overlap itself is found twice:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="nv">$x</span> <span class="o">=</span> <span class="nv">$a</span> <span class="o">.</span> <span class="nv">$a</span> <span class="o">.</span> <span class="nv">$a</span><span class="p">;</span>
+</code></pre></div>
+<p>Selecting <code>$a . $a</code> and taking "Extract variable (all occurrences)"
+matches at the first <code>$a</code> and again at the second, and both pass the
+word-boundary checks. The workspace edit then carries two overlapping
+<code>TextEdit</code>s for one document, which is undefined in LSP: an editor either
+rejects the whole edit or corrupts the line. "Extract constant (all
+occurrences)" shares the helper and the same shape.</p>
+<p>The one-byte step is also why the scan can index a <code>&amp;str</code> at a
+non-boundary: when the selection begins with a multibyte character
+(<code>Ünit::TAX</code> is a legal PHP name), the resumed slice starts inside it.
+That path panics into the code-action resolve guard, so the action
+silently does nothing.</p>
+<p>Advance by the match length instead, and cover both shapes with tests.</p>
 
 
 
