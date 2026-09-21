@@ -7,7 +7,7 @@
 //! and LSP `Position`/`Range` values (UTF-16 code units per the LSP
 //! spec).
 
-use tower_lsp::lsp_types::{Position, Range};
+use tower_lsp::lsp_types::{Position, Range, TextEdit};
 
 /// Check whether two LSP ranges overlap (share at least one character
 /// position).
@@ -27,12 +27,13 @@ pub(crate) fn ranges_overlap(a: &Range, b: &Range) -> bool {
 /// This is the inverse of [`position_to_byte_offset`].  Characters are
 /// counted as UTF-16 code units per the LSP specification.
 /// If `offset` is past the end of `content`, the position at the end of
-/// the file is returned.
+/// the file is returned.  An offset inside a multi-byte character answers
+/// the position after that character, rather than never matching.
 pub(crate) fn offset_to_position(content: &str, offset: usize) -> Position {
     let mut line = 0u32;
     let mut col = 0u32;
     for (i, ch) in content.char_indices() {
-        if i == offset {
+        if i >= offset {
             return Position {
                 line,
                 character: col,
@@ -89,17 +90,39 @@ impl<'a> LineIndex<'a> {
         self.content
     }
 
-    /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
-    /// column). Offsets past the end of the content clamp to the content
-    /// length, matching [`offset_to_position`].
-    pub(crate) fn position(&self, offset: usize) -> Position {
-        let offset = offset.min(self.content.len());
-        // Greatest line start that is <= offset. `line_starts[0] == 0`, so the
-        // `Err(0)` case (offset before the first line start) cannot happen.
-        let line = match self.line_starts.binary_search(&offset) {
+    /// Greatest line index whose start is <= `offset`, found by binary
+    /// search over the line table. Unlike [`Self::position`], this does not
+    /// clamp `offset` to the content length or compute a UTF-16 column.
+    pub(crate) fn line_of(&self, offset: usize) -> usize {
+        // `line_starts[0] == 0`, so the `Err(0)` case (offset before the
+        // first line start) cannot happen.
+        match self.line_starts.binary_search(&offset) {
             Ok(idx) => idx,
             Err(idx) => idx - 1,
-        };
+        }
+    }
+
+    /// Byte offset of the first character of the 0-based `line`, or the
+    /// content length when `line` is past the last one.
+    pub(crate) fn line_start(&self, line: usize) -> usize {
+        self.line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.content.len())
+    }
+
+    /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
+    /// column). Offsets past the end of the content clamp to the content
+    /// length, matching [`offset_to_position`]. An offset inside a
+    /// multi-byte character is walked forward to the next character
+    /// boundary, also matching [`offset_to_position`], rather than slicing
+    /// mid-character and panicking.
+    pub(crate) fn position(&self, offset: usize) -> Position {
+        let mut offset = offset.min(self.content.len());
+        while !self.content.is_char_boundary(offset) {
+            offset += 1;
+        }
+        let line = self.line_of(offset);
         let line_start = self.line_starts[line];
         let character = self.content[line_start..offset]
             .chars()
@@ -266,9 +289,77 @@ pub(crate) fn byte_range_to_lsp_range(content: &str, start: usize, end: usize) -
     }
 }
 
+/// Apply non-overlapping `TextEdit`s to `content` and return the result.
+///
+/// Edits are applied bottom-to-top so an earlier edit never shifts the
+/// positions of a later one; columns are UTF-16 code units, as in LSP.
+/// An edit whose range is inverted is skipped rather than applied.
+pub(crate) fn apply_text_edits(content: &str, edits: &[TextEdit]) -> String {
+    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
+    sorted.sort_by(|a, b| {
+        b.range
+            .start
+            .line
+            .cmp(&a.range.start.line)
+            .then(b.range.start.character.cmp(&a.range.start.character))
+    });
+    let mut result = content.to_string();
+    for edit in sorted {
+        let start = position_to_byte_offset(&result, edit.range.start);
+        let end = position_to_byte_offset(&result, edit.range.end);
+        if start <= end {
+            result.replace_range(start..end, &edit.new_text);
+        }
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn edits_apply_bottom_up_with_utf16_columns() {
+        let content = "ń = 1;\nfoo();\n";
+        let edits = vec![
+            TextEdit {
+                range: Range::new(Position::new(0, 4), Position::new(0, 5)),
+                new_text: "2".into(),
+            },
+            TextEdit {
+                range: Range::new(Position::new(1, 0), Position::new(1, 3)),
+                new_text: "bar".into(),
+            },
+        ];
+        assert_eq!(apply_text_edits(content, &edits), "ń = 2;\nbar();\n");
+    }
+
+    #[test]
+    fn an_inverted_range_is_skipped() {
+        let edits = vec![TextEdit {
+            range: Range::new(Position::new(0, 3), Position::new(0, 1)),
+            new_text: "x".into(),
+        }];
+        assert_eq!(apply_text_edits("abcd", &edits), "abcd");
+    }
+
+    #[test]
+    fn utf16_col_of_ascii_line_is_the_byte_offset() {
+        assert_eq!(
+            byte_offset_to_utf16_col("new _PHPStan_foo\\SomeClass()", 4),
+            4
+        );
+        assert_eq!(
+            byte_offset_to_utf16_col("new _PHPStan_foo\\SomeClass()", 25),
+            25
+        );
+    }
+
+    #[test]
+    fn utf16_col_counts_a_multibyte_char_once() {
+        // "é" is 2 bytes in UTF-8 but 1 UTF-16 code unit.
+        assert_eq!(byte_offset_to_utf16_col("é_PHPStan_test\\Cls", 2), 1);
+    }
 
     #[test]
     fn line_index_matches_offset_to_position() {
@@ -287,6 +378,17 @@ mod tests {
                 "mismatch at offset {offset}"
             );
         }
+    }
+
+    #[test]
+    fn line_index_matches_offset_to_position_mid_character() {
+        // An offset landing inside the multi-byte 'é' must not panic, and
+        // must agree with `offset_to_position`'s "answer the position
+        // after that character" rule.
+        let content = "<?php\nclass /*é*/ Foo {}\n";
+        let index = LineIndex::new(content);
+        let mid = content.find('é').unwrap() + 1;
+        assert_eq!(index.position(mid), offset_to_position(content, mid));
     }
 
     #[test]
@@ -321,5 +423,46 @@ mod tests {
     fn line_start_byte_offset_past_end_returns_len() {
         let content = "one\ntwo";
         assert_eq!(line_start_byte_offset(content, 5), content.len());
+    }
+
+    #[test]
+    fn offset_to_position_start_of_file() {
+        let content = "<?php\necho 'hello';\n";
+        assert_eq!(offset_to_position(content, 0), Position::new(0, 0));
+    }
+
+    #[test]
+    fn offset_to_position_second_line() {
+        let content = "<?php\necho 'hello';\n";
+        // Offset 6 is the 'e' of 'echo' on line 1.
+        assert_eq!(offset_to_position(content, 6), Position::new(1, 0));
+    }
+
+    #[test]
+    fn offset_to_position_mid_line() {
+        let content = "<?php\necho 'hello';\n";
+        // Offset 10 is the '\'' before 'hello' (line 1, col 4).
+        assert_eq!(offset_to_position(content, 10), Position::new(1, 4));
+    }
+
+    #[test]
+    fn offset_to_position_end_of_content() {
+        let content = "ab\ncd";
+        // Offset 5 is past the last character.
+        assert_eq!(offset_to_position(content, 5), Position::new(1, 2));
+    }
+
+    #[test]
+    fn offset_to_position_multibyte_char() {
+        // '€' is 3 bytes in UTF-8 but 1 code unit in UTF-16.
+        let content = "€x";
+        assert_eq!(offset_to_position(content, 3), Position::new(0, 1));
+    }
+
+    #[test]
+    fn offset_to_position_inside_a_multibyte_char() {
+        // An offset between the bytes of '€' answers the position after it.
+        let content = "€x";
+        assert_eq!(offset_to_position(content, 1), Position::new(0, 1));
     }
 }

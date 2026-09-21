@@ -203,23 +203,13 @@ pub(crate) fn vendor_package_roots(
     explicit_deps: &HashSet<String>,
 ) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return Vec::new();
-    };
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return Vec::new();
-    };
-    let composer_dir = vendor_path.join("composer");
+    let composer_dir = &installed.composer_dir;
     let mut roots = Vec::new();
-    for package in packages {
+    for package in &installed.packages {
         let pkg_name = package
             .get("name")
             .and_then(|n| n.as_str())
@@ -408,30 +398,15 @@ pub fn scan_vendor_packages_with_skip(
     progress: Option<&ScanProgress>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
 
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return WorkspaceScanResult::default();
     };
-
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return WorkspaceScanResult::default();
-    };
-
-    // installed.json has two formats:
-    //   Composer 1: top-level array of packages
-    //   Composer 2: { "packages": [...] }
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return WorkspaceScanResult::default();
-    };
-
-    // The directory containing installed.json — install-path values
-    // are relative to this directory.
-    let composer_dir = vendor_path.join("composer");
+    let packages = installed.packages.as_slice();
+    // install-path values are relative to the directory containing
+    // installed.json.
+    let composer_dir = installed.composer_dir;
 
     // Phase 1: read every package's autoload section and resolve the
     // paths it declares, without walking any of them.  Packages are
@@ -568,35 +543,46 @@ pub fn scan_workspace_fallback(
     scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths)
 }
 
-/// Scan a batch of files for class names in parallel and return a classmap.
+/// Scan `files` in parallel, calling `emit` on each to append the
+/// `(fqcn, path)` pairs it declares, and merge the result into one
+/// classmap where the first file to declare a name wins.
 ///
-/// Uses [`std::thread::scope`] with one thread per CPU core.  Small
-/// batches (≤ 4 files) are processed sequentially to avoid thread
-/// overhead.
-fn scan_files_parallel_classes(
-    files: &[PathBuf],
+/// Small batches (≤ 4 files) run sequentially: splitting them over
+/// threads costs more than the scan itself. `name` names the scan in the
+/// log line a panicking worker leaves behind.
+fn scan_files_parallel<T: Sync>(
+    files: &[T],
     progress: Option<&ScanProgress>,
+    name: &'static str,
+    emit: impl Fn(&T, &mut Vec<(String, PathBuf)>) + Sync,
 ) -> HashMap<String, PathBuf> {
     if files.is_empty() {
         return HashMap::new();
     }
 
-    // Small batches: sequential
-    if files.len() <= 4 {
-        let mut classmap = HashMap::new();
-        for path in files {
-            progress_add_done(progress);
-            if let Ok(content) = read_for_scan(path) {
-                for fqcn in scan_content(&content) {
-                    classmap.entry(fqcn).or_insert_with(|| path.clone());
-                }
+    let merge = |batches: Vec<Vec<(String, PathBuf)>>| {
+        let total: usize = batches.iter().map(Vec::len).sum();
+        let mut classmap = HashMap::with_capacity(total);
+        for batch in batches {
+            for (fqcn, path) in batch {
+                classmap.entry(fqcn).or_insert(path);
             }
         }
-        return classmap;
+        classmap
+    };
+
+    if files.len() <= 4 {
+        let mut local = Vec::new();
+        for file in files {
+            progress_add_done(progress);
+            emit(file, &mut local);
+        }
+        return merge(vec![local]);
     }
 
     let n_threads = thread_count().min(files.len());
     let chunk_size = files.len().div_ceil(n_threads);
+    let emit = &emit;
 
     let results: Vec<Vec<(String, PathBuf)>> = std::thread::scope(|s| {
         let handles: Vec<_> = files
@@ -604,13 +590,9 @@ fn scan_files_parallel_classes(
             .map(|chunk| {
                 s.spawn(move || {
                     let mut local: Vec<(String, PathBuf)> = Vec::new();
-                    for path in chunk {
+                    for file in chunk {
                         progress_add_done(progress);
-                        if let Ok(content) = read_for_scan(path) {
-                            for fqcn in scan_content(&content) {
-                                local.push((fqcn, path.clone()));
-                            }
-                        }
+                        emit(file, &mut local);
                     }
                     local
                 })
@@ -620,25 +602,36 @@ fn scan_files_parallel_classes(
             .into_iter()
             .map(|h| {
                 h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_classes");
+                    tracing::error!("PHPantom: thread panic in {name}");
                     Vec::new()
                 })
             })
             .collect()
     });
 
-    let total: usize = results.iter().map(|v| v.len()).sum();
-    let mut classmap = HashMap::with_capacity(total);
-    for batch in results {
-        for (fqcn, path) in batch {
-            classmap.entry(fqcn).or_insert(path);
-        }
-    }
-    classmap
+    merge(results)
 }
 
-/// Scan a batch of files for class names with PSR-4 filtering in
-/// parallel.
+/// Scan a batch of files for the class names they declare.
+fn scan_files_parallel_classes(
+    files: &[PathBuf],
+    progress: Option<&ScanProgress>,
+) -> HashMap<String, PathBuf> {
+    scan_files_parallel(
+        files,
+        progress,
+        "scan_files_parallel_classes",
+        |path, out| {
+            if let Ok(content) = read_for_scan(path) {
+                for fqcn in scan_content(&content) {
+                    out.push((fqcn, path.clone()));
+                }
+            }
+        },
+    )
+}
+
+/// Scan a batch of files for class names with PSR-4 filtering.
 ///
 /// Each entry is `(file_path, expected_fqn)`.  Only classes whose FQN
 /// matches the expected FQN are included.
@@ -646,68 +639,72 @@ fn scan_files_parallel_psr4(
     files: &[(PathBuf, String)],
     progress: Option<&ScanProgress>,
 ) -> HashMap<String, PathBuf> {
-    if files.is_empty() {
-        return HashMap::new();
-    }
-
-    // Small batches: sequential
-    if files.len() <= 4 {
-        let mut classmap = HashMap::new();
-        for (path, expected_fqn) in files {
-            progress_add_done(progress);
+    scan_files_parallel(
+        files,
+        progress,
+        "scan_files_parallel_psr4",
+        |(path, expected_fqn), out| {
             if let Ok(content) = read_for_scan(path) {
                 for fqcn in scan_content(&content) {
                     if &fqcn == expected_fqn {
-                        classmap.entry(fqcn).or_insert_with(|| path.clone());
+                        out.push((fqcn, path.clone()));
                     }
                 }
             }
-        }
-        return classmap;
-    }
+        },
+    )
+}
 
-    let n_threads = thread_count().min(files.len());
-    let chunk_size = files.len().div_ceil(n_threads);
-
-    let results: Vec<Vec<(String, PathBuf)>> = std::thread::scope(|s| {
-        let handles: Vec<_> = files
-            .chunks(chunk_size)
-            .map(|chunk| {
-                s.spawn(move || {
-                    let mut local: Vec<(String, PathBuf)> = Vec::new();
-                    for (path, expected_fqn) in chunk {
-                        progress_add_done(progress);
-                        if let Ok(content) = read_for_scan(path) {
-                            for fqcn in scan_content(&content) {
-                                if &fqcn == expected_fqn {
-                                    local.push((fqcn, path.clone()));
-                                }
-                            }
-                        }
-                    }
-                    local
-                })
+/// Merge one scanned file's symbols into `result`.
+///
+/// The first file to declare a name wins, except that a later file whose
+/// stem matches the class's short name displaces one whose stem does not:
+/// a package with conditional loading declares the same trait in
+/// `ArraySubsetAsserts.php` and `ArraySubsetAssertsEmpty.php`, and PSR-4
+/// says the first of those is the real one. The origin tier follows
+/// whichever file the classmap ends up pointing at.
+fn merge_scanned_file(
+    result: &mut WorkspaceScanResult,
+    scan: ScanResult,
+    path: &Path,
+    origin: crate::ClassCompletionOrigin,
+) {
+    for fqcn in scan.classes {
+        let class_short_name = crate::util::short_name(&fqcn).to_owned();
+        let mut origin_wins = false;
+        result
+            .classmap
+            .entry(fqcn.clone())
+            .and_modify(|existing| {
+                let existing_stem = existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if existing_stem != class_short_name && new_stem == class_short_name {
+                    *existing = path.to_path_buf();
+                    origin_wins = true;
+                }
             })
-            .collect();
-        handles
-            .into_iter()
-            .map(|h| {
-                h.join().unwrap_or_else(|_| {
-                    tracing::error!("PHPantom: thread panic in scan_files_parallel_psr4");
-                    Vec::new()
-                })
-            })
-            .collect()
-    });
-
-    let total: usize = results.iter().map(|v| v.len()).sum();
-    let mut classmap = HashMap::with_capacity(total);
-    for batch in results {
-        for (fqcn, path) in batch {
-            classmap.entry(fqcn).or_insert(path);
+            .or_insert_with(|| {
+                origin_wins = true;
+                path.to_path_buf()
+            });
+        if origin_wins {
+            result.class_origins.insert(fqcn, origin);
         }
     }
-    classmap
+    for fqn in scan.functions {
+        result
+            .function_index
+            .entry(fqn.clone())
+            .or_insert_with(|| path.to_path_buf());
+        result.function_origins.entry(fqn).or_insert(origin);
+    }
+    for name in scan.constants {
+        result
+            .constant_index
+            .entry(name.clone())
+            .or_insert_with(|| path.to_path_buf());
+        result.constant_origins.entry(name).or_insert(origin);
+    }
 }
 
 /// Scan a batch of files for all symbols (classes, functions, constants)
@@ -732,44 +729,7 @@ fn scan_files_parallel_full(
         for (path, origin) in files {
             progress_add_done(progress);
             if let Ok(content) = read_for_scan(path) {
-                let scan = super::find_symbols(&content);
-                for fqcn in scan.classes {
-                    let class_short_name = fqcn_short_name(&fqcn).to_owned();
-                    let mut origin_wins = false;
-                    result
-                        .classmap
-                        .entry(fqcn.clone())
-                        .and_modify(|existing| {
-                            let existing_stem =
-                                existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                            let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                            if existing_stem != class_short_name && new_stem == class_short_name {
-                                *existing = path.clone();
-                                origin_wins = true;
-                            }
-                        })
-                        .or_insert_with(|| {
-                            origin_wins = true;
-                            path.clone()
-                        });
-                    if origin_wins {
-                        result.class_origins.insert(fqcn, *origin);
-                    }
-                }
-                for fqn in scan.functions {
-                    result
-                        .function_index
-                        .entry(fqn.clone())
-                        .or_insert_with(|| path.clone());
-                    result.function_origins.entry(fqn).or_insert(*origin);
-                }
-                for name in scan.constants {
-                    result
-                        .constant_index
-                        .entry(name.clone())
-                        .or_insert_with(|| path.clone());
-                    result.constant_origins.entry(name).or_insert(*origin);
-                }
+                merge_scanned_file(&mut result, super::find_symbols(&content), path, *origin);
             }
         }
         return result;
@@ -833,49 +793,7 @@ fn scan_files_parallel_full(
     let mut result = WorkspaceScanResult::default();
     for (_, batch) in results {
         for (scan, path, origin) in batch {
-            for fqcn in scan.classes {
-                let class_short_name = fqcn_short_name(&fqcn).to_owned();
-                let mut origin_wins = false;
-                result
-                    .classmap
-                    .entry(fqcn.clone())
-                    .and_modify(|existing| {
-                        // When two files declare the same FQN, prefer the one
-                        // whose filename matches the class's short name (PSR-4
-                        // convention). This handles packages with conditional
-                        // loading (e.g. ArraySubsetAsserts.php vs
-                        // ArraySubsetAssertsEmpty.php both defining the same
-                        // trait name).
-                        let existing_stem =
-                            existing.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                        let new_stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                        if existing_stem != class_short_name && new_stem == class_short_name {
-                            *existing = path.clone();
-                            origin_wins = true;
-                        }
-                    })
-                    .or_insert_with(|| {
-                        origin_wins = true;
-                        path.clone()
-                    });
-                if origin_wins {
-                    result.class_origins.insert(fqcn, origin);
-                }
-            }
-            for fqn in scan.functions {
-                result
-                    .function_index
-                    .entry(fqn.clone())
-                    .or_insert_with(|| path.clone());
-                result.function_origins.entry(fqn).or_insert(origin);
-            }
-            for name in scan.constants {
-                result
-                    .constant_index
-                    .entry(name.clone())
-                    .or_insert_with(|| path.clone());
-                result.constant_origins.entry(name).or_insert(origin);
-            }
+            merge_scanned_file(&mut result, scan, &path, origin);
         }
     }
     result
@@ -1005,14 +923,6 @@ fn is_drupal_php_file(path: &Path) -> bool {
     )
 }
 
-/// Extract the short (unqualified) class name from a fully-qualified name.
-///
-/// For example, `"DMS\\PHPUnitExtensions\\ArraySubset\\ArraySubsetAsserts"`
-/// yields `"ArraySubsetAsserts"`.
-fn fqcn_short_name(fqcn: &str) -> &str {
-    fqcn.rsplit('\\').next().unwrap_or(fqcn)
-}
-
 /// Extract string values from a JSON value that is either a single
 /// string or an array of strings.
 fn value_to_strings(value: &serde_json::Value) -> Vec<String> {
@@ -1077,13 +987,13 @@ impl<'a> WalkOptions<'a> {
 /// classmap must not depend on that; sorting also makes the result
 /// reproducible across runs, which the readdir order it replaces was not.
 fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
-    use ignore::{WalkBuilder, WalkState};
+    use ignore::WalkState;
 
     // Two PSR-4 prefixes can map to the same directory, so the walk is
     // over the distinct roots; the attribution below still hands the
     // files to every root that named them.
     let mut roots_by_path: HashMap<&Path, Vec<usize>> = HashMap::new();
-    let mut builder: Option<WalkBuilder> = None;
+    let mut distinct_roots: Vec<&Path> = Vec::new();
     for (index, dir) in roots.iter().enumerate() {
         if !dir.is_dir() {
             continue;
@@ -1092,38 +1002,26 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
             std::collections::hash_map::Entry::Occupied(mut e) => e.get_mut().push(index),
             std::collections::hash_map::Entry::Vacant(e) => {
                 e.insert(vec![index]);
-                match &mut builder {
-                    Some(builder) => {
-                        builder.add(dir);
-                    }
-                    None => builder = Some(WalkBuilder::new(dir)),
-                }
+                distinct_roots.push(dir);
             }
         }
     }
 
     let mut out: Vec<Vec<PathBuf>> = vec![Vec::new(); roots.len()];
-    let Some(mut builder) = builder else {
+    let Some((first_root, other_roots)) = distinct_roots.split_first() else {
         return out;
     };
 
-    let skip_dirs = std::sync::Arc::clone(&opts.skip_dirs);
-    let filter_excludes = std::sync::Arc::clone(&opts.filters);
-    builder
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .hidden(true)
-        .parents(true)
-        .ignore(true)
-        .threads(thread_count())
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir && skip_dirs.iter().any(|dir| dir == entry.path()) {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        });
+    let mut builder = super::workspace_walk_builder(
+        first_root,
+        std::sync::Arc::clone(&opts.skip_dirs),
+        std::sync::Arc::clone(&opts.filters),
+        false,
+    );
+    for dir in other_roots {
+        builder.add(dir);
+    }
+    builder.threads(thread_count());
 
     let (tx, rx) = std::sync::mpsc::channel::<(usize, PathBuf)>();
     let skip_paths = opts.skip_paths;

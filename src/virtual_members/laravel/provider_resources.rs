@@ -16,6 +16,13 @@ use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_d
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
+use crate::symbol_map::extraction::laravel::{chain_roots_at_facade, is_laravel_container_expr};
+
+/// How many `->` links a `Route::…->group(path)` registration may put
+/// between the facade and the `group()` call. `Route::middleware(…)
+/// ->prefix(…)->name(…)->group(…)` is already longer than a provider
+/// realistically writes, and the bound keeps the walk linear.
+const ROUTE_GROUP_CHAIN_DEPTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderResource {
@@ -333,6 +340,15 @@ impl ProviderScans {
         true
     }
 
+    /// Drop one provider's scan, for a file deleted from disk.  Its FQN stays
+    /// registered, so a file that declares the provider again rejoins the
+    /// table the moment it parses.  Returns whether anything was dropped.
+    pub fn remove(&mut self, uri: &str) -> bool {
+        let before = self.scans.len();
+        self.scans.retain(|scan| scan.uri != uri);
+        self.scans.len() != before
+    }
+
     /// The merged table every consumer reads, with aliases resolved against
     /// the complete set of bindings.
     pub fn merged(&self) -> ProviderResources {
@@ -482,7 +498,9 @@ pub(crate) fn extract_provider_resources(
         // argument is either a closure (inline routes, ignored here) or a path
         // to a file whose routes we must scan.
         if method_lower == b"group"
-            && chain_roots_at_route(mc.object)
+            && chain_roots_at_facade(mc.object, ROUTE_GROUP_CHAIN_DEPTH, &|name| {
+                name.eq_ignore_ascii_case("Route")
+            })
             && let Some(first_arg) = mc.argument_list.arguments.iter().next()
             && let Some(path) = resolve_path_arg(
                 first_arg.value(),
@@ -501,7 +519,7 @@ pub(crate) fn extract_provider_resources(
         // `bind()`: the key is the second one, and the first names what it
         // stands for.
         if method_lower == b"alias"
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(target) = mc.argument_list.arguments.iter().next()
             && let Some(key_arg) = mc.argument_list.arguments.iter().nth(1)
             && let Some(key) = alias_key(key_arg.value(), content, &scope, &resolved)
@@ -544,7 +562,7 @@ pub(crate) fn extract_provider_resources(
         // through `$this->app`, not `$this`, so this is checked ahead of the
         // `$this->…` resource loaders below.
         if BINDING_METHODS.contains(&method_lower.as_slice())
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(key_arg) = mc.argument_list.arguments.iter().next()
             && let Some(key) = const_string(key_arg.value(), content, &scope)
         {
@@ -623,35 +641,22 @@ pub(crate) fn extract_provider_resources(
 
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
-        if method_lower == b"mergeconfigfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+        // The namespaced `load*From(path, namespace)` registrations differ
+        // only in which list they land in.
+        let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
+            b"mergeconfigfrom" => Some(&mut resources.config_files),
+            b"loadviewsfrom" => Some(&mut resources.view_dirs),
+            b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
+            _ => None,
+        };
+        if let Some(target) = namespaced {
+            if args.len() >= 2
+                && let Some(path) =
+                    resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
                 && let Some((ns, _, _)) =
                     super::helpers::extract_string_literal(args[1].value(), content)
             {
-                resources.config_files.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
-            }
-        } else if method_lower == b"loadviewsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
-            {
-                resources.view_dirs.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
-            }
-        } else if method_lower == b"loadtranslationsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
-            {
-                resources.trans_dirs.push(ProviderResource {
+                target.push(ProviderResource {
                     path,
                     namespace: ns.to_string(),
                 });
@@ -1006,31 +1011,6 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
     )
 }
 
-/// Whether `expr` names the service container: `$this->app` in a provider
-/// method, the `$app` a deferred callback receives, or the `app()` helper.
-pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Variable(Variable::Direct(dv)) => dv.name == b"$app",
-        Expression::Access(Access::Property(pa)) => {
-            is_this_expr(pa.object)
-                && matches!(
-                    &pa.property,
-                    ClassLikeMemberSelector::Identifier(ident)
-                        if ident.value.eq_ignore_ascii_case(b"app")
-                )
-        }
-        Expression::Call(Call::Function(fc)) => {
-            matches!(fc.function, Expression::Identifier(id)
-                if id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"app")))
-                && fc.argument_list.arguments.is_empty()
-        }
-        _ => false,
-    }
-}
-
 /// The concrete class a container binding puts behind its key.
 ///
 /// Covers the shapes a service provider writes: the class itself
@@ -1334,26 +1314,6 @@ fn last_assignment_before<'ast, 'arena>(
         ),
     }
     best.map(|(_, rhs)| rhs)
-}
-
-/// Check whether an instance-method call chain roots at the `Route` facade,
-/// i.e. `Route::middleware(...)->namespace(...)->…`.  Walks down the `->object`
-/// chain until it reaches the static entry point and matches its class name.
-fn chain_roots_at_route(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Call(Call::Method(mc)) => chain_roots_at_route(mc.object),
-        Expression::Call(Call::StaticMethod(sc)) => {
-            if let Expression::Identifier(id) = sc.class {
-                id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Route"))
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
 }
 
 #[cfg(test)]

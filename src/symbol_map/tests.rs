@@ -2,6 +2,13 @@ use super::docblock::is_navigable_type;
 use super::extraction::extract_symbol_map;
 use super::*;
 
+/// Pair a map with the source it was extracted from, for the subject-text
+/// assertions below.
+fn mapped<'a>(map: &SymbolMap, php: &'a str) -> MappedSource<'a> {
+    map.source(php)
+        .expect("the map under test was extracted from this text")
+}
+
 // ── SymbolMap::lookup tests ─────────────────────────────────────────
 
 fn make_span(start: u32, end: u32, name: &str) -> SymbolSpan {
@@ -138,6 +145,23 @@ fn parse_and_extract(php: &str) -> SymbolMap {
 }
 
 #[test]
+fn a_map_refuses_to_pair_with_a_different_revision() {
+    let php = "<?php\n$service->handle();\n";
+    let map = parse_and_extract(php);
+    assert!(map.source(php).is_some());
+
+    // Every shape of "different text" the same URI can be handed: an
+    // edited buffer, and a Blade template whose map describes the far
+    // longer virtual PHP it lowers to.
+    assert!(map.source("<?php\n$svc->handle();\n").is_none());
+    assert!(map.source("<?php\n").is_none());
+    assert!(
+        map.source(&format!("{php}// appended\n")).is_none(),
+        "a longer revision is a different revision too"
+    );
+}
+
+#[test]
 fn class_declaration_produces_class_declaration() {
     let php = "<?php\nclass Foo {}\n";
     let map = parse_and_extract(php);
@@ -254,7 +278,7 @@ fn method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "bar");
-        assert_eq!(subject_text.as_str(php), "$this");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
         assert!(!is_static);
         assert!(is_method_call);
     } else {
@@ -278,7 +302,7 @@ fn static_method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "create");
-        assert_eq!(subject_text.as_str(php), "self");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
         assert!(is_static);
         assert!(is_method_call);
     } else {
@@ -421,7 +445,10 @@ fn chained_method_call_subject_text() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "find");
-        assert_eq!(subject_text.as_str(php), "$this->getService()");
+        assert_eq!(
+            subject_text.as_str(mapped(&map, php)),
+            "$this->getService()"
+        );
     } else {
         panic!("Expected MemberAccess");
     }
@@ -3693,7 +3720,7 @@ fn see_tag_member_method() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(is_static, "@see members are treated as static access");
     } else {
@@ -3736,7 +3763,7 @@ fn see_tag_member_hash_fragment() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(!is_static, "@see `#` fragments are instance members");
     } else {
@@ -3776,7 +3803,7 @@ fn see_tag_member_property() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "channel_type");
         assert!(is_static);
     } else {
@@ -3808,7 +3835,7 @@ fn see_tag_member_constant() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "STATUS_PENDING");
         assert!(is_static);
     } else {
@@ -4149,7 +4176,7 @@ fn see_tag_self_member_spans_emitted() {
             docblock_ref,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "self");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
             assert_eq!(member_name, "bar");
             assert!(*is_static);
             assert_eq!(*docblock_ref, DocblockMemberRef::See);
@@ -4508,7 +4535,10 @@ fn array_callable_class_const_emits_member_access() {
             is_method_call,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "IndexPageController");
+            assert_eq!(
+                subject_text.as_str(mapped(&map, php)),
+                "IndexPageController"
+            );
             assert_eq!(member_name, "indexPage");
             assert!(*is_static);
             assert!(*is_method_call);
@@ -4531,7 +4561,7 @@ fn array_callable_variable_emits_instance_member_access() {
             is_static,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "$this");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
             assert_eq!(member_name, "handle");
             assert!(!*is_static);
         }
@@ -5113,7 +5143,11 @@ fn the_checked_model_is_recorded_in_each_spelling() {
             .first()
             .unwrap_or_else(|| panic!("`{subject}` should be recorded as the checked model"));
         assert_eq!(recorded.is_static, is_static, "for `{subject}`");
-        assert_eq!(recorded.subject_text.as_str(&php), text, "for `{subject}`");
+        assert_eq!(
+            recorded.subject_text.as_str(mapped(&map, &php)),
+            text,
+            "for `{subject}`"
+        );
     }
 }
 
@@ -5165,7 +5199,7 @@ fn authorize_for_user_reads_its_shifted_arguments() {
     assert_eq!(
         map.gate_subjects
             .first()
-            .map(|s| s.subject_text.as_str(php)),
+            .map(|s| s.subject_text.as_str(mapped(&map, php))),
         Some("$post")
     );
 

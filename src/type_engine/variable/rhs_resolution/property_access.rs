@@ -95,13 +95,7 @@ pub(super) fn resolve_rhs_property_access(
     // check whether the constant is an enum case (→ type is the enum
     // itself) or a typed constant (→ use its type_hint).
     if let Access::ClassConstant(cca) = access {
-        let class_name = match cca.class {
-            Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-            Expression::Self_(_) => Some(current_class_name.to_string()),
-            Expression::Static(_) => Some(current_class_name.to_string()),
-            Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-            _ => None,
-        };
+        let class_name = crate::class_lookup::class_expression_name(cca.class, ctx.current_class);
         if let Some(class_name) = class_name {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
             let resolved_typed = PhpType::named(atom(resolved_name));
@@ -219,16 +213,7 @@ pub(super) fn resolve_rhs_property_access(
 
     // ── Static property access: `self::$prop`, `static::$prop`, `Foo::$prop` ──
     if let Access::StaticProperty(spa) = access {
-        let class_name = match spa.class {
-            Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-            Expression::Self_(_) => Some(current_class_name.to_string()),
-            Expression::Static(_) => Some(current_class_name.to_string()),
-            Expression::Parent(_) => all_classes
-                .iter()
-                .find(|c| c.name == current_class_name)
-                .and_then(|c| c.parent_class.map(|a| a.to_string())),
-            _ => None,
-        };
+        let class_name = crate::class_lookup::class_expression_name(spa.class, ctx.current_class);
         let prop_name = match &spa.property {
             Variable::Direct(dv) => {
                 let raw = bytes_to_str(dv.name).to_string();

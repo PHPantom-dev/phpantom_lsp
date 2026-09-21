@@ -65,7 +65,9 @@ use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
-use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
+use crate::type_engine::resolver::{
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
+};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -463,8 +465,10 @@ impl Backend {
             &ctx.file.use_map,
             &ctx.file.namespace,
         );
-        let resolved_cache = &self.resolved_class_cache;
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
 
         for span in &symbol_map.spans {
             let SymbolKind::MemberAccess {
@@ -493,7 +497,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
 
             // `$this->ownProperty = …` inside the constructor is the
             // shape most writes in a file have.  Settling it before
@@ -517,18 +521,14 @@ impl Backend {
             }
 
             let rctx = ResolutionCtx {
-                current_class,
-                all_classes: local_classes,
-                content,
-                cursor_offset: span.start,
-                class_loader: &class_loader,
-                backend: Some(self),
-                laravel_macro_this_resolver: None,
-                resolved_class_cache: Some(resolved_cache),
-                function_loader: Some(&function_loader),
-                scope_var_resolver: None,
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                preserve_static: false,
+                ..self.resolution_ctx_at(
+                    current_class,
+                    local_classes,
+                    content,
+                    span.start,
+                    CtxLoaders::without_macro_this(&class_loader, &function_loader),
+                )
             };
             let SubjectOutcome::Resolved(receivers) =
                 resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)

@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::multi_file_edit;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
@@ -356,11 +357,7 @@ impl Backend {
         }
         changes.retain(|_, edits| !edits.is_empty());
 
-        Ok(Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        }))
+        Ok(Some(multi_file_edit(changes)))
     }
 
     /// Extract the renameable symbol name and its source range.

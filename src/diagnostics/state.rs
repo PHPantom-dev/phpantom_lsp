@@ -50,6 +50,13 @@ pub(crate) struct DiagnosticState {
     /// config reload switches `[diagnostics] workspace` off mid-pass.
     /// Cleared again before a later pass starts.
     pub(crate) workspace_diag_cancel: Arc<AtomicBool>,
+    /// Wakes the diagnostic-refresh pump (see
+    /// [`crate::Backend::request_diagnostic_refresh`]).  `Notify` holds at
+    /// most one stored permit, so refresh requests signalled while one is
+    /// in flight coalesce into a single follow-up refresh.
+    pub(crate) refresh_notify: Arc<Notify>,
+    /// Whether the refresh pump task has been spawned yet.
+    pub(crate) refresh_pump_started: Arc<AtomicBool>,
     /// Whether the client has sent at least one `workspace/diagnostic`
     /// pull.  In pull mode the background workspace pass waits for this:
     /// its results are only deliverable through workspace pull responses,
@@ -88,6 +95,8 @@ impl DiagnosticState {
             workspace_diags: Arc::new(Mutex::new(WorkspaceDiagnostics::default())),
             workspace_diag_pass_started: Arc::new(AtomicBool::new(false)),
             workspace_diag_cancel: Arc::new(AtomicBool::new(false)),
+            refresh_notify: Arc::new(Notify::new()),
+            refresh_pump_started: Arc::new(AtomicBool::new(false)),
             workspace_pull_seen: Arc::new(AtomicBool::new(false)),
             workspace_pull_notify: Arc::new(Notify::new()),
             decl_baselines: Arc::new(Mutex::new(HashMap::new())),

@@ -43,6 +43,7 @@ use mago_syntax::cst::*;
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::parser::extract_hint_type;
 use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, keyword_lowercase};
+use crate::text_scan::{ScanStep, scan_top_level};
 use crate::types::{ClassInfo, ClassLikeKind, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -1460,37 +1461,16 @@ fn literal_shape_key(text: &str) -> Option<String> {
 }
 
 /// Split an array item on its top-level `=>`, skipping the ones inside a
-/// nested array or a quoted string.
+/// nested array, a quoted string, or a comment.
 fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
-    let bytes = item.as_bytes();
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    index += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'[' | b'(' => depth += 1,
-                b']' | b')' => depth -= 1,
-                b'=' if depth == 0 && bytes.get(index + 1) == Some(&b'>') => {
-                    return Some((&item[..index], &item[index + 2..]));
-                }
-                _ => {}
-            },
+    let index = scan_top_level(item.as_bytes(), |bytes, i| {
+        if bytes[i..].starts_with(b"=>") {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        index += 1;
-    }
-    None
+    })?;
+    Some((&item[..index], &item[index + 2..]))
 }
 
 /// Infer a scalar type from a constant's initializer value string.

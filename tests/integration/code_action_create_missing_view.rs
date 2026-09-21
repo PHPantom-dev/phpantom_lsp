@@ -1,6 +1,6 @@
 //! Integration tests for the "Create missing view" code action.
 
-use crate::common::{create_psr4_workspace, get_code_actions_in_range};
+use crate::common::{create_psr4_workspace, find_action, get_code_actions_in_range};
 use tower_lsp::lsp_types::*;
 
 const COMPOSER: &str = r#"{
@@ -22,15 +22,6 @@ fn actions_on_line(
     )
 }
 
-fn find_create_missing_view(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Create missing view") => {
-            Some(ca)
-        }
-        _ => None,
-    })
-}
-
 const CONTROLLER: &str = "<?php\nnamespace App\\Http\\Controllers;\n\nclass HomeController\n{\n    public function index(): string\n    {\n        return view('missing.page');\n    }\n}\n";
 
 #[test]
@@ -42,7 +33,7 @@ fn offered_and_falls_back_to_conventional_dir_when_none_exists() {
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
-    let action = find_create_missing_view(&actions).expect("should offer the action");
+    let action = find_action(&actions, "Create missing view").expect("should offer the action");
 
     let edit = action.edit.as_ref().expect("action should carry an edit");
     let ops = match edit.document_changes.as_ref().expect("document_changes") {
@@ -77,7 +68,7 @@ fn offered_under_an_existing_view_root() {
     backend.update_ast(uri.as_str(), CONTROLLER);
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
-    let action = find_create_missing_view(&actions).expect("should offer the action");
+    let action = find_action(&actions, "Create missing view").expect("should offer the action");
 
     let edit = action.edit.as_ref().expect("action should carry an edit");
     let ops = match edit.document_changes.as_ref().expect("document_changes") {
@@ -110,7 +101,7 @@ fn not_offered_when_the_view_already_resolves() {
 
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 7);
     assert!(
-        find_create_missing_view(&actions).is_none(),
+        find_action(&actions, "Create missing view").is_none(),
         "should not offer to create a view that already exists"
     );
 }
@@ -125,5 +116,5 @@ fn not_offered_when_cursor_is_elsewhere() {
 
     // Line 3 is the class declaration, nowhere near the view() call.
     let actions = actions_on_line(&backend, uri.as_str(), CONTROLLER, 3);
-    assert!(find_create_missing_view(&actions).is_none());
+    assert!(find_action(&actions, "Create missing view").is_none());
 }

@@ -264,6 +264,7 @@ mod mago;
 mod mem_audit;
 pub mod move_cli;
 pub(crate) mod names;
+mod parallel;
 mod parser;
 pub(crate) mod phar;
 pub mod php_type;
@@ -583,7 +584,7 @@ pub struct Backend {
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
     /// subcommands, which parse every file but never issue a
-    /// find-references, rename, or inlay-hints request, so populating
+    /// find-references, rename, or CodeLens request, so populating
     /// the index would be pure wasted CPU and short-lived allocation.
     pub(crate) skip_reference_index: bool,
     /// Per-file parse errors from the Mago parser.
@@ -936,12 +937,12 @@ pub struct Backend {
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
-    /// `workspace.inlayHint.refreshSupport` capability.  The reference
-    /// counts shown on declarations are computed in the background, so
-    /// without a refresh the editor keeps the hints it pulled before they
-    /// were ready.
+    /// `workspace.inlayHint.refreshSupport` capability.  Hints resolve
+    /// against the workspace index and a background parse, so without a
+    /// refresh the editor keeps the ones it pulled before either was
+    /// ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Exact member references shared by declaration inlay hints and lenses.
+    /// Exact member references behind the declaration CodeLens.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -957,7 +958,11 @@ pub struct Backend {
     /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
-    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    ///
+    /// Shared rather than owned: every request against a template reads
+    /// this text, and a template's virtual PHP is several times the size
+    /// of the template itself.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
@@ -1472,6 +1477,13 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php_arc(uri)
+            .map(|php| String::clone(&php))
+    }
+
+    /// [`Self::blade_virtual_php`] without the copy, for the request paths
+    /// that only need to read the text.
+    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         self.blade_virtual_content.read().get(uri).cloned()
     }
 
@@ -1567,6 +1579,23 @@ impl Backend {
     /// file content without going through the LSP `didOpen` path).
     pub fn open_files(&self) -> &Arc<RwLock<HashMap<String, Arc<String>>>> {
         &self.open_files
+    }
+
+    /// Mark the workspace as indexed (used by integration tests that need
+    /// the state `ensure_workspace_indexed` leaves behind without running
+    /// a real workspace scan).
+    pub fn mark_workspace_indexed(&self) {
+        self.workspace_indexed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Declare whether the client supports `workspace/codeLens/refresh`,
+    /// which decides whether a lens may be answered cold and refreshed
+    /// once its count lands (used by integration tests to pick the path
+    /// without going through `initialize`).
+    pub fn set_supports_code_lens_refresh(&self, supported: bool) {
+        self.supports_code_lens_refresh
+            .store(supported, std::sync::atomic::Ordering::Release);
     }
 
     pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
@@ -1775,9 +1804,19 @@ impl Backend {
     /// access; this only restores the lightweight discovery indexes.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
-    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+    ///
+    /// Returns whether any *class declaration* was dropped, handed to a
+    /// surviving file, or discovered — i.e. whether class resolution could
+    /// now answer differently.  A batch of declaration-free files (a
+    /// generated cache artifact, a routes or config file) returns `false`,
+    /// and the caller can keep the resolved-class caches it would
+    /// otherwise have to drop.
+    pub(crate) fn reindex_files_batch(
+        &self,
+        changes: &[(String, PathBuf, FileChangeType)],
+    ) -> bool {
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         // Index values are stored under either the editor URI or the
@@ -1805,6 +1844,7 @@ impl Backend {
         // These FQNs no longer resolve, and the promoted ones resolve
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
+        let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1843,7 +1883,7 @@ impl Backend {
         // background indexer stores.  Missing the canonical spelling would
         // leave a stale symbol map that also blocks re-parsing (the
         // workspace-index walk skips files that already have one).
-        for (uri_str, path, _) in changes {
+        for (uri_str, path, change_type) in changes {
             let canonical_uri = crate::util::path_to_uri(path);
             let spellings = if canonical_uri == *uri_str {
                 vec![uri_str.as_str()]
@@ -1864,6 +1904,13 @@ impl Backend {
                 // at runtime.  A file that was merely changed re-registers
                 // them when it is re-parsed below.
                 self.laravel_runtime_config_keys.write().remove(uri);
+                // The Laravel registries a file fed (macros, storage drivers,
+                // commands, morph aliases, gates, provider resources) are
+                // refreshed only when the file is parsed, which a deleted
+                // file never is again.
+                if *change_type == FileChangeType::DELETED {
+                    self.forget_laravel_file_contributions(uri);
+                }
             }
         }
 
@@ -1878,6 +1925,7 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
+            classes_changed |= !classes.is_empty();
             self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
                     decls.note_discovered(&fqn, uri_str.clone());
@@ -1898,6 +1946,7 @@ impl Backend {
                 }
             }
         }
+        classes_changed
     }
 
     /// Create a shallow clone of this `Backend` that shares every

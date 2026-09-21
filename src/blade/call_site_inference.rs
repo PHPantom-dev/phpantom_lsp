@@ -439,8 +439,7 @@ impl Backend {
                             "\\Illuminate\\View\\ComponentSlot",
                         )));
                 }
-                let Some(virtual_php) = self.blade_virtual_content.read().get(file_uri).cloned()
-                else {
+                let Some(virtual_php) = self.blade_virtual_php_arc(file_uri) else {
                     continue;
                 };
                 for vars in
@@ -626,11 +625,11 @@ impl Backend {
     /// buffer: re-inferring a template rewrites its prologue, so the map a
     /// reader holds may have been built for a shorter text than the one the
     /// pass has since written.
-    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<String> {
+    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<Arc<String>> {
         if !is_blade {
-            return self.get_file_content(uri);
+            return self.get_file_content_arc(uri);
         }
-        let content = self.blade_virtual_content.read().get(uri).cloned()?;
+        let content = self.blade_virtual_php_arc(uri)?;
         map.matches_source(&content).then_some(content)
     }
 
@@ -1032,21 +1031,17 @@ impl Backend {
                 let current_class = enclosing.unwrap_or(&default_class);
                 let loaders = Loaders::with_function(Some(&function_loader_cl));
                 let var_ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class,
-                    all_classes: &file_ctx.classes,
-                    content,
-                    cursor_offset: site.offset,
-                    class_loader: &class_loader,
                     backend: Some(self),
                     loaders,
                     resolved_class_cache: Some(&self.resolved_class_cache),
-                    enclosing_return_type: None,
-                    branch_aware: false,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        current_class,
+                        &file_ctx.classes,
+                        content,
+                        site.offset,
+                        &class_loader,
+                    )
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
@@ -1235,21 +1230,17 @@ impl Backend {
                         let current_class = enclosing.unwrap_or(&default_class);
                         let loaders = Loaders::with_function(Some(&function_loader_cl));
                         let var_ctx = VarResolutionCtx {
-                            var_name: "",
-                            top_level_scope: None,
-                            current_class,
-                            all_classes: &file_ctx.classes,
-                            content,
-                            cursor_offset: offset,
-                            class_loader: &class_loader,
                             backend: Some(self),
                             loaders,
                             resolved_class_cache: Some(&self.resolved_class_cache),
-                            enclosing_return_type: None,
-                            branch_aware: false,
-                            match_arm_narrowing: HashMap::new(),
-                            scope_var_resolver: None,
-                            scope_proofs: None,
+                            ..VarResolutionCtx::new(
+                                "",
+                                current_class,
+                                &file_ctx.classes,
+                                content,
+                                offset,
+                                &class_loader,
+                            )
                         };
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,

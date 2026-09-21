@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -5778,15 +5778,7 @@ async fn definition_of_a_plain_parent_property_named_by_a_hook_call() {
         "}\n",
     );
 
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: text.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, text).await;
 
     // The parent property a hook call names need not be hooked itself.
     let params = GotoDefinitionParams {
@@ -5894,5 +5886,60 @@ async fn test_goto_definition_implements_method_declaration_returns_self_locatio
     assert_eq!(
         locations[0].range.start.line, 3,
         "should point back to the concrete method declaration line"
+    );
+    assert_eq!(
+        (
+            locations[0].range.start.character,
+            locations[0].range.end.character
+        ),
+        (20, 23),
+        "the range must cover the method name the cursor sits on, which is what \
+         editors compare against the cursor to decide to show usages"
+    );
+}
+
+/// The same for a method that overrides a parent class rather than
+/// implementing an interface: the declaration answers with itself, and the
+/// `extends` clause is the place that navigates to the parent.
+#[tokio::test]
+async fn test_goto_definition_overriding_method_declaration_returns_self_location() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///override_declaration.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "abstract class Animal {\n",
+        "    abstract public function speak(): string;\n",
+        "}\n",
+        "class Dog extends Animal {\n",
+        "    public function speak(): string { return 'woof'; }\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // Line 5, character 20 is the `speak` of `    public function speak(`.
+    let params = GotoDefinitionParams {
+        text_document_position_params: TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            position: Position {
+                line: 5,
+                character: 20,
+            },
+        },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+
+    let locations = match backend.goto_definition(params).await.unwrap() {
+        Some(GotoDefinitionResponse::Array(locs)) => locs,
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
+        other => panic!("Expected self-location, got: {other:?}"),
+    };
+    assert_eq!(locations.len(), 1, "should return exactly one location");
+    assert_eq!(locations[0].uri, uri);
+    assert_eq!(
+        locations[0].range.start.line, 5,
+        "should point back to Dog::speak, not Animal::speak on line 2"
     );
 }

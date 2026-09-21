@@ -1,3 +1,8 @@
+use std::ops::Range;
+
+use super::signature::{echo_delimiters, is_echo_start, matching_paren};
+use crate::text_scan::find;
+
 /// Every directive name `match_directive` recognises, in no particular
 /// order beyond the loose grouping comments below. [`DIRECTIVE_COMPLETIONS`]
 /// is checked against this list (`every_known_directive_has_a_completion`)
@@ -143,6 +148,112 @@ pub fn match_directive(s: &str) -> Option<&'static str> {
         }
     }
     None
+}
+
+/// A byte of the `\w+` run Blade reads a directive name as.
+pub(crate) fn is_word_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || byte == b'_'
+}
+
+/// Whether the byte before `at` lets an `@` there start a directive.
+///
+/// Blade's own `compileStatements` pattern is anchored with `\B`, so a
+/// name glued to a preceding word is not a directive: an `@production`
+/// in `admin@production.example` compiles to nothing, and `@@if` is the
+/// escape for a literal `@if`.
+pub(crate) fn boundary_before(bytes: &[u8], at: usize) -> bool {
+    at == 0 || !(bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1]))
+}
+
+/// The end of the `\w+` run starting at `from`.
+pub(crate) fn word_end(bytes: &[u8], from: usize) -> usize {
+    let mut i = from;
+    while i < bytes.len() && is_word_byte(bytes[i]) {
+        i += 1;
+    }
+    i
+}
+
+/// What parsing the `@` at a candidate directive position found.
+pub(crate) enum DirectiveHead<'a> {
+    /// Not a directive: the word-boundary rule failed, the name was
+    /// empty, or this is a `@click="…"`-style JavaScript framework
+    /// binding that the caller reads as an attribute instead. The
+    /// offset is where the caller should resume scanning.
+    None(usize),
+    /// `@@name` is the escape for a literal `@name`.
+    Escaped(usize),
+    /// `@{{ … }}` is a literal echo, whose braces are text rather than a
+    /// directive.
+    LiteralEcho(usize),
+    /// A directive name, and where its argument list opens and (if it
+    /// closes within `limit`) the argument list's full range.
+    Named {
+        name: &'a str,
+        name_end: usize,
+        open: usize,
+        args: Option<Range<usize>>,
+    },
+}
+
+/// Parse the directive head at the `@` at `at`: its name and, when
+/// present, its argument list. `limit` bounds the search for the
+/// argument list's closing paren and the literal echo's closing
+/// delimiter, so a caller working on a fragment does not read past it.
+///
+/// The name is any `\w+` run; whether Blade knows it is the caller's
+/// question ([`match_directive`]). Blade allows spaces and tabs, but no
+/// newline, between the name and its `(`, and an argument list left
+/// unterminated is read as no argument list rather than swallowing the
+/// rest of the file.
+pub(crate) fn directive_head<'a>(
+    src: &'a str,
+    bytes: &[u8],
+    at: usize,
+    limit: usize,
+) -> DirectiveHead<'a> {
+    if !boundary_before(bytes, at) {
+        return DirectiveHead::None(at + 1);
+    }
+    match bytes.get(at + 1) {
+        Some(b'@') => return DirectiveHead::Escaped(at + 2),
+        Some(b'{') if is_echo_start(bytes, at + 1) => {
+            let (open, close) = echo_delimiters(bytes, at + 1);
+            let body_start = at + 1 + open.len();
+            let end = find(bytes, body_start, limit, close.as_bytes())
+                .map_or(body_start, |end| end + close.len());
+            return DirectiveHead::LiteralEcho(end);
+        }
+        _ => {}
+    }
+    let name_end = word_end(bytes, at + 1);
+    if name_end == at + 1 {
+        return DirectiveHead::None(at + 1);
+    }
+    let name = &src[at + 1..name_end];
+    // `@click="…"` is a JavaScript framework's binding; the caller reads
+    // it as an attribute.
+    if bytes.get(name_end) == Some(&b'=') {
+        return DirectiveHead::None(name_end);
+    }
+
+    let mut open = name_end;
+    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
+        open += 1;
+    }
+    let args = (bytes.get(open) == Some(&b'('))
+        .then(|| {
+            matching_paren(bytes, open)
+                .filter(|close| *close < limit)
+                .map(|close| open..close + 1)
+        })
+        .flatten();
+    DirectiveHead::Named {
+        name,
+        name_end,
+        open,
+        args,
+    }
 }
 
 /// A directive a service provider registered on top of the ones Blade

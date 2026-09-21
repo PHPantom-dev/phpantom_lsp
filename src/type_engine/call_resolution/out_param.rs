@@ -153,31 +153,13 @@ thread_local! {
     static OUT_TYPE_DEPTH: Cell<u8> = const { Cell::new(0) };
 }
 
-/// RAII guard that clears [`OUT_TYPE_MEMO`] on drop.
-pub(crate) struct OutTypeMemoGuard {
-    owns: bool,
-}
-
-impl Drop for OutTypeMemoGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            OUT_TYPE_MEMO.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the out-parameter memo for the current thread.
+/// The guard [`with_out_type_memo`] hands back.
+pub(crate) type OutTypeMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<OutTypeKey, Option<PhpType>>>;
+
 pub(super) fn with_out_type_memo() -> OutTypeMemoGuard {
-    let already_active = OUT_TYPE_MEMO.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return OutTypeMemoGuard { owns: false };
-    }
-    OUT_TYPE_MEMO.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    OutTypeMemoGuard { owns: true }
+    crate::type_engine::activate_memo(&OUT_TYPE_MEMO)
 }
 
 /// How deep a chain of out-parameter readings may go.
@@ -228,44 +210,22 @@ fn infer_out_type(
 ) -> Option<PhpType> {
     let key = callee.key(param_index);
 
-    // Checked before the depth cap so a chain that ran out of budget still
-    // benefits from a reading an earlier, shallower call completed.
-    let memoized =
-        OUT_TYPE_MEMO.with(|cell| cell.borrow().as_ref().and_then(|m| m.get(&key).cloned()));
-    if let Some(cached) = memoized {
-        return cached;
-    }
-
-    let depth = OUT_TYPE_DEPTH.with(Cell::get);
-    if depth >= MAX_OUT_TYPE_DEPTH {
-        return None;
-    }
-
-    let already_visiting = OUT_TYPE_VISITED.with(|cell| !cell.borrow_mut().insert(key));
-    if already_visiting {
-        return None;
-    }
-    OUT_TYPE_DEPTH.with(|cell| cell.set(depth + 1));
-
-    let result = callee
-        .declaration_site(backend)
-        .and_then(|(uri, name_offset)| read_out_type(backend, &uri, name_offset, &param.name))
-        .filter(|ty| !ty.is_untyped() && !ty.is_mixed());
-
-    OUT_TYPE_DEPTH.with(|cell| cell.set(depth));
-    OUT_TYPE_VISITED.with(|cell| {
-        cell.borrow_mut().remove(&key);
-    });
-
-    // Only completed runs are memoized; the guards above return early
-    // without storing, so a cut-off `None` cannot shadow a later reading.
-    OUT_TYPE_MEMO.with(|cell| {
-        if let Some(memo) = cell.borrow_mut().as_mut() {
-            memo.insert(key, result.clone());
-        }
-    });
-
-    result
+    crate::type_engine::memoized_bounded_inference(
+        &OUT_TYPE_MEMO,
+        &OUT_TYPE_VISITED,
+        &OUT_TYPE_DEPTH,
+        MAX_OUT_TYPE_DEPTH,
+        key,
+        key,
+        || {
+            callee
+                .declaration_site(backend)
+                .and_then(|(uri, name_offset)| {
+                    read_out_type(backend, &uri, name_offset, &param.name)
+                })
+                .filter(|ty| !ty.is_untyped() && !ty.is_mixed())
+        },
+    )
 }
 
 /// Resolve `param_name` at the closing brace of the body declared at

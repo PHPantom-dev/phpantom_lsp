@@ -8,15 +8,10 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document, open_php};
     use phpantom_lsp::Backend;
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{
-        "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
-    }"#;
 
     const PROVIDERS_PHP: &str =
         "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
@@ -61,7 +56,7 @@ class Post
     /// `Blade::if()`, with `page.blade.php` holding `template`.
     async fn start(template: &str) -> (Backend, tempfile::TempDir, Url) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            LARAVEL_APP_COMPOSER,
             &[
                 ("bootstrap/providers.php", PROVIDERS_PHP),
                 ("app/Providers/AppServiceProvider.php", PROVIDER),
@@ -72,16 +67,7 @@ class Post
         backend.initialized(InitializedParams {}).await;
 
         let uri = Url::from_file_path(dir.path().join(TEMPLATE)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: template.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &uri, "blade", template).await;
         (backend, dir, uri)
     }
 
@@ -229,16 +215,7 @@ class Post
             "Blade::if('admin'",
             "Blade::directive('money', fn ($e) => $e);\n\n        Blade::if('admin'",
         );
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: provider_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: PROVIDER.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &provider_uri, PROVIDER).await;
         backend
             .did_change(DidChangeTextDocumentParams {
                 text_document: VersionedTextDocumentIdentifier {

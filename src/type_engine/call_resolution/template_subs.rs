@@ -56,6 +56,34 @@ impl Backend {
             _ => return HashMap::new(),
         };
 
+        let mut subs = Self::bind_method_template_args(&method, arg_texts, ctx);
+
+        finish_template_subs(
+            &mut subs,
+            &method.template_params,
+            &method.template_param_bounds,
+            method.return_type.as_ref(),
+            ctx,
+        );
+
+        subs
+    }
+
+    /// The argument-binding half of [`build_method_template_subs`]: resolve
+    /// each of `method`'s `@template` bindings from `arg_texts` and return
+    /// the map, without filling in the params nothing bound.
+    ///
+    /// A caller that has its own idea of what an unbound param should fall
+    /// back to (e.g. `new` binding a *class*-level template through an
+    /// inherited constructor, where the right bound lives on the class,
+    /// not the constructor) calls this directly instead of
+    /// [`build_method_template_subs`], which always finishes against the
+    /// method's own bounds.
+    pub(crate) fn bind_method_template_args(
+        method: &MethodInfo,
+        arg_texts: &[&str],
+        ctx: &ResolutionCtx<'_>,
+    ) -> HashMap<String, PhpType> {
         let mut subs = HashMap::new();
 
         // Bind the raw source-order argument texts to parameters by PHP's
@@ -557,14 +585,6 @@ impl Backend {
                 }
             }
         }
-
-        finish_template_subs(
-            &mut subs,
-            &method.template_params,
-            &method.template_param_bounds,
-            method.return_type.as_ref(),
-            ctx,
-        );
 
         subs
     }

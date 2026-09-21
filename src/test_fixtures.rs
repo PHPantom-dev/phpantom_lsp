@@ -8,11 +8,8 @@
 
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::TextEdit;
-
 use crate::Backend;
 use crate::php_type::PhpType;
-use crate::text_position::position_to_byte_offset;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, MethodInfo, ParameterInfo, PropertyInfo, Visibility,
 };
@@ -35,45 +32,7 @@ pub fn make_class(name: &str) -> ClassInfo {
     ClassInfo {
         kind: ClassLikeKind::Class,
         name: crate::atom::atom(name),
-        methods: Default::default(),
-        method_index: Default::default(),
-        indexed_method_count: 0,
-        properties: Default::default(),
-        constants: Default::default(),
-        start_offset: 0,
-        end_offset: 0,
-        keyword_offset: 0,
-        decl_start_offset: 0,
-        parent_class: None,
-        interfaces: Vec::new(),
-        used_traits: Vec::new(),
-        mixins: Vec::new(),
-        mixin_generics: Vec::new(),
-        require_extends: None,
-        require_implements: Vec::new(),
-        is_final: false,
-        is_abstract: false,
-        is_readonly: false,
-        deprecation_message: None,
-        deprecated_replacement: None,
-        links: Vec::new(),
-        see_refs: Vec::new(),
-        template_params: Vec::new(),
-        template_param_bounds: Default::default(),
-        template_param_defaults: Default::default(),
-        extends_generics: Vec::new(),
-        implements_generics: Vec::new(),
-        use_generics: Vec::new(),
-        type_aliases: Default::default(),
-        trait_precedences: Vec::new(),
-        trait_aliases: Vec::new(),
-        class_docblock: None,
-        doc_members: None,
-        file_namespace: None,
-        backed_type: None,
-        attribute_targets: 0,
-        laravel: None,
-        fqn: None,
+        ..Default::default()
     }
 }
 
@@ -149,26 +108,4 @@ pub fn make_param(name: &str, type_hint: Option<&str>, is_required: bool) -> Par
 /// Useful for tests that don't need cross-class resolution.
 pub fn no_loader(_name: &str) -> Option<Arc<ClassInfo>> {
     None
-}
-
-/// Apply non-overlapping `TextEdit`s to `content` and return the result.
-///
-/// Edits are applied bottom-to-top so earlier edits never shift the
-/// positions of later ones. Columns are UTF-16 code units, as in LSP.
-pub fn apply_edits(content: &str, edits: &[TextEdit]) -> String {
-    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.range
-            .start
-            .line
-            .cmp(&a.range.start.line)
-            .then(b.range.start.character.cmp(&a.range.start.character))
-    });
-    let mut result = content.to_string();
-    for edit in sorted {
-        let start = position_to_byte_offset(&result, edit.range.start);
-        let end = position_to_byte_offset(&result, edit.range.end);
-        result.replace_range(start..end, &edit.new_text);
-    }
-    result
 }

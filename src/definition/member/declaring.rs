@@ -7,6 +7,7 @@
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::inheritance::{ancestors, find_declaring_ancestor, find_declaring_trait};
 use crate::types::*;
 use std::sync::Arc;
 
@@ -46,133 +47,41 @@ impl Backend {
     /// from `file_namespace` + `name` when a namespace is available so
     /// that `find_class_file_content` can disambiguate classes that share
     /// the same short name (e.g. `Eloquent\Builder` vs `Query\Builder`).
+    ///
+    /// Interfaces are searched too, since one can declare `@method` /
+    /// `@property` tags worth jumping to; `@mixin` classes come last, on
+    /// the class itself and then on each ancestor.
     pub(in crate::definition) fn find_declaring_class(
         class: &ClassInfo,
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<(ClassInfo, String)> {
-        // Check if this class directly declares the member.
-        if Self::classify_member(class, member_name, MemberAccessHint::Unknown).is_some() {
+        let declares = |candidate: &ClassInfo| {
+            Self::classify_member(candidate, member_name, MemberAccessHint::Unknown).is_some()
+        };
+
+        if declares(class) {
             let fqn = build_fqn(&class.name, class.file_namespace.as_deref());
             return Some((class.clone(), fqn));
         }
 
-        // Check traits used by this class.
-        if let Some(found) =
-            Self::find_declaring_in_traits(&class.used_traits, member_name, class_loader, 0)
-        {
-            return Some(found);
+        if let Some((name, declaring)) = find_declaring_ancestor(class, class_loader, &declares) {
+            return Some((Arc::unwrap_or_clone(declaring), name.to_string()));
         }
 
-        // Walk up the parent chain.
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match class_loader(&parent_name) {
-                Some(p) => Arc::unwrap_or_clone(p),
-                None => break,
-            };
-            if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some() {
-                return Some((parent, parent_name.to_string()));
-            }
-            // Check traits used by the parent class.
-            if let Some(found) =
-                Self::find_declaring_in_traits(&parent.used_traits, member_name, class_loader, 0)
-            {
-                return Some(found);
-            }
-            current = parent;
-        }
-
-        // Check implemented interfaces (own + from parents).
-        // Interfaces can declare `@method` / `@property` / `@property-read`
-        // tags that should be resolvable via go-to-definition.
-        {
-            let mut all_iface_names: Vec<Atom> = class.interfaces.clone();
-            let mut iface_current = class.clone();
-            for _ in 0..MAX_INHERITANCE_DEPTH {
-                let parent_name = match iface_current.parent_class {
-                    Some(name) => name,
-                    None => break,
-                };
-                let parent = match class_loader(&parent_name) {
-                    Some(p) => Arc::unwrap_or_clone(p),
-                    None => break,
-                };
-                for iface in &parent.interfaces {
-                    if !all_iface_names.contains(iface) {
-                        all_iface_names.push(*iface);
-                    }
-                }
-                iface_current = parent;
-            }
-            for iface_name in &all_iface_names {
-                if let Some(iface) = class_loader(iface_name).map(Arc::unwrap_or_clone) {
-                    if Self::classify_member(&iface, member_name, MemberAccessHint::Unknown)
-                        .is_some()
-                    {
-                        return Some((iface, iface_name.to_string()));
-                    }
-                    // Walk the interface's own extends chain (interfaces
-                    // stored in `parent_class` or `interfaces`).
-                    let mut iface_ancestor = iface.clone();
-                    for _ in 0..MAX_INHERITANCE_DEPTH {
-                        for parent_iface in &iface_ancestor.interfaces {
-                            if let Some(pi) = class_loader(parent_iface).map(Arc::unwrap_or_clone)
-                                && Self::classify_member(
-                                    &pi,
-                                    member_name,
-                                    MemberAccessHint::Unknown,
-                                )
-                                .is_some()
-                            {
-                                return Some((pi, parent_iface.to_string()));
-                            }
-                        }
-                        match iface_ancestor.parent_class {
-                            Some(pn) => match class_loader(&pn) {
-                                Some(p) => iface_ancestor = Arc::unwrap_or_clone(p),
-                                None => break,
-                            },
-                            None => break,
-                        }
-                    }
-                }
-            }
-        }
-
-        // Check @mixin classes — these have the lowest precedence.
         if let Some(found) =
             Self::find_declaring_in_mixins(&class.mixins, member_name, class_loader, 0)
         {
             return Some(found);
         }
 
-        // Also check @mixin classes declared on ancestor classes.
         // e.g. `User extends Model` where `Model` has `@mixin Builder`.
-        let mut ancestor = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match ancestor.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match class_loader(&parent_name) {
-                Some(p) => Arc::unwrap_or_clone(p),
-                None => break,
-            };
-            if !parent.mixins.is_empty()
-                && let Some(found) =
-                    Self::find_declaring_in_mixins(&parent.mixins, member_name, class_loader, 0)
-            {
-                return Some(found);
+        ancestors(class, class_loader).find_map(|(_, parent)| {
+            if parent.mixins.is_empty() {
+                return None;
             }
-            ancestor = parent;
-        }
-
-        None
+            Self::find_declaring_in_mixins(&parent.mixins, member_name, class_loader, 0)
+        })
     }
 
     /// Search through a list of trait names for one that declares `member_name`.
@@ -186,64 +95,12 @@ impl Backend {
         trait_names: &[Atom],
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        depth: usize,
     ) -> Option<(ClassInfo, String)> {
-        if depth > MAX_TRAIT_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let trait_info = if let Some(t) = class_loader(trait_name) {
-                Arc::unwrap_or_clone(t)
-            } else {
-                continue;
-            };
-            if Self::classify_member(&trait_info, member_name, MemberAccessHint::Unknown).is_some()
-            {
-                return Some((trait_info, trait_name.to_string()));
-            }
-            // Recurse into traits used by this trait.
-            if let Some(found) = Self::find_declaring_in_traits(
-                &trait_info.used_traits,
-                member_name,
-                class_loader,
-                depth + 1,
-            ) {
-                return Some(found);
-            }
-            // Walk the parent_class (extends) chain so that interface
-            // inheritance is resolved.  For example, BackedEnum extends
-            // UnitEnum — looking up `cases` on BackedEnum should find
-            // the declaring UnitEnum interface.
-            let mut current = trait_info;
-            let mut parent_depth = depth;
-            while let Some(parent_name) = current.parent_class {
-                parent_depth += 1;
-                if parent_depth > MAX_TRAIT_DEPTH as usize {
-                    break;
-                }
-                let parent = if let Some(p) = class_loader(&parent_name) {
-                    Arc::unwrap_or_clone(p)
-                } else {
-                    break;
-                };
-                if Self::classify_member(&parent, member_name, MemberAccessHint::Unknown).is_some()
-                {
-                    return Some((parent, parent_name.to_string()));
-                }
-                if let Some(found) = Self::find_declaring_in_traits(
-                    &parent.used_traits,
-                    member_name,
-                    class_loader,
-                    parent_depth + 1,
-                ) {
-                    return Some(found);
-                }
-                current = parent;
-            }
-        }
-
-        None
+        let declares = |candidate: &ClassInfo| {
+            Self::classify_member(candidate, member_name, MemberAccessHint::Unknown).is_some()
+        };
+        find_declaring_trait(trait_names, class_loader, &declares)
+            .map(|(name, declaring)| (Arc::unwrap_or_clone(declaring), name.to_string()))
     }
 
     /// Search through `@mixin` class names for one that declares `member_name`.
@@ -266,9 +123,7 @@ impl Backend {
         }
 
         for mixin_name in mixin_names {
-            let mixin_class = if let Some(c) = class_loader(mixin_name) {
-                Arc::unwrap_or_clone(c)
-            } else {
+            let Some(mixin_class) = class_loader(mixin_name) else {
                 continue;
             };
 

@@ -153,8 +153,8 @@ impl Backend {
     /// preprocessor's prologue: that code stands behind no template text,
     /// so there is nowhere in the file to list it.
     fn translate_symbol(&self, uri: &str, symbol: DocumentSymbol) -> Option<DocumentSymbol> {
-        let range = self.translate_range(uri, symbol.range)?;
-        let selection_range = self.translate_range(uri, symbol.selection_range)?;
+        let range = self.try_translate_blade_range(uri, symbol.range)?;
+        let selection_range = self.try_translate_blade_range(uri, symbol.selection_range)?;
         let children = symbol.children.map(|children| {
             children
                 .into_iter()
@@ -167,13 +167,6 @@ impl Backend {
             children,
             ..symbol
         })
-    }
-
-    fn translate_range(&self, uri: &str, range: Range) -> Option<Range> {
-        Some(Range::new(
-            self.try_translate_php_to_blade(uri, range.start)?,
-            self.try_translate_php_to_blade(uri, range.end)?,
-        ))
     }
 }
 
@@ -283,7 +276,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         if constant.is_virtual {
             continue;
         }
-        if let Some(sym) = constant_to_symbol(constant, idx, class.kind == ClassLikeKind::Enum) {
+        if let Some(sym) = constant_to_symbol(constant, idx) {
             children.push(sym);
         }
     }
@@ -384,170 +377,121 @@ fn statement_declaration_end(content: &str, name_offset: usize, name_len: usize)
         .unwrap_or(fallback)
 }
 
+/// Build a leaf `DocumentSymbol` for a member declaration.
+///
+/// The selection range covers the name, which is what an editor
+/// highlights and jumps to; the full range covers the whole declaration,
+/// so folding the outline entry folds the member. `declaration_end` says
+/// where that declaration finishes, since a callable ends at its body's
+/// brace and a property or constant at its `;`.
+///
+/// A member with no recorded offset was synthesised rather than written,
+/// so it has no place in the outline and yields `None`.
+#[allow(deprecated)] // DocumentSymbol::deprecated is deprecated in the LSP types crate
+#[allow(clippy::too_many_arguments)]
+fn member_symbol(
+    (name, name_offset, name_len): (String, u32, usize),
+    kind: SymbolKind,
+    detail: Option<String>,
+    deprecated: bool,
+    idx: &LineIndex<'_>,
+    declaration_end: fn(&str, usize, usize) -> usize,
+) -> Option<DocumentSymbol> {
+    if name_offset == 0 {
+        return None;
+    }
+    let start = idx.position(name_offset as usize);
+    let selection_range = Range::new(start, idx.position(name_offset as usize + name_len));
+    let decl_end = declaration_end(idx.content(), name_offset as usize, name_len);
+    Some(DocumentSymbol {
+        name,
+        detail,
+        kind,
+        tags: deprecated.then(|| vec![SymbolTag::DEPRECATED]),
+        deprecated: None,
+        range: Range::new(start, idx.position(decl_end)),
+        selection_range,
+        children: None,
+    })
+}
+
 /// Convert a `MethodInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if method.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(method.name_offset as usize);
-    let name_end = idx.position(method.name_offset as usize + method.name.len());
-    let selection_range = Range::new(pos, name_end);
-
-    // The full range must enclose the whole declaration (signature and
-    // body), with the selection range (the name) nested inside it.
-    let decl_end = callable_declaration_end(
-        idx.content(),
-        method.name_offset as usize,
-        method.name.len(),
-    );
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = build_method_detail(method);
-    let tags = if method.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
     let kind = if method.name == "__construct" {
         SymbolKind::CONSTRUCTOR
     } else {
         SymbolKind::METHOD
     };
-
-    Some(DocumentSymbol {
-        name: method.name.to_string(),
-        detail,
+    member_symbol(
+        (
+            method.name.to_string(),
+            method.name_offset,
+            method.name.len(),
+        ),
         kind,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+        build_method_detail(method),
+        method.deprecation_message.is_some(),
+        idx,
+        callable_declaration_end,
+    )
 }
 
 /// Convert a `PropertyInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if prop.name_offset == 0 {
-        return None;
-    }
-
-    // The name_offset points to the `$` of the property name.
-    let dollar_name_len = prop.name.len() + 1; // `$` + name
-    let pos = idx.position(prop.name_offset as usize);
-    let name_end = idx.position(prop.name_offset as usize + dollar_name_len);
-    let selection_range = Range::new(pos, name_end);
-    let decl_end =
-        statement_declaration_end(idx.content(), prop.name_offset as usize, dollar_name_len);
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = prop.type_hint_str();
-    let tags = if prop.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    Some(DocumentSymbol {
-        name: format!("${}", prop.name),
-        detail,
-        kind: SymbolKind::PROPERTY,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+    member_symbol(
+        // The name offset points at the `$`, which is part of the name.
+        (
+            format!("${}", prop.name),
+            prop.name_offset,
+            prop.name.len() + 1,
+        ),
+        SymbolKind::PROPERTY,
+        prop.type_hint_str(),
+        prop.deprecation_message.is_some(),
+        idx,
+        statement_declaration_end,
+    )
 }
 
 /// Convert a `ConstantInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn constant_to_symbol(
-    constant: &ConstantInfo,
-    idx: &LineIndex<'_>,
-    is_enum: bool,
-) -> Option<DocumentSymbol> {
-    if constant.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(constant.name_offset as usize);
-    let name_end = idx.position(constant.name_offset as usize + constant.name.len());
-    let selection_range = Range::new(pos, name_end);
-    let decl_end = statement_declaration_end(
-        idx.content(),
-        constant.name_offset as usize,
-        constant.name.len(),
-    );
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let kind = if constant.is_enum_case {
-        SymbolKind::ENUM_MEMBER
+fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
+    let (kind, detail) = if constant.is_enum_case {
+        (SymbolKind::ENUM_MEMBER, constant.enum_value.clone())
     } else {
-        SymbolKind::CONSTANT
+        (
+            SymbolKind::CONSTANT,
+            constant.type_hint_str().or_else(|| constant.value.clone()),
+        )
     };
 
-    let detail = if constant.is_enum_case {
-        constant.enum_value.clone()
-    } else {
-        constant.type_hint_str().or_else(|| constant.value.clone())
-    };
-
-    let tags = if constant.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    let _ = is_enum;
-
-    Some(DocumentSymbol {
-        name: constant.name.to_string(),
-        detail,
+    member_symbol(
+        (
+            constant.name.to_string(),
+            constant.name_offset,
+            constant.name.len(),
+        ),
         kind,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+        detail,
+        constant.deprecation_message.is_some(),
+        idx,
+        statement_declaration_end,
+    )
 }
 
 /// Convert a `FunctionInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn function_to_symbol(func: &FunctionInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if func.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(func.name_offset as usize);
-    let name_end = idx.position(func.name_offset as usize + func.name.len());
-    let selection_range = Range::new(pos, name_end);
-    let decl_end =
-        callable_declaration_end(idx.content(), func.name_offset as usize, func.name.len());
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = build_function_detail(func);
-    let tags = if func.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    Some(DocumentSymbol {
-        name: func.name.to_string(),
-        detail,
-        kind: SymbolKind::FUNCTION,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+    member_symbol(
+        (func.name.to_string(), func.name_offset, func.name.len()),
+        SymbolKind::FUNCTION,
+        build_function_detail(func),
+        func.deprecation_message.is_some(),
+        idx,
+        callable_declaration_end,
+    )
 }
 
 // ── Detail string builders ──────────────────────────────────────────

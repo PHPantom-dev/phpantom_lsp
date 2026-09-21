@@ -115,9 +115,10 @@ mod env_vars;
 mod facade;
 mod factory;
 pub(crate) mod factory_count;
+pub(crate) mod file_contributions;
 mod folio;
 pub(crate) mod gates;
-mod helpers;
+pub(crate) mod helpers;
 mod higher_order_proxy;
 mod macros;
 mod model_extraction;
@@ -143,9 +144,9 @@ pub(crate) mod where_property;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
-    LaravelCommandIndex, command_signature_at_offset, is_command_accessor,
-    is_command_directory_uri, resolve_accessor_type as resolve_command_accessor_type,
-    scan_command_file,
+    EnclosingCommand, LaravelCommandIndex, command_enclosing_signature,
+    command_signature_at_offset, is_command_accessor, is_command_directory_uri,
+    resolve_accessor_type as resolve_command_accessor_type, scan_command_file,
 };
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
@@ -187,7 +188,7 @@ pub(crate) use storage::{
 };
 pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
-pub(crate) use view_data::{SharedViewVar, composer_class_vars};
+pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};
@@ -230,7 +231,9 @@ use where_property::{build_where_property_methods_for_class, lowercase_method_na
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
@@ -246,7 +249,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
+    PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -346,41 +349,20 @@ pub(crate) fn try_swap_custom_collection(
         Some(name) => name.to_string(),
         None => return cls,
     };
-    let model_class = find_class_in(all_classes, &model_name)
-        .cloned()
+    let model_class = crate::class_lookup::find_class_by_name(all_classes, &model_name)
+        .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
         .or_else(|| class_loader(&model_name).map(Arc::unwrap_or_clone));
 
     if let Some(ref mc) = model_class
         && let Some(coll_type) = mc.laravel().and_then(|l| l.custom_collection.as_ref())
     {
         let coll_name = coll_type.to_string();
-        find_class_in(all_classes, &coll_name)
-            .cloned()
+        crate::class_lookup::find_class_by_name(all_classes, &coll_name)
+            .map(|c| Arc::unwrap_or_clone(Arc::clone(c)))
             .or_else(|| class_loader(&coll_name).map(Arc::unwrap_or_clone))
             .unwrap_or(cls)
     } else {
         cls
-    }
-}
-
-/// Find a class in a slice by name (short or FQN).
-///
-/// Minimal local lookup used by the collection-swap helper.  Prefers
-/// namespace-aware matching when the name contains backslashes.
-fn find_class_in<'a>(all_classes: &'a [Arc<ClassInfo>], name: &str) -> Option<&'a ClassInfo> {
-    let short = name.rsplit('\\').next().unwrap_or(name);
-
-    if name.contains('\\') {
-        let expected_ns = name.rsplit_once('\\').map(|(ns, _)| ns);
-        all_classes
-            .iter()
-            .find(|c| c.name == short && c.file_namespace.as_deref() == expected_ns)
-            .map(|c| c.as_ref())
-    } else {
-        all_classes
-            .iter()
-            .find(|c| c.name == short)
-            .map(|c| c.as_ref())
     }
 }
 
@@ -498,14 +480,16 @@ fn custom_collection_for_model(
     model: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
-    let mut current = class_loader(model)?;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
-            return collection.base_name().map(str::to_owned);
-        }
-        current = class_loader(current.parent_class.as_ref()?)?;
-    }
-    None
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_collection.as_ref())
+            .and_then(|collection| collection.base_name())
+            .map(str::to_owned)
+    };
+    let model_class = class_loader(model)?;
+    declared(&model_class)
+        .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
 /// Build the replacement type for a custom collection class, matching its

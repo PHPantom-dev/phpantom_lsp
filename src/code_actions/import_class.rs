@@ -16,8 +16,10 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
+use crate::diagnostics::helpers::is_offset_in_ranges;
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
+use crate::diagnostics::use_statements::compute_use_line_ranges;
 
 use crate::class_lookup::is_class_keyword;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
@@ -40,6 +42,88 @@ fn span_matches_request(
 }
 
 impl Backend {
+    /// Push one "Import `Fqn`" code action per candidate that does not
+    /// conflict with an existing import.
+    ///
+    /// `diagnostics` are attached to every action so an editor can offer
+    /// each as a quick-fix for the diagnostic that flagged the name;
+    /// `is_preferred` is set when `candidates` holds only the one.
+    #[allow(clippy::too_many_arguments)]
+    fn push_import_actions(
+        &self,
+        out: &mut Vec<CodeActionOrCommand>,
+        doc_uri: &Url,
+        candidates: &[String],
+        file_use_map: &HashMap<String, String>,
+        use_block: &crate::completion::use_edit::UseBlockInfo,
+        file_namespace: &Option<String>,
+        diagnostics: Option<&[Diagnostic]>,
+    ) {
+        for fqn in candidates {
+            // Skip candidates that would conflict with an existing import
+            // (e.g. a different class with the same short name is already
+            // imported).
+            if use_import_conflicts(fqn, file_use_map) {
+                continue;
+            }
+
+            let edits = match build_use_edit(fqn, use_block, file_namespace) {
+                Some(e) => e,
+                // No edit needed (global class, no namespace) — skip.
+                None => continue,
+            };
+
+            out.push(CodeActionOrCommand::CodeAction(CodeAction {
+                title: format!("Import `{}`", fqn),
+                kind: Some(CodeActionKind::QUICKFIX),
+                diagnostics: diagnostics
+                    .filter(|d| !d.is_empty())
+                    .map(<[Diagnostic]>::to_vec),
+                edit: Some(crate::code_actions::single_file_edit(
+                    doc_uri.clone(),
+                    edits,
+                )),
+                command: None,
+                is_preferred: (candidates.len() == 1).then_some(true),
+                disabled: None,
+                data: None,
+            }));
+        }
+    }
+
+    /// Whether `ref_name`, a short (non-FQN) class name written in a file
+    /// whose context is given by `file_use_map`/`local_classes`/
+    /// `file_namespace`, resolves without an import.
+    ///
+    /// A name that is already imported, declared in the same file, reachable
+    /// through the file's own namespace, or (for a namespace-less file)
+    /// resolvable in the global scope needs no `use` statement; every other
+    /// name is an import candidate.
+    fn class_name_needs_import(
+        &self,
+        ref_name: &str,
+        file_use_map: &HashMap<String, String>,
+        local_classes: &HashSet<String>,
+        file_namespace: &Option<String>,
+    ) -> bool {
+        if file_use_map.contains_key(ref_name) {
+            return false;
+        }
+        if local_classes.contains(ref_name) {
+            return false;
+        }
+        if let Some(ns) = file_namespace {
+            let ns_qualified = format!("{}\\{}", ns, ref_name);
+            if self.find_or_load_class(&ns_qualified).is_some() {
+                return false;
+            }
+        }
+        if file_namespace.is_none() && self.find_or_load_class(ref_name).is_some() {
+            return false;
+        }
+        true
+    }
+
     /// Collect "Import class" code actions for the cursor position.
     ///
     /// For each unresolved `ClassReference` that overlaps with the
@@ -99,27 +183,13 @@ impl Backend {
                 continue;
             }
 
-            // Skip if the name is already imported via use-map.
-            if file_use_map.contains_key(ref_name) {
-                continue;
-            }
-
-            // Skip if it resolves as a local class (same file).
-            if local_classes.contains(ref_name) {
-                continue;
-            }
-
-            // Skip if it resolves via same-namespace lookup.
-            if let Some(ns) = &file_namespace {
-                let ns_qualified = format!("{}\\{}", ns, ref_name);
-                if self.find_or_load_class(&ns_qualified).is_some() {
-                    continue;
-                }
-            }
-
-            // Skip if the unqualified name resolves in global scope
-            // (and the file has no namespace, so no import needed).
-            if file_namespace.is_none() && self.find_or_load_class(ref_name).is_some() {
+            // Skip names that resolve without an import.
+            if !self.class_name_needs_import(
+                ref_name,
+                &file_use_map,
+                &local_classes,
+                &file_namespace,
+            ) {
                 continue;
             }
 
@@ -131,7 +201,7 @@ impl Backend {
                 continue;
             }
 
-            let use_block = analyze_use_block(content);
+            let use_block = self.use_block_for(uri, content);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -154,44 +224,15 @@ impl Backend {
                 .cloned()
                 .collect();
 
-            for fqn in &candidates {
-                // Skip candidates that would conflict with an existing
-                // import (e.g. a different class with the same short name
-                // is already imported).
-                if use_import_conflicts(fqn, &file_use_map) {
-                    continue;
-                }
-
-                let edits = match build_use_edit(fqn, &use_block, &file_namespace) {
-                    Some(e) => e,
-                    // No edit needed (global class, no namespace) — skip.
-                    None => continue,
-                };
-
-                let title = format!("Import `{}`", fqn);
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: if matching_diagnostics.is_empty() {
-                        None
-                    } else {
-                        Some(matching_diagnostics.clone())
-                    },
-                    edit: Some(crate::code_actions::single_file_edit(
-                        doc_uri.clone(),
-                        edits,
-                    )),
-                    command: None,
-                    is_preferred: if candidates.len() == 1 {
-                        Some(true)
-                    } else {
-                        None
-                    },
-                    disabled: None,
-                    data: None,
-                }));
-            }
+            self.push_import_actions(
+                out,
+                &doc_uri,
+                &candidates,
+                &file_use_map,
+                &use_block,
+                &file_namespace,
+                Some(&matching_diagnostics),
+            );
 
             // Only process the first unresolved reference at the cursor.
             // Multiple overlapping references at the exact same position
@@ -235,6 +276,9 @@ impl Backend {
     ) {
         let affinity_table =
             crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         for span in &symbol_map.spans {
             if !span_matches_request(
                 span.start as usize,
@@ -250,7 +294,7 @@ impl Backend {
                     subject_text,
                     is_static: true,
                     ..
-                } => subject_text.as_str(content),
+                } => subject_text.as_str(source),
                 _ => continue,
             };
 
@@ -259,25 +303,7 @@ impl Backend {
                 continue;
             }
 
-            // Already imported?
-            if file_use_map.contains_key(subject) {
-                continue;
-            }
-
-            // Local class?
-            if local_classes.contains(subject) {
-                continue;
-            }
-
-            // Resolves via namespace?
-            if let Some(ns) = file_namespace {
-                let ns_qualified = format!("{}\\{}", ns, subject);
-                if self.find_or_load_class(&ns_qualified).is_some() {
-                    continue;
-                }
-            }
-
-            if file_namespace.is_none() && self.find_or_load_class(subject).is_some() {
+            if !self.class_name_needs_import(subject, file_use_map, local_classes, file_namespace) {
                 continue;
             }
 
@@ -293,42 +319,21 @@ impl Backend {
             // The span covers the whole `Foo::bar` expression. We only
             // want the subject part for the diagnostic range, but for
             // the code action the span range is fine.
-            let use_block = analyze_use_block(content);
+            let use_block = self.use_block_for(uri, content);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
             };
 
-            for fqn in &candidates {
-                if use_import_conflicts(fqn, file_use_map) {
-                    continue;
-                }
-
-                let edits = match build_use_edit(fqn, &use_block, file_namespace) {
-                    Some(e) => e,
-                    None => continue,
-                };
-
-                let title = format!("Import `{}`", fqn);
-
-                out.push(CodeActionOrCommand::CodeAction(CodeAction {
-                    title,
-                    kind: Some(CodeActionKind::QUICKFIX),
-                    diagnostics: None,
-                    edit: Some(crate::code_actions::single_file_edit(
-                        doc_uri.clone(),
-                        edits,
-                    )),
-                    command: None,
-                    is_preferred: if candidates.len() == 1 {
-                        Some(true)
-                    } else {
-                        None
-                    },
-                    disabled: None,
-                    data: None,
-                }));
-            }
+            self.push_import_actions(
+                out,
+                &doc_uri,
+                &candidates,
+                file_use_map,
+                &use_block,
+                file_namespace,
+                None,
+            );
 
             break;
         }
@@ -557,6 +562,10 @@ impl Backend {
             crate::text_position::position_to_byte_offset(content, params.range.start);
         let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
+        let Some(source) = symbol_map.source(content) else {
+            return false;
+        };
+
         for span in &symbol_map.spans {
             if span.start as usize >= request_end || span.end as usize <= request_start {
                 continue;
@@ -573,28 +582,21 @@ impl Backend {
                     is_static: true,
                     ..
                 } if {
-                    let s = subject_text.as_str(content);
+                    let s = subject_text.as_str(source);
                     !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
                 } =>
                 {
-                    subject_text.as_str(content)
+                    subject_text.as_str(source)
                 }
                 _ => continue,
             };
 
-            if file_use_map.contains_key(ref_name) {
-                continue;
-            }
-            if local_classes.contains(ref_name) {
-                continue;
-            }
-            if let Some(ns) = &file_namespace {
-                let ns_qualified = format!("{}\\{}", ns, ref_name);
-                if self.find_or_load_class(&ns_qualified).is_some() {
-                    continue;
-                }
-            }
-            if file_namespace.is_none() && self.find_or_load_class(ref_name).is_some() {
+            if !self.class_name_needs_import(
+                ref_name,
+                &file_use_map,
+                &local_classes,
+                &file_namespace,
+            ) {
                 continue;
             }
 
@@ -639,7 +641,7 @@ impl Backend {
             imported_short_names.insert(alias.to_lowercase(), fqn.clone());
         }
 
-        let use_block = analyze_use_block(content);
+        let use_block = self.use_block_for(&data.uri, content);
 
         // First pass: decide which FQN to import for each unresolved name.
         let mut chosen_fqns: Vec<String> = Vec::new();
@@ -753,6 +755,10 @@ impl Backend {
         // references that are import declarations themselves.
         let use_line_ranges = compute_use_line_ranges(content);
 
+        let Some(source) = symbol_map.source(content) else {
+            return Vec::new();
+        };
+
         let mut seen: HashSet<String> = HashSet::new();
         let mut unresolved: Vec<(String, ClassRefContext)> = Vec::new();
 
@@ -773,11 +779,11 @@ impl Backend {
                     is_static: true,
                     ..
                 } if {
-                    let s = subject_text.as_str(content);
+                    let s = subject_text.as_str(source);
                     !s.starts_with('$') && !s.contains('\\') && !is_class_keyword(s)
                 } =>
                 {
-                    (subject_text.as_str(content), ClassRefContext::Other)
+                    (subject_text.as_str(source), ClassRefContext::Other)
                 }
                 _ => continue,
             };
@@ -787,26 +793,12 @@ impl Backend {
                 continue;
             }
 
-            // Skip if already imported.
-            if file_use_map.contains_key(ref_name) {
-                continue;
-            }
-
-            // Skip local classes.
-            if local_classes.contains(ref_name) {
-                continue;
-            }
-
-            // Skip if resolvable via same-namespace lookup.
-            if let Some(ns) = &file_namespace {
-                let ns_qualified = format!("{}\\{}", ns, ref_name);
-                if self.find_or_load_class(&ns_qualified).is_some() {
-                    continue;
-                }
-            }
-
-            // Skip if global scope resolves it (and file has no namespace).
-            if file_namespace.is_none() && self.find_or_load_class(ref_name).is_some() {
+            if !self.class_name_needs_import(
+                ref_name,
+                &file_use_map,
+                &local_classes,
+                &file_namespace,
+            ) {
                 continue;
             }
 
@@ -816,54 +808,6 @@ impl Backend {
         unresolved.sort_by(|a, b| a.0.cmp(&b.0));
         unresolved
     }
-}
-
-/// Compute byte ranges `(start, end)` of top-level `use` statement lines.
-///
-/// This is used to skip `ClassReference` spans that fall on import
-/// declaration lines (they are the imports themselves, not usages).
-fn compute_use_line_ranges(content: &str) -> Vec<(u32, u32)> {
-    let mut ranges = Vec::new();
-    let mut offset: u32 = 0;
-    let mut brace_depth: u32 = 0;
-
-    // Iterate with `split_inclusive` so the terminator stays attached to
-    // each chunk. Advancing `offset` by the full chunk length keeps the
-    // byte ranges correct on CRLF files (where `str::lines()` would strip
-    // the `\r` and drift the offset by one byte per line).
-    for chunk in content.split_inclusive('\n') {
-        let line = chunk.trim_end_matches('\n').trim_end_matches('\r');
-        let trimmed = line.trim();
-        let line_start = offset;
-        let line_end = offset + line.len() as u32;
-
-        let depth_at_start = brace_depth;
-        for ch in trimmed.chars() {
-            match ch {
-                '{' => brace_depth += 1,
-                '}' => brace_depth = brace_depth.saturating_sub(1),
-                _ => {}
-            }
-        }
-
-        if depth_at_start == 0
-            && (trimmed.starts_with("use ") || trimmed.starts_with("use\t"))
-            && !trimmed.starts_with("use (")
-            && !trimmed.starts_with("use(")
-        {
-            ranges.push((line_start, line_end));
-        }
-
-        offset += chunk.len() as u32;
-    }
-
-    ranges
-}
-
-fn is_offset_in_ranges(offset: u32, ranges: &[(u32, u32)]) -> bool {
-    ranges
-        .iter()
-        .any(|(start, end)| offset >= *start && offset < *end)
 }
 
 #[cfg(test)]

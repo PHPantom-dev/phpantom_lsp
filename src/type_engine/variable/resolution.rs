@@ -126,33 +126,15 @@ fn var_query_key(
     )
 }
 
-/// RAII guard that clears [`VAR_TYPE_MEMO`] when the pass that installed
-/// it ends.  Nested activation is a no-op, so an inner pass cannot
-/// discard the entries an outer one is still relying on.
-pub(crate) struct VarTypeMemoGuard {
-    owns: bool,
-}
-
-impl Drop for VarTypeMemoGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            VAR_TYPE_MEMO.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the variable-type memo for the current thread.
+/// The guard [`with_var_type_memo`] hands back. Nested activation is a
+/// no-op, so an inner pass cannot discard the entries an outer one is
+/// still relying on.
+pub(crate) type VarTypeMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<VarQueryKey, Vec<ResolvedType>>>;
+
 pub(crate) fn with_var_type_memo() -> VarTypeMemoGuard {
-    let already_active = VAR_TYPE_MEMO.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return VarTypeMemoGuard { owns: false };
-    }
-    VAR_TYPE_MEMO.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    VarTypeMemoGuard { owns: true }
+    crate::type_engine::activate_memo(&VAR_TYPE_MEMO)
 }
 
 /// RAII guard for [`BUILDING_TOP_LEVEL_SCOPE`].
@@ -368,22 +350,17 @@ pub(crate) fn resolve_variable_types(
     let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
         let active_cache = crate::virtual_members::active_resolved_class_cache();
         let ctx = VarResolutionCtx {
-            var_name,
-            current_class,
-            all_classes,
-            content,
-            cursor_offset,
-            class_loader,
             backend,
             loaders,
             resolved_class_cache: active_cache,
-            enclosing_return_type: None,
-            top_level_scope: None,
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
-
-            scope_var_resolver: None,
-            scope_proofs: None,
+            ..VarResolutionCtx::new(
+                var_name,
+                current_class,
+                all_classes,
+                content,
+                cursor_offset,
+                class_loader,
+            )
         };
 
         resolve_variable_in_statements(program.statements.iter(), &ctx)
@@ -650,9 +627,10 @@ fn check_param_list(
         let docblock_type =
             docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
                 .or_else(|| {
-                    // Try extracting from docblock text directly.
-                    find_method_docblock_text(content, method_start_offset)
-                        .and_then(|doc| docblock::extract_param_raw_type(&doc, pname))
+                    content
+                        .get(..method_start_offset)
+                        .and_then(extract_preceding_docblock)
+                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
                 });
 
         let effective =
@@ -664,18 +642,6 @@ fn check_param_list(
         return native_type;
     }
     None
-}
-
-/// Extract the raw docblock text preceding a method/function.
-fn find_method_docblock_text(content: &str, method_start: usize) -> Option<String> {
-    let before = content.get(..method_start)?;
-    let trimmed = before.trim_end();
-    if !trimmed.ends_with("*/") {
-        return None;
-    }
-    let doc_end = trimmed.len();
-    let doc_start = trimmed.rfind("/**")?;
-    Some(trimmed[doc_start..doc_end].to_string())
 }
 
 /// Check if the cursor is on a catch variable binding and return its type.
@@ -819,21 +785,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
     let ctx_with_tls;
     let ctx: &VarResolutionCtx<'_> = if top_level_scope.is_some() && ctx.top_level_scope.is_none() {
         ctx_with_tls = VarResolutionCtx {
-            var_name: ctx.var_name,
-            current_class: ctx.current_class,
-            all_classes: ctx.all_classes,
-            content: ctx.content,
-            cursor_offset: ctx.cursor_offset,
-            class_loader: ctx.class_loader,
-            backend: ctx.backend,
-            loaders: ctx.loaders,
-            resolved_class_cache: ctx.resolved_class_cache,
-            enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope,
-            branch_aware: ctx.branch_aware,
-            match_arm_narrowing: ctx.match_arm_narrowing.clone(),
-            scope_var_resolver: ctx.scope_var_resolver,
-            scope_proofs: ctx.scope_proofs,
+            ..ctx.clone()
         };
         &ctx_with_tls
     } else {
@@ -2761,12 +2714,8 @@ fn try_resolve_static_method_params<'a>(
         _ => return None,
     };
 
-    let class_name = match static_call.class {
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        _ => return None,
-    };
+    let class_name =
+        crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)?;
 
     let cls = (ctx.class_loader)(&class_name)?;
     let method_info = cls.get_method(method_name)?;
@@ -2786,12 +2735,7 @@ fn try_resolve_constructor_params<'a>(
     &'a ArgumentList<'a>,
     OutParamCallee,
 )> {
-    let class_name = match inst.class {
-        Expression::Identifier(ident) => bytes_to_str(ident.value()).to_string(),
-        Expression::Self_(_) | Expression::Static(_) => ctx.current_class.name.to_string(),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string())?,
-        _ => return None,
-    };
+    let class_name = crate::class_lookup::class_expression_name(inst.class, ctx.current_class)?;
 
     let args = inst.argument_list.as_ref()?;
     let cls = (ctx.class_loader)(&class_name)?;

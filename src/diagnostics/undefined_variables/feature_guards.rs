@@ -24,23 +24,6 @@ use mago_syntax::walker::Walker;
 
 use crate::scope_collector::ScopeBody;
 
-/// Emit [`Walker`] overrides that stop traversal at nested variable
-/// scopes (closures, arrow functions, named function declarations) while
-/// still walking an anonymous class's constructor arguments, which belong
-/// to the enclosing scope.
-macro_rules! stop_at_inner_scopes {
-    ($ctx:ty) => {
-        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
-        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
-        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
-        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
-            if let Some(argument_list) = &node.argument_list {
-                self.walk_partial_argument_list(argument_list, context);
-            }
-        }
-    };
-}
-
 // ─── Dynamic variable / extract detection ───────────────────────────────────
 
 /// Returns `true` if the body contains variable variables (`$$x` or
@@ -95,16 +78,22 @@ impl<'ast, 'arena> Walker<'ast, 'arena, bool> for DynamicVariableWalker {
 
 /// Returns `true` if the body contains a call to `extract()`.
 pub(super) fn has_extract_call(body: ScopeBody<'_, '_>) -> bool {
+    has_named_call(body, b"extract")
+}
+
+/// Whether the body calls the function `name` anywhere outside a nested
+/// scope.
+fn has_named_call(body: ScopeBody<'_, '_>, name: &'static [u8]) -> bool {
     let mut found = false;
-    body.walk_with(&ExtractCallWalker, &mut found);
+    body.walk_with(&NamedCallWalker(name), &mut found);
     found
 }
 
-struct ExtractCallWalker;
+struct NamedCallWalker(&'static [u8]);
 
-impl<'ast, 'arena> Walker<'ast, 'arena, bool> for ExtractCallWalker {
+impl<'ast, 'arena> Walker<'ast, 'arena, bool> for NamedCallWalker {
     fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut bool) {
-        if is_named_call(node, b"extract") {
+        if is_named_call(node, self.0) {
             *context = true;
         }
     }
@@ -203,21 +192,7 @@ fn collect_compact_name_from_elem(elem: &ArrayElement<'_>, vars: &mut HashSet<St
 /// considered used (e.g. for debug dumps), so unused-variable diagnostics
 /// should be suppressed for them.
 pub(crate) fn has_get_defined_vars(body: ScopeBody<'_, '_>) -> bool {
-    let mut found = false;
-    body.walk_with(&GetDefinedVarsWalker, &mut found);
-    found
-}
-
-struct GetDefinedVarsWalker;
-
-impl<'ast, 'arena> Walker<'ast, 'arena, bool> for GetDefinedVarsWalker {
-    fn walk_in_function_call(&self, node: &'ast FunctionCall<'arena>, context: &mut bool) {
-        if is_named_call(node, b"get_defined_vars") {
-            *context = true;
-        }
-    }
-
-    stop_at_inner_scopes!(bool);
+    has_named_call(body, b"get_defined_vars")
 }
 
 // ─── include / require detection ────────────────────────────────────────────

@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::common::collect_diagnostics_with;
     use std::collections::HashMap;
 
     use phpantom_lsp::Backend;
@@ -16,12 +17,11 @@ mod tests {
     /// collect argument-count diagnostics.  Extra-arguments checking
     /// is **off** (the default).
     fn collect(php: &str) -> Vec<Diagnostic> {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_argument_count_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(
+            &Backend::new_test(),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        )
     }
 
     /// Like [`collect`] but with the `extra-arguments` diagnostic
@@ -29,11 +29,7 @@ mod tests {
     fn collect_extra(php: &str) -> Vec<Diagnostic> {
         let backend = Backend::new_test();
         enable_extra_args(&backend);
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_argument_count_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(&backend, php, Backend::collect_argument_count_diagnostics)
     }
 
     /// Minimal stub function index shared by stub-aware helpers.
@@ -80,13 +76,11 @@ mod tests {
     /// functions like `strlen` are resolvable.  Extra-arguments
     /// checking is **off** (the default).
     fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
-        let backend =
-            Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index(), HashMap::new());
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_argument_count_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(
+            &Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index(), HashMap::new()),
+            php,
+            Backend::collect_argument_count_diagnostics,
+        )
     }
 
     /// Like [`collect_with_stubs`] but with the `extra-arguments`
@@ -95,11 +89,7 @@ mod tests {
         let backend =
             Backend::new_test_with_all_stubs(HashMap::new(), stub_fn_index(), HashMap::new());
         enable_extra_args(&backend);
-        let uri = "file:///test.php";
-        backend.update_ast(uri, php);
-        let mut out = Vec::new();
-        backend.collect_argument_count_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(&backend, php, Backend::collect_argument_count_diagnostics)
     }
 
     // ── Too few arguments ───────────────────────────────────────────

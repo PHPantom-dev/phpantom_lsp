@@ -5,18 +5,10 @@
 //! the `WorkspaceEdit` that removes the property declaration, removes
 //! the assignment, and adds a visibility modifier to the parameter.
 
-use crate::common::{apply_workspace_edit, create_test_backend, get_code_actions_at};
+use crate::common::{
+    apply_workspace_edit, create_test_backend, find_action_titled, get_code_actions_at,
+};
 use tower_lsp::lsp_types::*;
-
-/// Find the "Promote to constructor property" code action from a list.
-fn find_promote_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title == "Promote to constructor property" => {
-            Some(ca)
-        }
-        _ => None,
-    })
-}
 
 // ── Basic promotion ─────────────────────────────────────────────────────────
 
@@ -36,7 +28,8 @@ class Foo {
 ";
     // Cursor on `$name` in the constructor parameter list (line 4, on "string $name").
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -68,7 +61,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -92,7 +86,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -118,7 +113,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -145,7 +141,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 5, 32);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -178,7 +175,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 9, 32);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -209,7 +207,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 7, 32);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -244,7 +243,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 5, 32);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -275,7 +275,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 6, 32);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -305,7 +306,7 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions);
+    let action = find_action_titled(&actions, "Promote to constructor property");
     assert!(action.is_none(), "should not offer for non-constructor");
 }
 
@@ -320,7 +321,7 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 2, 40);
-    let action = find_promote_action(&actions);
+    let action = find_action_titled(&actions, "Promote to constructor property");
     assert!(action.is_none(), "should not offer for already-promoted");
 }
 
@@ -337,7 +338,7 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 2, 35);
-    let action = find_promote_action(&actions);
+    let action = find_action_titled(&actions, "Promote to constructor property");
     assert!(
         action.is_none(),
         "should not offer when no matching property"
@@ -360,7 +361,7 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions);
+    let action = find_action_titled(&actions, "Promote to constructor property");
     assert!(
         action.is_none(),
         "should not offer when param used elsewhere"
@@ -382,7 +383,7 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions);
+    let action = find_action_titled(&actions, "Promote to constructor property");
     assert!(action.is_none(), "should not offer for static property");
 }
 
@@ -406,7 +407,8 @@ class Foo {
 ";
     // Cursor on `$age` parameter.
     let actions = get_code_actions_at(&backend, uri, content, 5, 50);
-    let action = find_promote_action(&actions).expect("should offer promote for $age");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote for $age");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     // $age should be promoted.
@@ -444,7 +446,8 @@ class User {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 6, 35);
-    let action = find_promote_action(&actions).expect("should work in namespace");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should work in namespace");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -470,7 +473,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should handle union types");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should handle union types");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -494,7 +498,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should handle nullable types");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should handle nullable types");
     let result = apply_workspace_edit(content, action.edit.as_ref().unwrap());
 
     assert!(
@@ -520,7 +525,8 @@ class Foo {
 }
 ";
     let actions = get_code_actions_at(&backend, uri, content, 4, 35);
-    let action = find_promote_action(&actions).expect("should offer promote action");
+    let action = find_action_titled(&actions, "Promote to constructor property")
+        .expect("should offer promote action");
     assert_eq!(
         action.kind,
         Some(CodeActionKind::new("refactor.rewrite")),

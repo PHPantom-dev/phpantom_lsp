@@ -2,37 +2,8 @@
 //! list-destructuring position picks, and what the key-reading builtins
 //! report for an array whose key type the caller established.
 
-use crate::common::create_test_backend_with_full_stubs;
-use phpantom_lsp::Backend;
+use crate::common::{create_test_backend_with_full_stubs, type_at_marker};
 use tower_lsp::lsp_types::*;
-
-/// The type reported for the variable right after a `/*NAME*/` marker.
-///
-/// The marker sits on a *use* of the variable rather than its assignment,
-/// so this reads the type the forward walker bound at that point — which is
-/// what a `foreach` key/value and a destructuring position produce.
-fn type_at_marker(backend: &Backend, uri: &str, content: &str, marker: &str) -> String {
-    let needle = format!("/*{marker}*/$");
-    let (line, character) = content
-        .lines()
-        .enumerate()
-        .find_map(|(i, l)| {
-            l.find(&needle)
-                .map(|c| (i as u32, (c + needle.len()) as u32))
-        })
-        .unwrap_or_else(|| panic!("marker {marker} not found in the fixture"));
-    let hover = backend
-        .handle_hover(uri, content, Position { line, character })
-        .unwrap_or_else(|| panic!("no hover at marker {marker}"));
-    let HoverContents::Markup(markup) = &hover.contents else {
-        panic!("Expected MarkupContent");
-    };
-    markup
-        .value
-        .lines()
-        .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
-        .unwrap_or_else(|| panic!("no type in hover at marker {marker}: {}", markup.value))
-}
 
 /// Assert the marked type of every `(marker, expected)` pair in one file.
 fn assert_marked_types(content: &str, expected: &[(&str, &str)]) {

@@ -15,7 +15,7 @@ use crate::code_actions::implement_methods::collect_missing_methods;
 use crate::symbol_map::SymbolKind;
 use crate::types::ClassLikeKind;
 
-use super::helpers::FileDiagnosticContext;
+use super::helpers::{FileDiagnosticContext, make_diagnostic};
 
 impl Backend {
     /// Collect implementation-error diagnostics for a single file.
@@ -129,17 +129,12 @@ impl Backend {
                 )
             };
 
-            out.push(Diagnostic {
+            out.push(make_diagnostic(
                 range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("missing_implementation".to_string())),
-                code_description: None,
-                source: Some("phpantom".to_string()),
+                DiagnosticSeverity::ERROR,
+                "missing_implementation",
                 message,
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+            ));
         }
     }
 }

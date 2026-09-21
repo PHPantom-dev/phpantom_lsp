@@ -9,14 +9,9 @@
 //! edit to an unrelated file must never override the project's real
 //! configuration.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{LARAVEL_SRC_COMPOSER, create_psr4_workspace, open_php_str};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-const COMPOSER_JSON: &str = r#"{
-    "require": { "laravel/framework": "^11.0" },
-    "autoload": { "psr-4": { "App\\": "src/" } }
-}"#;
 
 const PROVIDERS_PHP: &str = "<?php\nreturn [\n    App\\Providers\\AppServiceProvider::class,\n];\n";
 
@@ -43,10 +38,6 @@ class AppServiceProvider {
 }
 ";
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
-
 /// Read the configured date class the backend currently resolves to.
 ///
 /// `None` means discovery has not run; `Some(None)` means no project override
@@ -58,7 +49,7 @@ fn configured_date_class(backend: &phpantom_lsp::Backend) -> Option<Option<Strin
 #[tokio::test]
 async fn removing_date_use_from_provider_clears_configured_class() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -82,7 +73,7 @@ async fn removing_date_use_from_provider_clears_configured_class() {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, PROVIDER_WITHOUT_USE).await;
+    open_php_str(&backend, &provider_uri, PROVIDER_WITHOUT_USE).await;
 
     assert_eq!(
         configured_date_class(&backend),
@@ -94,7 +85,7 @@ async fn removing_date_use_from_provider_clears_configured_class() {
 #[tokio::test]
 async fn changing_date_use_in_provider_updates_configured_class() {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -126,7 +117,7 @@ class AppServiceProvider {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, changed).await;
+    open_php_str(&backend, &provider_uri, changed).await;
 
     assert_eq!(
         configured_date_class(&backend),
@@ -138,7 +129,7 @@ class AppServiceProvider {
 #[tokio::test]
 async fn date_use_in_unrelated_file_does_not_override() {
     let (backend, _dir) = create_psr4_workspace(
-        COMPOSER_JSON,
+        LARAVEL_SRC_COMPOSER,
         &[
             ("bootstrap/providers.php", PROVIDERS_PHP),
             (
@@ -167,7 +158,7 @@ class Helper {
     }
 }
 ";
-    open(&backend, "file:///src/Helper.php", unrelated).await;
+    open_php_str(&backend, "file:///src/Helper.php", unrelated).await;
 
     assert_eq!(
         configured_date_class(&backend),

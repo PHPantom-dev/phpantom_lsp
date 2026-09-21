@@ -1,274 +1,102 @@
 //! Mago lint and Mago analyze proxy diagnostics: schedule functions and
 //! background workers.
 
-use std::sync::Arc;
-use std::sync::atomic::Ordering;
-
-use tower_lsp::lsp_types::*;
+use std::path::Path;
 
 use crate::Backend;
+use crate::config::Config;
 use crate::mago;
+
+use super::ExternalToolRun;
+
+/// Resolve the Mago binary for one Mago command.
+///
+/// `service` picks the [`mago::MagoServices`] flag that decides whether
+/// the project uses this command at all, and `run` is the command itself.
+fn prepare_mago(
+    config: &Config,
+    workspace_root: &Path,
+    service: fn(&mago::MagoServices) -> bool,
+    run: mago::MagoFileRunner,
+) -> Option<ExternalToolRun> {
+    if config.mago.is_disabled() {
+        return None;
+    }
+
+    let composer_pkg = crate::composer::read_composer_package(workspace_root);
+    let laravel = composer_pkg
+        .as_ref()
+        .is_some_and(crate::composer::is_laravel_project);
+
+    // Mago requires mago.toml to operate, and its tables decide whether
+    // the project uses this command at all.
+    if !service(&mago::enabled_services(
+        workspace_root,
+        &config.mago,
+        laravel,
+    )) {
+        return None;
+    }
+
+    let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
+
+    let resolved = mago::resolve_mago(
+        Some(workspace_root),
+        &config.mago,
+        bin_dir.as_deref(),
+        composer_pkg.as_ref(),
+    )?;
+
+    let mago_config = config.mago.clone();
+    Some(Box::new(
+        move |content, file_path, workspace_root, cancelled| {
+            run(
+                &resolved,
+                content,
+                file_path,
+                workspace_root,
+                &mago_config,
+                cancelled,
+            )
+        },
+    ))
+}
 
 impl Backend {
     // ── Mago lint worker ────────────────────────────────────────────
 
     /// Schedule a Mago lint run for a single file.
-    ///
-    /// Only the most recent file is kept: if the user switches files or
-    /// saves rapidly, earlier requests are superseded.
     pub(crate) fn schedule_mago_lint(&self, uri: String) {
-        *self.mago_lint_tool.pending_uri.lock() = Some(uri);
-        self.mago_lint_tool.notify.notify_one();
+        Self::schedule_external_tool(&self.mago_lint_tool, uri);
     }
 
-    /// Long-lived background task that runs `mago lint` on pending files.
-    ///
-    /// Spawned once during `initialized`. This task is completely
-    /// independent: native diagnostics, PHPStan, PHPCS, and Mago
-    /// analyze are never blocked.
-    ///
-    /// At most one `mago lint` process runs at a time. The worker
-    /// loop follows the same pattern as the PHPCS worker.
+    /// Run `mago lint` on pending files.
+    /// See [`Backend::external_tool_worker`].
     pub(crate) async fn mago_lint_worker(&self) {
-        loop {
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // ── Step 1: wait for work ───────────────────────────────
-            self.mago_lint_tool.notify.notified().await;
-
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // Drain any extra stored permits.
-            let _ = tokio::time::timeout(
-                std::time::Duration::ZERO,
-                self.mago_lint_tool.notify.notified(),
-            )
-            .await;
-
-            // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_lint_tool.pending_uri.lock().take() {
-                Some(u) => u,
-                None => continue,
-            };
-
-            let content = {
-                let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
-                }
-            };
-
-            // ── Step 3: resolve Mago binary ─────────────────────────
-            let config = self.config();
-            if config.mago.is_disabled() {
-                continue;
-            }
-
-            let workspace_root = self.workspace.workspace_root.read().clone();
-            let workspace_root = match workspace_root {
-                Some(root) => root,
-                None => continue,
-            };
-
-            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
-            let laravel = composer_pkg
-                .as_ref()
-                .is_some_and(crate::composer::is_laravel_project);
-
-            // Mago requires mago.toml to operate, and its tables decide
-            // whether the project uses `mago lint` at all.
-            if !mago::enabled_services(&workspace_root, &config.mago, laravel).lint {
-                continue;
-            }
-
-            let file_path = match uri.parse::<Url>().ok().and_then(|u| u.to_file_path().ok()) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
-
-            let resolved = match mago::resolve_mago(
-                Some(&workspace_root),
-                &config.mago,
-                bin_dir.as_deref(),
-                composer_pkg.as_ref(),
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // ── Step 4: run mago lint (the slow part) ───────────────
-            let mago_config = config.mago.clone();
-            let shutdown_flag = Arc::clone(&self.shutdown_flag);
-            let mago_diags = {
-                let result = crate::server::run_blocking_cancel_safe("mago lint", move || {
-                    mago::run_mago_lint(
-                        &resolved,
-                        &content,
-                        &file_path,
-                        &workspace_root,
-                        &mago_config,
-                        &shutdown_flag,
-                    )
-                })
-                .await;
-
-                match result {
-                    Some(Ok(diags)) => diags,
-                    _ => continue,
-                }
-            };
-
-            // ── Step 5: cache results and re-publish ────────────────
-            {
-                let files = self.open_files.read();
-                if !files.contains_key(&uri) {
-                    continue;
-                }
-            }
-
-            self.mago_lint_tool.store_file_result(&uri, mago_diags);
-
-            // In pull mode this also tells the editor to re-pull, but
-            // only when the run actually changed the file's diagnostics.
-            self.assemble_and_refresh(&uri).await;
-        }
+        self.external_tool_worker(&self.mago_lint_tool, "mago lint", |config, root| {
+            prepare_mago(config, root, |services| services.lint, mago::run_mago_lint)
+        })
+        .await;
     }
 
     // ── Mago analyze worker ─────────────────────────────────────────
 
     /// Schedule a Mago analyze run for a single file.
-    ///
-    /// Only the most recent file is kept: if the user switches files or
-    /// saves rapidly, earlier requests are superseded.
     pub(crate) fn schedule_mago_analyze(&self, uri: String) {
-        *self.mago_analyze_tool.pending_uri.lock() = Some(uri);
-        self.mago_analyze_tool.notify.notify_one();
+        Self::schedule_external_tool(&self.mago_analyze_tool, uri);
     }
 
-    /// Long-lived background task that runs `mago analyze` on pending files.
-    ///
-    /// Spawned once during `initialized`. This task is completely
-    /// independent: native diagnostics, PHPStan, PHPCS, and Mago lint
-    /// are never blocked.
-    ///
-    /// At most one `mago analyze` process runs at a time. The worker
-    /// loop follows the same pattern as the PHPStan worker.
+    /// Run `mago analyze` on pending files.
+    /// See [`Backend::external_tool_worker`].
     pub(crate) async fn mago_analyze_worker(&self) {
-        loop {
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // ── Step 1: wait for work ───────────────────────────────
-            self.mago_analyze_tool.notify.notified().await;
-
-            if self.shutdown_flag.load(Ordering::Acquire) {
-                return;
-            }
-
-            // Drain any extra stored permits.
-            let _ = tokio::time::timeout(
-                std::time::Duration::ZERO,
-                self.mago_analyze_tool.notify.notified(),
+        self.external_tool_worker(&self.mago_analyze_tool, "mago analyze", |config, root| {
+            prepare_mago(
+                config,
+                root,
+                |services| services.analyze,
+                mago::run_mago_analyze,
             )
-            .await;
-
-            // ── Step 2: snapshot the pending URI ────────────────────
-            let uri = match self.mago_analyze_tool.pending_uri.lock().take() {
-                Some(u) => u,
-                None => continue,
-            };
-
-            let content = {
-                let files = self.open_files.read();
-                match files.get(&uri) {
-                    Some(c) => c.clone(),
-                    None => continue,
-                }
-            };
-
-            // ── Step 3: resolve Mago binary ─────────────────────────
-            let config = self.config();
-            if config.mago.is_disabled() {
-                continue;
-            }
-
-            let workspace_root = self.workspace.workspace_root.read().clone();
-            let workspace_root = match workspace_root {
-                Some(root) => root,
-                None => continue,
-            };
-
-            let composer_pkg = crate::composer::read_composer_package(&workspace_root);
-            let laravel = composer_pkg
-                .as_ref()
-                .is_some_and(crate::composer::is_laravel_project);
-
-            // Mago requires mago.toml to operate, and its tables decide
-            // whether the project uses `mago analyze` at all.
-            if !mago::enabled_services(&workspace_root, &config.mago, laravel).analyze {
-                continue;
-            }
-
-            let file_path = match uri.parse::<Url>().ok().and_then(|u| u.to_file_path().ok()) {
-                Some(p) => p,
-                None => continue,
-            };
-
-            let bin_dir: Option<String> = composer_pkg.as_ref().map(crate::composer::get_bin_dir);
-
-            let resolved = match mago::resolve_mago(
-                Some(&workspace_root),
-                &config.mago,
-                bin_dir.as_deref(),
-                composer_pkg.as_ref(),
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            // ── Step 4: run mago analyze (the slow part) ────────────
-            let mago_config = config.mago.clone();
-            let shutdown_flag = Arc::clone(&self.shutdown_flag);
-            let mago_diags = {
-                let result = crate::server::run_blocking_cancel_safe("mago analyze", move || {
-                    mago::run_mago_analyze(
-                        &resolved,
-                        &content,
-                        &file_path,
-                        &workspace_root,
-                        &mago_config,
-                        &shutdown_flag,
-                    )
-                })
-                .await;
-
-                match result {
-                    Some(Ok(diags)) => diags,
-                    _ => continue,
-                }
-            };
-
-            // ── Step 5: cache results and re-publish ────────────────
-            {
-                let files = self.open_files.read();
-                if !files.contains_key(&uri) {
-                    continue;
-                }
-            }
-
-            self.mago_analyze_tool.store_file_result(&uri, mago_diags);
-
-            // In pull mode this also tells the editor to re-pull, but
-            // only when the run actually changed the file's diagnostics.
-            self.assemble_and_refresh(&uri).await;
-        }
+        })
+        .await;
     }
 }

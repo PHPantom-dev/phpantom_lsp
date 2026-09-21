@@ -62,7 +62,24 @@ use crate::scope_collector::{
     collect_hook_scope_with_resolver, hook_body_span,
 };
 
-use super::helpers::make_diagnostic;
+use super::helpers::{SUPERGLOBALS, make_diagnostic};
+
+/// Emit [`mago_syntax::walker::Walker`] overrides that stop traversal at
+/// nested variable scopes (closures, arrow functions, named function
+/// declarations) while still walking an anonymous class's constructor
+/// arguments, which belong to the enclosing scope.
+macro_rules! stop_at_inner_scopes {
+    ($ctx:ty) => {
+        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
+        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
+        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
+        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
+            if let Some(argument_list) = &node.argument_list {
+                self.walk_partial_argument_list(argument_list, context);
+            }
+        }
+    };
+}
 
 mod feature_guards;
 mod offset_guards;
@@ -79,23 +96,6 @@ use offset_guards::{
 /// Diagnostic code used for undefined-variable diagnostics so that
 /// code actions can match on it.
 pub(crate) const UNKNOWN_VARIABLE_CODE: &str = "unknown_variable";
-
-/// PHP superglobals and auto-defined variables that are always in scope.
-const SUPERGLOBALS: &[&str] = &[
-    "$_GET",
-    "$_POST",
-    "$_SERVER",
-    "$_REQUEST",
-    "$_SESSION",
-    "$_COOKIE",
-    "$_FILES",
-    "$_ENV",
-    "$GLOBALS",
-    "$argc",
-    "$argv",
-    "$http_response_header",
-    "$php_errormsg",
-];
 
 impl Backend {
     /// Collect undefined-variable diagnostics for a single file.

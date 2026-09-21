@@ -17,10 +17,51 @@
 //! whitelist-first semantics would invert the meaning of an exclude
 //! list containing a `!` pattern.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use ignore::WalkBuilder;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+
+/// The `ignore` walk every workspace scan starts from: the repository's
+/// gitignore rules (its own, the global one, `.git/info/exclude`, parent
+/// directories, and ripgrep-style `.ignore` files) plus the two
+/// exclusions that hold regardless of what git ignores. `skip_dirs`
+/// (vendor trees scanned through `installed.json`, monorepo subproject
+/// roots another pipeline covers) are never entered, and `[indexing]
+/// exclude` matches are pruned through `filters`.
+///
+/// Dotfiles are skipped unless `include_dotfiles` is set, in which case
+/// `.git` itself is still pruned. Callers add further roots, set the
+/// thread count, or keep the walk serial as their scan needs.
+pub fn workspace_walk_builder(
+    root: &Path,
+    skip_dirs: Arc<Vec<PathBuf>>,
+    filters: Arc<IndexFilters>,
+    include_dotfiles: bool,
+) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .hidden(!include_dotfiles)
+        .parents(true)
+        .ignore(true)
+        .filter_entry(move |entry| {
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir {
+                if include_dotfiles && entry.file_name() == ".git" {
+                    return false;
+                }
+                if skip_dirs.iter().any(|dir| dir == entry.path()) {
+                    return false;
+                }
+            }
+            !filters.is_excluded_entry(entry.path(), is_dir)
+        });
+    builder
+}
 
 /// Compiled exclude matcher and extra-extension set for file discovery.
 pub struct IndexFilters {

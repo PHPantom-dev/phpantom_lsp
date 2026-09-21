@@ -70,7 +70,15 @@ impl Backend {
             let Ok(parsed_uri) = Url::parse(file_uri) else {
                 continue;
             };
-            let Some(content) = self.get_file_content_arc(file_uri) else {
+            // The rest of Find References reads a template as the virtual
+            // PHP its symbol map describes, and `try_translate_location`
+            // maps the results back; reading the template's own bytes here
+            // would slice every span against text the map knows nothing
+            // about.
+            let Some(content) = self.reference_file_content_arc(file_uri) else {
+                continue;
+            };
+            let Some(source) = symbol_map.source(&content) else {
                 continue;
             };
             let file_ctx = self.file_context(file_uri);
@@ -90,14 +98,14 @@ impl Backend {
                     continue;
                 }
 
-                let matches_macro = if subject_text.as_str(&content).contains('(') {
+                let matches_macro = if subject_text.as_str(source).contains('(') {
                     // Chained call receivers like `$query->pluck(...)->macroName()`
                     // are expensive to resolve precisely here and are the main
                     // real-world macro-registration rename case.
                     true
                 } else {
                     let subject_fqns = self.resolve_subject_to_fqns(
-                        subject_text.as_str(&content),
+                        subject_text.as_str(source),
                         *is_static,
                         &file_ctx,
                         span.start,
@@ -211,6 +219,20 @@ impl Backend {
         &self,
         queries: &[MemberDeclarationReferenceQuery],
     ) -> Vec<Vec<Location>> {
+        self.member_declaration_references_batch_in(queries, None)
+    }
+
+    /// The same search, optionally narrowed to `restrict_to`.
+    ///
+    /// An edit moves the accesses in the files it reparsed and leaves every
+    /// other file's alone, so a declaration whose locations are still cached
+    /// only has to be searched again in those files.  Passing `None` searches
+    /// every candidate file, which is what a first computation needs.
+    pub(crate) fn member_declaration_references_batch_in(
+        &self,
+        queries: &[MemberDeclarationReferenceQuery],
+        restrict_to: Option<&HashSet<Arc<str>>>,
+    ) -> Vec<Vec<Location>> {
         struct PreparedQuery {
             member: Atom,
             is_static: bool,
@@ -249,7 +271,10 @@ impl Backend {
         }
 
         let candidate_keys: Vec<_> = candidate_keys.into_iter().collect();
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        let mut snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        if let Some(files) = restrict_to {
+            snapshot.retain(|(uri, _)| files.contains(uri.as_str()));
+        }
         self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
         let scan_file = |file_uri: &str,
@@ -269,6 +294,9 @@ impl Backend {
                 return Vec::new();
             };
             let Some(content) = self.reference_file_content_arc(file_uri) else {
+                return Vec::new();
+            };
+            let Some(source) = symbol_map.source(&content) else {
                 return Vec::new();
             };
             let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
@@ -300,7 +328,7 @@ impl Backend {
                             else {
                                 return false;
                             };
-                            let subject = subject_text.as_str(&content).trim_start();
+                            let subject = subject_text.as_str(source).trim_start();
                             subject.starts_with('$') && !subject.starts_with("$this")
                         });
                         if needs_variable_scopes {
@@ -343,7 +371,7 @@ impl Backend {
                                 };
                                 let targets = self
                                     .resolve_subject_to_fqns(
-                                        subject_text.as_str(&content),
+                                        subject_text.as_str(source),
                                         *is_static,
                                         &file_ctx,
                                         span.start,
@@ -416,48 +444,17 @@ impl Backend {
                 }
             }
         } else {
-            let next = std::sync::atomic::AtomicUsize::new(0);
-            let thread_count = std::thread::available_parallelism()
-                .map(std::num::NonZeroUsize::get)
-                .unwrap_or(4)
-                .min(snapshot.len());
-            let worker_results = std::thread::scope(|scope| {
-                let mut handles = Vec::with_capacity(thread_count);
-                for _ in 0..thread_count {
-                    let next = &next;
-                    let snapshot = &snapshot;
-                    let scan_file = &scan_file;
-                    handles.push(
-                        std::thread::Builder::new()
-                            .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                            .spawn_scoped(scope, move || {
-                                let mut matches = Vec::new();
-                                loop {
-                                    let index =
-                                        next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    let Some((file_uri, symbol_map)) = snapshot.get(index) else {
-                                        break;
-                                    };
-                                    self.request_scan_file_done();
-                                    matches.extend(scan_file(file_uri, symbol_map));
-                                }
-                                matches
-                            })
-                            .expect("spawn member reference worker"),
-                    );
+            let worker_results =
+                crate::parallel::map_indexed("member-references", snapshot.len(), |_, index| {
+                    let (file_uri, symbol_map) = &snapshot[index];
+                    self.request_scan_file_done();
+                    let matches = scan_file(file_uri, symbol_map);
+                    (!matches.is_empty()).then_some(matches)
+                });
+            for (_, matches) in worker_results {
+                for (query_index, location) in matches {
+                    locations[query_index].push(location);
                 }
-                handles
-                    .into_iter()
-                    .flat_map(|handle| {
-                        handle.join().unwrap_or_else(|_| {
-                            tracing::error!("member reference worker panicked");
-                            Vec::new()
-                        })
-                    })
-                    .collect::<Vec<_>>()
-            });
-            for (query_index, location) in worker_results {
-                locations[query_index].push(location);
             }
         }
 
@@ -581,10 +578,13 @@ impl Backend {
                             let Some(ref content) = file_content else {
                                 break;
                             };
+                            let Some(source) = symbol_map.source(content) else {
+                                break;
+                            };
 
                             let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
                             let subject_fqns = self.resolve_subject_to_fqns(
-                                subject_text.as_str(content),
+                                subject_text.as_str(source),
                                 *is_static,
                                 ctx,
                                 span.start,
@@ -714,13 +714,7 @@ impl Backend {
             }
         }
 
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
+        super::sort_locations_for_references(&mut locations);
 
         locations
     }

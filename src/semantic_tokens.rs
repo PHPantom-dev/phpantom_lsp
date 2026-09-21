@@ -249,6 +249,10 @@ impl Backend {
         ctx: &crate::types::FileContext,
         mode: SemanticTokensMode,
     ) -> Vec<AbsoluteToken> {
+        let Some(source) = symbol_map.source(content) else {
+            return Vec::new();
+        };
+
         let mut tokens = Vec::with_capacity(symbol_map.spans.len());
 
         // Precompute line starts once: converting each span's byte offset to a
@@ -325,7 +329,7 @@ impl Backend {
                     // Verify the member exists on the resolved subject class
                     // and pick up deprecated/static modifiers from it.
                     match self.resolve_member_semantics(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         member_name,
                         *is_static,
                         *is_method_call,
@@ -906,166 +910,121 @@ impl Backend {
         TT_TYPE
     }
 
-    /// Scan Blade source for directives, echo delimiters, and comment
-    /// delimiters and emit semantic tokens in original Blade coordinates.
+    /// Scan Blade source for directives, echo delimiters, and comments and
+    /// emit semantic tokens in original Blade coordinates.
     ///
     /// Token type assignments:
     /// - Blade directives (`@if`, `@foreach`, etc.) → `keyword`
     /// - Echo delimiters (`{{ }}`, `{!! !!}`) → `keyword`
     /// - Comment blocks (`{{-- ... --}}`) → `comment` (entire span)
+    ///
+    /// The regions Blade itself does not compile (`{{-- --}}` comments,
+    /// `@verbatim` blocks, `@php` blocks) come from the same
+    /// [`inert_regions`] scan the directive-balance check and the `@props`
+    /// reader use, and a candidate `@` is read by the same
+    /// [`directive_head`] rule the formatter applies, so a `@@if` escape or
+    /// a `@{{ … }}` literal echo is coloured as the text it compiles to.
+    ///
+    /// [`inert_regions`]: crate::blade::signature::inert_regions
+    /// [`directive_head`]: crate::blade::directives::directive_head
     fn collect_blade_tokens(content: &str) -> Vec<AbsoluteToken> {
+        use crate::blade::directives::{DirectiveHead, directive_head, match_directive};
+        use crate::blade::signature::{InertOpener, echo_delimiters, inert_regions, is_echo_start};
+
+        let bytes = content.as_bytes();
+        let lines = crate::text_position::LineIndex::new(content);
         let mut tokens = Vec::new();
-        let mut in_comment = false;
-
-        for (line_idx, line) in content.lines().enumerate() {
-            let line_u32 = line_idx as u32;
-            let chars: Vec<char> = line.chars().collect();
-            let mut col = 0u32; // UTF-16 column
-            let mut i = 0usize;
-
-            // If we're inside a multi-line comment, mark the entire line
-            // as comment until we find --}}.
-            if in_comment {
-                if let Some(close_pos) = find_substr(&chars, 0, &['-', '-', '}', '}']) {
-                    // Comment ends on this line: mark from start to end of --}}
-                    let end_col = utf16_col_at(&chars, close_pos + 4);
+        // A token cannot span lines, so a range covering several is one
+        // token per line, each measured in UTF-16 units from its line start.
+        let mut push = |token_type: u32, range: std::ops::Range<usize>| {
+            let mut at = range.start;
+            for segment in content[range.clone()].split_inclusive('\n') {
+                let text = segment.trim_end_matches(['\n', '\r']);
+                if !text.is_empty() {
+                    let from = lines.position(at);
+                    let to = lines.position(at + text.len());
                     tokens.push(AbsoluteToken {
-                        line: line_u32,
-                        start_char: 0,
-                        length: end_col,
-                        token_type: TT_COMMENT,
+                        line: from.line,
+                        start_char: from.character,
+                        length: to.character - from.character,
+                        token_type,
                         modifiers: 0,
                     });
-                    in_comment = false;
-                    // Continue scanning the rest of the line after the comment.
-                    i = close_pos + 4;
-                    col = end_col;
-                } else {
-                    // Entire line is comment.
-                    let line_len: u32 = chars.iter().map(|c| c.len_utf16() as u32).sum();
-                    if line_len > 0 {
-                        tokens.push(AbsoluteToken {
-                            line: line_u32,
-                            start_char: 0,
-                            length: line_len,
-                            token_type: TT_COMMENT,
-                            modifiers: 0,
-                        });
-                    }
-                    continue;
                 }
+                at += segment.len();
+            }
+        };
+        let directive_at = |at: usize| match directive_head(content, bytes, at, bytes.len()) {
+            DirectiveHead::Named { name, name_end, .. } => (
+                match_directive(name).map(|d| at..at + 1 + d.len()),
+                name_end,
+            ),
+            DirectiveHead::None(end)
+            | DirectiveHead::Escaped(end)
+            | DirectiveHead::LiteralEcho(end) => (None, end),
+        };
+
+        let regions = inert_regions(content, true);
+        let mut regions = regions.iter().peekable();
+        let mut i = 0;
+        while i < bytes.len() {
+            while regions.peek().is_some_and(|region| region.span.end <= i) {
+                regions.next();
+            }
+            if let Some(region) = regions.peek()
+                && region.span.start <= i
+            {
+                if region.span.start == i {
+                    match region.opener {
+                        InertOpener::Comment => push(TT_COMMENT, region.span.clone()),
+                        // The directives fencing the region are Blade;
+                        // nothing between them is.
+                        InertOpener::Verbatim
+                        | InertOpener::PhpBlock
+                        | InertOpener::PhpStatement => {
+                            if let (Some(range), _) = directive_at(region.span.start) {
+                                push(TT_KEYWORD, range);
+                            }
+                            let closer = match region.opener {
+                                InertOpener::Verbatim => "@endverbatim".len(),
+                                InertOpener::PhpBlock => "@endphp".len(),
+                                _ => 0,
+                            };
+                            if region.terminated && closer > 0 {
+                                push(TT_KEYWORD, region.span.end - closer..region.span.end);
+                            }
+                        }
+                    }
+                }
+                i = region.span.end;
+                regions.next();
+                continue;
             }
 
-            while i < chars.len() {
-                let remaining = &chars[i..];
-
-                // {{-- comment start
-                if remaining.starts_with(&['{', '{', '-', '-']) {
-                    if let Some(close_pos) = find_substr(&chars, i + 4, &['-', '-', '}', '}']) {
-                        // Single-line comment: mark the entire {{-- ... --}} span.
-                        let end_col = utf16_col_at(&chars, close_pos + 4);
-                        tokens.push(AbsoluteToken {
-                            line: line_u32,
-                            start_char: col,
-                            length: end_col - col,
-                            token_type: TT_COMMENT,
-                            modifiers: 0,
-                        });
-                        i = close_pos + 4;
-                        col = end_col;
-                        continue;
-                    } else {
-                        // Multi-line comment starts here.
-                        let line_len: u32 = chars.iter().map(|c| c.len_utf16() as u32).sum();
-                        tokens.push(AbsoluteToken {
-                            line: line_u32,
-                            start_char: col,
-                            length: line_len - col,
-                            token_type: TT_COMMENT,
-                            modifiers: 0,
-                        });
-                        in_comment = true;
-                        break;
+            i = match bytes[i] {
+                b'{' if is_echo_start(bytes, i) => {
+                    let (open, _) = echo_delimiters(bytes, i);
+                    push(TT_KEYWORD, i..i + open.len());
+                    i + open.len()
+                }
+                b'}' if bytes[i..].starts_with(b"}}") && (i == 0 || bytes[i - 1] != b'}') => {
+                    let len = if bytes[i..].starts_with(b"}}}") { 3 } else { 2 };
+                    push(TT_KEYWORD, i..i + len);
+                    i + len
+                }
+                b'!' if bytes[i..].starts_with(b"!!}") => {
+                    push(TT_KEYWORD, i..i + 3);
+                    i + 3
+                }
+                b'@' => {
+                    let (range, end) = directive_at(i);
+                    if let Some(range) = range {
+                        push(TT_KEYWORD, range);
                     }
+                    end
                 }
-
-                // {!! raw echo !!}
-                if remaining.starts_with(&['{', '!', '!']) {
-                    tokens.push(AbsoluteToken {
-                        line: line_u32,
-                        start_char: col,
-                        length: 3,
-                        token_type: TT_KEYWORD,
-                        modifiers: 0,
-                    });
-                    i += 3;
-                    col += 3;
-                    continue;
-                }
-
-                // !!} closing raw echo
-                if remaining.starts_with(&['!', '!', '}']) {
-                    tokens.push(AbsoluteToken {
-                        line: line_u32,
-                        start_char: col,
-                        length: 3,
-                        token_type: TT_KEYWORD,
-                        modifiers: 0,
-                    });
-                    i += 3;
-                    col += 3;
-                    continue;
-                }
-
-                // {{ echo }} — but not {{{
-                if remaining.starts_with(&['{', '{']) && !remaining.starts_with(&['{', '{', '{']) {
-                    tokens.push(AbsoluteToken {
-                        line: line_u32,
-                        start_char: col,
-                        length: 2,
-                        token_type: TT_KEYWORD,
-                        modifiers: 0,
-                    });
-                    i += 2;
-                    col += 2;
-                    continue;
-                }
-
-                // }} closing echo — but not }}}
-                if remaining.starts_with(&['}', '}']) && (i == 0 || chars[i - 1] != '}') {
-                    tokens.push(AbsoluteToken {
-                        line: line_u32,
-                        start_char: col,
-                        length: 2,
-                        token_type: TT_KEYWORD,
-                        modifiers: 0,
-                    });
-                    i += 2;
-                    col += 2;
-                    continue;
-                }
-
-                // @directive
-                if chars[i] == '@' && i + 1 < chars.len() && chars[i + 1].is_alphabetic() {
-                    let rest: String = chars[i + 1..].iter().collect();
-                    if let Some(directive) = crate::blade::directives::match_directive(&rest) {
-                        let token_len = 1 + directive.len() as u32; // @ + directive name
-                        tokens.push(AbsoluteToken {
-                            line: line_u32,
-                            start_char: col,
-                            length: token_len,
-                            token_type: TT_KEYWORD,
-                            modifiers: 0,
-                        });
-                        i += token_len as usize;
-                        col += token_len;
-                        continue;
-                    }
-                }
-
-                col += chars[i].len_utf16() as u32;
-                i += 1;
-            }
+                _ => i + 1,
+            };
         }
 
         tokens
@@ -1170,24 +1129,6 @@ fn kind_to_token_type(kind: ClassLikeKind) -> u32 {
         ClassLikeKind::Trait => TT_TYPE,
         ClassLikeKind::Enum => TT_ENUM,
     }
-}
-
-/// Find a character subsequence starting from position `start` in a char slice.
-fn find_substr(chars: &[char], start: usize, needle: &[char]) -> Option<usize> {
-    if needle.is_empty() || start + needle.len() > chars.len() {
-        return None;
-    }
-    for i in start..=chars.len() - needle.len() {
-        if chars[i..i + needle.len()] == *needle {
-            return Some(i);
-        }
-    }
-    None
-}
-
-/// Compute the UTF-16 column of position `pos` in a char slice.
-fn utf16_col_at(chars: &[char], pos: usize) -> u32 {
-    chars[..pos].iter().map(|c| c.len_utf16() as u32).sum()
 }
 
 /// Convert a byte offset and byte length to an absolute line/character
@@ -1360,7 +1301,6 @@ fn split_comments_around_inner(tokens: &mut Vec<AbsoluteToken>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Config;
 
     #[test]
     fn legend_has_correct_type_count() {
@@ -1447,103 +1387,5 @@ mod tests {
         assert_eq!(kind_to_token_type(ClassLikeKind::Interface), TT_INTERFACE);
         assert_eq!(kind_to_token_type(ClassLikeKind::Enum), TT_ENUM);
         assert_eq!(kind_to_token_type(ClassLikeKind::Trait), TT_TYPE);
-    }
-
-    #[test]
-    fn test_blade_interpolation_alignment() {
-        let backend = Backend::new_test();
-        let mut config = Config::default();
-        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
-        backend.set_config(config);
-        let uri = "file:///test.blade.php";
-        // Blade: src="{{ \App\Library\MyImage::get('foo.png') }}"
-        // Index: 012345678
-        // \ is at col 8.
-        let content = r#"src="{{ \App\Library\MyImage::get('foo.png') }}""#;
-
-        backend.update_ast(uri, content);
-        let res = backend.handle_semantic_tokens_full(uri, content).unwrap();
-        let tokens = match res {
-            tower_lsp::lsp_types::SemanticTokensResult::Tokens(tokens) => tokens,
-            _ => panic!("Expected tokens"),
-        };
-
-        let mut line = 0u32;
-        let mut start_char = 0u32;
-        let mut found = None;
-
-        for tok in tokens.data {
-            if tok.delta_line > 0 {
-                line += tok.delta_line;
-                start_char = tok.delta_start;
-            } else {
-                start_char += tok.delta_start;
-            }
-
-            if tok.length == 20 {
-                // App\Library\MyImage
-                found = Some(AbsoluteToken {
-                    line,
-                    start_char,
-                    length: tok.length,
-                    token_type: tok.token_type,
-                    modifiers: tok.token_modifiers_bitset,
-                });
-                break;
-            }
-        }
-
-        let app_lib = found.expect("Should find App-Library token");
-        assert_eq!(app_lib.line, 0);
-        assert_eq!(app_lib.start_char, 8);
-    }
-
-    #[test]
-    fn test_blade_foreach_alignment() {
-        let backend = Backend::new_test();
-        let mut config = Config::default();
-        config.semantic_tokens.mode = Some(SemanticTokensMode::Full);
-        backend.set_config(config);
-        let uri = "file:///test.blade.php";
-        // Blade: @foreach ($items as $item)
-        // Col:    01234567890
-        // $items starts at 10.
-        let content = "@foreach ($items as $item)\n@endforeach";
-
-        backend.update_ast(uri, content);
-        let res = backend.handle_semantic_tokens_full(uri, content).unwrap();
-        let tokens = match res {
-            tower_lsp::lsp_types::SemanticTokensResult::Tokens(tokens) => tokens,
-            _ => panic!("Expected tokens"),
-        };
-
-        // Find $items (length 6)
-        let mut line = 0u32;
-        let mut start_char = 0u32;
-        let mut found = None;
-
-        for tok in tokens.data {
-            if tok.delta_line > 0 {
-                line += tok.delta_line;
-                start_char = tok.delta_start;
-            } else {
-                start_char += tok.delta_start;
-            }
-
-            if tok.length == 6 {
-                found = Some(AbsoluteToken {
-                    line,
-                    start_char,
-                    length: tok.length,
-                    token_type: tok.token_type,
-                    modifiers: tok.token_modifiers_bitset,
-                });
-                break;
-            }
-        }
-
-        let items_tok = found.expect("Should find $items token");
-        assert_eq!(items_tok.line, 0);
-        assert_eq!(items_tok.start_char, 10); // "@foreach (" is 10 chars
     }
 }

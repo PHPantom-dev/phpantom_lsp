@@ -216,15 +216,11 @@ impl Backend {
     /// Resolve how the workspace formats Blade templates, from
     /// `.phpantom.toml`, the root `composer.json`, and `pint.json`.
     pub(crate) fn resolve_blade_formatting_strategy(&self) -> BladeFormattingStrategy {
-        let config = self.config();
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        let composer_json = workspace_root
-            .as_deref()
-            .and_then(composer::read_composer_package);
-        let bin_dir = composer_json.as_ref().map(composer::get_bin_dir);
+        let inputs = self.formatting_inputs();
+        let (composer_json, bin_dir) = inputs.composer();
         resolve_blade_strategy(
-            workspace_root.as_deref(),
-            &config.formatting,
+            inputs.workspace_root.as_deref(),
+            &inputs.config.formatting,
             composer_json.as_ref(),
             bin_dir.as_deref(),
             self.php_version(),
@@ -241,14 +237,13 @@ impl Backend {
         options: &BladeFormatOptions,
         cancelled: &AtomicBool,
     ) -> Result<Option<String>, String> {
-        let config = self.config();
-        let workspace_root = self.workspace.workspace_root.read().clone();
+        let inputs = self.formatting_inputs();
         format_blade_content(
             strategy,
             content,
             file_path,
-            workspace_root.as_deref(),
-            &config.formatting,
+            inputs.workspace_root.as_deref(),
+            &inputs.config.formatting,
             options,
             cancelled,
         )

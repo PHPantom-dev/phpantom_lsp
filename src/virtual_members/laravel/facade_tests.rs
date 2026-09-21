@@ -137,7 +137,7 @@ fn cache_binding(key: &str, concrete: &str) -> crate::virtual_members::ResolvedC
         .container
         .insert(key.to_string(), concrete.to_string());
     let slot = crate::virtual_members::laravel::new_alias_slot();
-    *slot.write() = Some(Arc::new(aliases));
+    slot.publish_for_test(Arc::new(aliases));
 
     let cache = crate::virtual_members::new_resolved_class_cache();
     cache.write().set_laravel_aliases(slot);

@@ -217,7 +217,7 @@ impl Backend {
 
         let content_to_parse = self
             .record_blade_virtual_php(uri, content)
-            .unwrap_or_else(|| content.to_string());
+            .unwrap_or_else(|| Arc::new(content.to_string()));
 
         self.laravel_string_key_cache
             .write()
@@ -344,7 +344,7 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<String> {
+    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<Arc<String>> {
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -371,9 +371,10 @@ impl Backend {
         self.blade_source_maps
             .write()
             .insert(uri.to_string(), source_map);
+        let virtual_php = Arc::new(virtual_php);
         self.blade_virtual_content
             .write()
-            .insert(uri.to_string(), virtual_php.clone());
+            .insert(uri.to_string(), Arc::clone(&virtual_php));
         Some(virtual_php)
     }
 
@@ -400,7 +401,7 @@ impl Backend {
         } else {
             None
         };
-        let content = preprocessed.as_deref().unwrap_or(content);
+        let content = preprocessed.as_ref().map_or(content, |php| php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
@@ -558,22 +559,7 @@ impl Backend {
                                 Statement::Use(use_stmt) => {
                                     Self::extract_use_items(&use_stmt.items, &mut use_map);
                                 }
-                                Statement::Class(_)
-                                | Statement::Interface(_)
-                                | Statement::Trait(_)
-                                | Statement::Enum(_)
-                                // Class-likes declared inside conditional /
-                                // control-flow blocks (e.g. Doctrine's
-                                // `ServiceEntityRepository` version guard) —
-                                // the extractor descends into the bodies.
-                                | Statement::If(_)
-                                | Statement::Block(_)
-                                | Statement::Try(_)
-                                | Statement::Switch(_)
-                                | Statement::While(_)
-                                | Statement::DoWhile(_)
-                                | Statement::For(_)
-                                | Statement::Foreach(_) => {
+                                inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
                                         std::iter::once(inner),
                                         &mut block_classes,
@@ -608,21 +594,7 @@ impl Backend {
                             classes_with_ns.push((cls, block_ns.clone()));
                         }
                     }
-                    Statement::Class(_)
-                    | Statement::Interface(_)
-                    | Statement::Trait(_)
-                    | Statement::Enum(_)
-                    // Class-likes declared inside top-level conditional /
-                    // control-flow blocks — the extractor descends into the
-                    // bodies (and still collects anonymous classes within).
-                    | Statement::If(_)
-                    | Statement::Block(_)
-                    | Statement::Try(_)
-                    | Statement::Switch(_)
-                    | Statement::While(_)
-                    | Statement::DoWhile(_)
-                    | Statement::For(_)
-                    | Statement::Foreach(_) => {
+                    statement if Self::is_classlike_extraction_candidate(statement) => {
                         // A template whose `$this` is bound wraps its body
                         // in a method rather than a function, which buries
                         // the template's own imports just the same (see the
@@ -1378,6 +1350,12 @@ impl Backend {
             // property type that changed here. Rebuild those files lazily;
             // the edited file itself is evicted by reference reindexing below.
             self.clear_resolved_member_files();
+            // For the same reason an access in a file nothing touched can
+            // start belonging to a different declaration, which the
+            // per-file invalidation the reindex does cannot see.
+            if !self.member_ref_counts.is_empty() {
+                self.member_ref_counts.invalidate_locations_all();
+            }
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.

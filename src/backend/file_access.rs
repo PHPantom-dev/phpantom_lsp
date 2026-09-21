@@ -7,7 +7,6 @@
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
-use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -78,9 +77,13 @@ impl Backend {
     /// A template's symbol map and types describe the virtual PHP, so every
     /// feature that reads them has to read the same text, and answer in the
     /// template's coordinates through `src/blade/translate.rs` afterwards.
-    pub(crate) fn analysable_content(&self, uri: &str) -> Option<String> {
-        self.blade_virtual_php(uri)
-            .or_else(|| self.get_file_content(uri))
+    ///
+    /// Shared rather than copied: a template's virtual PHP is fetched on
+    /// every completion, hover, go-to-definition, code-action and
+    /// diagnostic request against it.
+    pub(crate) fn analysable_content(&self, uri: &str) -> Option<Arc<String>> {
+        self.blade_virtual_php_arc(uri)
+            .or_else(|| self.get_file_content_arc(uri))
     }
 
     /// [`Self::analysable_content`] with `position` carried into the text:
@@ -89,18 +92,24 @@ impl Backend {
         &self,
         uri: &str,
         position: Position,
-    ) -> Option<(String, Position)> {
-        match self.blade_virtual_php(uri) {
+    ) -> Option<(Arc<String>, Position)> {
+        match self.blade_virtual_php_arc(uri) {
             Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
-            None => Some((self.get_file_content(uri)?, position)),
+            None => Some((self.get_file_content_arc(uri)?, position)),
         }
     }
 
     /// [`Self::analysable_content`] for a caller that already holds the
     /// file's content and only needs a template swapped for its virtual PHP.
-    pub(crate) fn analysable_content_or<'a>(&self, uri: &str, content: &'a str) -> Cow<'a, str> {
-        self.blade_virtual_php(uri)
-            .map_or(Cow::Borrowed(content), Cow::Owned)
+    pub(crate) fn analysable_content_or<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> AnalysableContent<'a> {
+        match self.blade_virtual_php_arc(uri) {
+            Some(virtual_php) => AnalysableContent::Shared(virtual_php),
+            None => AnalysableContent::Borrowed(content),
+        }
     }
 
     /// Retrieve file content as a cheap `Arc<String>` reference when the
@@ -203,33 +212,13 @@ impl Backend {
     /// `file_context`.  In multi-namespace files it picks the correct
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
-        let classes = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let (first_namespace, namespace_spans) = self.namespace_and_spans(uri);
-        let namespace = match namespace_spans.as_ref() {
-            Some(_) => self.namespace_at_offset(uri, byte_offset),
-            None => first_namespace,
-        };
-        let resolved_names = self.resolved_names.read().get(uri).cloned();
-
-        FileContext {
-            classes,
-            use_map,
-            namespace,
-            namespace_spans,
-            resolved_names,
+        let mut ctx = self.file_context(uri);
+        // A file with only one namespace has nothing to pick between, so
+        // the namespace `file_context` already found stands.
+        if ctx.namespace_spans.is_some() {
+            ctx.namespace = self.namespace_at_offset(uri, byte_offset);
         }
+        ctx
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers
@@ -355,6 +344,20 @@ impl Backend {
         self.symbol_maps.read().get(uri).cloned()
     }
 
+    /// Pair a file's cached symbol map with `content`, for a caller that
+    /// needs to slice a span but does not hold the map itself.
+    ///
+    /// `None` when the file has never been parsed, or when the map was
+    /// extracted from different text than `content` — see
+    /// [`MappedSource`](crate::symbol_map::MappedSource).
+    pub(crate) fn symbol_map_source<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> Option<crate::symbol_map::MappedSource<'a>> {
+        self.symbol_maps.read().get(uri)?.source(content)
+    }
+
     /// Remove a file's entries from every per-URI map populated while it
     /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
@@ -377,11 +380,46 @@ impl Backend {
         // parse-error vector for every file ever opened (or deleted from
         // disk) stays resident for the whole session.
         self.parse_errors.write().remove(uri);
+        // A template's lowered PHP, source map, and injected variables are
+        // recorded for every indexed template, not just open ones, so a
+        // deleted or renamed template has to give them up here rather than
+        // only when the editor closes it.  Left behind, they stay in the
+        // template lists the Blade refresh passes enumerate.
+        self.blade_virtual_content.write().remove(uri);
+        self.blade_source_maps.write().remove(uri);
+        self.blade_uris.write().remove(uri);
+        self.blade_injected_vars.write().remove(uri);
+        // The config keys a file declares at runtime (`Config::set(...)`)
+        // are otherwise only refreshed when the file is re-parsed, which a
+        // deleted file never is.
+        self.laravel_runtime_config_keys.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+}
+
+/// The text a caller should analyse: either the buffer it already holds,
+/// or the shared virtual PHP a template lowers to.
+///
+/// Returned by [`Backend::analysable_content_or`] so that swapping a
+/// template for its virtual PHP costs an `Arc` bump rather than a copy of
+/// the whole lowered file. Deref to `&str` to read it.
+pub(crate) enum AnalysableContent<'a> {
+    Borrowed(&'a str),
+    Shared(Arc<String>),
+}
+
+impl std::ops::Deref for AnalysableContent<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            AnalysableContent::Borrowed(text) => text,
+            AnalysableContent::Shared(text) => text,
+        }
     }
 }
 

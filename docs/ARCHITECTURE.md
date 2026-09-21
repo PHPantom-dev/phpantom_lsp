@@ -46,8 +46,8 @@ sit next to.
 src/
 ├── lib.rs                  # Backend struct, state, module declarations, shared constants (PARSE_WORKER_STACK_SIZE, …)
 ├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
-├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …) + workspace init/indexing
-├── backend.rs, backend/    # Backend construction and file access
+├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
+├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
 ├── config.rs               # .phpantom.toml / workspace configuration
 │
 │   # Data model

@@ -104,7 +104,7 @@ pub(super) fn residual_warnings(
                      because nothing here resolves it to the symbol that moved.",
                     needle.text
                 ),
-                file: Some(super::relative_display(root, &hit.path)),
+                file: Some(super::run::relative_display(root, &hit.path)),
                 line: Some(hit.line),
             }
         })
@@ -173,7 +173,7 @@ fn collect_hits(
     declaration: Option<&Path>,
     plan: &MovePlan,
 ) -> Vec<Hit> {
-    use ignore::{WalkBuilder, WalkState};
+    use ignore::WalkState;
 
     let written: std::collections::HashMap<&Path, &str> = plan
         .writes
@@ -195,37 +195,22 @@ fn collect_hits(
         .collect();
     let bare_names = &bare_names;
 
+    // Unlike the PHP walkers, dotfiles are in scope: a committed
+    // `.env.example` or `.github/workflows/*.yml` naming the old path is
+    // exactly the kind of leftover this pass exists to find. `.gitignore`
+    // still keeps the untracked ones out.
     let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
-    let filters = backend.index_filters();
-    let mut builder = WalkBuilder::new(root);
-    builder
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        // Unlike the PHP walkers, dotfiles are in scope: a committed
-        // `.env.example` or `.github/workflows/*.yml` naming the old
-        // path is exactly the kind of leftover this pass exists to find.
-        // `.gitignore` still keeps the untracked ones out.
-        .hidden(false)
-        .parents(true)
-        .ignore(true)
-        .threads(
-            std::thread::available_parallelism()
-                .map(|n| n.get())
-                .unwrap_or(4),
-        )
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir {
-                if entry.file_name() == ".git" {
-                    return false;
-                }
-                if vendor_dirs.iter().any(|vendor| vendor == entry.path()) {
-                    return false;
-                }
-            }
-            !filters.is_excluded_entry(entry.path(), is_dir)
-        });
+    let mut builder = crate::classmap_scanner::workspace_walk_builder(
+        root,
+        std::sync::Arc::new(vendor_dirs),
+        backend.index_filters(),
+        true,
+    );
+    builder.threads(
+        std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or(4),
+    );
 
     let (tx, rx) = std::sync::mpsc::channel::<Hit>();
     let written = &written;

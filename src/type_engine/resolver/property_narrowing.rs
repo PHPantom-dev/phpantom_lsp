@@ -2,7 +2,6 @@
 /// narrowing to a `$this->prop` (or `$obj->prop`) resolution result by
 /// walking the enclosing method body from its start down to the cursor.
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::types::ClassInfo;
@@ -104,21 +103,17 @@ pub(crate) fn apply_property_narrowing(
         "apply_property_narrowing",
         |program, _content| {
             let ctx = VarResolutionCtx {
-                var_name: property_path,
-                current_class,
-                all_classes: rctx.all_classes,
-                content: rctx.content,
-                cursor_offset: rctx.cursor_offset,
-                class_loader: rctx.class_loader,
                 backend: rctx.backend,
                 loaders: Loaders::with_function(rctx.function_loader),
                 resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
-                enclosing_return_type: None,
-                top_level_scope: None,
-                branch_aware: false,
-                match_arm_narrowing: HashMap::new(),
-                scope_var_resolver: None,
-                scope_proofs: None,
+                ..VarResolutionCtx::new(
+                    property_path,
+                    current_class,
+                    rctx.all_classes,
+                    rctx.content,
+                    rctx.cursor_offset,
+                    rctx.class_loader,
+                )
             };
             walk_property_narrowing_in_statements(
                 program.statements.iter(),
@@ -329,48 +324,36 @@ fn walk_property_narrowing_stmts<'b>(
                     walk_property_narrowing_expr(value, ctx, results, floor, is_intersection);
                 }
             }
-            Statement::Foreach(foreach) => match &foreach.body {
-                ForeachBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
-                }
-                ForeachBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(
-                        body.statements.iter(),
-                        ctx,
-                        results,
-                        floor,
-                        is_intersection,
-                    );
-                }
-            },
-            Statement::While(while_stmt) => match &while_stmt.body {
-                WhileBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
-                }
-                WhileBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(
-                        body.statements.iter(),
-                        ctx,
-                        results,
-                        floor,
-                        is_intersection,
-                    );
-                }
-            },
-            Statement::For(for_stmt) => match &for_stmt.body {
-                ForBody::Statement(inner) => {
-                    walk_property_narrowing_stmt(inner, ctx, results, floor, is_intersection);
-                }
-                ForBody::ColonDelimited(body) => {
-                    walk_property_narrowing_stmts(
-                        body.statements.iter(),
-                        ctx,
-                        results,
-                        floor,
-                        is_intersection,
-                    );
-                }
-            },
+            // Every loop body reads the same either way it is spelled, so
+            // `statements()` covers both the single-statement and the
+            // `:`-delimited form.
+            Statement::Foreach(loop_stmt) => {
+                walk_property_narrowing_stmts(
+                    loop_stmt.body.statements().iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
+            }
+            Statement::While(loop_stmt) => {
+                walk_property_narrowing_stmts(
+                    loop_stmt.body.statements().iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
+            }
+            Statement::For(loop_stmt) => {
+                walk_property_narrowing_stmts(
+                    loop_stmt.body.statements().iter(),
+                    ctx,
+                    results,
+                    floor,
+                    is_intersection,
+                );
+            }
             Statement::DoWhile(dw) => {
                 walk_property_narrowing_stmt(dw.statement, ctx, results, floor, is_intersection);
             }
@@ -417,6 +400,18 @@ fn walk_property_narrowing_stmts<'b>(
     }
 }
 
+/// One branch of an `if` chain, as the property-narrowing walk reads it.
+struct NarrowingBranch<'a, 'ast> {
+    /// The condition that has to hold for this branch to run, or `None`
+    /// for the `else`, which runs when none of them do.
+    condition: Option<&'ast mago_syntax::cst::Expression<'ast>>,
+    /// The source range the branch covers, which is where a narrowing it
+    /// establishes applies.
+    span: mago_span::Span,
+    /// The statements the branch runs.
+    statements: &'a [mago_syntax::cst::Statement<'ast>],
+}
+
 /// Apply property-level narrowing inside an if / elseif / else chain.
 fn walk_property_narrowing_if<'b>(
     if_stmt: &'b mago_syntax::cst::If<'b>,
@@ -431,188 +426,145 @@ fn walk_property_narrowing_if<'b>(
 
     use crate::type_engine::types::narrowing;
 
-    let condition_is_stale = check_is_stale(if_stmt.condition, floor);
-
-    match &if_stmt.body {
+    // The two spellings of an `if` differ only in how each branch's
+    // statements and source range are found; once those are in hand the
+    // narrowing is the same, so both describe their branches the same way
+    // and hand them to `walk_narrowing_branches`.
+    let branches: Vec<NarrowingBranch<'_, 'b>> = match &if_stmt.body {
         IfBody::Statement(body) => {
-            // ── then-body narrowing ──
-            if !condition_is_stale {
-                narrowing::try_apply_instanceof_narrowing(
-                    if_stmt.condition,
-                    body.statement.span(),
-                    ctx,
-                    results,
-                )
-                .record(is_intersection);
-            }
-            walk_property_narrowing_stmt(body.statement, ctx, results, floor, is_intersection);
-
-            // ── elseif narrowing ──
-            for else_if in body.else_if_clauses.iter() {
-                if !check_is_stale(else_if.condition, floor) {
-                    narrowing::try_apply_instanceof_narrowing(
-                        else_if.condition,
-                        else_if.statement.span(),
-                        ctx,
-                        results,
-                    )
-                    .record(is_intersection);
-                }
-                walk_property_narrowing_stmt(
-                    else_if.statement,
-                    ctx,
-                    results,
-                    floor,
-                    is_intersection,
-                );
-            }
-
-            // ── else-body inverse narrowing ──
+            let mut branches = vec![NarrowingBranch {
+                condition: Some(if_stmt.condition),
+                span: body.statement.span(),
+                statements: std::slice::from_ref(body.statement),
+            }];
+            branches.extend(body.else_if_clauses.iter().map(|else_if| NarrowingBranch {
+                condition: Some(else_if.condition),
+                span: else_if.statement.span(),
+                statements: std::slice::from_ref(else_if.statement),
+            }));
             if let Some(else_clause) = &body.else_clause {
-                let else_span = else_clause.statement.span();
-                if !condition_is_stale {
-                    narrowing::try_apply_instanceof_narrowing_inverse(
-                        if_stmt.condition,
-                        else_span,
-                        ctx,
-                        results,
-                    )
-                    .record(is_intersection);
-                }
-                for else_if in body.else_if_clauses.iter() {
-                    if !check_is_stale(else_if.condition, floor) {
-                        narrowing::try_apply_instanceof_narrowing_inverse(
-                            else_if.condition,
-                            else_span,
-                            ctx,
-                            results,
-                        )
-                        .record(is_intersection);
-                    }
-                }
-                walk_property_narrowing_stmt(
-                    else_clause.statement,
-                    ctx,
-                    results,
-                    floor,
-                    is_intersection,
-                );
+                branches.push(NarrowingBranch {
+                    condition: None,
+                    span: else_clause.statement.span(),
+                    statements: std::slice::from_ref(else_clause.statement),
+                });
             }
+            branches
         }
         IfBody::ColonDelimited(body) => {
-            let then_end = if !body.else_if_clauses.is_empty() {
-                body.else_if_clauses
-                    .first()
-                    .unwrap()
-                    .elseif
-                    .span()
-                    .start
-                    .offset
+            // A `:`-delimited branch has no span of its own, so each one
+            // runs from its `:` to wherever the next keyword starts.
+            let then_end = if let Some(first) = body.else_if_clauses.first() {
+                first.elseif.span().start.offset
             } else if let Some(ref ec) = body.else_clause {
                 ec.r#else.span().start.offset
             } else {
                 body.endif.span().start.offset
             };
-            let then_span = mago_span::Span::new(
-                body.colon.file_id,
-                body.colon.start,
-                mago_span::Position::new(then_end),
-            );
-            if !condition_is_stale {
-                narrowing::try_apply_instanceof_narrowing(
-                    if_stmt.condition,
-                    then_span,
-                    ctx,
-                    results,
-                )
-                .record(is_intersection);
-            }
-            walk_property_narrowing_stmts(
-                body.statements.iter(),
-                ctx,
-                results,
-                floor,
-                is_intersection,
-            );
-
-            for else_if in body.else_if_clauses.iter() {
-                let ei_span = mago_span::Span::new(
-                    else_if.colon.file_id,
-                    else_if.colon.start,
-                    mago_span::Position::new(
-                        else_if
-                            .statements
-                            .span(else_if.colon.file_id, else_if.colon.end)
-                            .end
-                            .offset,
+            let mut branches = vec![NarrowingBranch {
+                condition: Some(if_stmt.condition),
+                span: mago_span::Span::new(
+                    body.colon.file_id,
+                    body.colon.start,
+                    mago_span::Position::new(then_end),
+                ),
+                statements: body.statements.as_slice(),
+            }];
+            branches.extend(body.else_if_clauses.iter().map(|else_if| {
+                NarrowingBranch {
+                    condition: Some(else_if.condition),
+                    span: mago_span::Span::new(
+                        else_if.colon.file_id,
+                        else_if.colon.start,
+                        mago_span::Position::new(
+                            else_if
+                                .statements
+                                .span(else_if.colon.file_id, else_if.colon.end)
+                                .end
+                                .offset,
+                        ),
                     ),
-                );
-                if !check_is_stale(else_if.condition, floor) {
-                    narrowing::try_apply_instanceof_narrowing(
-                        else_if.condition,
-                        ei_span,
-                        ctx,
-                        results,
-                    )
-                    .record(is_intersection);
+                    statements: else_if.statements.as_slice(),
                 }
-                walk_property_narrowing_stmts(
-                    else_if.statements.iter(),
-                    ctx,
-                    results,
-                    floor,
-                    is_intersection,
-                );
-            }
-
+            }));
             if let Some(else_clause) = &body.else_clause {
-                let else_span = mago_span::Span::new(
-                    else_clause.colon.file_id,
-                    else_clause.colon.start,
-                    mago_span::Position::new(
-                        else_clause
-                            .statements
-                            .span(else_clause.colon.file_id, else_clause.colon.end)
-                            .end
-                            .offset,
+                branches.push(NarrowingBranch {
+                    condition: None,
+                    span: mago_span::Span::new(
+                        else_clause.colon.file_id,
+                        else_clause.colon.start,
+                        mago_span::Position::new(
+                            else_clause
+                                .statements
+                                .span(else_clause.colon.file_id, else_clause.colon.end)
+                                .end
+                                .offset,
+                        ),
                     ),
-                );
-                if !condition_is_stale {
-                    narrowing::try_apply_instanceof_narrowing_inverse(
-                        if_stmt.condition,
-                        else_span,
-                        ctx,
-                        results,
-                    )
-                    .record(is_intersection);
-                }
-                for else_if in body.else_if_clauses.iter() {
-                    if !check_is_stale(else_if.condition, floor) {
-                        narrowing::try_apply_instanceof_narrowing_inverse(
-                            else_if.condition,
-                            else_span,
-                            ctx,
-                            results,
-                        )
-                        .record(is_intersection);
-                    }
-                }
-                walk_property_narrowing_stmts(
-                    else_clause.statements.iter(),
-                    ctx,
-                    results,
-                    floor,
-                    is_intersection,
-                );
+                    statements: else_clause.statements.as_slice(),
+                });
             }
+            branches
         }
-    }
+    };
+
+    walk_narrowing_branches(&branches, ctx, results, floor, is_intersection);
+
+    let condition_is_stale = check_is_stale(if_stmt.condition, floor);
 
     // ── Guard clause narrowing ──
     // When the then-body unconditionally exits and there are no
     // elseif / else branches, apply inverse narrowing after the if.
     if enclosing_stmt.span().end.offset < ctx.cursor_offset && !condition_is_stale {
         narrowing::apply_guard_clause_narrowing(if_stmt, ctx, results);
+    }
+}
+
+/// Narrow inside each branch of an `if` chain, then walk it.
+///
+/// A branch's own condition holds inside it; the `else` runs only when
+/// every condition above it was false, so each of those is applied
+/// inverted there. A condition written before the narrowing floor is
+/// stale — it describes a value that has since been reassigned — and
+/// proves nothing about the branch.
+fn walk_narrowing_branches(
+    branches: &[NarrowingBranch<'_, '_>],
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+    floor: Option<u32>,
+    is_intersection: &mut bool,
+) {
+    use crate::type_engine::types::narrowing;
+
+    for (index, branch) in branches.iter().enumerate() {
+        match branch.condition {
+            Some(condition) => {
+                if !check_is_stale(condition, floor) {
+                    narrowing::try_apply_instanceof_narrowing(condition, branch.span, ctx, results)
+                        .record(is_intersection);
+                }
+            }
+            None => {
+                for prior in branches[..index].iter().filter_map(|b| b.condition) {
+                    if !check_is_stale(prior, floor) {
+                        narrowing::try_apply_instanceof_narrowing_inverse(
+                            prior,
+                            branch.span,
+                            ctx,
+                            results,
+                        )
+                        .record(is_intersection);
+                    }
+                }
+            }
+        }
+        walk_property_narrowing_stmts(
+            branch.statements.iter(),
+            ctx,
+            results,
+            floor,
+            is_intersection,
+        );
     }
 }
 
@@ -713,10 +665,7 @@ fn walk_property_narrowing_expr<'b>(
                 Call::StaticMethod(sc) => &sc.argument_list,
             };
             for arg in args.arguments.iter() {
-                let arg_expr = match arg {
-                    Argument::Positional(a) => a.value,
-                    Argument::Named(a) => a.value,
-                };
+                let arg_expr = crate::type_engine::types::narrowing::argument_value(arg);
                 walk_property_narrowing_expr(arg_expr, ctx, results, floor, is_intersection);
             }
         }
@@ -793,37 +742,13 @@ fn scan_stmts_for_writes<'b>(
             }
             Statement::If(if_stmt) => {
                 scan_expr_for_writes(if_stmt.condition, subject, cursor, floor);
-                match &if_stmt.body {
-                    IfBody::Statement(body) => {
-                        scan_stmt_for_writes(body.statement, subject, cursor, floor);
-                        for else_if in body.else_if_clauses.iter() {
-                            scan_expr_for_writes(else_if.condition, subject, cursor, floor);
-                            scan_stmt_for_writes(else_if.statement, subject, cursor, floor);
-                        }
-                        if let Some(else_clause) = &body.else_clause {
-                            scan_stmt_for_writes(else_clause.statement, subject, cursor, floor);
-                        }
-                    }
-                    IfBody::ColonDelimited(body) => {
-                        scan_stmts_for_writes(body.statements.iter(), subject, cursor, floor);
-                        for else_if in body.else_if_clauses.iter() {
-                            scan_expr_for_writes(else_if.condition, subject, cursor, floor);
-                            scan_stmts_for_writes(
-                                else_if.statements.iter(),
-                                subject,
-                                cursor,
-                                floor,
-                            );
-                        }
-                        if let Some(else_clause) = &body.else_clause {
-                            scan_stmts_for_writes(
-                                else_clause.statements.iter(),
-                                subject,
-                                cursor,
-                                floor,
-                            );
-                        }
-                    }
+                scan_stmts_for_writes(if_stmt.body.statements().iter(), subject, cursor, floor);
+                for (condition, statements) in if_stmt.body.else_if_clauses() {
+                    scan_expr_for_writes(condition, subject, cursor, floor);
+                    scan_stmts_for_writes(statements.iter(), subject, cursor, floor);
+                }
+                if let Some(statements) = if_stmt.body.else_statements() {
+                    scan_stmts_for_writes(statements.iter(), subject, cursor, floor);
                 }
             }
             Statement::Block(block) => {
@@ -841,25 +766,11 @@ fn scan_stmts_for_writes<'b>(
                     }
                 }
                 scan_expr_for_writes(foreach.expression, subject, cursor, floor);
-                match &foreach.body {
-                    ForeachBody::Statement(inner) => {
-                        scan_stmt_for_writes(inner, subject, cursor, floor);
-                    }
-                    ForeachBody::ColonDelimited(body) => {
-                        scan_stmts_for_writes(body.statements.iter(), subject, cursor, floor);
-                    }
-                }
+                scan_stmts_for_writes(foreach.body.statements().iter(), subject, cursor, floor);
             }
             Statement::While(while_stmt) => {
                 scan_expr_for_writes(while_stmt.condition, subject, cursor, floor);
-                match &while_stmt.body {
-                    WhileBody::Statement(inner) => {
-                        scan_stmt_for_writes(inner, subject, cursor, floor);
-                    }
-                    WhileBody::ColonDelimited(body) => {
-                        scan_stmts_for_writes(body.statements.iter(), subject, cursor, floor);
-                    }
-                }
+                scan_stmts_for_writes(while_stmt.body.statements().iter(), subject, cursor, floor);
             }
             Statement::For(for_stmt) => {
                 for init in for_stmt.initializations.iter() {
@@ -871,14 +782,7 @@ fn scan_stmts_for_writes<'b>(
                 for increment in for_stmt.increments.iter() {
                     scan_expr_for_writes(increment, subject, cursor, floor);
                 }
-                match &for_stmt.body {
-                    ForBody::Statement(inner) => {
-                        scan_stmt_for_writes(inner, subject, cursor, floor);
-                    }
-                    ForBody::ColonDelimited(body) => {
-                        scan_stmts_for_writes(body.statements.iter(), subject, cursor, floor);
-                    }
-                }
+                scan_stmts_for_writes(for_stmt.body.statements().iter(), subject, cursor, floor);
             }
             Statement::DoWhile(dw) => {
                 scan_stmt_for_writes(dw.statement, subject, cursor, floor);
@@ -955,10 +859,7 @@ fn scan_expr_for_writes(
                 Call::StaticMethod(sc) => &sc.argument_list,
             };
             for arg in args.arguments.iter() {
-                let arg_expr = match arg {
-                    Argument::Positional(a) => a.value,
-                    Argument::Named(a) => a.value,
-                };
+                let arg_expr = crate::type_engine::types::narrowing::argument_value(arg);
                 scan_expr_for_writes(arg_expr, subject, cursor, floor);
             }
         }

@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::text_scan::unquote_php_string;
+
 /// Discover Laravel Blade view directories from `config/view.php`.
 ///
 /// Parses the `'paths'` array in the config file to extract directory
@@ -84,7 +86,7 @@ fn parse_view_config_paths(config_path: &Path, workspace_root: &Path) -> Vec<Pat
             if resolved.is_dir() {
                 result.push(resolved);
             }
-        } else if let Some(path) = extract_string_literal(trimmed) {
+        } else if let Some(path) = unquote_php_string(trimmed) {
             // Absolute or relative path literal.
             let resolved = if Path::new(path).is_absolute() {
                 PathBuf::from(path)
@@ -116,7 +118,7 @@ fn extract_view_path_arg(s: &str) -> Option<String> {
 
     if let Some(rest) = inner.strip_prefix("base_path(") {
         let arg = rest.strip_suffix(')')?.trim();
-        return extract_string_literal(arg).map(|p| p.to_string());
+        return unquote_php_string(arg).map(|p| p.to_string());
     }
 
     if let Some(rest) = inner.strip_prefix("resource_path(") {
@@ -124,20 +126,10 @@ fn extract_view_path_arg(s: &str) -> Option<String> {
         if arg.is_empty() {
             return Some("resources".to_string());
         }
-        return extract_string_literal(arg).map(|p| format!("resources/{p}"));
+        return unquote_php_string(arg).map(|p| format!("resources/{p}"));
     }
 
     None
-}
-
-/// Extract content from a single- or double-quoted PHP string literal.
-fn extract_string_literal(s: &str) -> Option<&str> {
-    let s = s.trim();
-    if (s.starts_with('\'') && s.ends_with('\'')) || (s.starts_with('"') && s.ends_with('"')) {
-        Some(&s[1..s.len() - 1])
-    } else {
-        None
-    }
 }
 
 #[cfg(test)]

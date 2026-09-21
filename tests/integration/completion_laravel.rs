@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, method_names, property_names};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -513,7 +513,8 @@ fn make_workspace(app_files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfil
     create_psr4_workspace(COMPOSER_JSON, &files)
 }
 
-/// Helper: open a file and trigger completion, returning the completion items.
+/// Helper: open a file of the workspace and trigger completion in it,
+/// returning the completion items.
 async fn complete_at(
     backend: &phpantom_lsp::Backend,
     dir: &tempfile::TempDir,
@@ -523,51 +524,7 @@ async fn complete_at(
     character: u32,
 ) -> Vec<CompletionItem> {
     let uri = Url::from_file_path(dir.path().join(relative_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    }
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
+    crate::common::complete_at(backend, &uri, content, line, character).await
 }
 
 // ─── HasMany relationship produces virtual property ─────────────────────────

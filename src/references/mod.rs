@@ -125,19 +125,15 @@ impl Backend {
     }
 
     pub(super) fn reference_file_content(&self, uri: &str) -> Option<String> {
-        if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
-        {
-            return Some(content.clone());
-        }
-        self.get_file_content(uri)
+        self.reference_file_content_arc(uri)
+            .map(|content| String::clone(&content))
     }
 
     pub(super) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
         if self.is_blade_file(uri)
-            && let Some(content) = self.blade_virtual_content.read().get(uri)
+            && let Some(content) = self.blade_virtual_php_arc(uri)
         {
-            return Some(Arc::new(content.clone()));
+            return Some(content);
         }
         self.get_file_content_arc(uri)
     }
@@ -216,7 +212,10 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
     name.eq_ignore_ascii_case("__construct")
 }
 
-fn sort_locations_for_references(locations: &mut Vec<Location>) {
+/// Put the locations a Find References answer carries into the order an
+/// editor lists them: by file, then by position within it, with exact
+/// duplicates collapsed.
+pub(crate) fn sort_locations_for_references(locations: &mut Vec<Location>) {
     locations.sort_by(|a, b| {
         a.uri
             .as_str()
@@ -362,32 +361,13 @@ fn visit_workspace_files_gitignore(
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
     mut visit: impl FnMut(&Path),
 ) {
-    use ignore::WalkBuilder;
-
-    let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
-    let filter_excludes = std::sync::Arc::clone(filters);
-
-    let walker = WalkBuilder::new(root)
-        // Respect .gitignore, .git/info/exclude, global gitignore
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        // Skip hidden files/dirs (.git, .idea, etc.)
-        .hidden(true)
-        // Read parent .gitignore files
-        .parents(true)
-        // Also respect .ignore files (ripgrep convention)
-        .ignore(true)
-        // Always skip vendor directories (even if not gitignored) and
-        // `[indexing] exclude` matches
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir && vendor_paths_owned.iter().any(|vp| vp == entry.path()) {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        })
-        .build();
+    let walker = crate::classmap_scanner::workspace_walk_builder(
+        root,
+        std::sync::Arc::new(vendor_dir_paths.to_vec()),
+        std::sync::Arc::clone(filters),
+        false,
+    )
+    .build();
 
     for entry in walker.flatten() {
         let path = entry.path();

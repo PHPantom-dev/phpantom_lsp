@@ -7,22 +7,11 @@
 //! or `?->`.
 
 use crate::common::{
-    create_test_backend, extract_edit_text, get_code_actions_at, lsp_pos_to_offset,
+    create_test_backend, extract_edit_text, find_actions, get_code_actions_at, lsp_pos_to_offset,
 };
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Find all "Simplify to …" code actions from a list of actions.
-fn find_simplify_actions(actions: &[CodeActionOrCommand]) -> Vec<&CodeAction> {
-    actions
-        .iter()
-        .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Simplify to ") => Some(ca),
-            _ => None,
-        })
-        .collect()
-}
 
 /// Extract the range being replaced from a code action's workspace edit.
 fn extract_edit_range(action: &CodeAction) -> Range {
@@ -46,7 +35,7 @@ $result = isset($x) ? $x : 'default';
 
     // Cursor on the `isset` keyword (line 1).
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1, "actions: {:?}", simplify);
     assert_eq!(simplify[0].title, "Simplify to ??");
@@ -63,7 +52,7 @@ $result = isset($data['key']) ? $data['key'] : null;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$data['key'] ?? null");
@@ -79,7 +68,7 @@ $result = isset($x) ? $y : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(
         simplify.is_empty(),
@@ -97,7 +86,7 @@ $result = isset($x, $y) ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(
         simplify.is_empty(),
@@ -117,7 +106,7 @@ $result = $x !== null ? $x : 'fallback';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ??");
@@ -134,7 +123,7 @@ $result = null !== $x ? $x : 'fallback';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'fallback'");
@@ -152,7 +141,7 @@ $result = $x === null ? 'default' : $x;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ??");
@@ -169,7 +158,7 @@ $result = null === $x ? 'default' : $x;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -187,7 +176,7 @@ $result = $x !== null ? $x->getName() : null;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ?->");
@@ -204,7 +193,7 @@ $result = $x !== null ? $x->name : null;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ?->");
@@ -222,7 +211,7 @@ $result = $x === null ? null : $x->getName();
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ?->");
@@ -241,7 +230,7 @@ $result = isset($x) ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(
@@ -260,7 +249,7 @@ $result = $x !== null ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].is_preferred, Some(true));
@@ -278,7 +267,7 @@ $result = isset($x) ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
     assert_eq!(simplify.len(), 1);
 
     let range = extract_edit_range(simplify[0]);
@@ -315,7 +304,7 @@ function foo($x) {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 14);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -335,7 +324,7 @@ class Foo {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 16);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -355,7 +344,7 @@ function foo($x) {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 14);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? null");
@@ -377,7 +366,7 @@ function foo($x) {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 20);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'fallback'");
@@ -397,7 +386,7 @@ function foo($items) {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 3, 20);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ?->");
@@ -416,7 +405,7 @@ $result = $x > 0 ? 'positive' : 'negative';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(simplify.is_empty(), "should not simplify unrelated ternary");
 }
@@ -431,7 +420,7 @@ $result = $x ?: 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(
         simplify.is_empty(),
@@ -451,7 +440,7 @@ $result = isset($x) ? $x : 'default';
 
     // Cursor on `$a = 1` (line 1), not on the ternary (line 2).
     let actions = get_code_actions_at(&backend, uri, content, 1, 2);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(
         simplify.is_empty(),
@@ -470,7 +459,7 @@ $result = $x !== null ? $y : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert!(
         simplify.is_empty(),
@@ -490,7 +479,7 @@ $result = ($x !== null) ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -506,7 +495,7 @@ $result = $x !== (null) ? $x : 'default';
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 12);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -529,7 +518,7 @@ class Foo {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 18);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$this->bar ?? 'default'");
@@ -550,7 +539,7 @@ class Foo {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 4, 18);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(simplify[0].title, "Simplify to ?->");
@@ -569,7 +558,7 @@ $name = $user !== null ? $user : $defaultUser;
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 10);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$user ?? $defaultUser");
@@ -587,7 +576,7 @@ foo(isset($x) ? $x : 'default');
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 1, 6);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'default'");
@@ -607,7 +596,7 @@ function foo($x) {
     backend.update_ast(uri, content);
 
     let actions = get_code_actions_at(&backend, uri, content, 2, 14);
-    let simplify = find_simplify_actions(&actions);
+    let simplify = find_actions(&actions, "Simplify to ");
 
     assert_eq!(simplify.len(), 1);
     assert_eq!(extract_edit_text(simplify[0]), "$x ?? 'none'");

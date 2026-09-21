@@ -2,16 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::common::{create_test_backend, get_code_actions_at};
+use crate::common::{create_test_backend, find_action_titled, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-/// Find the "Extract interface" code action from a list.
-fn find_extract_interface(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title == "Extract interface" => Some(ca),
-        _ => None,
-    })
-}
 
 #[test]
 fn offered_on_class_with_public_methods() {
@@ -37,7 +29,7 @@ class User
     // Cursor on the class body.
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 5, 4);
-    let action = find_extract_interface(&actions);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_some(), "Should offer Extract interface");
 }
 
@@ -55,7 +47,7 @@ interface UserInterface
 
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 3, 4);
-    let action = find_extract_interface(&actions);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_none(), "Should not offer on interfaces");
 }
 
@@ -73,7 +65,7 @@ class User
 
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 3, 4);
-    let action = find_extract_interface(&actions);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_none(), "Should not offer without public methods");
 }
 
@@ -101,7 +93,7 @@ class User
 
     backend.update_ast(uri, content);
     let actions = get_code_actions_at(&backend, uri, content, 5, 4);
-    let action = find_extract_interface(&actions).expect("should have action");
+    let action = find_action_titled(&actions, "Extract interface").expect("should have action");
 
     // Resolve the deferred action.
     backend

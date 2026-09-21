@@ -2512,10 +2512,12 @@ pub(super) fn resolve_rhs_static_call(
     );
 
     let class_name = match static_call.class {
-        Expression::Self_(_) => Some(current_class_name.to_string()),
-        Expression::Static(_) => Some(current_class_name.to_string()),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+        Expression::Self_(_)
+        | Expression::Static(_)
+        | Expression::Parent(_)
+        | Expression::Identifier(_) => {
+            crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)
+        }
         // ── `$var::method()` where `$var` holds a class-string ──
         Expression::Variable(Variable::Direct(dv)) => {
             let var_name = bytes_to_str(dv.name).to_string();

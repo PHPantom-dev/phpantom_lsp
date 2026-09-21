@@ -760,15 +760,18 @@ impl PhpType {
         TypeKind::Raw(text.into()).into()
     }
 
-    /// Union of two or more members.
+    /// Union of the members.
     ///
-    /// Repeated alternatives are dropped (and a union left with a single
-    /// alternative is unwrapped), because a union that names the same type
-    /// twice is never anything but noise in a hover or a diagnostic. No
-    /// other normalisation happens here — for `true|false` → `bool`,
-    /// subtype absorption, and nested-union flattening see
-    /// [`simplified`](PhpType::simplified).
+    /// A single member is returned as itself, and repeated alternatives
+    /// are dropped (unwrapping the union if one alternative is left),
+    /// because a union that names the same type twice is never anything
+    /// but noise in a hover or a diagnostic. No other normalisation
+    /// happens here — for `true|false` → `bool`, subtype absorption, and
+    /// nested-union flattening see [`simplified`](PhpType::simplified).
     pub fn union(mut members: Vec<PhpType>) -> PhpType {
+        if members.len() == 1 {
+            return members.pop().unwrap();
+        }
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
@@ -1690,60 +1693,7 @@ impl PhpType {
     /// - Unions/intersections of native types are preserved
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
-        match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.to_native_hint(),
-            TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-                native_scalar_name(s).map(|n| n.to_string())
-            }
-            TypeKind::Generic(g) => {
-                // Generic classes: strip the generic params.
-                // `array<K,V>` → `array`, `Collection<T>` → `Collection`
-                native_scalar_name(&g.name)
-                    .map(|n| n.to_string())
-                    .or_else(|| Some(g.name.to_string()))
-            }
-            TypeKind::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
-            TypeKind::Union(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None; // some members have no native form
-                }
-                // Deduplicate (e.g. `list<string>|array<int>` both → `array`)
-                let mut deduped = native;
-                deduped.sort();
-                deduped.dedup();
-                Some(deduped.join("|"))
-            }
-            TypeKind::Intersection(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None;
-                }
-                Some(native.join("&"))
-            }
-            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some("array".to_string()),
-            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some("string".to_string()),
-            TypeKind::IntRange(_, _) => Some("int".to_string()),
-            TypeKind::Literal(l) => Some(
-                match **l {
-                    LiteralValue::String(_) => "string",
-                    LiteralValue::Int(_) => "int",
-                    LiteralValue::Float(_) => "float",
-                }
-                .to_string(),
-            ),
-            TypeKind::ObjectShape(_) => Some("object".to_string()),
-            TypeKind::Callable(c) => Some(c.kind.to_string()),
-            // Conditionals, key-of, value-of, index-access, and raw
-            // types have no native form.
-            TypeKind::Conditional(_)
-            | TypeKind::KeyOf(_)
-            | TypeKind::ValueOf(_)
-            | TypeKind::IndexAccess(_, _)
-            | TypeKind::Raw(_) => None,
-        }
+        self.to_native_hint_typed().map(|ty| ty.to_string())
     }
 
     /// Like [`to_native_hint`] but returns a structured [`PhpType`] instead of a string,
@@ -2170,31 +2120,13 @@ impl PhpType {
     /// found.
     pub fn extract_shape_key_type(&self, key: &str) -> Option<PhpType> {
         match self.kind() {
-            TypeKind::ArrayShape(entries) => {
-                if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
-                    return if entry.optional {
-                        Some(PhpType::nullable(entry.value_type.clone()))
-                    } else {
-                        Some(entry.value_type.clone())
-                    };
+            TypeKind::ArrayShape(_) => self.shape_entry(key).map(|entry| {
+                if entry.optional {
+                    PhpType::nullable(entry.value_type.clone())
+                } else {
+                    entry.value_type.clone()
                 }
-                if let Ok(idx) = key.parse::<usize>() {
-                    let mut positional_idx = 0usize;
-                    for entry in entries {
-                        if entry.key.is_none() {
-                            if positional_idx == idx {
-                                return if entry.optional {
-                                    Some(PhpType::nullable(entry.value_type.clone()))
-                                } else {
-                                    Some(entry.value_type.clone())
-                                };
-                            }
-                            positional_idx += 1;
-                        }
-                    }
-                }
-                None
-            }
+            }),
             TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
             TypeKind::Union(members) => {
                 // Every alternative contributes its own entry: reading

@@ -747,3 +747,97 @@ fn execute_disabled_returns_none() {
     assert!(result.is_ok());
     assert!(result.unwrap().is_none());
 }
+
+// ── stdin tool producing empty output ────────────────────────────
+
+/// Writes an executable shell script standing in for a stdin-driven
+/// formatter (Pint) and returns its path.
+#[cfg(unix)]
+fn write_fake_tool(dir: &std::path::Path, name: &str, script_body: &str) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{}\n", script_body)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    path
+}
+
+#[cfg(unix)]
+#[test]
+fn run_external_pipeline_rejects_empty_stdout_for_nonempty_input() {
+    use super::ResolvedTool;
+    use super::external::run_external_pipeline;
+
+    let dir = tempfile::tempdir().unwrap();
+    // Exits successfully but prints nothing, e.g. a wrapper that formats
+    // in place instead of writing the result to stdout.
+    let tool_path = write_fake_tool(dir.path(), "fake-pint", "exit 0");
+    let file_path = dir.path().join("Example.php");
+
+    let result = run_external_pipeline(
+        &[ResolvedTool {
+            tool: Tool::Pint,
+            path: tool_path,
+        }],
+        "<?php\necho 'hello';\n",
+        &file_path,
+        None,
+        &FormattingConfig::default(),
+        &AtomicBool::new(false),
+    );
+
+    let err = result.expect_err("empty stdout for non-empty input must be rejected");
+    assert!(err.contains("pint"), "unexpected error: {err}");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_external_pipeline_allows_empty_stdout_for_empty_input() {
+    use super::ResolvedTool;
+    use super::external::run_external_pipeline;
+
+    let dir = tempfile::tempdir().unwrap();
+    let tool_path = write_fake_tool(dir.path(), "fake-pint", "exit 0");
+    let file_path = dir.path().join("Example.php");
+
+    let result = run_external_pipeline(
+        &[ResolvedTool {
+            tool: Tool::Pint,
+            path: tool_path,
+        }],
+        "",
+        &file_path,
+        None,
+        &FormattingConfig::default(),
+        &AtomicBool::new(false),
+    );
+
+    assert_eq!(result.unwrap(), "");
+}
+
+#[cfg(unix)]
+#[test]
+fn run_pint_on_blade_rejects_empty_stdout_for_nonempty_input() {
+    use super::ResolvedTool;
+    use super::external::run_pint_on_blade;
+
+    let dir = tempfile::tempdir().unwrap();
+    let tool_path = write_fake_tool(dir.path(), "fake-pint", "exit 0");
+    let file_path = dir.path().join("example.blade.php");
+
+    let result = run_pint_on_blade(
+        &ResolvedTool {
+            tool: Tool::Pint,
+            path: tool_path,
+        },
+        "<div>{{ $hello }}</div>\n",
+        &file_path,
+        None,
+        true,
+        &FormattingConfig::default(),
+        &AtomicBool::new(false),
+    );
+
+    let err = result.expect_err("empty stdout for non-empty input must be rejected");
+    assert!(err.contains("pint"), "unexpected error: {err}");
+}

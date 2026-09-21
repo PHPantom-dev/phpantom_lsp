@@ -427,6 +427,36 @@ pub(super) enum HoverMemberHit {
 }
 
 impl Backend {
+    /// Close out a member's hover: append the rendered declaration and,
+    /// when the class's provenance is known (a vendor package, a stub),
+    /// a line naming it, then join everything into one `Hover`.
+    ///
+    /// Shared by [`hover_for_method`](Self::hover_for_method),
+    /// [`hover_for_property`](Self::hover_for_property), and
+    /// [`hover_for_constant`](Self::hover_for_constant), which differ only
+    /// in what they push onto `lines` before reaching this tail.
+    fn finish_member_hover(
+        &self,
+        owner: &ClassInfo,
+        member_line: &str,
+        mut lines: Vec<String>,
+    ) -> Hover {
+        let code = build_class_member_block(
+            &owner.name,
+            owner.file_namespace.as_deref(),
+            owner_kind_keyword(owner),
+            &owner_name_suffix(owner),
+            member_line,
+        );
+        lines.push(code);
+
+        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
+            lines.push(prov);
+        }
+
+        make_hover(lines.join("\n\n"))
+    }
+
     /// Search `class` for a member matching `member_name`.
     ///
     /// When `is_method_call` is true, only methods are considered.
@@ -572,20 +602,7 @@ impl Backend {
             lines.push(section);
         }
 
-        let code = build_class_member_block(
-            &owner.name,
-            owner.file_namespace.as_deref(),
-            owner_kind_keyword(owner),
-            &owner_name_suffix(owner),
-            &member_line,
-        );
-        lines.push(code);
-
-        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
-            lines.push(prov);
-        }
-
-        make_hover(lines.join("\n\n"))
+        self.finish_member_hover(owner, &member_line, lines)
     }
 
     /// Build hover content for a property.
@@ -658,20 +675,7 @@ impl Backend {
             lines.push(format_deprecation_line(msg));
         }
 
-        let code = build_class_member_block(
-            &owner.name,
-            owner.file_namespace.as_deref(),
-            owner_kind_keyword(owner),
-            &owner_name_suffix(owner),
-            &member_line,
-        );
-        lines.push(code);
-
-        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
-            lines.push(prov);
-        }
-
-        make_hover(lines.join("\n\n"))
+        self.finish_member_hover(owner, &member_line, lines)
     }
 
     /// Build hover content for a class constant.
@@ -728,19 +732,6 @@ impl Backend {
         }
 
         // Constants don't have a native vs effective type split, so no doc annotation.
-        let code = build_class_member_block(
-            &owner.name,
-            owner.file_namespace.as_deref(),
-            owner_kind_keyword(owner),
-            &owner_name_suffix(owner),
-            &member_line,
-        );
-        lines.push(code);
-
-        if let Some(prov) = self.provenance_line_for_class(&owner.fqn()) {
-            lines.push(prov);
-        }
-
-        make_hover(lines.join("\n\n"))
+        self.finish_member_hover(owner, &member_line, lines)
     }
 }

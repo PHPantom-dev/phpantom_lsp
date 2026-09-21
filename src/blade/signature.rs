@@ -32,6 +32,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::php_type::PhpType;
+use crate::text_scan::{ScanStep, find_matching_forward_bytes, scan_top_level};
 
 use super::call_site_inference::string_literal_contents;
 
@@ -148,15 +149,7 @@ fn extends_first_candidates(masked: &str, content: &str) -> Option<Vec<String>> 
 
 /// The contents of the plain string literal an argument list starts with.
 pub(crate) fn leading_string_literal(args: &str) -> Option<String> {
-    let args = args.trim_start();
-    let quote = args.chars().next().filter(|ch| *ch == '\'' || *ch == '"')?;
-    let rest = &args[quote.len_utf8()..];
-    let value = &rest[..rest.find(quote)?];
-    // A double-quoted argument that interpolates is a dynamic name.
-    if quote == '"' && value.contains(['$', '{']) {
-        return None;
-    }
-    Some(value.to_string())
+    crate::blade::plain_string_literal(args.trim_start()).map(str::to_string)
 }
 
 /// Whether the template declares its own contract, and so manages its own
@@ -294,6 +287,22 @@ pub(crate) enum InertOpener {
     PhpBlock,
     /// `@php(…)`, which closes on its own parenthesis.
     PhpStatement,
+}
+
+/// Whether an echo (`{{ … }}`, `{{{ … }}}`, or `{!! … !!}`) opens at `at`.
+pub(crate) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
+    bytes[at..].starts_with(b"{{") || bytes[at..].starts_with(b"{!!")
+}
+
+/// The opening and closing delimiters of the echo at `at`.
+pub(crate) fn echo_delimiters(bytes: &[u8], at: usize) -> (&'static str, &'static str) {
+    if bytes[at..].starts_with(b"{{{") {
+        ("{{{", "}}}")
+    } else if bytes[at..].starts_with(b"{!!") {
+        ("{!!", "!!}")
+    } else {
+        ("{{", "}}")
+    }
 }
 
 /// Every region Blade excludes from directive processing: `{{-- … --}}`
@@ -606,74 +615,38 @@ fn find_directive_args(masked: &str, directive: &str) -> Option<std::ops::Range<
     None
 }
 
-/// The offset of the `)` matching the `(` at `open`, or `None` when the
-/// argument list is unterminated.
+/// The offset of the `)` (or `]`) matching the `(` (or `[`) at `open`, or
+/// `None` when the argument list is unterminated.
+///
+/// String literals and PHP comments are skipped whole, so a bracket
+/// written inside either (`@props(['a' => 1, // trailing )`) closes
+/// nothing.
 pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
-    let mut i = open;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'(' | b'[' => depth += 1,
-                b')' | b']' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(i);
-                    }
-                }
-                _ => {}
-            },
-        }
-        i += 1;
-    }
-    None
+    let close = match bytes.get(open)? {
+        b'(' => b')',
+        b'[' => b']',
+        _ => return None,
+    };
+    find_matching_forward_bytes(bytes, open, bytes[open], close)
 }
 
 /// Split a directive's argument text at its top-level commas, ignoring the
-/// ones inside nested calls, arrays, and string literals.
+/// ones inside nested calls, arrays, string literals, and comments.
 pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
     let bytes = args.as_bytes();
     let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
     let mut start = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'(' | b'[' | b'{' => depth += 1,
-                b')' | b']' | b'}' => depth -= 1,
-                b',' if depth == 0 => {
-                    parts.push(&args[start..i]);
-                    start = i + 1;
-                }
-                _ => {}
-            },
+    // Each pass restarts at depth zero just past a top-level comma, which
+    // is outside every string, comment and bracket by construction.
+    while let Some(at) = scan_top_level(&bytes[start..], |bytes, i| {
+        if bytes[i] == b',' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        i += 1;
+    }) {
+        parts.push(&args[start..start + at]);
+        start += at + 1;
     }
     parts.push(&args[start..]);
     parts
@@ -980,6 +953,46 @@ mod tests {
     fn props_span_a_bracket_inside_a_string_default() {
         assert_eq!(
             props("@props(['a' => ']', 'b' => 2])")
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn props_span_a_bracket_inside_a_comment() {
+        // A "]" or ")" written in a PHP comment closes nothing, so the
+        // scan must run past it to the real end of the argument list.
+        assert_eq!(
+            props("@props([\n    'a' => 1, // trailing )\n    'b' => 2, # and ]\n    /* and ) */\n    'c' => 3,\n])\n")
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    /// A comma inside a comment ends nothing, so the argument after it is
+    /// still the one the caller asked for by index.
+    #[test]
+    fn arguments_do_not_split_at_a_comma_inside_a_comment() {
+        assert_eq!(
+            split_top_level_args("'view', // one, two\n['a' => 1]"),
+            vec!["'view'", " // one, two\n['a' => 1]"]
+        );
+        assert_eq!(
+            split_top_level_args("'view' /* one, two */, ['a' => 1]"),
+            vec!["'view' /* one, two */", " ['a' => 1]"]
+        );
+    }
+
+    /// `#[` opens a PHP attribute, not a comment, so the scan must keep
+    /// counting brackets through it.
+    #[test]
+    fn props_span_an_attribute_rather_than_reading_it_as_a_comment() {
+        assert_eq!(
+            props("@props(['a' => foo(#[Pure] fn () => 1), 'b' => 2])")
                 .iter()
                 .map(|(n, _)| n.as_str())
                 .collect::<Vec<_>>(),

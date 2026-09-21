@@ -107,7 +107,9 @@ pub(crate) fn component_tag_names(
     view_names: &[String],
     anonymous: &[AnonymousNamespace],
 ) -> Vec<String> {
-    let mut tags = Vec::new();
+    // Every view name in the project reaches this, so the seen set is
+    // kept beside the ordered list rather than scanning it per tag.
+    let mut tags = TagList::default();
     for name in view_names {
         if let Some(tag) = component_tag_for_view_name(name) {
             push_tag(tag, &mut tags);
@@ -126,7 +128,23 @@ pub(crate) fn component_tag_names(
             );
         }
     }
-    tags
+    tags.tags
+}
+
+/// The tags collected so far, in the order they were found, with the set
+/// that answers "already collected?" without walking them.
+#[derive(Default)]
+struct TagList {
+    tags: Vec<String>,
+    seen: std::collections::HashSet<String>,
+}
+
+impl TagList {
+    fn push(&mut self, tag: String) {
+        if self.seen.insert(tag.clone()) {
+            self.tags.push(tag);
+        }
+    }
 }
 
 /// Add a tag and, for the view of an index component, the shorter tag it
@@ -135,15 +153,11 @@ pub(crate) fn component_tag_names(
 /// Laravel falls back to `{view}.index` and to `{view}.{last segment}` when
 /// a component's own view name does not exist, so `components.card.index`
 /// and `components.card.card` are both what `<x-card>` reaches.
-fn push_tag(tag: String, tags: &mut Vec<String>) {
-    if let Some(shorter) = index_component_tag(&tag)
-        && !tags.contains(&shorter)
-    {
+fn push_tag(tag: String, tags: &mut TagList) {
+    if let Some(shorter) = index_component_tag(&tag) {
         tags.push(shorter);
     }
-    if !tags.contains(&tag) {
-        tags.push(tag);
-    }
+    tags.push(tag);
 }
 
 /// The tag an index component's view name is *also* addressable by:
