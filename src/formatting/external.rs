@@ -70,12 +70,14 @@ impl Tool {
             //  32 = fixer configuration error
             //  64 = exception
             Tool::PhpCsFixer => code == 0,
-            // phpcbf exit codes:
-            //   0 = no fixes needed
-            //   1 = fixes applied (success)
-            //   2 = could not fix all errors
-            //   3+ = operational error
-            Tool::Phpcbf => matches!(code, 0 | 1),
+            // phpcbf exit codes (bitmask):
+            //   0 = no issues
+            //   1 = auto-fixable issues found (and fixed)
+            //   2 = non-fixable issues found
+            //   4 = fixer conflict (file failed to fix)
+            //  16 = processing error
+            //  64 = requirements not met
+            Tool::Phpcbf => code >= 0 && code & (16 | 64) == 0,
         }
     }
 }
