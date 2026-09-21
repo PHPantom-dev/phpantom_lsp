@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790033262131,
+  "lastUpdate": 1790034617255,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28457,6 +28457,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4d2abe8e843d7c4406bc208437e3872cfa03f5f2",
+          "message": "An external formatter (Pint, php-cs-fixer) that prints nothing on stdout\nno longer empties the file",
+          "timestamp": "2026-09-22T01:32:53+02:00",
+          "tree_id": "3db337cc94cd41edfd1270950bdad897243e930a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4d2abe8e843d7c4406bc208437e3872cfa03f5f2"
+        },
+        "date": 1790034609646,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 73.1,
             "unit": "MiB"
           }
         ]
