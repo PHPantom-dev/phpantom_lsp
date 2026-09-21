@@ -1350,6 +1350,12 @@ impl Backend {
             // property type that changed here. Rebuild those files lazily;
             // the edited file itself is evicted by reference reindexing below.
             self.clear_resolved_member_files();
+            // For the same reason an access in a file nothing touched can
+            // start belonging to a different declaration, which the
+            // per-file invalidation the reindex does cannot see.
+            if !self.member_ref_counts.is_empty() {
+                self.member_ref_counts.invalidate_locations_all();
+            }
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.

@@ -215,7 +215,7 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
 /// Put the locations a Find References answer carries into the order an
 /// editor lists them: by file, then by position within it, with exact
 /// duplicates collapsed.
-pub(super) fn sort_locations_for_references(locations: &mut Vec<Location>) {
+pub(crate) fn sort_locations_for_references(locations: &mut Vec<Location>) {
     locations.sort_by(|a, b| {
         a.uri
             .as_str()

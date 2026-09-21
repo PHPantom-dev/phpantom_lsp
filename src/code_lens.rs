@@ -12,6 +12,11 @@ use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, Visibility};
 
+/// Shown while a declaration's references are being counted, so the lens
+/// keeps its line instead of vanishing and shifting the file, and reads as
+/// the count it is about to become.
+const PENDING_COUNT_TITLE: &str = "- references";
+
 /// The offset of the class' own name, so the reference lens sits on the
 /// declaration line rather than on a preceding attribute or docblock.
 fn class_declaration_name_offset(symbol_map: Option<&SymbolMap>, class: &ClassInfo) -> u32 {
@@ -311,11 +316,23 @@ impl Backend {
             });
         }
 
-        // Clients with refresh support can re-pull once the shared background
-        // worker fills the exact cache.  Omitting the cold lens avoids an
-        // eager resolve burst merely to obtain titles for the viewport.
+        // Clients with refresh support re-pull once the shared background
+        // worker fills the exact cache, so the lens holds its line with a
+        // placeholder rather than being omitted: a lens that comes and goes
+        // moves every line of the file under the reader on each keystroke.
+        // Resolving it eagerly instead would put the whole viewport's
+        // searches back on the request.
         if supports_refresh {
-            return None;
+            return Some(CodeLens {
+                range,
+                command: Some(Command {
+                    title: PENDING_COUNT_TITLE.to_string(),
+                    // No handler: the placeholder is text, not an action.
+                    command: String::new(),
+                    arguments: None,
+                }),
+                data: None,
+            });
         }
 
         Some(CodeLens {

@@ -285,11 +285,12 @@ impl Backend {
         };
         evict_reference_index_uri_locked(&mut index, uri);
         drop(index);
+        let evicted: HashSet<Arc<str>> = std::iter::once(Arc::from(uri)).collect();
         if track_members {
-            self.member_ref_counts.invalidate_locations_all();
+            self.member_ref_counts.invalidate_locations_in(&evicted);
         }
         for name in dropped.into_keys() {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &evicted);
         }
         self.forget_class_shape(uri);
     }
@@ -421,8 +422,19 @@ impl Backend {
         }
         crate::util::retain_by_mask(&mut rebuilt, &keep);
 
-        if track_members && !rebuilt.is_empty() {
-            self.member_ref_counts.invalidate_locations_all();
+        // Only the files this pass reparsed can have moved an access, so a
+        // cached result is rescanned in those files alone rather than being
+        // thrown away and searched for across the workspace again.
+        let reparsed: HashSet<Arc<str>> = if track_members {
+            rebuilt
+                .iter()
+                .map(|(uri, _)| Arc::from(uri.as_str()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        if track_members {
+            self.member_ref_counts.invalidate_locations_in(&reparsed);
         }
 
         // Which member names each file contributed a reference to, so the
@@ -478,7 +490,7 @@ impl Backend {
         drop(index);
 
         for name in stale {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &reparsed);
         }
     }
 

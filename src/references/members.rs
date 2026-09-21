@@ -219,6 +219,20 @@ impl Backend {
         &self,
         queries: &[MemberDeclarationReferenceQuery],
     ) -> Vec<Vec<Location>> {
+        self.member_declaration_references_batch_in(queries, None)
+    }
+
+    /// The same search, optionally narrowed to `restrict_to`.
+    ///
+    /// An edit moves the accesses in the files it reparsed and leaves every
+    /// other file's alone, so a declaration whose locations are still cached
+    /// only has to be searched again in those files.  Passing `None` searches
+    /// every candidate file, which is what a first computation needs.
+    pub(crate) fn member_declaration_references_batch_in(
+        &self,
+        queries: &[MemberDeclarationReferenceQuery],
+        restrict_to: Option<&HashSet<Arc<str>>>,
+    ) -> Vec<Vec<Location>> {
         struct PreparedQuery {
             member: Atom,
             is_static: bool,
@@ -257,7 +271,10 @@ impl Backend {
         }
 
         let candidate_keys: Vec<_> = candidate_keys.into_iter().collect();
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        let mut snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
+        if let Some(files) = restrict_to {
+            snapshot.retain(|(uri, _)| files.contains(uri.as_str()));
+        }
         self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
         let scan_file = |file_uri: &str,

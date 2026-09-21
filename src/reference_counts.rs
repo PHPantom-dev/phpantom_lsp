@@ -9,16 +9,24 @@
 //! served from this bounded cache; the lens titles its count from them and
 //! hands them straight to the client when the user opens the reference list.
 //!
-//! Clickable lenses require fresh locations and are omitted for
-//! refresh-capable clients until recomputation finishes.  The reference
-//! index marks entries stale rather than dropping them, and the next lens
-//! request queues them for recomputation.
+//! Clickable lenses require fresh locations, so a lens whose result is
+//! being recomputed carries a placeholder rather than a count it cannot
+//! back up.  The reference index marks entries stale rather than dropping
+//! them, and the next lens request queues them.
+//!
+//! Staleness records *which files* an edit reparsed, because that is what
+//! makes recomputation affordable: the accesses in those files are searched
+//! for again and every other file's cached locations are merged back in, so
+//! typing in one file does not re-search the workspace once per declaration
+//! in it.  Only a change that can move a receiver's type anywhere (a
+//! signature, a docblock, an inheritance edit) falls back to searching
+//! everything.
 
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use parking_lot::{Mutex, RwLock};
 use tower_lsp::lsp_types::{Location, Range, Url};
@@ -38,6 +46,11 @@ const MAX_CACHED_LOCATIONS: usize = 50_000;
 const MAX_LOCATIONS_PER_MEMBER: usize = 5_000;
 const MAX_CACHED_URIS: usize = 50_000;
 
+/// How long the workspace has to go unedited before queued declarations are
+/// searched for.  Long enough that a burst of keystrokes costs one search
+/// rather than one each, short enough that a pause fills the lenses in.
+const EDIT_PAUSE: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// A member declaration whose count still has to be computed.
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct PendingCount {
@@ -56,9 +69,84 @@ struct CachedReferences {
     /// Set when the reference index changed in a way that can affect this
     /// count.  The value is still served; it is only a recompute request.
     count_stale: bool,
-    /// Set after any source edit, since receiver type resolution can change
-    /// without changing the indexed member name or candidate count.
-    locations_stale: bool,
+    /// What has to be rescanned before the cached locations can be served.
+    locations_stale: Staleness,
+}
+
+/// Which files' contributions to a cached result an edit can have changed.
+///
+/// Reparsing a file moves the offsets of the accesses *in that file* and can
+/// change what their receivers resolve to, but it leaves every other file's
+/// accesses exactly where they were.  Recording which files were touched is
+/// what lets an edit rescan those files alone instead of searching the whole
+/// workspace again for every declaration in the open file.
+#[derive(Clone, Default, PartialEq, Eq)]
+enum Staleness {
+    #[default]
+    Fresh,
+    /// Only these files were reparsed.
+    Files(HashSet<Arc<str>>),
+    /// A signature or inheritance change: any access anywhere can have
+    /// changed which declaration it belongs to.
+    Everything,
+}
+
+impl Staleness {
+    fn is_fresh(&self) -> bool {
+        *self == Staleness::Fresh
+    }
+
+    /// Widen to also cover `other`, keeping the more pessimistic of the two.
+    fn merge(&mut self, other: Staleness) {
+        *self = match (std::mem::take(self), other) {
+            (Staleness::Everything, _) | (_, Staleness::Everything) => Staleness::Everything,
+            (Staleness::Fresh, new) => new,
+            (current, Staleness::Fresh) => current,
+            (Staleness::Files(mut current), Staleness::Files(new)) => {
+                current.extend(new);
+                Staleness::Files(current)
+            }
+        };
+    }
+}
+
+impl PendingCount {
+    fn query(&self) -> crate::references::MemberDeclarationReferenceQuery {
+        crate::references::MemberDeclarationReferenceQuery {
+            uri: Arc::clone(&self.uri),
+            offset: self.offset,
+            member: self.member,
+            is_static: self.is_static,
+        }
+    }
+}
+
+/// A declaration whose cached locations only have to be refreshed in the
+/// files an edit reparsed.
+struct RescanPlan {
+    /// The files to search again.
+    rescan: HashSet<Arc<str>>,
+    /// The cached locations from every other file, which the edit cannot
+    /// have moved.
+    keep: Vec<Location>,
+}
+
+impl RescanPlan {
+    /// Combine what was kept with what the restricted search found.
+    ///
+    /// The search runs over the union of every queued declaration's files,
+    /// so results from a file this declaration did not have to rescan are
+    /// dropped rather than added twice.
+    fn merge(self, found: Vec<Location>) -> Vec<Location> {
+        let mut locations = self.keep;
+        locations.extend(
+            found
+                .into_iter()
+                .filter(|location| self.rescan.contains(location.uri.as_str())),
+        );
+        crate::references::sort_locations_for_references(&mut locations);
+        locations
+    }
 }
 
 /// A cached LSP location without a separately allocated `Url` string for
@@ -108,6 +196,12 @@ pub(crate) struct MemberRefCounts {
     /// CodeLens resolves.  A resolve that races the worker reuses its result
     /// instead of launching the same expensive scan twice.
     compute_lock: Mutex<()>,
+    /// Bumped by every invalidation, so a search that took seconds can tell
+    /// whether the content it read is still what the editor holds.
+    epoch: AtomicU64,
+    /// When the last invalidation landed, so a search can wait for typing to
+    /// stop instead of racing the next keystroke.
+    last_invalidation: Mutex<Option<std::time::Instant>>,
 }
 
 fn slot(is_static: bool) -> usize {
@@ -115,18 +209,71 @@ fn slot(is_static: bool) -> usize {
 }
 
 impl MemberRefCounts {
+    /// Note that cached results just went out of date.
+    ///
+    /// The epoch tells a search that already ran that its answer describes
+    /// replaced content; the timestamp lets the next one wait for typing to
+    /// stop first.
+    fn record_invalidation(&self) {
+        self.epoch.fetch_add(1, Ordering::AcqRel);
+        *self.last_invalidation.lock() = Some(std::time::Instant::now());
+    }
+
+    /// How long ago the last invalidation landed.  A cache nothing has
+    /// invalidated yet reports a long time, so nothing waits on it.
+    fn since_last_invalidation(&self) -> std::time::Duration {
+        self.last_invalidation
+            .lock()
+            .map_or(EDIT_PAUSE, |at| at.elapsed())
+    }
+
     fn get(&self, class_fqn: Atom, member: Atom, is_static: bool) -> Option<CachedReferences> {
         self.counts.read().by_member.get(&member)?.get(&class_fqn)?[slot(is_static)].clone()
     }
 
+    /// How a queued declaration can be brought up to date without searching
+    /// the workspace again, or `None` when nothing cached survives the edit.
+    fn rescan_plan(&self, item: &PendingCount) -> Option<RescanPlan> {
+        let cache = self.counts.read();
+        let cached = cache.by_member.get(&item.member)?.get(&item.class_fqn)?[slot(item.is_static)]
+            .as_ref()?;
+        let Staleness::Files(files) = &cached.locations_stale else {
+            return None;
+        };
+        let keep = cached
+            .locations
+            .as_ref()?
+            .iter()
+            .filter(|location| !files.contains(&location.uri))
+            .filter_map(CompactLocation::to_lsp)
+            .collect();
+        Some(RescanPlan {
+            rescan: files.clone(),
+            keep,
+        })
+    }
+
+    /// Whether the cached result for a declaration can be served as is.
+    fn is_fresh(&self, item: &PendingCount) -> bool {
+        self.get(item.class_fqn, item.member, item.is_static)
+            .is_some_and(|cached| !cached.count_stale && cached.locations_stale.is_fresh())
+    }
+
     /// Store freshly computed references, returning whether they differ from
     /// the result the editor was last given.
+    ///
+    /// `invalidated_since` says an edit landed while these were being
+    /// computed, so they describe content the editor has already replaced.
+    /// The value is still worth keeping (it is closer than nothing and stops
+    /// the count from blinking), but the staleness the edit recorded is left
+    /// in place so the entry is recomputed rather than trusted.
     fn store(
         &self,
         class_fqn: Atom,
         member: Atom,
         is_static: bool,
         locations: Vec<Location>,
+        invalidated_since: bool,
     ) -> bool {
         let mut cache = self.counts.write();
         let previous = cache
@@ -177,10 +324,15 @@ impl MemberRefCounts {
 
         let changed = previous.as_ref().is_none_or(|cached| {
             cached.count_stale
-                || cached.locations_stale
+                || !cached.locations_stale.is_fresh()
                 || cached.count != count
                 || cached.locations.as_deref() != cached_locations.as_deref()
         });
+        let (count_stale, locations_stale) = match (invalidated_since, &previous) {
+            (true, Some(cached)) => (cached.count_stale, cached.locations_stale.clone()),
+            (true, None) => (true, Staleness::Everything),
+            (false, _) => (false, Staleness::Fresh),
+        };
         let entry = &mut cache
             .by_member
             .entry(member)
@@ -190,15 +342,17 @@ impl MemberRefCounts {
         *entry = Some(CachedReferences {
             count,
             locations: cached_locations,
-            count_stale: false,
-            locations_stale: false,
+            count_stale,
+            locations_stale,
         });
         cache.location_count += new_location_count;
         changed
     }
 
-    /// Mark every count for members of this name as needing recomputation.
-    pub(crate) fn invalidate_member(&self, member: Atom) {
+    /// Mark every count for members of this name as needing recomputation,
+    /// because `uris` changed what they contribute to it.
+    pub(crate) fn invalidate_member(&self, member: Atom, uris: &HashSet<Arc<str>>) {
+        self.record_invalidation();
         let mut cache = self.counts.write();
         let Some(entries) = cache.by_member.get_mut(&member) else {
             return;
@@ -206,22 +360,55 @@ impl MemberRefCounts {
         for slots in entries.values_mut() {
             for cached in slots.iter_mut().flatten() {
                 cached.count_stale = true;
-                cached.locations_stale = true;
+                cached.locations_stale.merge(Staleness::Files(uris.clone()));
             }
         }
     }
 
-    /// Mark exact locations stale while preserving cached counts.
+    /// Mark the locations a reparse of `uris` can have moved.
     ///
-    /// A source edit can change the resolved receiver class without changing
-    /// the member name or number of indexed candidates. Counts are invalidated
-    /// more selectively, but clickable locations must never survive that edit.
-    pub(crate) fn invalidate_locations_all(&self) {
+    /// A cached result is only affected when one of its own locations sits in
+    /// a reparsed file: offsets elsewhere did not move, and an access
+    /// elsewhere still resolves to the same receiver.  An entry whose
+    /// locations were too many to cache cannot be checked, so it is rescanned
+    /// in full.
+    pub(crate) fn invalidate_locations_in(&self, uris: &HashSet<Arc<str>>) {
+        if uris.is_empty() {
+            return;
+        }
+        self.record_invalidation();
         let mut cache = self.counts.write();
         for entries in cache.by_member.values_mut() {
             for slots in entries.values_mut() {
                 for cached in slots.iter_mut().flatten() {
-                    cached.locations_stale = true;
+                    match &cached.locations {
+                        Some(locations) => {
+                            if locations
+                                .iter()
+                                .any(|location| uris.contains(&location.uri))
+                            {
+                                cached.locations_stale.merge(Staleness::Files(uris.clone()));
+                            }
+                        }
+                        None => cached.locations_stale = Staleness::Everything,
+                    }
+                }
+            }
+        }
+    }
+
+    /// Mark every cached location stale.
+    ///
+    /// A signature or docblock change settles receiver types against the
+    /// whole workspace, so an access in a file nothing touched can start
+    /// belonging to a different declaration.
+    pub(crate) fn invalidate_locations_all(&self) {
+        self.record_invalidation();
+        let mut cache = self.counts.write();
+        for entries in cache.by_member.values_mut() {
+            for slots in entries.values_mut() {
+                for cached in slots.iter_mut().flatten() {
+                    cached.locations_stale = Staleness::Everything;
                 }
             }
         }
@@ -232,12 +419,13 @@ impl MemberRefCounts {
     /// Used when a class' place in the inheritance graph changes, since
     /// that moves which accesses belong to which declaration.
     pub(crate) fn invalidate_all(&self) {
+        self.record_invalidation();
         let mut cache = self.counts.write();
         for entries in cache.by_member.values_mut() {
             for slots in entries.values_mut() {
                 for cached in slots.iter_mut().flatten() {
                     cached.count_stale = true;
-                    cached.locations_stale = true;
+                    cached.locations_stale = Staleness::Everything;
                 }
             }
         }
@@ -389,12 +577,12 @@ impl Backend {
         if queue_if_missing
             && cached
                 .as_ref()
-                .is_none_or(|cached| cached.count_stale || cached.locations_stale)
+                .is_none_or(|cached| cached.count_stale || !cached.locations_stale.is_fresh())
         {
             self.queue_member_references(uri, offset, class_fqn, member, is_static);
         }
         cached.and_then(|cached| {
-            if cached.count_stale || cached.locations_stale {
+            if cached.count_stale || !cached.locations_stale.is_fresh() {
                 return None;
             }
             cached.locations.map(|locations| {
@@ -443,7 +631,7 @@ impl Backend {
         let _compute_guard = self.member_ref_counts.compute_lock.lock();
         if let Some(cached) = self.member_ref_counts.get(class_fqn, member, is_static)
             && !cached.count_stale
-            && !cached.locations_stale
+            && cached.locations_stale.is_fresh()
             && let Some(locations) = cached.locations
         {
             return locations
@@ -452,16 +640,25 @@ impl Backend {
                 .collect();
         }
 
+        let epoch = self.member_ref_counts.epoch.load(Ordering::Acquire);
         let locations = self.member_declaration_references(uri, offset, &member, is_static);
-        self.member_ref_counts
-            .store(class_fqn, member, is_static, locations.clone());
-        self.member_ref_counts.pending.lock().remove(&PendingCount {
-            uri: Arc::from(uri),
-            offset,
+        let invalidated_since = self.member_ref_counts.epoch.load(Ordering::Acquire) != epoch;
+        self.member_ref_counts.store(
             class_fqn,
             member,
             is_static,
-        });
+            locations.clone(),
+            invalidated_since,
+        );
+        if !invalidated_since {
+            self.member_ref_counts.pending.lock().remove(&PendingCount {
+                uri: Arc::from(uri),
+                offset,
+                class_fqn,
+                member,
+                is_static,
+            });
+        }
         locations
     }
 
@@ -472,10 +669,9 @@ impl Backend {
     /// runs, so the number matches what the user gets when they follow it.
     pub(crate) fn compute_pending_member_ref_counts(&self) -> bool {
         let _compute_guard = self.member_ref_counts.compute_lock.lock();
-        // Taken rather than drained: a request that arrives while this
-        // runs sees the counts it wants still stale and queues them
-        // again, and clearing them at the end keeps that from buying a
-        // second pass over work this one has already done.
+        // Taken rather than drained: an edit that lands while this runs marks
+        // the entries it affects stale again, and the epoch below is what
+        // tells the results apart from the content the editor now holds.
         let pending: Vec<PendingCount> = self
             .member_ref_counts
             .pending
@@ -486,6 +682,7 @@ impl Backend {
         if pending.is_empty() {
             return false;
         }
+        let epoch = self.member_ref_counts.epoch.load(Ordering::Acquire);
 
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
@@ -497,30 +694,61 @@ impl Backend {
             .iter()
             .filter(|item| self.declaration_still_at(item))
             .collect();
-        let queries: Vec<_> = valid_pending
-            .iter()
-            .map(|item| crate::references::MemberDeclarationReferenceQuery {
-                uri: Arc::clone(&item.uri),
-                offset: item.offset,
-                member: item.member,
-                is_static: item.is_static,
-            })
-            .collect();
-        let results = self.member_declaration_references_batch(&queries);
+
+        // An edit only moves the accesses in the files it reparsed.  Those
+        // declarations are rescanned in those files alone and merged with
+        // what is still cached for every other file, which is what keeps a
+        // keystroke from re-searching the workspace once per declaration.
+        let mut full = Vec::new();
+        let mut partial = Vec::new();
+        for item in valid_pending {
+            match self.member_ref_counts.rescan_plan(item) {
+                Some(plan) => partial.push((item, plan)),
+                None => full.push(item),
+            }
+        }
+
+        let mut results: Vec<(&PendingCount, Vec<Location>)> = Vec::new();
+        if !full.is_empty() {
+            let queries: Vec<_> = full.iter().map(|item| item.query()).collect();
+            results.extend(
+                full.into_iter()
+                    .zip(self.member_declaration_references_batch(&queries)),
+            );
+        }
+        if !partial.is_empty() {
+            let mut scope: HashSet<Arc<str>> = HashSet::new();
+            for (_, plan) in &partial {
+                scope.extend(plan.rescan.iter().cloned());
+            }
+            let queries: Vec<_> = partial.iter().map(|(item, _)| item.query()).collect();
+            let scanned = self.member_declaration_references_batch_in(&queries, Some(&scope));
+            for ((item, plan), found) in partial.into_iter().zip(scanned) {
+                results.push((item, plan.merge(found)));
+            }
+        }
 
         let mut changed = false;
-        for (item, locations) in valid_pending.into_iter().zip(results) {
+        let invalidated_since = self.member_ref_counts.epoch.load(Ordering::Acquire) != epoch;
+        for (item, locations) in results {
             changed |= self.member_ref_counts.store(
                 item.class_fqn,
                 item.member,
                 item.is_static,
                 locations,
+                invalidated_since,
             );
         }
 
+        // Only declarations whose result is now trustworthy leave the queue.
+        // One the edit above invalidated stays on it, or the recomputation it
+        // asked for would be dropped and its count frozen at what this pass
+        // read from content the editor has already replaced.
         let mut queue = self.member_ref_counts.pending.lock();
         for item in &pending {
-            queue.remove(item);
+            if !invalidated_since || self.member_ref_counts.is_fresh(item) {
+                queue.remove(item);
+            }
         }
         changed
     }
@@ -544,6 +772,11 @@ impl Backend {
     /// runs join the same burst, which is drained before one editor refresh.
     /// Refreshing after every partial batch creates a feedback loop in clients
     /// that immediately re-request lenses for all open buffers.
+    ///
+    /// The burst also waits for typing to pause.  A change to a signature
+    /// settles receiver types across the whole workspace, so every keystroke
+    /// in a method name would otherwise start a search that the next
+    /// keystroke invalidates before it finishes.
     pub(crate) fn schedule_member_ref_counts(&self) {
         if !self.member_ref_counts.has_pending()
             || self
@@ -556,6 +789,7 @@ impl Backend {
 
         let backend = self.clone_for_blocking();
         tokio::spawn(async move {
+            backend.await_edit_pause().await;
             let worker = backend.clone_for_blocking();
             let changed = crate::server::run_blocking_cancel_safe("member ref counts", move || {
                 let mut changed = false;
@@ -595,6 +829,17 @@ impl Backend {
                     .store(false, Ordering::Release),
             }
         });
+    }
+
+    /// Wait until no file has been reparsed for [`EDIT_PAUSE`].
+    async fn await_edit_pause(&self) {
+        loop {
+            let since = self.member_ref_counts.since_last_invalidation();
+            if since >= EDIT_PAUSE {
+                return;
+            }
+            tokio::time::sleep(EDIT_PAUSE - since).await;
+        }
     }
 }
 
@@ -665,6 +910,7 @@ mod tests {
                 crate::atom::atom(&format!("member{index}")),
                 false,
                 vec![location.clone(); MAX_LOCATIONS_PER_MEMBER],
+                false,
             );
         }
 
@@ -859,9 +1105,13 @@ function run(Service $service): void {
             "stale locations must not be served to a clickable lens"
         );
 
-        // A lens the user can click has to list what it counted, so it is
-        // withheld rather than shown with the pre-edit references.
-        assert_eq!(count_on_line(&lenses(&backend, &edited), 2), None);
+        // A lens the user can click has to list what it counted, so the
+        // pre-edit references are not shown again.  It keeps its line with a
+        // placeholder rather than disappearing and shifting the file.
+        assert_eq!(
+            count_on_line(&lenses(&backend, &edited), 2).as_deref(),
+            Some("- references")
+        );
         assert!(backend.compute_pending_member_ref_counts());
         assert_eq!(
             count_on_line(&lenses(&backend, &edited), 2).as_deref(),
@@ -979,7 +1229,7 @@ function run(Service $service): void {
         );
         // Exact locations are another matter: any edit can move them, so
         // the clickable lens recomputes before it is shown again.
-        assert!(cached.locations_stale);
+        assert!(!cached.locations_stale.is_fresh());
     }
 
     #[tokio::test]
@@ -1001,8 +1251,8 @@ function run(Service $service): void {
             .unwrap()
             .unwrap_or_default();
         assert_eq!(
-            count_on_line(&first, 2),
-            None,
+            count_on_line(&first, 2).as_deref(),
+            Some("- references"),
             "the first request answers before the count is known"
         );
 
@@ -1114,6 +1364,138 @@ function useA(): void {
             count_on_line(&lenses_for(&backend, URI_B, &pen_b), 8).as_deref(),
             Some("1 reference"),
             "App\\B\\Pen::write must only count ConsumerB's call"
+        );
+    }
+
+    #[test]
+    fn an_edit_in_an_unrelated_file_leaves_a_cached_declaration_alone() {
+        const ORDER_URI: &str = "file:///Order.php";
+        const CONSUMER_URI: &str = "file:///Consumer.php";
+        const UNRELATED_URI: &str = "file:///helpers.php";
+        const ORDER: &str = "<?php\nclass Order {\n    public function save(): void {}\n}\n";
+        const CONSUMER: &str =
+            "<?php\nfunction persist(Order $order): void {\n    $order->save();\n}\n";
+
+        let backend = Backend::new_test();
+        parse_extra(&backend, ORDER_URI, ORDER);
+        parse_extra(&backend, CONSUMER_URI, CONSUMER);
+        parse_extra(&backend, UNRELATED_URI, "<?php\nfunction noop(): void {}\n");
+        lenses_for(&backend, ORDER_URI, ORDER);
+        backend.compute_pending_member_ref_counts();
+        assert_eq!(
+            count_on_line(&lenses_for(&backend, ORDER_URI, ORDER), 2).as_deref(),
+            Some("1 reference")
+        );
+
+        // A file that holds none of the cached locations was reparsed.
+        parse_extra(
+            &backend,
+            UNRELATED_URI,
+            "<?php\nfunction noop(): void {}\n// touched\n",
+        );
+
+        assert_eq!(
+            count_on_line(&lenses_for(&backend, ORDER_URI, ORDER), 2).as_deref(),
+            Some("1 reference"),
+            "an edit that cannot have moved a cached location must not blank the lens"
+        );
+        assert!(
+            !backend.member_ref_counts.has_pending(),
+            "nor queue the declaration for another workspace search"
+        );
+    }
+
+    #[test]
+    fn an_edit_rescans_the_file_it_touched_and_keeps_the_rest() {
+        const ORDER_URI: &str = "file:///Order.php";
+        const FIRST_URI: &str = "file:///First.php";
+        const SECOND_URI: &str = "file:///Second.php";
+        const ORDER: &str = "<?php\nclass Order {\n    public function save(): void {}\n}\n";
+        const FIRST: &str = "<?php\nfunction first(Order $order): void {\n    $order->save();\n    $order->save();\n}\n";
+        let second = |calls: usize| {
+            let body = "    $order->save();\n".repeat(calls);
+            format!("<?php\nfunction second(Order $order): void {{\n{body}}}\n")
+        };
+
+        let backend = Backend::new_test();
+        parse_extra(&backend, ORDER_URI, ORDER);
+        parse_extra(&backend, FIRST_URI, FIRST);
+        parse_extra(&backend, SECOND_URI, &second(1));
+        lenses_for(&backend, ORDER_URI, ORDER);
+        backend.compute_pending_member_ref_counts();
+        assert_eq!(
+            count_on_line(&lenses_for(&backend, ORDER_URI, ORDER), 2).as_deref(),
+            Some("3 references")
+        );
+
+        // Only the second file changes.  Its accesses are counted again and
+        // the first file's cached ones are carried over untouched.
+        parse_extra(&backend, SECOND_URI, &second(3));
+        assert_eq!(
+            count_on_line(&lenses_for(&backend, ORDER_URI, ORDER), 2).as_deref(),
+            Some("- references"),
+            "the lens holds its line while the touched file is rescanned"
+        );
+        assert!(backend.compute_pending_member_ref_counts());
+
+        let locations = backend
+            .member_ref_locations_cached(
+                ORDER_URI,
+                ORDER.find("save").unwrap() as u32,
+                crate::atom::atom("Order"),
+                crate::atom::atom("save"),
+                false,
+            )
+            .expect("the rescan should leave a complete result");
+        assert_eq!(locations.len(), 5);
+        assert_eq!(
+            locations
+                .iter()
+                .filter(|location| location.uri.as_str() == FIRST_URI)
+                .count(),
+            2,
+            "the untouched file's references must survive the rescan"
+        );
+    }
+
+    #[test]
+    fn a_result_computed_before_an_edit_is_not_marked_fresh() {
+        let backend = Backend::new_test();
+        parse(&backend, ONE_CALL);
+        lenses(&backend, ONE_CALL);
+        backend.compute_pending_member_ref_counts();
+
+        let class_fqn = crate::atom::atom("Order");
+        let member = crate::atom::atom("save");
+        let declaration_offset = ONE_CALL.find("save").unwrap() as u32;
+
+        // What a search finishing after an edit landed looks like: it carries
+        // locations read from content the editor has already replaced.
+        backend.queue_member_references(URI, declaration_offset, class_fqn, member, false);
+        backend.member_ref_counts.invalidate_locations_all();
+        backend
+            .member_ref_counts
+            .store(class_fqn, member, false, Vec::new(), true);
+
+        assert!(
+            !backend.member_ref_counts.is_fresh(&PendingCount {
+                uri: Arc::from(URI),
+                offset: declaration_offset,
+                class_fqn,
+                member,
+                is_static: false,
+            }),
+            "a result read from replaced content must stay stale"
+        );
+        assert!(
+            backend
+                .member_ref_locations_cached(URI, declaration_offset, class_fqn, member, false)
+                .is_none(),
+            "and must not be served to a clickable lens"
+        );
+        assert!(
+            backend.member_ref_counts.has_pending(),
+            "the recomputation the edit asked for must survive"
         );
     }
 }

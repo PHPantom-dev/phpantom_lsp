@@ -253,9 +253,21 @@ function persist(Order $order): void {
         .await
         .unwrap()
         .unwrap_or_default();
+    let cold_lens = cold
+        .iter()
+        .find(|lens| lens.range.start.line == 3)
+        .unwrap_or_else(|| panic!("the member lens should hold its line while cold: {cold:?}"));
+    assert_eq!(
+        cold_lens
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("- references"),
+        "a cold lens carries a placeholder, not a count it cannot back up"
+    );
     assert!(
-        cold.iter().all(|lens| lens.range.start.line != 3),
-        "a cold member lens would make the client resolve it eagerly: {cold:?}"
+        cold_lens.data.is_none(),
+        "and no resolve payload, which would make the client resolve it eagerly"
     );
 
     let warm = tokio::time::timeout(std::time::Duration::from_secs(2), async {
