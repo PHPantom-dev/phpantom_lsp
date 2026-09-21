@@ -247,35 +247,56 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
+#### L58. Infer morph constraint callbacks from candidate models
 
 **Impact: Medium · Complexity: Medium-High**
 
-Two areas where the PHPStan Laravel extensions have moved past what we
-mirror, and where we have machinery that has not been checked against
-them:
+The `whereHasMorph` family does not participate in relation-query
+inference. A literal model class or an array of candidates yields
+`Builder<string>` in the assertion fixture, losing both the related
+models and their custom builders. The second `$type` callback parameter
+already resolves to `string` from Laravel's declaration and must stay
+typed when the first parameter is refined.
 
-- **A custom builder surviving the chain.** We read
-  `newEloquentBuilder()` (`virtual_members/laravel/model_extraction.rs`)
-  and inject the builder, but it is not established that
-  `Team::query()->where(…)->orderBy(…)` stays on `TeamBuilder` rather than
-  degrading to `Builder<Team>` at the first inherited call, nor that
-  static calls on the model and instance calls on the builder agree about
-  what comes back.
-- **Relation-constraint closure parameters.** We type closures for the
-  `whereHas` family (`type_engine/variable/closure_resolution.rs`,
-  `forward_walk/callable_inference.rs`). Unverified: dotted relation paths
-  (`whereHas('stocks.warehouse', …)` should type the closure for
-  `Warehouse`'s builder, resolving each segment against the model the
-  previous one named), the `*Morph` variants' union of candidate builders
-  plus their `$type` parameter, `withWhereHas` receiving both a builder
-  and the relation, and closures in non-leading argument positions
-  (`has('stocks', '>=', 1, 'and', fn ($q) => …)`).
+**Reproducer:** The `morphs()` assertions in
+`tests/phpstan_nsrt/laravel-builder-relations.php` cover all six
+callback-taking existence methods, single and multiple candidates,
+reordered named arguments, wildcard and empty-list fallbacks, and a
+declared `MorphTo<Team>` target. The desired builder types remain in the
+`SKIP` assertions; the `$type` assertions run normally.
 
-**Where to change:** Write the assertion cases first — the existing
-`tests/integration/completion_laravel.rs` conventions cover both areas —
-and file what actually fails. Splitting this into concrete items once the
-gaps are known is preferable to a broad rewrite of either subsystem.
+**Where to change:** Extend shared callable inference using bound
+`relation`, `types`, and `callback` arguments. Build a union of candidate
+builders, preserving custom builders. For unresolved/wildcard candidates,
+use the relation's declared target, falling back to `Model` when that is
+all the declaration knows. Also cover class-string variables and mixed
+known/unknown candidate arrays, as
+[Larastan's callback extension](https://github.com/larastan/larastan/blob/c328727e6103c1147d1c64cc96b3aedfda26bc20/src/ClosureTypes/RelationshipQueryCallbackExtension.php)
+does. Do not boot the application or query the database for wildcard
+discovery. Check the `whereMorphRelation` shortcuts when sharing the
+callback logic.
+
+#### L59. Infer both callback receivers for withWhereHas
+
+**Impact: Medium · Complexity: Medium-High**
+
+`withWhereHas('stocks', …)` calls the constraint with `Builder<Stock>` for
+the existence query and `HasMany<Stock, Team>` for eager loading. We infer
+only the builder. Dotted paths likewise lose the final relation type, and
+the `stocks:id` column-selection form fails relation lookup entirely,
+falling back to unbound `Builder<mixed>|Relation<mixed, mixed, mixed>`.
+
+**Reproducer:** The `eagerRelations()` assertions in
+`tests/phpstan_nsrt/laravel-builder-relations.php`. The Laravel runtime
+assertions also verify both invocations without executing eager-load SQL.
+
+**Where to change:** Extend the shared relation-chain resolver to retain
+the terminal instantiated relation and its declaring model, then use the
+builder/relation union for this callback. Strip the column suffix where
+Laravel accepts it, preserve custom builders, and bind named arguments.
+The callback's ordinary fluent methods must preserve that union. Cover
+explicit `Builder|Relation` hints and the `withWhereRelation` counterpart;
+ordinary `whereHas` must continue to receive just the related builder.
 
 #### L45. `*_count` properties are offered on every relationship
 
