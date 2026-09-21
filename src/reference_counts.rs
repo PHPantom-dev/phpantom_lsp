@@ -667,7 +667,7 @@ impl Backend {
     /// Returns `true` when at least one count changed, which is the signal
     /// to ask the editor to re-pull lenses.  Runs the search Find References
     /// runs, so the number matches what the user gets when they follow it.
-    pub(crate) fn compute_pending_member_ref_counts(&self) -> bool {
+    pub fn compute_pending_member_ref_counts(&self) -> bool {
         let _compute_guard = self.member_ref_counts.compute_lock.lock();
         // Taken rather than drained: an edit that lands while this runs marks
         // the entries it affects stale again, and the epoch below is what
@@ -847,13 +847,17 @@ pub(crate) fn new_member_ref_counts() -> Arc<MemberRefCounts> {
     Arc::new(MemberRefCounts::default())
 }
 
+/// Unit tests for the count cache itself.
+///
+/// These stay in the crate because they assert on state the public API
+/// deliberately does not expose: staleness epochs, the bounded exact
+/// location store, and which scope snapshots a batch of counts reused.
+/// The tests that only drive a `Backend` through the lens handlers live in
+/// `tests/integration/code_lens.rs`.
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tower_lsp::LanguageServer;
-    use tower_lsp::lsp_types::{
-        CodeLens, CodeLensParams, Position, Range, TextDocumentIdentifier, Url,
-    };
+    use tower_lsp::lsp_types::{CodeLens, Position, Range};
 
     const URI: &str = "file:///test.php";
 
@@ -1230,141 +1234,6 @@ function run(Service $service): void {
         // Exact locations are another matter: any edit can move them, so
         // the clickable lens recomputes before it is shown again.
         assert!(!cached.locations_stale.is_fresh());
-    }
-
-    #[tokio::test]
-    async fn the_request_path_counts_off_the_request() {
-        let backend = Backend::new_test();
-        parse(&backend, ONE_CALL);
-
-        let params = CodeLensParams {
-            text_document: TextDocumentIdentifier {
-                uri: Url::parse(URI).unwrap(),
-            },
-            work_done_progress_params: Default::default(),
-            partial_result_params: Default::default(),
-        };
-
-        let first = backend
-            .code_lens(params.clone())
-            .await
-            .unwrap()
-            .unwrap_or_default();
-        assert_eq!(
-            count_on_line(&first, 2).as_deref(),
-            Some("- references"),
-            "the first request answers before the count is known"
-        );
-
-        for _ in 0..200 {
-            if !backend.member_ref_counts.is_empty() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-
-        let second = backend.code_lens(params).await.unwrap().unwrap_or_default();
-        assert_eq!(count_on_line(&second, 2).as_deref(), Some("1 reference"));
-    }
-
-    #[test]
-    fn a_new_parent_class_recomputes_the_count() {
-        let backend = Backend::new_test();
-        let unrelated = r#"<?php
-class Model {
-    public function save(): void {}
-}
-class Order {
-    public function save(): void {}
-}
-function persist(Order $order): void {
-    $order->save();
-}
-"#;
-        parse(&backend, unrelated);
-        lenses(&backend, unrelated);
-        backend.compute_pending_member_ref_counts();
-        assert_eq!(
-            count_on_line(&lenses(&backend, unrelated), 2).as_deref(),
-            Some("0 references")
-        );
-
-        let inherited = unrelated.replace(
-            "class Order {\n    public function save(): void {}",
-            "class Order extends Model {",
-        );
-        parse(&backend, &inherited);
-        lenses(&backend, &inherited);
-        assert!(backend.compute_pending_member_ref_counts());
-        assert_eq!(
-            count_on_line(&lenses(&backend, &inherited), 2).as_deref(),
-            Some("1 reference")
-        );
-    }
-
-    #[test]
-    fn chain_cache_does_not_leak_a_resolution_across_files() {
-        let backend = Backend::new_test();
-
-        const URI_A: &str = "file:///PenA.php";
-        const URI_B: &str = "file:///PenB.php";
-        const URI_CONSUMER_A: &str = "file:///ConsumerA.php";
-        const URI_CONSUMER_B: &str = "file:///ConsumerB.php";
-
-        // Two unrelated classes that happen to share a bare name and an
-        // identically-shaped `make()->write()` chain, each imported under
-        // that bare name by its own consumer file.
-        let pen_a = r#"<?php
-namespace App\A;
-
-class Pen {
-    public static function make(): self {
-        return new self();
-    }
-
-    public function write(): void {}
-}
-"#;
-        let pen_b = pen_a.replace("App\\A", "App\\B");
-
-        let consumer_a = r#"<?php
-namespace App;
-
-use App\A\Pen;
-
-function useA(): void {
-    Pen::make()->write();
-}
-"#;
-        let consumer_b = consumer_a
-            .replace("App\\A", "App\\B")
-            .replace("useA", "useB");
-
-        parse_extra(&backend, URI_A, pen_a);
-        parse_extra(&backend, URI_B, &pen_b);
-        parse_extra(&backend, URI_CONSUMER_A, consumer_a);
-        parse_extra(&backend, URI_CONSUMER_B, &consumer_b);
-
-        // Queue both `write()` declarations for a count, then resolve them
-        // in the same `compute_pending_member_ref_counts` pass so both
-        // consumer files are scanned under one chain-cache activation —
-        // the scenario where a text-only cache key leaks a resolution from
-        // one file's `use` scope into the other's.
-        lenses_for(&backend, URI_A, pen_a);
-        lenses_for(&backend, URI_B, &pen_b);
-        backend.compute_pending_member_ref_counts();
-
-        assert_eq!(
-            count_on_line(&lenses_for(&backend, URI_A, pen_a), 8).as_deref(),
-            Some("1 reference"),
-            "App\\A\\Pen::write must only count ConsumerA's call, not ConsumerB's \
-             identically-spelled `Pen::make()->write()` against `App\\B\\Pen`"
-        );
-        assert_eq!(
-            count_on_line(&lenses_for(&backend, URI_B, &pen_b), 8).as_deref(),
-            Some("1 reference"),
-            "App\\B\\Pen::write must only count ConsumerB's call"
-        );
     }
 
     #[test]

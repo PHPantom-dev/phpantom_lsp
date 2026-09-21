@@ -1581,6 +1581,23 @@ impl Backend {
         &self.open_files
     }
 
+    /// Mark the workspace as indexed (used by integration tests that need
+    /// the state `ensure_workspace_indexed` leaves behind without running
+    /// a real workspace scan).
+    pub fn mark_workspace_indexed(&self) {
+        self.workspace_indexed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Declare whether the client supports `workspace/codeLens/refresh`,
+    /// which decides whether a lens may be answered cold and refreshed
+    /// once its count lands (used by integration tests to pick the path
+    /// without going through `initialize`).
+    pub fn set_supports_code_lens_refresh(&self, supported: bool) {
+        self.supports_code_lens_refresh
+            .store(supported, std::sync::atomic::Ordering::Release);
+    }
+
     pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
         self.package_info_for_uri(uri).0
     }

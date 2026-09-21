@@ -623,14 +623,24 @@ impl Backend {
             return;
         }
 
+        // The spans of one command class all share its signature, so it is
+        // resolved on the first of them and reused until a span falls outside
+        // that class' body.
+        let mut enclosing: Option<crate::virtual_members::laravel::EnclosingCommand> = None;
+
         for (name, is_option, start, end) in &spans {
-            // Resolve the enclosing command signature at the span offset.  If
-            // the class declares no `$signature` (e.g. a `$name`-only or
-            // dynamically-built command), skip — there is nothing to validate.
-            let Some(signature) = crate::virtual_members::laravel::command_signature_at_offset(
-                content,
-                *start as usize,
-            ) else {
+            if !enclosing
+                .as_ref()
+                .is_some_and(|command| command.body.contains(start))
+            {
+                enclosing = crate::virtual_members::laravel::command_enclosing_signature(
+                    content,
+                    *start as usize,
+                );
+            }
+            // A class that declares no `$signature` (e.g. a `$name`-only or
+            // dynamically-built command) has nothing to validate against.
+            let Some(signature) = enclosing.as_ref().and_then(|c| c.signature.as_ref()) else {
                 continue;
             };
             let known = if *is_option {

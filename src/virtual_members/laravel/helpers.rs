@@ -1009,8 +1009,6 @@ pub(crate) fn chain_as_prefix<'a>(expr: &Expression<'a>, content: &str) -> Optio
 
 // ─── Shared PHP AST walker ───────────────────────────────────────────────────
 
-use mago_allocator::LocalArena;
-use mago_database::file::FileId;
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
 
@@ -1027,10 +1025,9 @@ pub(crate) fn walk_all_php_expressions(
     content: &str,
     visitor: &mut impl FnMut(&Expression<'_>) -> ControlFlow<()>,
 ) {
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-    walk_program_expressions(program, visitor);
+    crate::parser::with_parsed_program(content, "walk_all_php_expressions", |program, _| {
+        walk_program_expressions(program, visitor);
+    });
 }
 
 /// Like [`walk_all_php_expressions`], but for a `Program` the caller has

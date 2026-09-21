@@ -44,33 +44,45 @@ use mago_syntax::cst::*;
 
 use crate::types::ResolvedType;
 
+mod array_assignment;
 mod assignment;
+mod by_ref;
 mod callable_inference;
 mod closures;
 mod cond_narrowing;
 mod control_flow;
 mod diagnostic_cache;
 mod diagnostic_walk;
+mod foreach;
 mod loop_control;
+mod loops;
 mod param_seeding;
 mod reachability;
+mod receiver_mutation;
 mod scope_state;
 mod snapshot_narrowing;
 mod static_locals;
+mod var_docblocks;
 mod walk_ctx;
 
+pub(crate) use array_assignment::*;
 pub(crate) use assignment::*;
+pub(crate) use by_ref::*;
 pub(crate) use callable_inference::*;
 pub(crate) use closures::*;
 pub(crate) use cond_narrowing::*;
 pub(crate) use control_flow::*;
 pub(crate) use diagnostic_cache::*;
 pub(crate) use diagnostic_walk::*;
+pub(crate) use foreach::*;
 pub(crate) use loop_control::*;
+pub(crate) use loops::*;
 pub(crate) use param_seeding::*;
 pub(crate) use reachability::*;
+pub(crate) use receiver_mutation::*;
 pub(crate) use scope_state::*;
 pub(crate) use snapshot_narrowing::*;
+pub(crate) use var_docblocks::*;
 pub(crate) use walk_ctx::*;
 
 /// Walk a sequence of statements top-to-bottom, updating `scope` at

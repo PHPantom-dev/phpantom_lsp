@@ -1355,3 +1355,338 @@ class Consumer {
         "titles: {titles:?}"
     );
 }
+
+// ─── Reference counts on declarations ───────────────────────────────────
+//
+// These drive `handle_code_lens` / `resolve_code_lens_item` directly so a
+// count is asserted the way a client that displays the lens sees it, with
+// the background search run to completion first.
+
+/// Seed `uri` as an open file the way `didOpen` would, for a client that
+/// supports lens refresh and a workspace that has finished indexing.
+fn seed_open_file(backend: &phpantom_lsp::Backend, uri: &str, content: &str) {
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+    backend.update_ast(uri, content);
+    backend.mark_workspace_indexed();
+    backend.set_supports_code_lens_refresh(true);
+}
+
+/// Open a file and return its lenses once the member references the first
+/// request queued have been computed.
+fn declaration_lenses(backend: &phpantom_lsp::Backend, uri: &str, content: &str) -> Vec<CodeLens> {
+    seed_open_file(backend, uri, content);
+
+    backend.handle_code_lens(uri, content);
+    backend.compute_pending_member_ref_counts();
+    backend.handle_code_lens(uri, content).unwrap_or_default()
+}
+
+/// The title of the lens on `line`, resolved the way a client that
+/// displays it would.
+fn title_on_line(
+    backend: &phpantom_lsp::Backend,
+    lenses: &[CodeLens],
+    line: u32,
+) -> Option<String> {
+    let lens = lenses.iter().find(|lens| lens.range.start.line == line)?;
+    backend
+        .resolve_code_lens_item(lens.clone())
+        .command
+        .map(|command| command.title)
+}
+
+/// The title of the lens on `line` as `handle_code_lens` returns it,
+/// without the resolve round-trip.
+fn unresolved_title_on_line(lenses: &[CodeLens], line: u32) -> Option<String> {
+    lenses
+        .iter()
+        .find(|lens| lens.range.start.line == line)
+        .and_then(|lens| lens.command.as_ref())
+        .map(|command| command.title.clone())
+}
+
+#[test]
+fn a_function_nothing_calls_is_reported_as_zero() {
+    let backend = create_test_backend();
+
+    let lenses = declaration_lenses(
+        &backend,
+        "file:///helpers.php",
+        "<?php\nfunction unused(): void {}\n",
+    );
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 1).as_deref(),
+        Some("0 references"),
+        "a file with no classes at all still reports its functions"
+    );
+}
+
+#[test]
+fn a_magic_method_gets_no_reference_lens() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public function __construct() {}
+    public function save(): void {}
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert!(lenses.iter().any(|lens| lens.range.start.line == 1));
+    assert!(lenses.iter().any(|lens| lens.range.start.line == 3));
+    assert!(!lenses.iter().any(|lens| lens.range.start.line == 2));
+}
+
+#[test]
+fn a_member_lens_ignores_a_member_of_the_same_name_on_another_class() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public int $id = 0;
+    public function save(): void {}
+}
+class Order {
+    public int $id = 0;
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    echo $order->id;
+    $order->save();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 6).as_deref(),
+        Some("1 reference")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 7).as_deref(),
+        Some("1 reference")
+    );
+}
+
+#[test]
+fn a_member_lens_counts_references_through_a_subclass() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order extends Model {
+}
+function persist(Order $order, Model $model): void {
+    $order->save();
+    $model->save();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("2 references")
+    );
+}
+
+#[test]
+fn a_class_lens_ignores_a_class_of_the_same_name_in_another_namespace() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Widget {}
+namespace App;
+class Widget {}
+function build(): void {
+    $first = new \App\Widget();
+    $second = new \App\Widget();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 1).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("2 references")
+    );
+}
+
+#[test]
+fn a_new_parent_class_recomputes_the_count() {
+    const URI: &str = "file:///test.php";
+    let backend = create_test_backend();
+    let unrelated = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let lenses = declaration_lenses(&backend, URI, unrelated);
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 2).as_deref(),
+        Some("0 references")
+    );
+
+    let inherited = unrelated.replace(
+        "class Order {\n    public function save(): void {}",
+        "class Order extends Model {",
+    );
+    seed_open_file(&backend, URI, &inherited);
+    backend.handle_code_lens(URI, &inherited);
+    assert!(backend.compute_pending_member_ref_counts());
+    let lenses = backend
+        .handle_code_lens(URI, &inherited)
+        .unwrap_or_default();
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 2).as_deref(),
+        Some("1 reference")
+    );
+}
+
+#[test]
+fn chain_cache_does_not_leak_a_resolution_across_files() {
+    let backend = create_test_backend();
+
+    const URI_A: &str = "file:///PenA.php";
+    const URI_B: &str = "file:///PenB.php";
+    const URI_CONSUMER_A: &str = "file:///ConsumerA.php";
+    const URI_CONSUMER_B: &str = "file:///ConsumerB.php";
+
+    // Two unrelated classes that happen to share a bare name and an
+    // identically-shaped `make()->write()` chain, each imported under
+    // that bare name by its own consumer file.
+    let pen_a = r#"<?php
+namespace App\A;
+
+class Pen {
+    public static function make(): self {
+        return new self();
+    }
+
+    public function write(): void {}
+}
+"#;
+    let pen_b = pen_a.replace("App\\A", "App\\B");
+
+    let consumer_a = r#"<?php
+namespace App;
+
+use App\A\Pen;
+
+function useA(): void {
+    Pen::make()->write();
+}
+"#;
+    let consumer_b = consumer_a
+        .replace("App\\A", "App\\B")
+        .replace("useA", "useB");
+
+    seed_open_file(&backend, URI_A, pen_a);
+    seed_open_file(&backend, URI_B, &pen_b);
+    seed_open_file(&backend, URI_CONSUMER_A, consumer_a);
+    seed_open_file(&backend, URI_CONSUMER_B, &consumer_b);
+
+    // Queue both `write()` declarations for a count, then resolve them in
+    // the same `compute_pending_member_ref_counts` pass so both consumer
+    // files are scanned under one chain-cache activation — the scenario
+    // where a text-only cache key leaks a resolution from one file's `use`
+    // scope into the other's.
+    backend.handle_code_lens(URI_A, pen_a);
+    backend.handle_code_lens(URI_B, &pen_b);
+    backend.compute_pending_member_ref_counts();
+
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend.handle_code_lens(URI_A, pen_a).unwrap_or_default(),
+            8
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "App\\A\\Pen::write must only count ConsumerA's call, not ConsumerB's \
+         identically-spelled `Pen::make()->write()` against `App\\B\\Pen`"
+    );
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend.handle_code_lens(URI_B, &pen_b).unwrap_or_default(),
+            8
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "App\\B\\Pen::write must only count ConsumerB's call"
+    );
+}
+
+#[tokio::test]
+async fn the_request_path_counts_off_the_request() {
+    const URI: &str = "file:///test.php";
+    const ONE_CALL: &str = r#"<?php
+class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let backend = create_test_backend();
+    seed_open_file(&backend, URI, ONE_CALL);
+
+    let params = CodeLensParams {
+        text_document: TextDocumentIdentifier {
+            uri: Url::parse(URI).unwrap(),
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let first = backend
+        .code_lens(params.clone())
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    assert_eq!(
+        unresolved_title_on_line(&first, 2).as_deref(),
+        Some("- references"),
+        "the first request answers before the count is known"
+    );
+
+    let counted = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let lenses = backend
+                .code_lens(params.clone())
+                .await
+                .unwrap()
+                .unwrap_or_default();
+            if let Some(title) = unresolved_title_on_line(&lenses, 2)
+                && title != "- references"
+            {
+                break title;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the background count did not land");
+    assert_eq!(counted, "1 reference");
+}
