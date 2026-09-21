@@ -196,6 +196,78 @@ check(
     $result->getModel() instanceof \App\Models\Baker
 );
 
+check(
+    'Inherited where/orderBy calls preserve the LoafBuilder instance',
+    ($query = \App\Models\Loaf::query())->where('crust', 'sourdough')->orderBy('id')->stale() === $query
+);
+check(
+    'Static where/orderBy forwarding returns LoafBuilder',
+    \App\Models\Loaf::where('crust', 'sourdough')->orderBy('id')->stale() instanceof \App\Models\LoafBuilder
+);
+check(
+    'Query-builder forwarding preserves BakerBuilder and its model',
+    ($query = \App\Models\Baker::query())->whereIn('id', [1])->lockForUpdate()->active() === $query
+    && $query->getModel() instanceof \App\Models\Baker
+);
+
+foreach (['newQuery', 'newModelQuery', 'newQueryWithoutScopes'] as $factory) {
+    $loafQuery = (new \App\Models\Loaf())->$factory();
+    $bakerQuery = (new \App\Models\Baker())->$factory();
+    check(
+        "Model::$factory preserves custom builders and their models",
+        $loafQuery instanceof \App\Models\LoafBuilder
+        && $loafQuery->stale()->getModel() instanceof \App\Models\Loaf
+        && $bakerQuery instanceof \App\Models\BakerBuilder
+        && $bakerQuery->active()->getModel() instanceof \App\Models\Baker
+    );
+}
+
+$callbackModels = [];
+\App\Models\BlogPost::whereHas('author.posts', function ($query) use (&$callbackModels) {
+    $callbackModels[] = get_class($query->getModel());
+    $query->where('published', true);
+});
+check(
+    'Dotted whereHas callback queries the last related model',
+    $callbackModels === [\App\Models\BlogPost::class]
+);
+
+$callbackModels = [];
+\App\Models\BlogAuthor::has('posts.author', '>=', 1, 'and', function ($query) use (&$callbackModels) {
+    $callbackModels[] = get_class($query->active()->getModel());
+});
+check(
+    'The fifth has argument receives the final related model builder and scopes',
+    $callbackModels === [\App\Models\BlogAuthor::class]
+);
+check(
+    'An arrow callback in the fifth has argument preserves the outer query',
+    ($query = \App\Models\BlogAuthor::query())->has('posts.author', '>=', 1, 'and', fn ($related) => $related->active()) === $query
+);
+
+// Check both callback invocations without executing the eager-load SQL.
+$callbackClasses = [];
+$query = \App\Models\BlogAuthor::withWhereHas('posts', function ($related) use (&$callbackClasses) {
+    $callbackClasses[] = get_class($related);
+});
+$query->getEagerLoads()['posts']((new \App\Models\BlogAuthor())->posts());
+check(
+    'withWhereHas supplies a builder for existence and a relation for eager loading',
+    $callbackClasses === [\Illuminate\Database\Eloquent\Builder::class, \Illuminate\Database\Eloquent\Relations\HasMany::class]
+);
+
+$morphCallbacks = [];
+\App\Models\Review::whereHasMorph('reviewable', [\App\Models\BlogPost::class, \App\Models\Loaf::class], function ($related, $type) use (&$morphCallbacks) {
+    $morphCallbacks[] = [get_class($related), get_class($related->getModel()), $type];
+});
+check(
+    'Morph callbacks receive each candidate builder, its model, and the class-string type',
+    $morphCallbacks === [
+        [\Illuminate\Database\Eloquent\Builder::class, \App\Models\BlogPost::class, \App\Models\BlogPost::class],
+        [\App\Models\LoafBuilder::class, \App\Models\Loaf::class, \App\Models\Loaf::class],
+    ]
+);
+
 // Model::fresh() on instance (non-existing model returns null)
 $result = $bakery->fresh();
 check(
