@@ -935,23 +935,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B323. An external formatter that prints nothing empties the document
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1529,23 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B323. An external formatter that prints nothing empties the document
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1604,31 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b323-an-external-formatter-that-prints-nothing-empties-the-document">B323. An external formatter that prints nothing empties the document<a class="headerlink" href="#b323-an-external-formatter-that-prints-nothing-empties-the-document" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: High · Complexity: Low</strong></p>
-<p>The stdin-driven formatters (Pint, php-cs-fixer) return the child's
-stdout verbatim from <code>run_tool</code> in <code>formatting/external.rs</code>, with no
-check that anything came back. <code>format_content</code> then sees a formatted
-text that differs from the original, and <code>compute_edits</code> turns that into
-a single <code>TextEdit</code> covering the whole document whose replacement is the
-empty string. Formatting the file deletes it.</p>
-<p>Two paths produce an empty stdout while the exit code stays <code>0</code>, so
-nothing upstream reports a failure:</p>
-<ul>
-<li><code>process.rs</code> drains the child with <code>let _ = s.read_to_string(&amp;mut buf)</code>.
-  A single non-UTF-8 byte anywhere in the output leaves <code>buf</code> empty and
-  throws the error away.</li>
-<li>The same function collects the drain threads with
-  <code>.and_then(|h| h.join().ok()).unwrap_or_default()</code>, so a panicking
-  reader thread also yields <code>""</code>.</li>
-</ul>
-<p>The configured Pint command is a free-form string, and a wrapper that
-formats in place and prints nothing is a common way to write one. That
-is enough on its own: exit <code>0</code>, no stdout, document wiped.</p>
-<p>The sibling-file arm is already defensive about partial results; the
-stdin arm needs the same care. Reject an empty result for a non-empty
-input, and make the drain threads propagate a read failure as an error
-instead of an empty string. <code>run_pint_on_blade</code> has the same hole.</p>
+<p>No outstanding items.</p>
 
 
 
