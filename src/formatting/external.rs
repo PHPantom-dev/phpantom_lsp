@@ -148,7 +148,7 @@ pub(super) fn run_pint_on_blade(
     }
     let run = Run::new(workspace_root, config, cancelled);
     let output = execute(tool, &arguments, Some(content), &run)?;
-    Ok(output.stdout)
+    reject_empty_result(tool.tool, content, output.stdout)
 }
 
 fn run_tool(
@@ -160,7 +160,7 @@ fn run_tool(
     match tool.tool.invocation() {
         Invocation::Stdin => {
             let output = execute(tool, &tool.tool.arguments(file_path), Some(content), run)?;
-            Ok(output.stdout)
+            reject_empty_result(tool.tool, content, output.stdout)
         }
         Invocation::SiblingFile => {
             let temp = write_sibling_temp_file(file_path, content)?;
@@ -172,6 +172,20 @@ fn run_tool(
             result.map(|_| formatted)
         }
     }
+}
+
+/// Guard against a stdin-driven tool that reports success but produced no
+/// output: returning that empty string as the formatted content would
+/// delete the document. A tool given empty input is allowed to return
+/// empty output.
+fn reject_empty_result(tool: Tool, input: &str, output: String) -> Result<String, String> {
+    if output.is_empty() && !input.is_empty() {
+        return Err(format!(
+            "{} produced no output for non-empty input",
+            tool.name()
+        ));
+    }
+    Ok(output)
 }
 
 /// Run one tool and check its exit code.

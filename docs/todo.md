@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| B323 | [An external formatter that prints nothing empties the document](todo/bugs.md#b323-an-external-formatter-that-prints-nothing-empties-the-document)              | High        | Low         |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 

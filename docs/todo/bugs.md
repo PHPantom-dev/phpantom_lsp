@@ -54,32 +54,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B323. An external formatter that prints nothing empties the document
-
-**Impact: High · Complexity: Low**
-
-The stdin-driven formatters (Pint, php-cs-fixer) return the child's
-stdout verbatim from `run_tool` in `formatting/external.rs`, with no
-check that anything came back. `format_content` then sees a formatted
-text that differs from the original, and `compute_edits` turns that into
-a single `TextEdit` covering the whole document whose replacement is the
-empty string. Formatting the file deletes it.
-
-Two paths produce an empty stdout while the exit code stays `0`, so
-nothing upstream reports a failure:
-
-- `process.rs` drains the child with `let _ = s.read_to_string(&mut buf)`.
-  A single non-UTF-8 byte anywhere in the output leaves `buf` empty and
-  throws the error away.
-- The same function collects the drain threads with
-  `.and_then(|h| h.join().ok()).unwrap_or_default()`, so a panicking
-  reader thread also yields `""`.
-
-The configured Pint command is a free-form string, and a wrapper that
-formats in place and prints nothing is a common way to write one. That
-is enough on its own: exit `0`, no stdout, document wiped.
-
-The sibling-file arm is already defensive about partial results; the
-stdin arm needs the same care. Reject an empty result for a non-empty
-input, and make the drain threads propagate a read failure as an error
-instead of an empty string. `run_pint_on_blade` has the same hole.
+No outstanding items.
