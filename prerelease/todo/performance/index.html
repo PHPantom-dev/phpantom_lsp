@@ -3246,15 +3246,101 @@ targets (16 bytes per access) would let a warm candidate file be
 filtered without reading it at all, which also removes the file reads
 above.</p>
 <p>That leaves the layer being cleared wholesale on a signature change.
-Before narrowing it, measure how much of a burst is the rebuild and how
-much is the scan: the layer is shared with Find References, so a
-narrowing that gets it wrong shows up as missing references, not as a
-slow lens.</p>
+The measurement that was asked for here has been taken, on a 6,700-file
+Laravel application, opening a controller that declares eight methods
+(<code>index</code>, <code>create</code>, <code>save</code>, <code>update</code>, <code>edit</code>, <code>delete</code>, <code>featured</code>,
+<code>publish</code>) whose counts come to nine references in total:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>candidate files</th>
+<th>receiver walks</th>
+<th>wall</th>
+<th>CPU</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>first open</td>
+<td>1,225</td>
+<td>1,118</td>
+<td>8.6 s</td>
+<td>122 s</td>
+</tr>
+<tr>
+<td>after renaming one method</td>
+<td>1,122</td>
+<td>1,078</td>
+<td>8.5 s</td>
+<td>117 s</td>
+</tr>
+</tbody>
+</table>
+<p>The second row is the cost this item is about: the rename reaches
+<code>clear_resolved_member_files</code>, every warm entry goes, and the burst pays
+the same price again. Nothing else in the second row is new work; a
+rename that did not clear the layer would have been served from it.</p>
+<p>The layer is shared with Find References, so a narrowing that gets it
+wrong shows up as missing references, not as a slow lens.</p>
 <p><strong>Where to look:</strong> <code>Staleness</code> and <code>compute_pending_member_ref_counts</code>
 in <code>reference_counts.rs</code>, <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>,
 <code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
 <code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>, and
 <code>get_file_content_arc</code> in <code>backend/file_access.rs</code>.</p>
+<hr />
+<h2 id="p58-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access">P58. A receiver walk builds variable scopes for a whole file to type one access<a class="headerlink" href="#p58-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<p>Resolving the receiver of a member access needs the enclosing function's
+variable scopes, and <code>member_declaration_references_batch_in</code> gets them
+from <code>build_diagnostic_scopes</code>, which forward-walks every function in
+the file. A candidate file usually holds one or two accesses the search
+is interested in, in one function, out of dozens.</p>
+<p>On the measurement recorded under P55 (a 6,700-file Laravel application,
+eight method declarations in one controller, nine references between
+them), 542 of the 1,225 candidate files needed variable scopes, and
+building them was 116 of the burst's 122 CPU-seconds: 95% of what is
+left once the search stopped resolving accesses nobody asked about. The
+remaining 6 seconds resolve the 7,259 accesses that are actually
+candidates.</p>
+<h3 id="fix_4">Fix<a class="headerlink" href="#fix_4" title="Permanent link">&para;</a></h3>
+<p>Build scopes for the function that encloses the access being resolved
+rather than for the file. The walker already descends per function from
+<code>build_diagnostic_scopes</code>; what it lacks is a way to say which ones a
+caller needs, and a scope cache keyed finely enough that a second access
+in the same function reuses the first one's walk.</p>
+<p>The whole-file entry point has to stay for diagnostics, which do want
+every function. This is an additional entry point, not a replacement,
+and both must populate the same cache so the two consumers cannot
+disagree about a type.</p>
+<p><strong>Where to look:</strong> <code>build_diagnostic_scopes</code> and <code>DIAGNOSTIC_SCOPE</code> in
+<code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>, and the
+<code>resolved_file</code> closure in <code>member_declaration_references_batch_in</code>
+(<code>references/members.rs</code>).</p>
+<hr />
+<h2 id="p59-member-reference-candidates-are-selected-by-member-name-alone">P59. Member-reference candidates are selected by member name alone<a class="headerlink" href="#p59-member-reference-candidates-are-selected-by-member-name-alone" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: High</strong></p>
+<p><code>member_candidate_keys</code> keys the reference index by member name and
+static-ness only, so the candidate set for a declaration is every file
+that accesses <em>any</em> member of that name. In the P55 measurement, eight
+declarations on one controller selected 1,225 files, and the hierarchy
+each was filtered against held exactly one class. Over a thousand files
+were walked to find nine references.</p>
+<p>The narrowing that suggests itself, intersecting with the files that
+mention a class in the hierarchy, is not sound: a receiver reaches its
+type through return types declared elsewhere, so
+<code>$repo-&gt;find()-&gt;publish()</code> names neither <code>Article</code> nor the controller.
+It is precisely the models, the classes most often returned from another
+file, that it would break.</p>
+<p>A sound narrowing needs the index to record what a file's accesses
+resolve <em>to</em>, not just what they are named, which is the same
+information <code>ResolvedMemberFile</code> holds lazily. Making it a product of
+the workspace index rather than of the first search that needs it is the
+substantial part, and it interacts with P55: a durable index has to be
+invalidated by dependency rather than wholesale.</p>
+<p><strong>Where to look:</strong> <code>member_candidate_keys</code> and
+<code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
+<code>ReferenceIndexKey</code> and <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>.</p>
 <hr />
 <h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
