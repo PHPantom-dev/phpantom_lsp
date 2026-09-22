@@ -92,7 +92,7 @@ cargo test
 cargo clippy -- -D warnings
 cargo clippy --tests -- -D warnings
 cargo clippy --all-targets --features semantic-export -- -D warnings
-cargo test --features semantic-export --lib semantic_export
+cargo test --features semantic-export semantic_export
 cargo fmt --check
 find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php

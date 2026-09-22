@@ -921,6 +921,20 @@ pub fn find_action_containing<'a>(
     })
 }
 
+/// Find all code actions whose title contains `needle`.
+pub fn find_actions_containing<'a>(
+    actions: &'a [CodeActionOrCommand],
+    needle: &str,
+) -> Vec<&'a CodeAction> {
+    actions
+        .iter()
+        .filter_map(|a| match a {
+            CodeActionOrCommand::CodeAction(ca) if ca.title.contains(needle) => Some(ca),
+            _ => None,
+        })
+        .collect()
+}
+
 /// Find all code actions whose title starts with `prefix`.
 pub fn find_actions<'a>(actions: &'a [CodeActionOrCommand], prefix: &str) -> Vec<&'a CodeAction> {
     actions

@@ -1118,17 +1118,46 @@ fn new_alias_slot_and_cache() -> (
     (slot, cache)
 }
 
+/// The three stub indices a `Backend` starts life with.
+///
+/// [`StubIndices::embedded`] is the PHP standard library compiled into the
+/// binary; [`StubIndices::empty`] skips building it for test backends that
+/// never consult it.
+struct StubIndices {
+    classes: CiMap<&'static str>,
+    functions: CiMap<&'static str>,
+    constants: HashMap<&'static str, &'static str>,
+}
+
+impl StubIndices {
+    /// The full embedded standard library (1,455 classes, 5,023
+    /// functions, 8,119 constants).
+    fn embedded() -> Self {
+        Self {
+            classes: CiMap::from(stubs::build_stub_class_index()),
+            functions: CiMap::from(stubs::build_stub_function_index()),
+            constants: stubs::build_stub_constant_index(),
+        }
+    }
+
+    /// No stubs at all, avoiding the cost of building three large
+    /// `HashMap`s (14,597 entries total).
+    fn empty() -> Self {
+        Self {
+            classes: CiMap::new(),
+            functions: CiMap::new(),
+            constants: HashMap::new(),
+        }
+    }
+}
+
 impl Backend {
     /// Shared defaults for all Backend constructors.
     ///
-    /// Returns a `Backend` with no LSP client, empty maps, and the full
-    /// embedded stub indices.  Each public constructor customises only the
-    /// fields that differ.
-    ///
-    /// **Note:** This loads the full embedded stub indices (1,455 classes,
-    /// 5,023 functions, 8,119 constants).  Test code should use
-    /// [`test_defaults`] instead, which leaves stubs empty.
-    fn defaults() -> Self {
+    /// Returns a `Backend` with no LSP client and empty maps, reading its
+    /// workspace environment and standard library from the arguments.
+    /// Each public constructor customises only the fields that differ.
+    fn defaults_with(workspace: WorkspaceEnv, stubs: StubIndices) -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
             name: "PHPantom".to_string(),
@@ -1139,7 +1168,7 @@ impl Backend {
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new(),
+            workspace,
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
@@ -1150,11 +1179,9 @@ impl Backend {
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: Arc::new(RwLock::new(CiMap::from(stubs::build_stub_class_index()))),
-            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
-                stubs::build_stub_function_index(),
-            )))),
-            stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
+            stub_index: Arc::new(RwLock::new(stubs.classes)),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(stubs.functions))),
+            stub_constant_index: Arc::new(RwLock::new(stubs.constants)),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             storage_disk_type_cache: Arc::new(RwLock::new(None)),
@@ -1235,121 +1262,34 @@ impl Backend {
         }
     }
 
-    /// Shared defaults for test Backend constructors.
+    /// The standard `Backend` every test constructor starts from.
     ///
-    /// Identical to [`defaults`] but with **empty** stub indices, avoiding
-    /// the cost of building three large `HashMap`s (14,597 entries total)
-    /// that most tests never consult.  Tests that need specific stubs
-    /// override the relevant fields after construction.
+    /// Identical to [`Backend::defaults`] but with **empty** stub indices,
+    /// so a test pays nothing for a standard library it never consults.
+    /// Tests that need specific stubs override the relevant fields after
+    /// construction.
     ///
     /// The workspace environment is also isolated from the global
     /// `.phpantom.toml`, so a test asserts against the project config it
     /// writes itself rather than against the config directory of whoever
     /// happens to be running the suite.
     fn test_defaults() -> Self {
-        let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
-            name: "PHPantom".to_string(),
-            version: env!("PHPANTOM_GIT_VERSION").to_string(),
-            client_name: Mutex::new(String::new()),
-            open_files: Arc::new(RwLock::new(HashMap::new())),
-            symbol_maps: Arc::new(RwLock::new(HashMap::new())),
-            reference_index: reference_index::new_reference_index(),
-            skip_reference_index: false,
-            symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new_isolated(),
-            parse_errors: Arc::new(RwLock::new(HashMap::new())),
-            did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
-            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
-            client: None,
-            file_imports: Arc::new(RwLock::new(HashMap::new())),
-            resolved_names: Arc::new(RwLock::new(HashMap::new())),
-            file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            phar_archives: Arc::new(RwLock::new(HashMap::new())),
-            parsed_uris: Arc::new(RwLock::new(HashSet::new())),
-            parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: Arc::new(RwLock::new(CiMap::new())),
-            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::new()))),
-            stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
-            resolved_class_cache,
-            auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
-            storage_disk_type_cache: Arc::new(RwLock::new(None)),
-            laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
-            laravel_aliases,
-            laravel_macros: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelMacroIndex::default(),
-            )),
-            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_pivots: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelPivotIndex::default(),
-            )),
-            laravel_has_pivots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_pivots_dirty: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            laravel_commands: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelCommandIndex::default(),
-            )),
-            laravel_has_commands: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_morph_map: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelMorphMapIndex::default(),
-            )),
-            laravel_gates: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelGateIndex::default(),
-            )),
-            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
-            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
-            laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            laravel_date_class: Arc::new(RwLock::new(None)),
-            laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            laravel_provider_resources: Arc::new(RwLock::new(
-                virtual_members::laravel::ProviderResources::default(),
-            )),
-            laravel_provider_scans: Arc::new(RwLock::new(
-                virtual_members::laravel::ProviderScans::default(),
-            )),
-            blade_custom_directives: Arc::new(RwLock::new(
-                blade::directives::CustomDirectives::default(),
-            )),
-            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
-            laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
-            schema_index: Arc::new(RwLock::new(
-                virtual_members::laravel::database_schema::SchemaIndex::default(),
-            )),
-            member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
-            diag: crate::diagnostics::state::DiagnosticState::new(),
-            phpstan_tool: ExternalToolWorker::new(),
-            phpcs_tool: ExternalToolWorker::new(),
-            mago_lint_tool: ExternalToolWorker::new(),
-            mago_analyze_tool: ExternalToolWorker::new(),
-            supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             // Tests drive the backend without an `initialize` round-trip; a
             // real client advertises this capability there.
             supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_type_hierarchy_dynamic_registration: Arc::new(
-                std::sync::atomic::AtomicBool::new(false),
-            ),
-            registered_watcher_state: Arc::new(RwLock::new(None)),
-            supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            member_ref_counts: reference_counts::new_member_ref_counts(),
-            init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
-            blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
-            blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
-            typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
-            workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            workspace_index_lock: Arc::new(Mutex::new(())),
-            full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            workspace_index_status: Arc::new(Mutex::new(None)),
-            request_progress: None,
+            // A test asserts right after the edit that triggered the parse,
+            // so the parse has to have committed by the time the edit
+            // returns.
             sync_ast_updates: true,
+            ..Self::defaults_with(WorkspaceEnv::new_isolated(), StubIndices::empty())
         }
+    }
+
+    /// Shared defaults for the non-test `Backend` constructors: the real
+    /// workspace environment and the full embedded standard library.
+    fn defaults() -> Self {
+        Self::defaults_with(WorkspaceEnv::new(), StubIndices::embedded())
     }
 
     /// Create a new `Backend` connected to an LSP client.
@@ -1399,10 +1339,7 @@ impl Backend {
     /// behaviour.
     pub fn new_test_with_full_stubs() -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
-        let backend = Self {
-            workspace: WorkspaceEnv::new_isolated(),
-            ..Self::defaults()
-        };
+        let backend = Self::defaults_with(WorkspaceEnv::new_isolated(), StubIndices::embedded());
         backend.set_php_version(backend.php_version());
         backend
     }
