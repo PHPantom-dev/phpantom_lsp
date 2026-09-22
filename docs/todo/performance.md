@@ -1193,7 +1193,7 @@ in `reference_counts.rs`, `ResolvedMemberFile` in `reference_index.rs`,
 
 ---
 
-## P58. A receiver walk builds variable scopes for a whole file to type one access
+## P60. A receiver walk builds variable scopes for a whole file to type one access
 
 **Impact: High · Complexity: Medium-High**
 
@@ -1231,7 +1231,7 @@ disagree about a type.
 
 ---
 
-## P59. Member-reference candidates are selected by member name alone
+## P61. Member-reference candidates are selected by member name alone
 
 **Impact: Medium-High · Complexity: High**
 

@@ -35,7 +35,11 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
+| P55  | [A signature edit re-resolves every member-reference candidate file](todo/performance.md#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file) | Medium-High | Medium      |
+| X17  | [Index the workspace's other folders](todo/indexing.md#x17-index-the-workspaces-other-folders)                              | Medium      | Medium      |
+| P60  | [A receiver walk builds variable scopes for a whole file to type one access](todo/performance.md#p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access) | High | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| P61  | [Member-reference candidates are selected by member name alone](todo/performance.md#p61-member-reference-candidates-are-selected-by-member-name-alone) | Medium-High | High        |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
@@ -183,9 +187,6 @@ unlikely to move the needle for most users.
 | P16 | [Pre-parsed stub format (eliminate raw PHP embedding)](todo/performance.md#p16-pre-parsed-stub-format-eliminate-raw-php-embedding)                                          | High        | Very High   |
 | P35 | [Diagnostic passes reach only a fraction of available cores](todo/performance.md#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores)                            | Medium-High | Very High   |
 | P30 | [Evaluate migrating parse/resolve/docblock pipeline to `mago-hir`](todo/performance.md#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir) (parked — re-evaluated at mago 1.46.0, still no `mago-hir` consumers upstream) | Medium-High | Very High   |
-| P55 | [A signature edit re-resolves every member-reference candidate file](todo/performance.md#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file)          | Medium-High | Medium      |
-| P58 | [A receiver walk builds variable scopes for a whole file to type one access](todo/performance.md#p58-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access) | High        | Medium-High |
-| P59 | [Member-reference candidates are selected by member name alone](todo/performance.md#p59-member-reference-candidates-are-selected-by-member-name-alone)                      | Medium-High | High        |
 | P52 | [The diagnostic benchmarks measure a path no consumer takes](todo/performance.md#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes)                            | Medium      | Low         |
 | P53 | [The deprecated collector deep-copies a class per member access](todo/performance.md#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)                    | Medium      | Low         |
 | P51 | [CI-gated scaling and memory invariants](todo/performance.md#p51-ci-gated-scaling-and-memory-invariants)                                                                    | Medium      | Low-Medium  |
@@ -205,7 +206,6 @@ unlikely to move the needle for most users.
 | P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium-High |
 | P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | High        |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
-| X17 | [Index the workspace's other folders](todo/indexing.md#x17-index-the-workspaces-other-folders)                                                                              | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |
 | X16 | [Composer's own class lists bypass `[indexing] exclude`](todo/indexing.md#x16-composers-own-class-lists-bypass-indexing-exclude)                                            | Low-Medium  | Low         |
