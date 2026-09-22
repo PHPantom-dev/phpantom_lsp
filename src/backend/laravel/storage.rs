@@ -28,13 +28,19 @@ impl Backend {
     /// baked into, so the next load of either recomputes it.
     fn invalidate_storage_disk_type(&self) {
         *self.storage_disk_type_cache.write() = None;
-        let mut cache = self.resolved_class_cache.write();
-        for fqn in [
-            crate::virtual_members::laravel::FILESYSTEM_MANAGER_FQN,
-            crate::virtual_members::laravel::STORAGE_FACADE_FQN,
-        ] {
-            crate::virtual_members::evict_fqn(&mut cache, fqn);
+        {
+            let mut cache = self.resolved_class_cache.write();
+            for fqn in [
+                crate::virtual_members::laravel::FILESYSTEM_MANAGER_FQN,
+                crate::virtual_members::laravel::STORAGE_FACADE_FQN,
+            ] {
+                crate::virtual_members::evict_fqn(&mut cache, fqn);
+            }
         }
+        // The disk type is baked in without a class lookup naming the config
+        // file that decides it, so a cached receiver resolution records no
+        // dependency on this.
+        self.clear_resolved_member_files();
     }
 
     /// Keep the storage-driver index and the memoized disk type coherent with

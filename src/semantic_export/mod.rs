@@ -311,7 +311,7 @@ impl SemanticExporter {
         for (index, source) in sources.into_iter().enumerate() {
             consume(export_document(&backend, &source));
             if cache_window != 0 && index.saturating_add(1) % cache_window == 0 {
-                backend.resolved_class_cache.write().clear();
+                backend.clear_resolved_class_cache();
             }
         }
         Ok(())

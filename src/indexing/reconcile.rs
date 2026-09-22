@@ -52,7 +52,7 @@ impl Backend {
             // Whatever those files declared may be baked into a resolved
             // class (a parent, a trait, a mixin) or a cached completion
             // list, neither of which the index purge reaches.
-            self.resolved_class_cache.write().clear();
+            self.clear_resolved_class_cache();
             self.member_completion_cache.lock().clear();
         }
 
@@ -210,7 +210,7 @@ impl Backend {
         // class already resolved may have been missing a parent, trait,
         // or mixin the old filters hid.
         self.clear_class_not_found_cache();
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
 
         // Parse what the walk added, the way startup does; the pass

@@ -50,6 +50,12 @@ impl Backend {
             }
         }
         *self.laravel_date_seed_uris.write() = seed_uris;
-        *self.laravel_date_class.write() = Some(configured);
+        let previous = self.laravel_date_class.write().replace(configured.clone());
+        // `now()` reaches the configured class through this slot rather than
+        // through a lookup of the provider that set it, so a cached receiver
+        // resolution records no dependency on it.
+        if previous != Some(configured) {
+            self.clear_resolved_member_files();
+        }
     }
 }

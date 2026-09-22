@@ -143,12 +143,20 @@ struct ResolvedMemberAccess {
 /// table below — without it a later search for a different name would read
 /// this entry as "no receiver anywhere" and silently drop every reference in
 /// the file.
+///
+/// `deps` records the classes and functions the resolution consulted, so an
+/// edit elsewhere in the workspace drops the entries it can have changed
+/// rather than the whole layer.  See
+/// [`resolution_deps`](crate::resolution_deps).
 pub(crate) struct ResolvedMemberFile {
     symbol_map: Arc<SymbolMap>,
     /// The member names this entry resolved the accesses of, sorted.
     covered: Box<[Atom]>,
     accesses: Vec<ResolvedMemberAccess>,
     targets: Vec<Atom>,
+    /// The names this entry's resolution depended on, sorted.  Keyed the way
+    /// [`dep_key`](crate::resolution_deps::dep_key) keys them.
+    deps: Box<[Atom]>,
 }
 
 impl ResolvedMemberFile {
@@ -156,6 +164,7 @@ impl ResolvedMemberFile {
         symbol_map: Arc<SymbolMap>,
         mut covered: Vec<Atom>,
         mut resolved: Vec<(usize, Range, Vec<Atom>)>,
+        mut deps: Vec<Atom>,
     ) -> Self {
         covered.sort_unstable();
         covered.dedup();
@@ -178,12 +187,38 @@ impl ResolvedMemberFile {
                 target_len: (packed_targets.len() - target_start) as u32,
             });
         }
+        // A receiver the entry names is a dependency whether or not the walk
+        // that produced it had to load the class: an edit to it can change
+        // which declaration the access belongs to.
+        deps.extend(
+            packed_targets
+                .iter()
+                .map(|target| crate::resolution_deps::dep_key(target)),
+        );
+        deps.sort_unstable();
+        deps.dedup();
         Self {
             symbol_map,
             covered: covered.into_boxed_slice(),
             accesses,
             targets: packed_targets,
+            deps: deps.into_boxed_slice(),
         }
+    }
+
+    /// The names this entry's resolution depended on, so a later walk that
+    /// carries its resolutions over carries their dependencies too.
+    pub(crate) fn deps(&self) -> &[Atom] {
+        &self.deps
+    }
+
+    /// Whether an edit to any of `changed` can have changed what this entry
+    /// resolved.  `changed` is the smaller side by far (one edit's classes
+    /// against a file's whole dependency set), so it drives the loop.
+    fn depends_on_any(&self, changed: &[Atom]) -> bool {
+        changed
+            .iter()
+            .any(|name| self.deps.binary_search(name).is_ok())
     }
 
     /// Whether this entry already answers for every one of `members`.
@@ -244,10 +279,12 @@ impl ResolvedMemberFile {
             self.accesses.len(),
             self.accesses.capacity() * std::mem::size_of::<ResolvedMemberAccess>()
                 + self.targets.capacity() * std::mem::size_of::<Atom>()
-                + self.covered.len() * std::mem::size_of::<Atom>(),
+                + self.covered.len() * std::mem::size_of::<Atom>()
+                + self.deps.len() * std::mem::size_of::<Atom>(),
             usize::from(self.accesses.capacity() > 0)
                 + usize::from(self.targets.capacity() > 0)
-                + usize::from(!self.covered.is_empty()),
+                + usize::from(!self.covered.is_empty())
+                + usize::from(!self.deps.is_empty()),
         )
     }
 }
@@ -305,11 +342,13 @@ impl Backend {
         symbol_map: Arc<SymbolMap>,
         covered: Vec<Atom>,
         resolved: Vec<(usize, Range, Vec<Atom>)>,
+        deps: Vec<Atom>,
     ) -> Arc<ResolvedMemberFile> {
         let built = Arc::new(ResolvedMemberFile::new(
             Arc::clone(&symbol_map),
             covered,
             resolved,
+            deps,
         ));
 
         // A didChange parse may have replaced the symbol map while the
@@ -348,8 +387,38 @@ impl Backend {
         built
     }
 
+    /// Drop every cached receiver resolution.
+    ///
+    /// For an edit whose effect on the type engine cannot be named: a
+    /// Laravel registry (the macro table, the container aliases, the pivot
+    /// index, the configured date class) is consulted without a class
+    /// lookup naming the provider that registered it, so an entry that read
+    /// one records no dependency on it.
     pub(crate) fn clear_resolved_member_files(&self) {
         self.reference_index.write().resolved_members.clear();
+    }
+
+    /// Drop the cached receiver resolutions that consulted one of `changed`,
+    /// keeping the rest.
+    ///
+    /// `changed` holds the [`dep_key`](crate::resolution_deps::dep_key) of
+    /// every class and function an edit altered, *including* the classes
+    /// that inherit from them: a cached full resolution reads its parents
+    /// from the resolved-class cache rather than loading them, so it records
+    /// no dependency on a parent it never looked up.  The caller closes that
+    /// over the inheritance and mixin graph before calling here (which is
+    /// what the resolved-class cache's own eviction already computes).
+    pub(crate) fn retain_resolved_member_files(&self, changed: &[Atom]) {
+        if changed.is_empty() {
+            return;
+        }
+        let mut index = self.reference_index.write();
+        if index.resolved_members.is_empty() {
+            return;
+        }
+        index
+            .resolved_members
+            .retain(|_, file| !file.depends_on_any(changed));
     }
 
     pub(crate) fn evict_reference_index_uri(&self, uri: &str) {

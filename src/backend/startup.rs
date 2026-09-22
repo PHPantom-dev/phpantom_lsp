@@ -537,7 +537,7 @@ impl Backend {
         // hover — which walks the parent chain live rather than reading
         // the merged cache — resolves them correctly.  Clearing here lets
         // the now-complete index rebuild every merge correctly.
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.auth_user_type_cache.write().clear();
         *self.storage_disk_type_cache.write() = None;
         self.laravel_aliases.invalidate();

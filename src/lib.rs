@@ -291,6 +291,7 @@ mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+pub(crate) mod resolution_deps;
 mod resource_navigation;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;

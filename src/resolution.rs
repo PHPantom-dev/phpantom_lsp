@@ -204,6 +204,13 @@ impl Backend {
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
+        // Report the lookup to whoever is recording what a resolution
+        // depends on, before the memo below can answer it without touching
+        // the class index.  A name that finds nothing is reported too: it
+        // gains a declaration as readily as an existing one changes.
+        if let Some(base) = ty.base_name() {
+            crate::resolution_deps::record(base);
+        }
         // The name search is memoised per thread on the interned type
         // handle: the diagnostic pass asks for the same types millions of
         // times, and every miss costs two case-insensitive hash lookups
@@ -304,7 +311,27 @@ impl Backend {
             || memchr::memmem::find(content.as_bytes(), b"morphToMany").is_some();
         if has_m2m || self.laravel_pivots.read().contributes(uri) {
             self.laravel_pivots_dirty.store(true, Ordering::Relaxed);
+            // A pivot accessor is attached to the *target* model, which the
+            // file declaring the relation never has to be looked up for, so a
+            // cached receiver resolution records no dependency on this index.
+            self.clear_resolved_member_files();
         }
+    }
+
+    /// Empty the resolved-class cache, and the caches whose entries were
+    /// derived from it.
+    ///
+    /// The cached receiver resolutions a reference search leaves behind are
+    /// kept across an edit by intersecting what each one consulted with what
+    /// the edit changed, and the *unconsulted* half of that, a parent read
+    /// out of this cache rather than loaded, is recovered from this cache's
+    /// reverse-dependency graph.  Emptying the cache discards that graph, so
+    /// there is no longer anything to recover it from and the resolutions go
+    /// with it.  Prefer `evict_fqn` over this wherever the changed classes
+    /// can be named.
+    pub(crate) fn clear_resolved_class_cache(&self) {
+        self.resolved_class_cache.write().clear();
+        self.clear_resolved_member_files();
     }
 
     /// Rebuild the reverse pivot index from every parsed class.
@@ -989,6 +1016,11 @@ impl Backend {
     /// FQN via use-map, the namespace-qualified name).  The first match
     /// wins.
     pub fn find_or_load_function(&self, candidates: &[&str]) -> Option<FunctionInfo> {
+        // Every spelling tried is a name this resolution depends on, whether
+        // or not it is the one that answers: a function declared under one
+        // of the others later would win instead.
+        crate::resolution_deps::record_all(candidates);
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();

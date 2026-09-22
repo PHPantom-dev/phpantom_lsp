@@ -474,6 +474,7 @@ impl Backend {
         {
             self.laravel_pivots_dirty
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.clear_resolved_member_files();
         }
 
         self.apply_ast_index_updates_batch(updates)
@@ -1052,6 +1053,9 @@ impl Backend {
         // The common case — a class file with no standalone functions that
         // never had any — skips the snapshot scan below entirely.
         let mut any_function_changed = false;
+        // The names behind `any_function_changed`, for the caches that can
+        // be invalidated by dependency rather than wholesale.
+        let mut changed_names: Vec<crate::atom::Atom> = Vec::new();
         {
             let mut fmap = self.symbols.global_functions.write();
             let mut dupes = self.symbols.duplicate_functions.write();
@@ -1127,20 +1131,18 @@ impl Backend {
                     // empty the file has never been parsed before.  New
                     // functions appearing on first parse are not changes
                     // — they mirror the class first-parse fast path.
-                    if !any_function_changed && !old_functions.is_empty() {
-                        match old_functions
+                    if !old_functions.is_empty() {
+                        let changed = match old_functions
                             .iter()
                             .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
                         {
-                            Some((_, old_info)) => {
-                                if !old_info.signature_eq(&func_info) {
-                                    any_function_changed = true;
-                                }
-                            }
-                            None => {
-                                // New function — may affect callers.
-                                any_function_changed = true;
-                            }
+                            Some((_, old_info)) => !old_info.signature_eq(&func_info),
+                            // New function — may affect callers.
+                            None => true,
+                        };
+                        if changed {
+                            any_function_changed = true;
+                            changed_names.push(crate::resolution_deps::dep_key(&fqn));
                         }
                     }
 
@@ -1156,11 +1158,15 @@ impl Backend {
 
                 // A function was removed from this file — callers may
                 // now reference an unknown function.
-                if !any_function_changed
-                    && !old_functions.is_empty()
-                    && update.new_function_fqns.len() != old_functions.len()
-                {
-                    any_function_changed = true;
+                for (old_fqn, _) in &old_functions {
+                    if !update
+                        .new_function_fqns
+                        .iter()
+                        .any(|fqn| fqn.eq_ignore_ascii_case(old_fqn))
+                    {
+                        any_function_changed = true;
+                        changed_names.push(crate::resolution_deps::dep_key(old_fqn));
+                    }
                 }
             }
         }
@@ -1282,6 +1288,7 @@ impl Backend {
                     match (old_cls, new_cls) {
                         (Some(old), Some(new)) if old.signature_eq(new) => {}
                         _ => {
+                            changed_names.push(crate::resolution_deps::dep_key(fqn));
                             evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                             any_signature_changed = true;
                         }
@@ -1290,6 +1297,7 @@ impl Backend {
 
                 for fqn in &update.new_fqns {
                     if !update.old_fqns.contains(fqn) {
+                        changed_names.push(crate::resolution_deps::dep_key(fqn));
                         evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                         any_signature_changed = true;
                     }
@@ -1298,6 +1306,19 @@ impl Backend {
         }
         evicted_fqns.sort();
         evicted_fqns.dedup();
+        // A class whose own resolution was cached read its parents, traits,
+        // and mixins from that cache rather than loading them, so it records
+        // no dependency on the one that just changed.  The eviction above
+        // already walked the cache's reverse-dependency graph to find every
+        // such class; carrying its result into the changed set is what makes
+        // the dependency-keyed invalidation below sound for inheritance.
+        changed_names.extend(
+            evicted_fqns
+                .iter()
+                .map(|fqn| crate::resolution_deps::dep_key(fqn)),
+        );
+        changed_names.sort_unstable();
+        changed_names.dedup();
 
         {
             let mut uri_classes = self.symbols.uri_classes_index.write();
@@ -1347,9 +1368,13 @@ impl Backend {
         if changed {
             self.member_completion_cache.lock().clear();
             // Exact member targets in other files may depend on the return or
-            // property type that changed here. Rebuild those files lazily;
-            // the edited file itself is evicted by reference reindexing below.
-            self.clear_resolved_member_files();
+            // property type that changed here, but only in the files whose
+            // resolution consulted one of the names this parse changed.  A
+            // signature keystroke in a controller would otherwise throw away
+            // the receiver layer for every candidate file in the workspace
+            // and make the next search rebuild all of it.  The edited file
+            // itself is evicted by reference reindexing below.
+            self.retain_resolved_member_files(&changed_names);
             // For the same reason an access in a file nothing touched can
             // start belonging to a different declaration, which the
             // per-file invalidation the reindex does cannot see.

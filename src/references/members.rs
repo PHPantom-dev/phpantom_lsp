@@ -377,6 +377,13 @@ impl Backend {
                     .as_ref()
                     .map(|file| file.resolutions().collect())
                     .unwrap_or_default();
+                // Carrying an earlier walk's resolutions over carries what
+                // that walk consulted: the merged entry is only as valid as
+                // the older half of it.
+                let carried_deps: Vec<Atom> = previous
+                    .as_ref()
+                    .map(|file| file.deps().to_vec())
+                    .unwrap_or_default();
                 let mut access_indices: Vec<usize> = Vec::new();
                 for member in &searched {
                     let already_resolved = previous
@@ -403,8 +410,15 @@ impl Backend {
                         Arc::clone(symbol_map),
                         covered,
                         carried,
+                        carried_deps,
                     );
                 }
+
+                // Everything below resolves receivers, and every class and
+                // function it consults is what the entry stays valid
+                // against.  The recording is confined to this file's walk:
+                // scanning runs one file per worker thread.
+                let recording = crate::resolution_deps::record_consulted_names();
 
                 let _parse_cache_guard = crate::parser::with_parse_cache(&content);
                 let file_ctx = self.file_context(file_uri);
@@ -489,7 +503,15 @@ impl Backend {
                         Some((span_index, range, targets))
                     }))
                     .collect();
-                self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), covered, resolved)
+                let mut deps = recording.consulted();
+                deps.extend(carried_deps);
+                self.cache_resolved_member_file(
+                    file_uri,
+                    Arc::clone(symbol_map),
+                    covered,
+                    resolved,
+                    deps,
+                )
             });
 
             let mut matches = Vec::new();

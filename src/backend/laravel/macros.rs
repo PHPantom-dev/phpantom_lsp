@@ -171,6 +171,10 @@ impl Backend {
                 crate::virtual_members::evict_fqn(&mut cache, fqn);
             }
         }
+        // A macro is attached without a class lookup naming the provider that
+        // registered it, so a cached receiver resolution records no
+        // dependency on this table.
+        self.clear_resolved_member_files();
 
         tracing::info!(
             "PHPantom: scanned {} Laravel macro candidates ({} providers, {} imported classes), indexed {} macro targets",
@@ -301,10 +305,15 @@ impl Backend {
 
         // Evict every class a macro attaches to so the next resolution picks
         // up the change instead of a stale cached merge.
-        let mut cache = self.resolved_class_cache.write();
-        for fqn in targets {
-            crate::virtual_members::evict_fqn(&mut cache, &fqn);
+        {
+            let mut cache = self.resolved_class_cache.write();
+            for fqn in targets {
+                crate::virtual_members::evict_fqn(&mut cache, &fqn);
+            }
         }
+        // See the rebuild path above: the receiver layer cannot name this
+        // table as a dependency, so it goes wholesale.
+        self.clear_resolved_member_files();
     }
 
     fn infer_laravel_macro_return_types(

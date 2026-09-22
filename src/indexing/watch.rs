@@ -241,7 +241,7 @@ impl Backend {
             });
             if self.reindex_files_batch(&php_changes) || touches_config {
                 self.clear_class_not_found_cache();
-                self.resolved_class_cache.write().clear();
+                self.clear_resolved_class_cache();
                 self.auth_user_type_cache.write().clear();
                 *self.storage_disk_type_cache.write() = None;
                 self.laravel_aliases.invalidate();
@@ -311,7 +311,7 @@ impl Backend {
         // Resolved classes and completions may depend on config-driven
         // behaviour (e.g. `report-magic-properties`), so both must be
         // recomputed against the new settings rather than served stale.
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
 
         // Switching workspace diagnostics on or off is the one setting

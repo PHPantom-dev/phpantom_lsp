@@ -317,6 +317,248 @@ class Consumer {
     );
 }
 
+/// A file whose receivers a signature edit cannot have moved keeps its
+/// resolutions.  Clearing the layer on every signature keystroke is what
+/// makes the next search rebuild the receiver layer for every candidate file
+/// in the workspace, and most of them never consulted the edited class.
+mod layer_survives_unrelated_edits {
+    use super::*;
+
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const OTHER_URI: &str = "file:///Other.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+}
+"#;
+    const OTHER: &str = "<?php\nclass Other {\n    public function ping(): void {}\n}\n";
+
+    /// Warm the layer for the consumer by searching for `Service::save`.
+    fn warmed() -> Backend {
+        let backend = Backend::new_test();
+        parse_extra(&backend, SERVICE_URI, SERVICE);
+        parse_extra(&backend, CONSUMER_URI, CONSUMER);
+        parse_extra(&backend, OTHER_URI, OTHER);
+
+        let save_offset = SERVICE.find("save").unwrap() as u32;
+        let found = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+        assert_eq!(found.len(), 1, "the access in the consumer is a reference");
+        assert!(
+            is_warm(&backend),
+            "the search has to leave the file indexed"
+        );
+        backend
+    }
+
+    /// Whether the consumer's resolutions are still cached.
+    fn is_warm(backend: &Backend) -> bool {
+        let map = backend
+            .symbol_maps
+            .read()
+            .get(CONSUMER_URI)
+            .cloned()
+            .expect("the consumer is parsed");
+        backend.resolved_member_file(CONSUMER_URI, &map).is_some()
+    }
+
+    #[test]
+    fn a_signature_change_in_a_class_the_file_never_consulted_keeps_it() {
+        let backend = warmed();
+        backend.update_ast(
+            OTHER_URI,
+            "<?php\nclass Other {\n    public function ping(): string {}\n}\n",
+        );
+        assert!(
+            is_warm(&backend),
+            "nothing the consumer resolved goes through `Other`"
+        );
+    }
+
+    #[test]
+    fn a_signature_change_in_a_class_the_file_did_consult_drops_it() {
+        let backend = warmed();
+        backend.update_ast(
+            SERVICE_URI,
+            "<?php\nclass Service {\n    public function save(): string {}\n}\n",
+        );
+        assert!(
+            !is_warm(&backend),
+            "the consumer's receiver resolved through `Service`"
+        );
+    }
+
+    #[test]
+    fn a_new_class_of_a_name_the_file_looked_for_drops_it() {
+        let backend = warmed();
+        // The consumer's `Service` parameter was looked up while this file
+        // declared something else, so the declaration it would find now is a
+        // different one.
+        backend.update_ast(
+            OTHER_URI,
+            "<?php\nclass Other {}\nclass Service {\n    public function save(): void {}\n}\n",
+        );
+        assert!(
+            !is_warm(&backend),
+            "a name that gains a declaration changes what it resolves to"
+        );
+    }
+}
+
+/// The receiver a chain ends on is settled by classes the file never names,
+/// so the layer is invalidated by what its resolution consulted rather than
+/// by what its text mentions.
+#[test]
+fn an_edit_to_a_class_reached_only_through_a_return_type_drops_the_entry() {
+    const FACTORY_URI: &str = "file:///Factory.php";
+    const PRODUCT_URI: &str = "file:///Product.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const FACTORY: &str = "<?php\nclass Factory {\n    public function make(): Product {}\n}\n";
+    const PRODUCT: &str = "<?php\nclass Product {\n    public function ship(): void {}\n}\n";
+    // Neither `Product` nor `Factory` is named here: the receiver of `ship`
+    // comes from `make()`'s declared return type.
+    const CONSUMER: &str = r#"<?php
+function run(Factory $factory): void {
+    $factory->make()->ship();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_extra(&backend, FACTORY_URI, FACTORY);
+    parse_extra(&backend, PRODUCT_URI, PRODUCT);
+    parse_extra(&backend, CONSUMER_URI, CONSUMER);
+
+    let ship_offset = PRODUCT.find("ship").unwrap() as u32;
+    assert_eq!(
+        backend
+            .member_declaration_references(PRODUCT_URI, ship_offset, "ship", false)
+            .len(),
+        1,
+        "the chained call is a reference"
+    );
+
+    let consumer_map = backend
+        .symbol_maps
+        .read()
+        .get(CONSUMER_URI)
+        .cloned()
+        .unwrap();
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_some()
+    );
+
+    backend.update_ast(
+        FACTORY_URI,
+        "<?php\nclass Factory {\n    public function make(): Other {}\n}\n",
+    );
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_none(),
+        "the return type the chain resolved through has moved"
+    );
+}
+
+/// The same for a global function: a helper's return type is what decides
+/// the receiver of everything chained off it.
+#[test]
+fn an_edit_to_a_function_the_receiver_came_from_drops_the_entry() {
+    const HELPERS_URI: &str = "file:///helpers.php";
+    const PRODUCT_URI: &str = "file:///Product.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const HELPERS: &str = "<?php\nfunction product(): Product {}\n";
+    const PRODUCT: &str = "<?php\nclass Product {\n    public function ship(): void {}\n}\n";
+    const CONSUMER: &str = "<?php\nfunction run(): void {\n    product()->ship();\n}\n";
+
+    let backend = Backend::new_test();
+    parse_extra(&backend, HELPERS_URI, HELPERS);
+    parse_extra(&backend, PRODUCT_URI, PRODUCT);
+    parse_extra(&backend, CONSUMER_URI, CONSUMER);
+
+    let ship_offset = PRODUCT.find("ship").unwrap() as u32;
+    assert_eq!(
+        backend
+            .member_declaration_references(PRODUCT_URI, ship_offset, "ship", false)
+            .len(),
+        1,
+        "the call chained off the helper is a reference"
+    );
+
+    let consumer_map = backend
+        .symbol_maps
+        .read()
+        .get(CONSUMER_URI)
+        .cloned()
+        .unwrap();
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_some()
+    );
+
+    backend.update_ast(HELPERS_URI, "<?php\nfunction product(): Other {}\n");
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_none(),
+        "the helper whose return type the receiver came from has changed"
+    );
+}
+
+/// A class a candidate file resolved through can inherit the member from a
+/// parent the file never mentions, and a cached full resolution reads that
+/// parent from the resolved-class cache rather than loading it.  The changed
+/// set is closed over that cache's dependency graph for exactly this.
+#[test]
+fn an_edit_to_a_parent_drops_an_entry_that_only_named_the_child() {
+    const BASE_URI: &str = "file:///Base.php";
+    const CHILD_URI: &str = "file:///Child.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const BASE: &str = "<?php\nclass Base {\n    public function save(): void {}\n}\n";
+    const CHILD: &str = "<?php\nclass Child extends Base {}\n";
+    const CONSUMER: &str = "<?php\nfunction run(Child $child): void {\n    $child->save();\n}\n";
+
+    let backend = Backend::new_test();
+    parse_extra(&backend, BASE_URI, BASE);
+    parse_extra(&backend, CHILD_URI, CHILD);
+    parse_extra(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = BASE.find("save").unwrap() as u32;
+    assert_eq!(
+        backend
+            .member_declaration_references(BASE_URI, save_offset, "save", false)
+            .len(),
+        1,
+        "the inherited call is a reference to the declaration on the parent"
+    );
+
+    let consumer_map = backend
+        .symbol_maps
+        .read()
+        .get(CONSUMER_URI)
+        .cloned()
+        .unwrap();
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_some()
+    );
+
+    backend.update_ast(
+        BASE_URI,
+        "<?php\nclass Base {\n    public function save(): string {}\n}\n",
+    );
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &consumer_map)
+            .is_none(),
+        "the consumer's `Child` receiver inherits from the edited parent"
+    );
+}
+
 #[test]
 fn ready_only_location_lookup_does_not_queue_background_work() {
     let backend = Backend::new_test();
