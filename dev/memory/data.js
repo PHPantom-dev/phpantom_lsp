@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790090718291,
+  "lastUpdate": 1790090971604,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29035,6 +29035,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 69.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "da706faf463dce0e93c095c33e85ac1c165e9f8d",
+          "message": "A first-class callable a variable takes from itself no longer brings the\nlanguage server down",
+          "timestamp": "2026-09-22T17:12:22+02:00",
+          "tree_id": "f22aa452b7d02ffe63b40fad678674952ac6ba38",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/da706faf463dce0e93c095c33e85ac1c165e9f8d"
+        },
+        "date": 1790090963561,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.2,
             "unit": "MiB"
           }
         ]
