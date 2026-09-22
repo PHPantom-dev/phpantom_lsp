@@ -3215,8 +3215,8 @@ path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
 <h2 id="p55-a-signature-edit-re-resolves-every-member-reference-candidate-file">P55. A signature edit re-resolves every member-reference candidate file<a class="headerlink" href="#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: Medium</strong></p>
-<p>An edit that only reparses files now rescans those files alone: a cached
+<p><strong>Impact: Medium-High · Complexity: High</strong></p>
+<p>An edit that only reparses files rescans those files alone: a cached
 member result records which files went stale, and the recomputation
 searches those and merges the rest of the cached locations back in.
 Typing inside a method body costs no workspace search at all.</p>
@@ -3225,31 +3225,16 @@ Typing inside a method body costs no workspace search at all.</p>
 That branch is correct and cannot be narrowed by which classes changed:
 a chain such as <code>$b-&gt;makeC()-&gt;handle()</code> resolves its receiver through a
 class the file never names, so the files whose receivers a change can
-affect are not the files that mention it. The cost lands in two places:</p>
-<ul>
-<li>The branch clears <code>resolved_members</code>, so the next search rebuilds the
-  per-file receiver layer for every candidate file rather than reusing
-  it. On a large application, with a common member name (<code>handle</code>,
-  <code>get</code>, <code>name</code>) a candidate in thousands of files, one such burst is
-  tens of CPU-seconds even though most of those files were not touched.</li>
-<li><code>member_declaration_references_batch</code> calls
-  <code>reference_file_content_arc</code> per candidate file, which falls through
-  to <code>get_file_content_arc</code>, an uncached <code>std::fs::read_to_string</code> for
-  any file not open in the editor.</li>
-</ul>
-<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
-<p><strong>Make the warm semantic layer self-sufficient.</strong> <code>ResolvedMemberFile</code>
-already packs the resolved receiver atoms per symbol-span index; it does
-not carry the LSP <code>Range</code> for the access, which is the only other thing
-<code>scan_file</code> needs the file's text for. Storing the range alongside the
-targets (16 bytes per access) would let a warm candidate file be
-filtered without reading it at all, which also removes the file reads
-above.</p>
-<p>That leaves the layer being cleared wholesale on a signature change.
-The measurement that was asked for here has been taken, on a 6,700-file
-Laravel application, opening a controller that declares eight methods
-(<code>index</code>, <code>create</code>, <code>save</code>, <code>update</code>, <code>edit</code>, <code>delete</code>, <code>featured</code>,
-<code>publish</code>) whose counts come to nine references in total:</p>
+affect are not the files that mention it. The branch clears
+<code>resolved_members</code>, so the next search rebuilds the per-file receiver
+layer for every candidate file rather than reusing it. On a large
+application, with a common member name (<code>handle</code>, <code>get</code>, <code>name</code>) a
+candidate in thousands of files, one such burst is tens of CPU-seconds
+even though most of those files were not touched.</p>
+<p>The measurement, on a 6,700-file Laravel application, opening a
+controller that declares eight methods (<code>index</code>, <code>create</code>, <code>save</code>,
+<code>update</code>, <code>edit</code>, <code>delete</code>, <code>featured</code>, <code>publish</code>) whose counts come to
+nine references in total:</p>
 <table>
 <thead>
 <tr>
@@ -3279,15 +3264,54 @@ Laravel application, opening a controller that declares eight methods
 </table>
 <p>The second row is the cost this item is about: the rename reaches
 <code>clear_resolved_member_files</code>, every warm entry goes, and the burst pays
-the same price again. Nothing else in the second row is new work; a
-rename that did not clear the layer would have been served from it.</p>
+the same price again. Nothing else in the second row is new work.</p>
+<p>Being served from the layer is now free: each entry carries the LSP
+range of every access it resolved, so a candidate file the layer already
+answers for is filtered without its text being read or walked. On a
+synthetic 1,200-file workspace holding 8,400 accesses to one method, the
+first search takes 6.3 s and a repeat 10 ms. That factor is what the
+clear throws away on every signature keystroke.</p>
+<h3 id="fix_3">Fix<a class="headerlink" href="#fix_3" title="Permanent link">&para;</a></h3>
+<p>Narrowing the clear needs the layer to record what each entry's
+resolution <em>depended on</em>. Three cheaper narrowings were considered and
+are unsound, which is worth stating so they are not rediscovered:</p>
+<ul>
+<li>Intersecting the changed FQNs with an entry's recorded targets misses
+  the intermediate classes. <code>makeC(): C</code> changing on <code>B</code> alters the
+  receiver of <code>$b-&gt;makeC()-&gt;handle()</code> while <code>B</code> appears in no target.</li>
+<li>Intersecting with the names the file mentions (the reference index's
+  <code>uri_keys</code> already holds them) fails on inheritance: a class whose
+  <code>extends</code> moves from <code>A</code> to <code>B</code> changes what <code>self::factory()</code>
+  resolves to in a file that mentions neither, only <code>factory</code>.</li>
+<li>Keeping entries whose accesses all have a <code>$this</code>, <code>self</code>, or
+  <code>static</code> receiver is sound (those resolve to the enclosing class,
+  which is settled by the file's own text) but small: 683 of the 1,225
+  files above, worth about 6 of the 122 CPU-seconds, since a file with
+  no variable receivers is the cheap kind to walk.</li>
+</ul>
+<p>The direction that works is recording the class and function names each
+entry's resolution consulted, including the ones that resolved to
+nothing (a name that gains a declaration changes the answer too), and
+dropping only the entries that intersect what the edit changed.
+<code>find_or_load_class_typed</code> is the funnel every <code>ClassInfo</code> comes through
+and its per-thread memo sits inside it, so a thread-local recorder
+activated around the per-file resolution in <code>member_declaration_references_batch_in</code>
+sees every lookup. The set to compare against is <code>evicted_fqns</code> rather
+than the reparsed file's own classes: it is already the transitive
+closure over the inheritance and mixin graph, which covers a parent
+change reaching a file that only ever loaded the child.</p>
+<p>The hole to close before this can ship is the Laravel registries. A
+macro table, an alias table, the pivot index, and the configured auth
+model are all consulted without a class lookup naming the provider that
+registered them, so an entry whose resolution read one has to record
+that too, or those edits have to keep clearing the layer wholesale.</p>
 <p>The layer is shared with Find References, so a narrowing that gets it
 wrong shows up as missing references, not as a slow lens.</p>
 <p><strong>Where to look:</strong> <code>Staleness</code> and <code>compute_pending_member_ref_counts</code>
-in <code>reference_counts.rs</code>, <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>,
+in <code>reference_counts/</code>, <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>,
 <code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
-<code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>, and
-<code>get_file_content_arc</code> in <code>backend/file_access.rs</code>.</p>
+<code>find_or_load_class_typed</code> in <code>resolution.rs</code>, and
+<code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>.</p>
 <hr />
 <h2 id="p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access">P60. A receiver walk builds variable scopes for a whole file to type one access<a class="headerlink" href="#p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Complexity: Medium-High</strong></p>
