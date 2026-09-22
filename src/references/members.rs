@@ -17,9 +17,84 @@ use tower_lsp::lsp_types::{Location, Range};
 use crate::atom::{Atom, AtomMap};
 use crate::class_lookup::find_class_at_offset;
 use crate::references::push_unique_location;
-use crate::symbol_map::SymbolKind;
+use crate::symbol_map::{SelfStaticParentKind, SubjectText, SymbolKind};
 use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::ClassInfo;
+
+/// Whether a receiver of this text resolves without the file's content.
+///
+/// [`resolve_subject_type`](crate::type_engine::subject_resolution::resolve_subject_type)
+/// reads the content only for the receivers it hands to the forward walker
+/// and the chain resolver.  The class keywords never get there, and neither
+/// does the subject of a static access: both resolve from the enclosing
+/// class and the import table alone, which the candidate filter already
+/// holds.
+fn receiver_settles_without_content(subject_text: &str, is_static: bool) -> bool {
+    matches!(subject_text, "$this" | "self" | "static" | "parent")
+        || (is_static && !subject_text.starts_with('$'))
+}
+
+/// The text a member access's receiver is written with, recovered without
+/// reading the file, for the receivers whose class the file's own text
+/// settles.
+///
+/// The candidate filter runs before any file is opened, so it cannot slice a
+/// `Range` subject out of the content the way the scan does.  What it can do
+/// is recognise the *span* that range covers: a receiver written as `$this`,
+/// `self`, `static`, `parent`, or a class name emits a span of its own at
+/// exactly that range, and that span carries the text.  Each arm
+/// reconstructs the source the span was built from and checks it against the
+/// range's width, so a reconstruction that comes out a different length
+/// counts as unsettled rather than as something else.
+///
+/// Handing the text back rather than a resolved class is what keeps the
+/// filter honest: it goes to the same
+/// [`resolve_subject_to_fqns`](Backend::resolve_subject_to_fqns) the scan
+/// calls, so the two cannot answer differently.
+///
+/// `None` for every other receiver — a variable, a chain, a `new` expression
+/// — since settling those is the type engine's job and needs the file.
+fn settled_receiver_text(symbol_map: &SymbolMap, span_index: usize) -> Option<String> {
+    let SymbolKind::MemberAccess {
+        subject_text,
+        is_static,
+        ..
+    } = &symbol_map.spans[span_index].kind
+    else {
+        return None;
+    };
+
+    let (start, end) = match subject_text {
+        // A subject the extraction synthesised carries its own text, so
+        // there is nothing to recover.  It is passed on as written rather
+        // than trimmed, since that is what the scan would hand over.
+        SubjectText::Owned(text) => {
+            return receiver_settles_without_content(text, *is_static).then(|| text.to_string());
+        }
+        SubjectText::Range { start, end } => (*start, *end),
+    };
+    let width = end.checked_sub(start)?;
+
+    let text = match &symbol_map.span_covering_exactly(start, end)?.kind {
+        SymbolKind::SelfStaticParent(kind) => match kind {
+            SelfStaticParentKind::This => "$this".to_string(),
+            SelfStaticParentKind::Self_ => "self".to_string(),
+            SelfStaticParentKind::Static => "static".to_string(),
+            SelfStaticParentKind::Parent => "parent".to_string(),
+        },
+        SymbolKind::ClassReference { name, is_fqn, .. } => {
+            if *is_fqn {
+                format!("\\{name}")
+            } else {
+                name.to_string()
+            }
+        }
+        _ => return None,
+    };
+
+    (text.len() as u32 == width && receiver_settles_without_content(&text, *is_static))
+        .then_some(text)
+}
 
 #[derive(Clone)]
 pub(crate) struct MemberDeclarationReferenceQuery {
@@ -186,6 +261,62 @@ impl Backend {
         push_unique_location(locations, &parsed_uri, start, end);
     }
 
+    /// Whether what is already in memory answers "no reference here" for
+    /// `uri`, so the file never has to be read.
+    ///
+    /// Candidate files are selected by member name alone, so a common name
+    /// such as `save` or `handle` selects every file that accesses *any*
+    /// class's member of that name — thousands of them on a large
+    /// application, almost all on classes unrelated to the one being
+    /// searched.  Telling them apart normally means reading each file and
+    /// running the type engine over it to find out what its receivers are.
+    ///
+    /// For the receivers a file settles by itself — `$this`, `self`,
+    /// `static`, `parent`, and a static access on a class name written at
+    /// the access site — the answer instead comes out of the symbol map and
+    /// the file's imports, both already in memory.  A file whose searched
+    /// accesses are all of that kind, and none of which lands in a hierarchy
+    /// being searched, cannot hold a reference and is dropped before
+    /// anything opens it.
+    ///
+    /// Conservative wherever it cannot be sure: one receiver the symbol map
+    /// cannot settle keeps the whole file.  Every query has to carry a
+    /// hierarchy, since the name-only fallback the search drops to without
+    /// one accepts any receiver and so rules nothing out.
+    fn member_accesses_ruled_out(
+        &self,
+        uri: &str,
+        symbol_map: &SymbolMap,
+        queries: &[(Atom, &HashSet<String>)],
+    ) -> bool {
+        let file_ctx = OnceCell::new();
+        for (member, hierarchy) in queries {
+            for &span_index in symbol_map.member_access_indices(member) {
+                let Some(subject_text) = settled_receiver_text(symbol_map, span_index) else {
+                    return false;
+                };
+                let span = &symbol_map.spans[span_index];
+                let SymbolKind::MemberAccess { is_static, .. } = &span.kind else {
+                    continue;
+                };
+                // The content argument is unused for these subjects: every
+                // one of them resolves from the enclosing class or the
+                // import table, which is precisely what makes them settled.
+                let subject_fqns = self.resolve_subject_to_fqns(
+                    &subject_text,
+                    *is_static,
+                    file_ctx.get_or_init(|| self.file_context(uri)),
+                    span.start,
+                    "",
+                );
+                if subject_fqns.iter().any(|fqn| hierarchy.contains(fqn)) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
     /// Find the references to a member declaration, scoped to the class
     /// hierarchy that declares it.
     ///
@@ -276,6 +407,20 @@ impl Backend {
         if let Some(files) = restrict_to {
             snapshot.retain(|(uri, _)| files.contains(uri.as_str()));
         }
+
+        // Only a query that filters by hierarchy can rule a file out; the
+        // name-only fallback accepts any receiver, so one such query in the
+        // batch keeps every candidate.
+        let filtered: Option<Vec<(Atom, &HashSet<String>)>> = prepared
+            .iter()
+            .map(|query| query.hierarchy.as_ref().map(|h| (query.member, h)))
+            .collect();
+        if let Some(filtered) = filtered {
+            snapshot.retain(|(uri, symbol_map)| {
+                !self.member_accesses_ruled_out(uri, symbol_map, &filtered)
+            });
+        }
+
         self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
         let scan_file = |file_uri: &str,
@@ -622,18 +767,24 @@ impl Backend {
         let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
         self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
 
+        let member = crate::atom::atom(target_member);
         for (file_uri, symbol_map) in &snapshot {
             self.request_scan_file_done();
             // First pass: name-only check to avoid unnecessary work.
             // When a hierarchy is present (e.g. Laravel), we allow static mismatch.
-            let has_member_access_match = symbol_map
-                .member_access_indices(target_member)
-                .iter()
-                .any(|&idx| match &symbol_map.spans[idx].kind {
+            let names_the_member = symbol_map.member_access_indices(target_member).iter().any(
+                |&idx| match &symbol_map.spans[idx].kind {
                     SymbolKind::MemberAccess { is_static, .. } => {
                         hierarchy.is_some() || *is_static == target_is_static
                     }
                     _ => false,
+                },
+            );
+            // A file whose accesses to the name all settle on a class
+            // outside the hierarchy is answered here rather than read.
+            let has_member_access_match = names_the_member
+                && hierarchy.is_none_or(|hier| {
+                    !self.member_accesses_ruled_out(file_uri, symbol_map, &[(member, hier)])
                 });
             let has_declaration_match = include_declaration
                 && symbol_map.spans.iter().any(|span| match &span.kind {
@@ -648,7 +799,7 @@ impl Backend {
             let mut check_ast_map = false;
             if !has_potential_match
                 && include_declaration
-                && let Some(classes) = self.get_classes_for_uri(file_uri)
+                && let Some(classes) = self.shared_classes_for_uri(file_uri)
             {
                 for class in &classes {
                     for prop in &class.properties {
@@ -807,7 +958,7 @@ impl Backend {
             // MemberDeclaration) because GTD relies on the Variable
             // kind to jump to the type hint.  Scan the uri_classes_index to
             // pick up property declaration sites.
-            if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
+            if include_declaration && let Some(classes) = self.shared_classes_for_uri(file_uri) {
                 for class in &classes {
                     if let Some(hier) = declaration_scope.or(hierarchy) {
                         let class_fqn = class.fqn().to_string();

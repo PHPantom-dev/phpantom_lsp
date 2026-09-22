@@ -150,6 +150,13 @@ impl Backend {
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
     }
 
+    /// The classes `uri` declares, sharing the index's `Arc`s instead of
+    /// copying each body the way [`get_classes_for_uri`](Self::get_classes_for_uri)
+    /// does.  For the scanners that ask this of every candidate file.
+    pub(crate) fn shared_classes_for_uri(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        self.symbols.uri_classes_index.read().get(uri).cloned()
+    }
+
     /// The short names of the classes `uri` declares, for asking whether a
     /// name is one of the file's own classes without cloning their bodies.
     pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {

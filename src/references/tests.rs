@@ -962,3 +962,227 @@ fn collect_php_files_gitignore_follows_symlink_cycle_safely() {
         "workspace files must still be found next to a cycle: {files:?}"
     );
 }
+
+// ─── Candidate narrowing by settled receivers ───────────────────────────────
+
+/// Index `text` as a workspace file the scanners can reach.
+fn parse_file(backend: &Backend, uri: &str, text: &str) {
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+    backend.update_ast(uri, text);
+    backend.workspace_indexed.store(true, Ordering::Release);
+}
+
+fn symbol_map_of(backend: &Backend, uri: &str) -> std::sync::Arc<crate::symbol_map::SymbolMap> {
+    backend
+        .symbol_maps
+        .read()
+        .get(uri)
+        .cloned()
+        .expect("the file was parsed")
+}
+
+/// A file selected as a candidate only because it accesses the same *name*
+/// on a class of its own is ruled out from the symbol map, so the search
+/// never opens it.  The receiver the file cannot settle by itself is still
+/// resolved the long way.
+#[test]
+fn a_file_whose_accesses_are_all_on_its_own_class_is_never_walked() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const UNRELATED_URI: &str = "file:///Unrelated.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const UNRELATED: &str = r#"<?php
+class Unrelated {
+    public function save(): void {}
+    public function run(): void {
+        $this->save();
+    }
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function persist(Service $service): void {
+    $service->save();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, UNRELATED_URI, UNRELATED);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    assert_eq!(
+        locations.len(),
+        1,
+        "only the consumer calls Service::save: {locations:?}"
+    );
+    assert!(locations[0].uri.as_str().ends_with("Consumer.php"));
+    assert!(
+        backend
+            .resolved_member_file(UNRELATED_URI, &symbol_map_of(&backend, UNRELATED_URI))
+            .is_none(),
+        "a file whose `$this->save()` settles to another class is ruled out unread"
+    );
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
+            .is_some(),
+        "a variable receiver is not settled by the file, so it is still walked"
+    );
+}
+
+/// The narrowing drops only the receivers that settle *outside* the
+/// hierarchy: `$this` in a subclass and `parent::` both stay references.
+#[test]
+fn settled_receivers_inside_the_hierarchy_are_still_references() {
+    const BASE_URI: &str = "file:///Base.php";
+    const CHILD_URI: &str = "file:///Child.php";
+    const BASE: &str = r#"<?php
+class Base {
+    public function save(): void {}
+    public function persist(): void {
+        $this->save();
+    }
+}
+"#;
+    const CHILD: &str = r#"<?php
+class Child extends Base {
+    public function store(): void {
+        $this->save();
+        parent::save();
+    }
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, BASE_URI, BASE);
+    parse_file(&backend, CHILD_URI, CHILD);
+
+    let save_offset = BASE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(BASE_URI, save_offset, "save", false);
+
+    assert_eq!(
+        locations.len(),
+        3,
+        "the own call, the inherited call, and the parent call: {locations:?}"
+    );
+}
+
+/// A static access names its receiver outright, so a call on a namesake
+/// class is ruled out while the one on the searched class is kept.
+#[test]
+fn a_static_access_on_a_namesake_class_is_ruled_out() {
+    const REGISTRY_URI: &str = "file:///Registry.php";
+    const OTHER_URI: &str = "file:///Other.php";
+    const CALLER_URI: &str = "file:///Caller.php";
+    const REGISTRY: &str =
+        "<?php\nclass Registry {\n    public static function flush(): void {}\n}\n";
+    const OTHER: &str = concat!(
+        "<?php\n",
+        "class Other {\n",
+        "    public static function flush(): void {}\n",
+        "}\n",
+        "Other::flush();\n",
+    );
+    const CALLER: &str = "<?php\nRegistry::flush();\n";
+
+    let backend = Backend::new_test();
+    parse_file(&backend, REGISTRY_URI, REGISTRY);
+    parse_file(&backend, OTHER_URI, OTHER);
+    parse_file(&backend, CALLER_URI, CALLER);
+
+    let flush_offset = REGISTRY.find("flush").unwrap() as u32;
+    let locations =
+        backend.member_declaration_references(REGISTRY_URI, flush_offset, "flush", true);
+
+    assert_eq!(
+        locations.len(),
+        1,
+        "only the caller names Registry: {locations:?}"
+    );
+    assert!(locations[0].uri.as_str().ends_with("Caller.php"));
+    assert!(
+        backend
+            .resolved_member_file(OTHER_URI, &symbol_map_of(&backend, OTHER_URI))
+            .is_none(),
+        "`Other::flush()` names its own class, so the file is ruled out unread"
+    );
+}
+
+/// A file is a candidate for declaring the member as much as for accessing
+/// it, and the access narrowing must not take the declaration with it.
+#[tokio::test]
+async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let child_uri = Url::parse("file:///Child.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function save(): void {}\n",
+        "}\n",
+    );
+    let child_text = concat!(
+        "<?php\n",
+        "class Child extends Base {\n",
+        "    public function store(): void {\n",
+        "        $this->save();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &child_uri, child_text).await;
+
+    let (line, character) = line_char_of(child_text, "save();");
+    let locs = find_references(&backend, &child_uri, line, character, true).await;
+
+    assert!(
+        locs.iter().any(|loc| loc.uri == base_uri),
+        "the declaration in Base.php has to be reported: {locs:?}"
+    );
+    assert!(
+        locs.iter().any(|loc| loc.uri == child_uri),
+        "the call in Child.php has to be reported: {locs:?}"
+    );
+}
+
+/// A docblock reference names its class outright too, so a `@see` on an
+/// unrelated class is ruled out the same way a static call is.
+#[test]
+fn a_docblock_reference_to_another_class_is_ruled_out() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const UNRELATED_URI: &str = "file:///Unrelated.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const UNRELATED: &str = r#"<?php
+class Unrelated {
+    public function save(): void {}
+    /** @see Unrelated::save() */
+    public function run(): void {}
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, UNRELATED_URI, UNRELATED);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    assert!(
+        locations.is_empty(),
+        "nothing calls Service::save: {locations:?}"
+    );
+    assert!(
+        backend
+            .resolved_member_file(UNRELATED_URI, &symbol_map_of(&backend, UNRELATED_URI))
+            .is_none(),
+        "the docblock names the class it refers to, so the file is ruled out unread"
+    );
+}

@@ -1130,35 +1130,50 @@ path) and `narrowed_by_rewalk` in
 
 ---
 
-## P61. Member-reference candidates are selected by member name alone
+## P59. A candidate file with a variable receiver is still walked in full
 
 **Impact: Medium-High · Complexity: High**
 
-`member_candidate_keys` keys the reference index by member name and
-static-ness only, so the candidate set for a declaration is every file
-that accesses *any* member of that name. Measured on a 6,700-file
-Laravel application, the eight declarations of one controller selected
-1,225 files, and the hierarchy each was filtered against held exactly
-one class. Over a thousand files were walked to find nine references.
+A member-reference candidate is now dropped before it is opened when
+every access to the searched name has a receiver the file's own text
+settles: `$this`, `self`, `static`, `parent`, and a static access on a
+class name written at the access site all resolve from the enclosing
+class and the import table, both of which are already in memory.
+Measured on a 6,700-file Laravel application, the eight declarations of
+one controller selected 1,225 files, and the hierarchy each was filtered
+against held exactly one class. 683 of those files have nothing but
+`$this`, `self`, or `static` receivers and go that way, along with
+whatever share of the rest names its class at the access.
 
-The narrowing that suggests itself, intersecting with the files that
-mention a class in the hierarchy, is not sound: a receiver reaches its
-type through return types declared elsewhere, so
+What remains is the other 542, and they are the expensive half: a
+receiver written as `$order` or `$repo->find()` needs the type engine,
+so the file is read and walked to find out it belongs to an unrelated
+class. On a large application a common name (`handle`, `get`, `name`)
+puts hundreds of those in every candidate set.
+
+The narrowing that suggests itself for them, intersecting with the files
+that mention a class in the hierarchy, is not sound: a receiver reaches
+its type through return types declared elsewhere, so
 `$repo->find()->publish()` names neither `Article` nor the controller.
 It is precisely the models, the classes most often returned from another
 file, that it would break.
 
-A sound narrowing needs the index to record what a file's accesses
-resolve *to*, not just what they are named, which is the same
-information `ResolvedMemberFile` holds lazily. Making it a product of
-the workspace index rather than of the first search that needs it is the
-substantial part. The dependency-keyed invalidation `ResolvedMemberFile`
-already carries (`resolution_deps`) is what a durable index would be
-maintained by, rather than by rebuilding it on every edit.
+A sound narrowing needs the index to record what those accesses resolve
+*to*, not just what they are named, which is the same information
+`ResolvedMemberFile` holds lazily. Making it a product of the workspace
+index rather than of the first search that needs it is the substantial
+part: resolving every receiver in the workspace eagerly is the cost of a
+diagnostic pass over it, which no startup budget has room for, so it has
+to be earned incrementally and kept. The dependency-keyed invalidation
+`ResolvedMemberFile` already carries (`resolution_deps`) is what a
+durable index would be maintained by, rather than by rebuilding it on
+every edit.
 
-**Where to look:** `member_candidate_keys` and
-`member_declaration_references_batch_in` in `references/members.rs`,
-`ReferenceIndexKey` and `ResolvedMemberFile` in `reference_index.rs`.
+**Where to look:** `settled_receiver_text` and
+`member_accesses_ruled_out` in `references/members.rs` for the receivers
+already handled, `member_declaration_references_batch_in` in the same
+file, and `ReferenceIndexKey` and `ResolvedMemberFile` in
+`reference_index.rs`.
 
 ---
 
