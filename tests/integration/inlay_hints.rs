@@ -1500,3 +1500,70 @@ makeClosure('1', '2')('test');
         a_count, line6_labels
     );
 }
+
+// ─── Staleness: map offsets vs. buffer content ──────────────────────────────
+
+#[tokio::test]
+async fn stale_symbol_map_declines_rather_than_misplacing_hints() {
+    // The symbol map is rebuilt on a background task, so a request that
+    // arrives mid-keystroke is handed content the map does not describe.
+    // Resolving its offsets against that content used to put labels inside
+    // the arguments they annotate and, because the viewport window is
+    // converted from the newer text, pull the *next* call's hints onto the
+    // edited line as duplicates.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/stale_inlay.php").unwrap();
+    let text = r#"<?php
+function makeThing(string $needle, int $count): void {}
+makeThing('aa', 1);
+makeThing('bb', 2);
+"#;
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let whole_file = Range {
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 100,
+            character: 0,
+        },
+    };
+
+    let fresh = backend
+        .handle_inlay_hints(uri.as_ref(), text, whole_file)
+        .unwrap_or_default();
+    assert_eq!(
+        hints_at_line(&fresh, 2).len(),
+        2,
+        "the matching-content case must still hint: {:?}",
+        labels(&hints_at_line(&fresh, 2))
+    );
+
+    // The buffer as it stands one keystroke burst later, before the
+    // background parse has published a map for it.
+    let edited = text.replace("'aa'", &format!("'aa{}'", "Y".repeat(30)));
+
+    let stale = backend
+        .handle_inlay_hints(uri.as_ref(), &edited, whole_file)
+        .unwrap_or_default();
+    assert!(
+        stale.is_empty(),
+        "hints resolved against content the map does not describe: {:?}",
+        stale
+            .iter()
+            .map(|h| (h.position.line, h.position.character, hint_label(h)))
+            .collect::<Vec<_>>()
+    );
+}

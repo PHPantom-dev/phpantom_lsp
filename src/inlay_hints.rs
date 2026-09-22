@@ -25,6 +25,10 @@ use crate::symbol_map::{CallSite, UntypedClosureSite};
 use crate::text_position::{offset_to_position, position_to_offset};
 use crate::types::{ClassLikeKind, FileContext};
 
+/// LSP's `ContentModified` error code, which `tower-lsp`'s `ErrorCode` has
+/// no variant for.
+const CONTENT_MODIFIED: i64 = -32801;
+
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
     ///
@@ -40,7 +44,7 @@ impl Backend {
         // and the editor re-requests them on each scroll and each refresh a
         // keystroke triggers, so the work runs off the request task.
         let backend = self.clone_for_blocking();
-        let result = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
+        let outcome = crate::server::run_blocking_cancel_safe("inlay_hint", move || {
             backend.with_file_content("textDocument/inlayHint", &uri, None, |content, _| {
                 backend.handle_inlay_hints(&uri, content, range)
             })
@@ -48,7 +52,26 @@ impl Backend {
         .await
         .flatten();
 
-        Ok(result.flatten())
+        match outcome {
+            Some(Some(hints)) => Ok(Some(hints)),
+            // Declining is not the same answer as "no hints here", and a
+            // null result is the only way the client can read it: it would
+            // replace the labels it is already showing with an empty set and
+            // leave the line bare until something re-pulls. `ContentModified`
+            // is the spec's own way to say this request could not be answered
+            // about this document state -- a conforming client keeps what it
+            // has and re-pulls on the `inlayHint/refresh` `did_change` sends
+            // once the new map commits.
+            Some(None) => Err(jsonrpc::Error {
+                code: jsonrpc::ErrorCode::ServerError(CONTENT_MODIFIED),
+                message: "inlay hints are not current for this document version".into(),
+                data: None,
+            }),
+            // No content to work from, or the blocking task died -- neither
+            // is a document-version problem, and re-requesting would not
+            // change either one.
+            None => Ok(None),
+        }
     }
 
     /// Handle a `textDocument/inlayHint` request.
@@ -62,6 +85,20 @@ impl Backend {
         range: Range,
     ) -> Option<Vec<InlayHint>> {
         let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
+
+        // A map rebuilt on the background parse task lags the buffer by a
+        // keystroke, and its offsets only index the text it was built from.
+        // Resolved against `content` they land inside the very tokens they
+        // label, and the viewport window -- converted from `content` -- no
+        // longer selects the same call sites, so neighbouring lines' hints
+        // pile onto the edited one. `did_change` sends `inlayHint/refresh`
+        // once the new map commits, which re-pulls what this declines -- see
+        // `inlay_hint_request` for why declining answers `ContentModified`
+        // rather than an empty result.
+        if !symbol_map.matches_source(content) {
+            return None;
+        }
+
         let ctx = self.file_context(uri);
 
         // A template's request range arrives in Blade coordinates; the
@@ -885,6 +922,65 @@ mod tests {
         assert!(eq_ignore_case_snake("my_param", "myParam"));
         assert!(eq_ignore_case_snake("myParam", "my_param"));
         assert!(!eq_ignore_case_snake("foo", "bar"));
+    }
+
+    /// Declining must not look like "no hints here" to the client: an empty
+    /// result replaces the labels it is already showing, where
+    /// `ContentModified` leaves them alone and re-pulls on the refresh that
+    /// follows.
+    #[tokio::test]
+    async fn a_decline_answers_content_modified_rather_than_an_empty_result() {
+        let backend = Backend::new_test();
+        let uri = "file:///test/declined_inlay.php";
+        let text =
+            "<?php\nfunction makeThing(string $needle, int $count): void {}\nmakeThing('aa', 1);\n";
+
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+        backend.update_ast(uri, text);
+        backend.workspace_indexed.store(true, Ordering::Release);
+
+        let params = InlayHintParams {
+            text_document: TextDocumentIdentifier {
+                uri: Url::parse(uri).unwrap(),
+            },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 100,
+                    character: 0,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+
+        let answered = backend.inlay_hint_request(params.clone()).await;
+        assert!(
+            matches!(answered, Ok(Some(ref hints)) if !hints.is_empty()),
+            "a request the map describes must still answer with hints: {answered:?}"
+        );
+
+        // The buffer one keystroke burst ahead of the map describing it,
+        // which is the state a background parse leaves behind.
+        let edited = text.replace("'aa'", "'aaYYYYYYYYYY'");
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(edited));
+
+        match backend.inlay_hint_request(params).await {
+            Err(error) => assert_eq!(
+                error.code,
+                jsonrpc::ErrorCode::ServerError(CONTENT_MODIFIED),
+                "a decline must be ContentModified, not any other error: {error:?}"
+            ),
+            Ok(hints) => panic!("declined request answered {hints:?} instead of ContentModified"),
+        }
     }
 
     #[test]
