@@ -4101,8 +4101,9 @@ rather than from the classes the current parse produced.</p>
 <p>The hierarchy set is built in two passes:</p>
 <ol>
 <li><strong>Ancestors</strong> — walk the parent chain, interfaces, traits, and mixins upward from the target class, collecting every FQN encountered.</li>
-<li><strong>Descendants</strong> — scan all classes in <code>uri_classes_index</code> and <code>fqn_uri_index</code> for classes that extend, implement, or use anything already in the set. This repeats until no new FQNs are added (transitive closure), bounded by <code>MAX_INHERITANCE_DEPTH</code>.</li>
+<li><strong>Descendants</strong> — walk the reverse inheritance index (<code>gti_index</code>) down from the declaring classes until no new FQNs are added (transitive closure).</li>
 </ol>
+<p>That index only holds classes from files something has parsed, so a receiver it does not account for (typically a class in a package nothing has needed yet) is settled by walking up from the receiver's own class to the declaring classes instead, loading the ancestors that walk needs. Without it the same search would answer differently depending on what the session parsed before it.</p>
 <p>For each candidate <code>MemberAccess</code> span, the subject text is resolved to class FQNs using a lightweight path:</p>
 <ul>
 <li><code>self</code> / <code>static</code> / <code>$this</code> → enclosing class FQN via <code>find_class_at_offset</code></li>

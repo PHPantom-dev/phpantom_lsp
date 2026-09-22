@@ -902,23 +902,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B325. A member search misses the implementors nothing has parsed yet
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1496,23 +1479,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B325. A member search misses the implementors nothing has parsed yet
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1598,35 +1564,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet">B325. A member search misses the implementors nothing has parsed yet<a class="headerlink" href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>A member reference search scopes itself to the hierarchy that declares
-the member, and <code>collect_descendants_for_roots</code> reads that hierarchy's
-descendants out of <code>gti_index</code> alone. That index only holds classes from
-files that have been fully parsed, and a package class is parsed the
-first time something needs it, so an implementor sitting in a dependency
-is missing from the scope until an unrelated lookup happens to pull its
-file in. Every access on it is then judged to be on an unrelated class
-and dropped from the results.</p>
-<p><code>type_hierarchy.rs</code> documents the same limitation for its own use of the
-index and works around it by calling <code>find_implementors</code>, whose second
-phase scans for the classes the index does not know about yet. The member
-search has no such phase.</p>
-<p>The result is that the same search answers differently depending on what
-the session has done before it. On a Laravel application, Find References
-on a method declared by a package interface and implemented both by the
-application and by a package class misses the package implementor on the
-first run and finds it on the second: the first run resolves a
-<code>$service = app()-&gt;make(PackageService::class)</code> receiver while scanning,
-which parses <code>PackageService</code> and files it under the interface, and the
-second run's hierarchy is built from the index that first run filled.
-Anything that loads the workspace's classes first (the startup receiver
-warm-up, a completion, a hover) has the same effect, which is what makes
-this look intermittent.</p>
-<p><strong>Where to look:</strong> <code>collect_descendants_for_roots</code> and
-<code>collect_member_receiver_scope</code> in <code>src/references/members.rs</code>,
-<code>find_implementors</code> and its scan phase, and the <code>gti_index</code> note in
-<code>src/type_hierarchy.rs</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
