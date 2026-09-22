@@ -1130,55 +1130,6 @@ path) and `narrowed_by_rewalk` in
 
 ---
 
-## P60. The first member-reference search of a session still walks its candidates
-
-**Impact: Low-Medium · Complexity: Very High**
-
-A candidate file is now walked at most once for the whole workspace: the
-walk records what every access in the bodies it entered resolves to, and
-the pre-open filter reads those recordings, so the second search for any
-other class drops the file without opening it. Over a sweep of 250
-classes that is 2.95 s → 1.72 s on a 1,400-file Laravel application and
-0.42 s → 0.23 s on PHPMD, with identical results.
-
-What is left is the first search over a cold layer. On the same Laravel
-application a data object's 25 property and method names (`id`, `name`,
-`title`, and the rest of that family) select 463 candidates and keep 404
-to find 29 references, and walking those costs around 0.49 s wall
-(8.3 s CPU across the pool). Of that CPU, 99 % is
-`build_diagnostic_scopes_for_offsets`: resolving a receiver means
-forward-walking the body it sits in from the first statement, which for a
-Laravel feature test is 30 ms for a single access. The resolutions
-themselves are 0.09 s. Profiling the walk is flat across the type engine,
-the parser and the interner, so there is no hot spot to remove; only the
-walk count is worth attacking.
-
-Two narrowings do not work. Intersecting with the files that mention a
-class in the hierarchy is not sound: a receiver reaches its type through
-return types declared elsewhere, so `$repo->find()->publish()` names
-neither `Article` nor the controller. Closing that over the declared-type
-graph (the classes from which the hierarchy is reachable by chaining
-calls) is sound but degenerates on Laravel, where `app()`,
-`Container::make()` and `Collection::first()` have template return types
-that make every class reachable from every other one.
-
-That leaves earning the layer ahead of the search rather than narrowing
-what it looks at: populating it in the background once the workspace is
-indexed, maintained by the dependency-keyed invalidation
-`ResolvedMemberFile` already carries (`resolution_deps`) rather than
-rebuilt on every edit. The cost is a receiver walk of every user file,
-which is a diagnostic pass over the workspace. That is seconds of
-background CPU on this application and scales with the workspace, so it
-needs a budget and a cancellation story before it is worth the memory it
-would hold, for a saving that is under half a second once per class per
-session.
-
-**Where to look:** `member_accesses_ruled_out` and the widening block in
-`member_declaration_references_batch_in`, both in `references/members.rs`,
-and `ResolvedMemberFile` in `reference_index.rs`.
-
----
-
 ## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
 
 **Impact: Medium · Complexity: Medium-High**

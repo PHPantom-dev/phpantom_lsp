@@ -1286,3 +1286,118 @@ function run(Service $service): void {
         "the same entry keeps the file for the class it did resolve to"
     );
 }
+
+/// A warm-up walks every body, not just the ones holding the accesses a
+/// search asked about, so the entry it leaves answers for names nothing has
+/// searched for yet.  That is what lets the *first* search for one of them
+/// rule the file out without opening it.
+#[test]
+fn warming_a_file_records_the_receiver_of_every_access_in_it() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+    public function cancel(): void {}
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+    $service->cancel();
+}
+function elsewhere(Service $service): void {
+    $service->purge();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    assert!(
+        backend.warm_member_receivers(CONSUMER_URI),
+        "the file has accesses nothing has resolved yet"
+    );
+
+    let consumer_map = symbol_map_of(&backend, CONSUMER_URI);
+    let entry = backend
+        .resolved_member_file(CONSUMER_URI, &consumer_map)
+        .expect("the warm-up left an entry");
+    for name in ["save", "cancel", "purge"] {
+        assert!(
+            entry.covers([crate::atom::atom(name)]),
+            "the whole-file walk reached the body holding `{name}`"
+        );
+    }
+
+    let purge = crate::atom::atom("purge");
+    let other_hierarchy: std::collections::HashSet<String> =
+        std::iter::once("Other".to_string()).collect();
+    let service_hierarchy: std::collections::HashSet<String> =
+        std::iter::once("Service".to_string()).collect();
+    assert!(
+        backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(purge, &other_hierarchy)]
+        ),
+        "the recorded receiver is a Service, so a search for Other::purge \
+         drops the file unread"
+    );
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(purge, &service_hierarchy)]
+        ),
+        "the same entry keeps the file for the class it did resolve to"
+    );
+
+    assert!(
+        !backend.warm_member_receivers(CONSUMER_URI),
+        "a file whose every access is already recorded is not walked again"
+    );
+}
+
+/// What the warm-up records is what the search would have computed itself,
+/// so a session that warmed the layer finds exactly the references a session
+/// that did not would.
+#[test]
+fn a_warmed_layer_finds_the_same_references_as_an_unwarmed_one() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+}
+"#;
+    const OTHER: &str = r#"<?php
+class Other {
+    public function save(): void {}
+}
+"#;
+    const OTHER_URI: &str = "file:///Other.php";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service, Other $other): void {
+    $service->save();
+    $other->save();
+}
+"#;
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let references = |warm: bool| {
+        let backend = Backend::new_test();
+        parse_file(&backend, SERVICE_URI, SERVICE);
+        parse_file(&backend, OTHER_URI, OTHER);
+        parse_file(&backend, CONSUMER_URI, CONSUMER);
+        if warm {
+            backend.warm_member_receivers(CONSUMER_URI);
+        }
+        backend.member_declaration_references(SERVICE_URI, save_offset, "save", false)
+    };
+
+    let cold = references(false);
+    assert_eq!(cold.len(), 1, "only the Service receiver is a reference");
+    assert_eq!(references(true), cold);
+}

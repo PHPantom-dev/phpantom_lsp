@@ -693,6 +693,13 @@ impl Backend {
             // scan.
             if progress_backend.wait_for_init_complete().await {
                 progress_backend.eager_populate_resolved_classes().await;
+
+                // Then resolve each user file's member-access receivers,
+                // which the warm class cache above makes far cheaper.  This
+                // is what the session's first Find References or reference
+                // CodeLens reads instead of walking every file that happens
+                // to mention the name it is after.
+                progress_backend.warm_member_reference_layer().await;
             }
 
             // Then run the background workspace diagnostics pass
