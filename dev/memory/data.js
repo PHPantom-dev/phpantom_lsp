@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790094515770,
+  "lastUpdate": 1790095504462,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29171,6 +29171,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6e265bed5690a69386f2c73a67e4c238aebff721",
+          "message": "Two anonymous classes that open at the same place in different files no\nlonger share one resolution",
+          "timestamp": "2026-09-22T18:27:27+02:00",
+          "tree_id": "5c40d2640a123d1bdf6944c2e2d3cf379e75d6e4",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6e265bed5690a69386f2c73a67e4c238aebff721"
+        },
+        "date": 1790095496927,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.7,
             "unit": "MiB"
           }
         ]
