@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790034670682,
+  "lastUpdate": 1790035931872,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28525,6 +28525,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "dev@eranmachiels.nl",
+            "name": "Eran",
+            "username": "EranNL"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "43d0e245308195903ee454cbeaae4095b924fb0d",
+          "message": "Fixed go to usages of method goes to parent instead of own usages (#422)",
+          "timestamp": "2026-09-22T01:55:17+02:00",
+          "tree_id": "ef6e317584960c41392f86d3bb0ede1392b7c757",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/43d0e245308195903ee454cbeaae4095b924fb0d"
+        },
+        "date": 1790035922559,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 70.4,
             "unit": "MiB"
           }
         ]
