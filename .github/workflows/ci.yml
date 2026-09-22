@@ -35,6 +35,13 @@ jobs:
           printf '[target.%s]\nrustflags = ["-C", "link-arg=-fuse-ld=mold"]\n' "$CARGO_BUILD_TARGET" >> .cargo/config.toml
       - run: cargo fmt --check
       - run: cargo clippy --all-targets -- -D warnings
+      # `semantic-export` is off by default, so nothing above compiles it.
+      # Without these steps a refactor of an internal API breaks the module
+      # and no job notices until someone builds with the feature on. They
+      # run here rather than in the test job so that job keeps measuring
+      # exactly the feature set the released binary is built with.
+      - run: cargo clippy --all-targets --features semantic-export -- -D warnings
+      - run: cargo test --features semantic-export --lib semantic_export
 
   test:
     name: Test
