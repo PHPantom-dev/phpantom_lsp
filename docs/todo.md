@@ -205,6 +205,7 @@ unlikely to move the needle for most users.
 | P15 | [Two-phase stub index construction (eliminate `RwLock` on stub maps)](todo/performance.md#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps)              | Low         | Medium-High |
 | P6  | O(n²) transitive eviction in `evict_fqn`                                                                                                                                    | Low         | High        |
 |     | **[Indexing](todo/indexing.md)**                                                                                                                                            |             |             |
+| X17 | [Index the workspace's other folders](todo/indexing.md#x17-index-the-workspaces-other-folders)                                                                              | Medium      | Medium      |
 | X7  | [Recency tracking](todo/indexing.md#x7-recency-tracking)                                                                                                                    | Medium      | Medium-High |
 | X6  | Disk cache (evaluate later)                                                                                                                                                 | Medium      | Very High   |
 | X16 | [Composer's own class lists bypass `[indexing] exclude`](todo/indexing.md#x16-composers-own-class-lists-bypass-indexing-exclude)                                            | Low-Medium  | Low         |
