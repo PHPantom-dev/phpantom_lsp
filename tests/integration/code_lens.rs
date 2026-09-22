@@ -974,8 +974,9 @@ class Handler extends Base {
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
-    assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0], "↑ Base::handle");
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"↑ Base::handle"));
+    assert!(titles.contains(&"0 references"));
 }
 
 // ─── Abstract Method Implementation ────────────────────────────────────────
@@ -1107,8 +1108,9 @@ class Document implements Printable {
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
-    assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0], "◆ Printable::print");
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"◆ Printable::print"));
+    assert!(titles.contains(&"0 references"));
 }
 
 // ─── PHPUnit Coverage Lens ("which tests cover this class") ────────────────
@@ -1501,6 +1503,37 @@ function persist(Order $order, Model $model): void {
         title_on_line(&backend, &lenses, 2).as_deref(),
         Some("2 references")
     );
+}
+
+/// A method that overrides a parent still gets its own reference-count
+/// lens alongside the `↑ Parent::method` navigation lens (GH #412):
+/// implementing a contract should not hide the usage count.
+#[test]
+fn an_overriding_method_keeps_its_reference_count_lens() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function area(): float { return 3.14; }
+}
+function measure(Circle $circle): void {
+    $circle->area();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter(|lens| lens.range.start.line == 5)
+        .map(|lens| backend.resolve_code_lens_item(lens.clone()))
+        .filter_map(|lens| lens.command.map(|c| c.title))
+        .collect();
+
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"↑ Shape::area".to_string()));
+    assert!(titles.contains(&"1 reference".to_string()));
 }
 
 #[test]

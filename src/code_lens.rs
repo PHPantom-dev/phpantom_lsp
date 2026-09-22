@@ -114,7 +114,6 @@ impl Backend {
 
                 let proto = self.find_prototype(class, &method.name, uri, content);
                 if !method.name.starts_with("__")
-                    && proto.is_none()
                     && let Some(lens) = self.build_member_reference_lens(
                         uri,
                         &index,
