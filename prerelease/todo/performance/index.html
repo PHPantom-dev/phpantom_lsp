@@ -3215,25 +3215,32 @@ path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
 <h2 id="p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full">P59. A candidate file with a variable receiver is still walked in full<a class="headerlink" href="#p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium-High · Complexity: High</strong></p>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
 <p>A member-reference candidate is now dropped before it is opened when
 every access to the searched name has a receiver the file's own text
 settles: <code>$this</code>, <code>self</code>, <code>static</code>, <code>parent</code>, and a static access on a
 class name written at the access site all resolve from the enclosing
-class and the import table, both of which are already in memory.
-Measured on a 6,700-file Laravel application, the eight declarations of
-one controller selected 1,225 files, and the hierarchy each was filtered
-against held exactly one class. 683 of those files have nothing but
-<code>$this</code>, <code>self</code>, or <code>static</code> receivers and go that way, along with
-whatever share of the rest names its class at the access.</p>
-<p>What remains is the other 542, and they are the expensive half: a
-receiver written as <code>$order</code> or <code>$repo-&gt;find()</code> needs the type engine,
-so the file is read and walked to find out it belongs to an unrelated
-class. On a large application a common name (<code>handle</code>, <code>get</code>, <code>name</code>)
-puts hundreds of those in every candidate set.</p>
-<p>The narrowing that suggests itself for them, intersecting with the files
-that mention a class in the hierarchy, is not sound: a receiver reaches
-its type through return types declared elsewhere, so
+class and the import table, both of which are already in memory.</p>
+<p>What remains is the files whose receivers need the type engine, written
+as <code>$order</code> or <code>$repo-&gt;find()</code>: each is read and walked to find out it
+belongs to an unrelated class. How many those are depends entirely on
+the names being searched. Measured on a 1,400-file Laravel application,
+a controller's seven method names selected 60 candidates and kept 19,
+while a data object's 26 property and method names (<code>id</code>, <code>name</code>,
+<code>title</code>, and the rest of that family) selected 673 and kept 404 to find
+29 references. A common name is what fills a candidate set, and a class
+that declares several of them fills it several times over.</p>
+<p>The filter itself costs half a millisecond over the whole workspace, and
+a second search of the same declarations is answered from the
+resolved-member layer in around 4 ms. So the whole of the remaining cost
+is the first walk of each kept file, which the shared resolved-class
+store brought down from around 77 ms to around 18 ms of CPU per file
+(0.43 s wall for those 404, against 1.19 s before). Narrowing the kept
+set is worth roughly that 0.4 s on a first search and nothing on a
+repeat, which is why this is no longer Medium-High.</p>
+<p>The narrowing that suggests itself, intersecting with the files that
+mention a class in the hierarchy, is not sound: a receiver reaches its
+type through return types declared elsewhere, so
 <code>$repo-&gt;find()-&gt;publish()</code> names neither <code>Article</code> nor the controller.
 It is precisely the models, the classes most often returned from another
 file, that it would break.</p>
