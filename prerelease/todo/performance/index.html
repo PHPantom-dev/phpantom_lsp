@@ -3214,30 +3214,44 @@ through a separate flag, so the cached value has to carry both.</p>
 path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
-<h2 id="p61-member-reference-candidates-are-selected-by-member-name-alone">P61. Member-reference candidates are selected by member name alone<a class="headerlink" href="#p61-member-reference-candidates-are-selected-by-member-name-alone" title="Permanent link">&para;</a></h2>
+<h2 id="p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full">P59. A candidate file with a variable receiver is still walked in full<a class="headerlink" href="#p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: High</strong></p>
-<p><code>member_candidate_keys</code> keys the reference index by member name and
-static-ness only, so the candidate set for a declaration is every file
-that accesses <em>any</em> member of that name. Measured on a 6,700-file
-Laravel application, the eight declarations of one controller selected
-1,225 files, and the hierarchy each was filtered against held exactly
-one class. Over a thousand files were walked to find nine references.</p>
-<p>The narrowing that suggests itself, intersecting with the files that
-mention a class in the hierarchy, is not sound: a receiver reaches its
-type through return types declared elsewhere, so
+<p>A member-reference candidate is now dropped before it is opened when
+every access to the searched name has a receiver the file's own text
+settles: <code>$this</code>, <code>self</code>, <code>static</code>, <code>parent</code>, and a static access on a
+class name written at the access site all resolve from the enclosing
+class and the import table, both of which are already in memory.
+Measured on a 6,700-file Laravel application, the eight declarations of
+one controller selected 1,225 files, and the hierarchy each was filtered
+against held exactly one class. 683 of those files have nothing but
+<code>$this</code>, <code>self</code>, or <code>static</code> receivers and go that way, along with
+whatever share of the rest names its class at the access.</p>
+<p>What remains is the other 542, and they are the expensive half: a
+receiver written as <code>$order</code> or <code>$repo-&gt;find()</code> needs the type engine,
+so the file is read and walked to find out it belongs to an unrelated
+class. On a large application a common name (<code>handle</code>, <code>get</code>, <code>name</code>)
+puts hundreds of those in every candidate set.</p>
+<p>The narrowing that suggests itself for them, intersecting with the files
+that mention a class in the hierarchy, is not sound: a receiver reaches
+its type through return types declared elsewhere, so
 <code>$repo-&gt;find()-&gt;publish()</code> names neither <code>Article</code> nor the controller.
 It is precisely the models, the classes most often returned from another
 file, that it would break.</p>
-<p>A sound narrowing needs the index to record what a file's accesses
-resolve <em>to</em>, not just what they are named, which is the same
-information <code>ResolvedMemberFile</code> holds lazily. Making it a product of
-the workspace index rather than of the first search that needs it is the
-substantial part. The dependency-keyed invalidation <code>ResolvedMemberFile</code>
-already carries (<code>resolution_deps</code>) is what a durable index would be
-maintained by, rather than by rebuilding it on every edit.</p>
-<p><strong>Where to look:</strong> <code>member_candidate_keys</code> and
-<code>member_declaration_references_batch_in</code> in <code>references/members.rs</code>,
-<code>ReferenceIndexKey</code> and <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>.</p>
+<p>A sound narrowing needs the index to record what those accesses resolve
+<em>to</em>, not just what they are named, which is the same information
+<code>ResolvedMemberFile</code> holds lazily. Making it a product of the workspace
+index rather than of the first search that needs it is the substantial
+part: resolving every receiver in the workspace eagerly is the cost of a
+diagnostic pass over it, which no startup budget has room for, so it has
+to be earned incrementally and kept. The dependency-keyed invalidation
+<code>ResolvedMemberFile</code> already carries (<code>resolution_deps</code>) is what a
+durable index would be maintained by, rather than by rebuilding it on
+every edit.</p>
+<p><strong>Where to look:</strong> <code>settled_receiver_text</code> and
+<code>member_accesses_ruled_out</code> in <code>references/members.rs</code> for the receivers
+already handled, <code>member_declaration_references_batch_in</code> in the same
+file, and <code>ReferenceIndexKey</code> and <code>ResolvedMemberFile</code> in
+<code>reference_index.rs</code>.</p>
 <hr />
 <h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
