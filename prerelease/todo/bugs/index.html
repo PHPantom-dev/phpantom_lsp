@@ -906,10 +906,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b324-two-anonymous-classes-at-the-same-offset-share-one-resolution" class="md-nav__link">
+  <a href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B324. Two anonymous classes at the same offset share one resolution
+        B325. A member search misses the implementors nothing has parsed yet
       </span>
     </span>
   </a>
@@ -1500,10 +1500,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b324-two-anonymous-classes-at-the-same-offset-share-one-resolution" class="md-nav__link">
+  <a href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B324. Two anonymous classes at the same offset share one resolution
+        B325. A member search misses the implementors nothing has parsed yet
       </span>
     </span>
   </a>
@@ -1598,35 +1598,35 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b324-two-anonymous-classes-at-the-same-offset-share-one-resolution">B324. Two anonymous classes at the same offset share one resolution<a class="headerlink" href="#b324-two-anonymous-classes-at-the-same-offset-share-one-resolution" title="Permanent link">&para;</a></h3>
+<h3 id="b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet">B325. A member search misses the implementors nothing has parsed yet<a class="headerlink" href="#b325-a-member-search-misses-the-implementors-nothing-has-parsed-yet" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>parser/anonymous.rs</code> names an anonymous class <code>__anonymous@&lt;offset&gt;</code>
-from the offset of its opening brace <em>within its own file</em>, and
-<code>resolution.rs</code> deliberately keeps those synthetic names out of the
-workspace declaration index. So the name is unique per file and nothing
-makes it unique across the workspace.</p>
-<p>The resolved-class cache is keyed by fully-qualified name, and
-<code>resolve_class_fully_inner</code> cannot reload an anonymous class from the
-class loader (it is not in the index), so it falls back to the
-<code>ClassInfo</code> it was handed and caches the result under that name. Two
-files whose anonymous class sits at the same byte offset in the same
-namespace therefore collide: whichever resolves first answers for both.</p>
-<p>Boilerplate-identical files make this ordinary rather than exotic. A
-Laravel anonymous migration is <code>return new class extends Migration {</code>
-after a fixed <code>&lt;?php</code> header and three <code>use</code> lines, so a project's
-migrations all put the brace at the same offset. Reproduced with two
-global-namespace files that differ only in the method their anonymous
-class declares: completing on the second file's instance offers the
-first file's method and not its own.</p>
-<p>The name has to carry the file as well as the offset, or the cache key
-does. Changing the synthetic name is the smaller change but it is
-user-visible (it reaches hover and the outline), so the FQN it is built
-from and the places that match on the <code>__anonymous@</code> prefix both have to
-be checked.</p>
-<p><strong>Where to look:</strong> <code>AnonymousClassWalker</code> in <code>parser/anonymous.rs</code>, the
-<code>__anonymous@</code> filters in <code>resolution.rs</code> and <code>parser/ast_update.rs</code>, and
-the <code>cache_key</code> in <code>resolve_class_fully_inner</code>
-(<code>virtual_members/resolve.rs</code>).</p>
+<p>A member reference search scopes itself to the hierarchy that declares
+the member, and <code>collect_descendants_for_roots</code> reads that hierarchy's
+descendants out of <code>gti_index</code> alone. That index only holds classes from
+files that have been fully parsed, and a package class is parsed the
+first time something needs it, so an implementor sitting in a dependency
+is missing from the scope until an unrelated lookup happens to pull its
+file in. Every access on it is then judged to be on an unrelated class
+and dropped from the results.</p>
+<p><code>type_hierarchy.rs</code> documents the same limitation for its own use of the
+index and works around it by calling <code>find_implementors</code>, whose second
+phase scans for the classes the index does not know about yet. The member
+search has no such phase.</p>
+<p>The result is that the same search answers differently depending on what
+the session has done before it. On a Laravel application, Find References
+on a method declared by a package interface and implemented both by the
+application and by a package class misses the package implementor on the
+first run and finds it on the second: the first run resolves a
+<code>$service = app()-&gt;make(PackageService::class)</code> receiver while scanning,
+which parses <code>PackageService</code> and files it under the interface, and the
+second run's hierarchy is built from the index that first run filled.
+Anything that loads the workspace's classes first (the startup receiver
+warm-up, a completion, a hover) has the same effect, which is what makes
+this look intermittent.</p>
+<p><strong>Where to look:</strong> <code>collect_descendants_for_roots</code> and
+<code>collect_member_receiver_scope</code> in <code>src/references/members.rs</code>,
+<code>find_implementors</code> and its scan phase, and the <code>gti_index</code> note in
+<code>src/type_hierarchy.rs</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>

@@ -3214,47 +3214,6 @@ through a separate flag, so the cached value has to carry both.</p>
 path) and <code>narrowed_by_rewalk</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
 <hr />
-<h2 id="p60-the-first-member-reference-search-of-a-session-still-walks-its-candidates">P60. The first member-reference search of a session still walks its candidates<a class="headerlink" href="#p60-the-first-member-reference-search-of-a-session-still-walks-its-candidates" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Very High</strong></p>
-<p>A candidate file is now walked at most once for the whole workspace: the
-walk records what every access in the bodies it entered resolves to, and
-the pre-open filter reads those recordings, so the second search for any
-other class drops the file without opening it. Over a sweep of 250
-classes that is 2.95 s → 1.72 s on a 1,400-file Laravel application and
-0.42 s → 0.23 s on PHPMD, with identical results.</p>
-<p>What is left is the first search over a cold layer. On the same Laravel
-application a data object's 25 property and method names (<code>id</code>, <code>name</code>,
-<code>title</code>, and the rest of that family) select 463 candidates and keep 404
-to find 29 references, and walking those costs around 0.49 s wall
-(8.3 s CPU across the pool). Of that CPU, 99 % is
-<code>build_diagnostic_scopes_for_offsets</code>: resolving a receiver means
-forward-walking the body it sits in from the first statement, which for a
-Laravel feature test is 30 ms for a single access. The resolutions
-themselves are 0.09 s. Profiling the walk is flat across the type engine,
-the parser and the interner, so there is no hot spot to remove; only the
-walk count is worth attacking.</p>
-<p>Two narrowings do not work. Intersecting with the files that mention a
-class in the hierarchy is not sound: a receiver reaches its type through
-return types declared elsewhere, so <code>$repo-&gt;find()-&gt;publish()</code> names
-neither <code>Article</code> nor the controller. Closing that over the declared-type
-graph (the classes from which the hierarchy is reachable by chaining
-calls) is sound but degenerates on Laravel, where <code>app()</code>,
-<code>Container::make()</code> and <code>Collection::first()</code> have template return types
-that make every class reachable from every other one.</p>
-<p>That leaves earning the layer ahead of the search rather than narrowing
-what it looks at: populating it in the background once the workspace is
-indexed, maintained by the dependency-keyed invalidation
-<code>ResolvedMemberFile</code> already carries (<code>resolution_deps</code>) rather than
-rebuilt on every edit. The cost is a receiver walk of every user file,
-which is a diagnostic pass over the workspace. That is seconds of
-background CPU on this application and scales with the workspace, so it
-needs a budget and a cancellation story before it is worth the memory it
-would hold, for a saving that is under half a second once per class per
-session.</p>
-<p><strong>Where to look:</strong> <code>member_accesses_ruled_out</code> and the widening block in
-<code>member_declaration_references_batch_in</code>, both in <code>references/members.rs</code>,
-and <code>ResolvedMemberFile</code> in <code>reference_index.rs</code>.</p>
-<hr />
 <h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p>A <code>ClassInfo</code>'s members are <code>SharedVec</code>s, so the struct is often called
