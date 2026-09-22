@@ -9,6 +9,7 @@
 
 use super::*;
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
@@ -17,7 +18,7 @@ use crate::atom::{Atom, AtomMap};
 use crate::class_lookup::find_class_at_offset;
 use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
-use crate::text_position::offset_to_position;
+use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::ClassInfo;
 
 #[derive(Clone)]
@@ -293,11 +294,67 @@ impl Backend {
             let Ok(parsed_uri) = Url::parse(file_uri) else {
                 return Vec::new();
             };
+
+            // A warm entry that answers for every name being searched records
+            // both the receiver and the range of each access it resolved, so
+            // the file's text is not needed at all.  An access it holds
+            // nothing for resolved to nothing, which only a query filtering by
+            // hierarchy can decide without a range — hence the `all`.
+            let hierarchy_only = prepared.iter().all(|query| query.hierarchy.is_some());
+            let warm = hierarchy_only
+                .then(|| self.resolved_member_file(file_uri, symbol_map))
+                .flatten()
+                .filter(|file| file.covers(by_member.keys().copied()));
+            if let Some(warm) = warm {
+                let mut matches = Vec::new();
+                for span_index in span_indices {
+                    let SymbolKind::MemberAccess { member_name, .. } =
+                        &symbol_map.spans[span_index].kind
+                    else {
+                        continue;
+                    };
+                    let Some(query_indices) = by_member.get(member_name) else {
+                        continue;
+                    };
+                    let Some((range, subject_fqns)) = warm.resolved_access(span_index) else {
+                        continue;
+                    };
+                    for &query_index in query_indices {
+                        let Some(hierarchy) = prepared[query_index].hierarchy.as_ref() else {
+                            continue;
+                        };
+                        if subject_fqns
+                            .iter()
+                            .any(|fqn| hierarchy.contains(fqn.as_str()))
+                        {
+                            matches.push((
+                                query_index,
+                                Location {
+                                    uri: parsed_uri.clone(),
+                                    range,
+                                },
+                            ));
+                        }
+                    }
+                }
+                return matches;
+            }
+
             let Some(content) = self.reference_file_content_arc(file_uri) else {
                 return Vec::new();
             };
             let Some(source) = symbol_map.source(&content) else {
                 return Vec::new();
+            };
+            // One line table for the whole file: converting each access's
+            // offsets by rescanning from the start of the file makes a file
+            // holding many accesses to the searched names quadratic in its own
+            // size, and a candidate file is scanned for both ends of every one.
+            let lines = OnceCell::new();
+            let position = |offset: u32| {
+                lines
+                    .get_or_init(|| LineIndex::new(&content))
+                    .position(offset as usize)
             };
             let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
             let resolved_file = needs_receiver.then(|| {
@@ -316,7 +373,7 @@ impl Backend {
                     return Arc::clone(covering);
                 }
 
-                let carried: Vec<(usize, Vec<Atom>)> = previous
+                let carried: Vec<(usize, Range, Vec<Atom>)> = previous
                     .as_ref()
                     .map(|file| file.resolutions().collect())
                     .unwrap_or_default();
@@ -406,7 +463,7 @@ impl Backend {
                         else {
                             return None;
                         };
-                        let targets = self
+                        let targets: Vec<Atom> = self
                             .resolve_subject_to_fqns(
                                 subject_text.as_str(source),
                                 *is_static,
@@ -417,7 +474,11 @@ impl Backend {
                             .into_iter()
                             .map(|target| crate::atom::atom(&target))
                             .collect();
-                        Some((span_index, targets))
+                        if targets.is_empty() {
+                            return None;
+                        }
+                        let range = Range::new(position(span.start), position(span.end));
+                        Some((span_index, range, targets))
                     }))
                     .collect();
                 self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), covered, resolved)
@@ -438,13 +499,16 @@ impl Backend {
                     continue;
                 };
 
-                let subject_fqns = resolved_file
+                let resolved = resolved_file
                     .as_ref()
-                    .map_or(&[][..], |file| file.targets_for_span(span_index));
-                let range = Range::new(
-                    offset_to_position(&content, span.start as usize),
-                    offset_to_position(&content, span.end as usize),
-                );
+                    .and_then(|file| file.resolved_access(span_index));
+                let (subject_fqns, range) = match resolved {
+                    Some((range, targets)) => (targets, range),
+                    None => (
+                        &[][..],
+                        Range::new(position(span.start), position(span.end)),
+                    ),
+                };
 
                 for &query_index in query_indices {
                     let query = &prepared[query_index];

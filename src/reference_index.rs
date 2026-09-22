@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
+use tower_lsp::lsp_types::Range;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
@@ -117,6 +118,9 @@ pub(crate) struct ReferenceIndexInner {
 #[derive(Clone, Copy)]
 struct ResolvedMemberAccess {
     span_index: u32,
+    /// Where the access sits, so a warm file answers a search without its
+    /// text being read again to convert the span's byte offsets.
+    range: Range,
     target_start: u32,
     target_len: u32,
 }
@@ -125,6 +129,11 @@ struct ResolvedMemberAccess {
 /// immutable symbol map.  Targets are packed into one allocation; the access
 /// table points into it and stays sorted by symbol-span index for binary
 /// lookup.
+///
+/// Each access also carries the LSP range it occupies.  That is the only other
+/// thing a search needs the file's text for, so an entry that covers every name
+/// a search asks about answers it outright: no `read_to_string` for a file the
+/// editor does not have open, and no offset-to-position pass over it.
 ///
 /// Resolving a receiver means running the type engine over the whole enclosing
 /// file, so an entry only covers the member names a search actually asked
@@ -146,15 +155,15 @@ impl ResolvedMemberFile {
     pub(crate) fn new(
         symbol_map: Arc<SymbolMap>,
         mut covered: Vec<Atom>,
-        mut resolved: Vec<(usize, Vec<Atom>)>,
+        mut resolved: Vec<(usize, Range, Vec<Atom>)>,
     ) -> Self {
         covered.sort_unstable();
         covered.dedup();
-        resolved.sort_unstable_by_key(|(span_index, _)| *span_index);
-        let target_count = resolved.iter().map(|(_, targets)| targets.len()).sum();
+        resolved.sort_unstable_by_key(|(span_index, ..)| *span_index);
+        let target_count = resolved.iter().map(|(_, _, targets)| targets.len()).sum();
         let mut accesses = Vec::with_capacity(resolved.len());
         let mut packed_targets = Vec::with_capacity(target_count);
-        for (span_index, mut targets) in resolved {
+        for (span_index, range, mut targets) in resolved {
             if targets.is_empty() {
                 continue;
             }
@@ -164,6 +173,7 @@ impl ResolvedMemberFile {
             packed_targets.extend(targets);
             accesses.push(ResolvedMemberAccess {
                 span_index: span_index as u32,
+                range,
                 target_start: target_start as u32,
                 target_len: (packed_targets.len() - target_start) as u32,
             });
@@ -190,29 +200,38 @@ impl ResolvedMemberFile {
     /// The resolutions already recorded, so a search that needs one more
     /// member name carries them over instead of walking the file again for
     /// names a previous search already paid for.
-    pub(crate) fn resolutions(&self) -> impl Iterator<Item = (usize, Vec<Atom>)> + '_ {
+    pub(crate) fn resolutions(&self) -> impl Iterator<Item = (usize, Range, Vec<Atom>)> + '_ {
         self.accesses.iter().map(|access| {
             let start = access.target_start as usize;
             (
                 access.span_index as usize,
+                access.range,
                 self.targets[start..start + access.target_len as usize].to_vec(),
             )
         })
     }
 
-    pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
-        let Ok(span_index) = u32::try_from(span_index) else {
-            return &[];
-        };
-        let Ok(index) = self
+    /// The range and receiver classes recorded for one access, or `None` when
+    /// the entry holds none for it: the search that built the entry either did
+    /// not ask about that member name, or the receiver resolved to nothing.
+    pub(crate) fn resolved_access(&self, span_index: usize) -> Option<(Range, &[Atom])> {
+        let span_index = u32::try_from(span_index).ok()?;
+        let index = self
             .accesses
             .binary_search_by_key(&span_index, |access| access.span_index)
-        else {
-            return &[];
-        };
+            .ok()?;
         let access = self.accesses[index];
         let start = access.target_start as usize;
-        &self.targets[start..start + access.target_len as usize]
+        Some((
+            access.range,
+            &self.targets[start..start + access.target_len as usize],
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
+        self.resolved_access(span_index)
+            .map_or(&[][..], |(_, targets)| targets)
     }
 
     fn matches_symbol_map(&self, symbol_map: &Arc<SymbolMap>) -> bool {
@@ -285,7 +304,7 @@ impl Backend {
         uri: &str,
         symbol_map: Arc<SymbolMap>,
         covered: Vec<Atom>,
-        resolved: Vec<(usize, Vec<Atom>)>,
+        resolved: Vec<(usize, Range, Vec<Atom>)>,
     ) -> Arc<ResolvedMemberFile> {
         let built = Arc::new(ResolvedMemberFile::new(
             Arc::clone(&symbol_map),

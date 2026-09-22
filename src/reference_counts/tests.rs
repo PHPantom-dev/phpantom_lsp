@@ -228,6 +228,38 @@ function run(Service $service): void {
     );
 }
 
+/// The semantic layer records where each access it resolved sits, so a search
+/// whose names a candidate file is already indexed for never goes back to that
+/// file's text: the file is neither opened nor read from disk again.
+#[test]
+fn a_warm_candidate_file_is_answered_without_reading_it() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_extra(&backend, SERVICE_URI, SERVICE);
+    parse_extra(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let first = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    assert_eq!(first.len(), 1, "the access in the consumer is a reference");
+
+    // Nothing but the warm entry can answer for the consumer now: it is not
+    // open, and the URI has no file behind it.
+    backend.open_files.write().remove(CONSUMER_URI);
+    let second = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    assert_eq!(
+        second, first,
+        "a file already resolved for this member is answered from the layer"
+    );
+}
+
 #[test]
 fn ready_only_location_lookup_does_not_queue_background_work() {
     let backend = Backend::new_test();

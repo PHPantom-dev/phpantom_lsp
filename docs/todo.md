@@ -35,10 +35,10 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| P55  | [A signature edit re-resolves every member-reference candidate file](todo/performance.md#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file) | Medium-High | Medium      |
 | X17  | [Index the workspace's other folders](todo/indexing.md#x17-index-the-workspaces-other-folders)                              | Medium      | Medium      |
 | P60  | [A receiver walk builds variable scopes for a whole file to type one access](todo/performance.md#p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access) | High | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| P55  | [A signature edit re-resolves every member-reference candidate file](todo/performance.md#p55-a-signature-edit-re-resolves-every-member-reference-candidate-file) | Medium-High | High        |
 | P61  | [Member-reference candidates are selected by member name alone](todo/performance.md#p61-member-reference-candidates-are-selected-by-member-name-alone) | Medium-High | High        |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 

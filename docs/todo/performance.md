@@ -1132,9 +1132,9 @@ path) and `narrowed_by_rewalk` in
 
 ## P55. A signature edit re-resolves every member-reference candidate file
 
-**Impact: Medium-High · Complexity: Medium**
+**Impact: Medium-High · Complexity: High**
 
-An edit that only reparses files now rescans those files alone: a cached
+An edit that only reparses files rescans those files alone: a cached
 member result records which files went stale, and the recomputation
 searches those and merges the rest of the cached locations back in.
 Typing inside a method body costs no workspace search at all.
@@ -1144,33 +1144,17 @@ A change to a *signature* is still a blanket invalidation, from the
 That branch is correct and cannot be narrowed by which classes changed:
 a chain such as `$b->makeC()->handle()` resolves its receiver through a
 class the file never names, so the files whose receivers a change can
-affect are not the files that mention it. The cost lands in two places:
+affect are not the files that mention it. The branch clears
+`resolved_members`, so the next search rebuilds the per-file receiver
+layer for every candidate file rather than reusing it. On a large
+application, with a common member name (`handle`, `get`, `name`) a
+candidate in thousands of files, one such burst is tens of CPU-seconds
+even though most of those files were not touched.
 
-- The branch clears `resolved_members`, so the next search rebuilds the
-  per-file receiver layer for every candidate file rather than reusing
-  it. On a large application, with a common member name (`handle`,
-  `get`, `name`) a candidate in thousands of files, one such burst is
-  tens of CPU-seconds even though most of those files were not touched.
-- `member_declaration_references_batch` calls
-  `reference_file_content_arc` per candidate file, which falls through
-  to `get_file_content_arc`, an uncached `std::fs::read_to_string` for
-  any file not open in the editor.
-
-### Fix
-
-**Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
-already packs the resolved receiver atoms per symbol-span index; it does
-not carry the LSP `Range` for the access, which is the only other thing
-`scan_file` needs the file's text for. Storing the range alongside the
-targets (16 bytes per access) would let a warm candidate file be
-filtered without reading it at all, which also removes the file reads
-above.
-
-That leaves the layer being cleared wholesale on a signature change.
-The measurement that was asked for here has been taken, on a 6,700-file
-Laravel application, opening a controller that declares eight methods
-(`index`, `create`, `save`, `update`, `edit`, `delete`, `featured`,
-`publish`) whose counts come to nine references in total:
+The measurement, on a 6,700-file Laravel application, opening a
+controller that declares eight methods (`index`, `create`, `save`,
+`update`, `edit`, `delete`, `featured`, `publish`) whose counts come to
+nine references in total:
 
 | | candidate files | receiver walks | wall | CPU |
 | --- | --- | --- | --- | --- |
@@ -1179,17 +1163,60 @@ Laravel application, opening a controller that declares eight methods
 
 The second row is the cost this item is about: the rename reaches
 `clear_resolved_member_files`, every warm entry goes, and the burst pays
-the same price again. Nothing else in the second row is new work; a
-rename that did not clear the layer would have been served from it.
+the same price again. Nothing else in the second row is new work.
+
+Being served from the layer is now free: each entry carries the LSP
+range of every access it resolved, so a candidate file the layer already
+answers for is filtered without its text being read or walked. On a
+synthetic 1,200-file workspace holding 8,400 accesses to one method, the
+first search takes 6.3 s and a repeat 10 ms. That factor is what the
+clear throws away on every signature keystroke.
+
+### Fix
+
+Narrowing the clear needs the layer to record what each entry's
+resolution *depended on*. Three cheaper narrowings were considered and
+are unsound, which is worth stating so they are not rediscovered:
+
+- Intersecting the changed FQNs with an entry's recorded targets misses
+  the intermediate classes. `makeC(): C` changing on `B` alters the
+  receiver of `$b->makeC()->handle()` while `B` appears in no target.
+- Intersecting with the names the file mentions (the reference index's
+  `uri_keys` already holds them) fails on inheritance: a class whose
+  `extends` moves from `A` to `B` changes what `self::factory()`
+  resolves to in a file that mentions neither, only `factory`.
+- Keeping entries whose accesses all have a `$this`, `self`, or
+  `static` receiver is sound (those resolve to the enclosing class,
+  which is settled by the file's own text) but small: 683 of the 1,225
+  files above, worth about 6 of the 122 CPU-seconds, since a file with
+  no variable receivers is the cheap kind to walk.
+
+The direction that works is recording the class and function names each
+entry's resolution consulted, including the ones that resolved to
+nothing (a name that gains a declaration changes the answer too), and
+dropping only the entries that intersect what the edit changed.
+`find_or_load_class_typed` is the funnel every `ClassInfo` comes through
+and its per-thread memo sits inside it, so a thread-local recorder
+activated around the per-file resolution in `member_declaration_references_batch_in`
+sees every lookup. The set to compare against is `evicted_fqns` rather
+than the reparsed file's own classes: it is already the transitive
+closure over the inheritance and mixin graph, which covers a parent
+change reaching a file that only ever loaded the child.
+
+The hole to close before this can ship is the Laravel registries. A
+macro table, an alias table, the pivot index, and the configured auth
+model are all consulted without a class lookup naming the provider that
+registered them, so an entry whose resolution read one has to record
+that too, or those edits have to keep clearing the layer wholesale.
 
 The layer is shared with Find References, so a narrowing that gets it
 wrong shows up as missing references, not as a slow lens.
 
 **Where to look:** `Staleness` and `compute_pending_member_ref_counts`
-in `reference_counts.rs`, `ResolvedMemberFile` in `reference_index.rs`,
+in `reference_counts/`, `ResolvedMemberFile` in `reference_index.rs`,
 `member_declaration_references_batch_in` in `references/members.rs`,
-`clear_resolved_member_files` in `parser/ast_update.rs`, and
-`get_file_content_arc` in `backend/file_access.rs`.
+`find_or_load_class_typed` in `resolution.rs`, and
+`clear_resolved_member_files` in `parser/ast_update.rs`.
 
 ---
 
