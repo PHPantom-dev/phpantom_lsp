@@ -121,6 +121,76 @@ pub(crate) struct MemberDeclarationReferenceQuery {
     pub(crate) is_static: bool,
 }
 
+/// The classes a member search counts as carrying the member it searches for.
+///
+/// A scope built from the classes that *declare* the member also has to cover
+/// everything that inherits the declaration, and the reverse-inheritance
+/// index answers that in one pass.  What the index cannot answer is a class
+/// nothing has parsed yet: a package class is parsed the first time something
+/// needs it, so an implementor sitting in a dependency has no edge in the
+/// index until then, and every access on it would be judged to be on an
+/// unrelated class.  A receiver the index did not account for is therefore
+/// settled by walking up from the receiver's own class instead, which loads
+/// what that walk needs.  Without it the same search answers differently
+/// depending on what the session parsed before it.
+#[derive(Clone)]
+pub(crate) struct MemberScope(Arc<MemberScopeInner>);
+
+struct MemberScopeInner {
+    /// The declaring classes plus every descendant the reverse-inheritance
+    /// index knew about when the scope was built.
+    indexed: HashSet<String>,
+    /// The declaring classes, empty for a scope that is exactly `indexed`.
+    roots: HashSet<String>,
+    /// What the upward walk has already settled, so a receiver that recurs
+    /// across the thousands of files a search scans is walked once.
+    walked: parking_lot::RwLock<HashMap<String, bool>>,
+}
+
+impl MemberScope {
+    /// A scope that is exactly `fqns`, with no walk behind it.
+    pub(super) fn exact(fqns: HashSet<String>) -> Self {
+        Self(Arc::new(MemberScopeInner {
+            indexed: fqns,
+            roots: HashSet::new(),
+            walked: parking_lot::RwLock::new(HashMap::new()),
+        }))
+    }
+
+    /// The classes that inherit the member from `roots`, with the walk that
+    /// reaches the ones the index has no edge for.
+    fn descendants_of(roots: HashSet<String>, indexed: HashSet<String>) -> Self {
+        Self(Arc::new(MemberScopeInner {
+            indexed,
+            roots,
+            walked: parking_lot::RwLock::new(HashMap::new()),
+        }))
+    }
+
+    /// The classes the scope holds without walking: what a caller that needs
+    /// to enumerate the scope rather than test one class against it gets.
+    pub(super) fn indexed(&self) -> &HashSet<String> {
+        &self.0.indexed
+    }
+
+    /// Whether a receiver resolved to `fqn` carries the searched member.
+    pub(super) fn contains(&self, backend: &Backend, fqn: &str) -> bool {
+        let fqn = strip_fqn_prefix(fqn);
+        if self.0.indexed.contains(fqn) {
+            return true;
+        }
+        if self.0.roots.is_empty() {
+            return false;
+        }
+        if let Some(&walked) = self.0.walked.read().get(fqn) {
+            return walked;
+        }
+        let inherits = backend.inherits_from_any(fqn, &self.0.roots);
+        self.0.walked.write().insert(fqn.to_string(), inherits);
+        inherits
+    }
+}
+
 impl Backend {
     pub(super) fn find_laravel_macro_references(
         &self,
@@ -205,7 +275,7 @@ impl Backend {
                         &content,
                     );
                     !subject_fqns.is_empty()
-                        && subject_fqns.iter().any(|fqn| hierarchy.contains(fqn))
+                        && subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn))
                 };
                 if !matches_macro {
                     continue;
@@ -218,7 +288,7 @@ impl Backend {
         }
 
         if include_declaration {
-            let macro_scope: HashSet<String> = targets.iter().cloned().collect();
+            let macro_scope = MemberScope::exact(targets.iter().cloned().collect());
             self.append_laravel_macro_registration_locations(
                 &mut locations,
                 name,
@@ -233,13 +303,13 @@ impl Backend {
         &self,
         locations: &mut Vec<Location>,
         name: &str,
-        targets: Option<&HashSet<String>>,
+        targets: Option<&MemberScope>,
     ) {
         let Some(targets) = targets else {
             return;
         };
         let index = self.laravel_macros.read();
-        for target in targets {
+        for target in targets.indexed() {
             if !index.has_macro(target, name) {
                 continue;
             }
@@ -312,7 +382,7 @@ impl Backend {
         &self,
         uri: &str,
         symbol_map: &Arc<SymbolMap>,
-        queries: &[(Atom, &HashSet<String>)],
+        queries: &[(Atom, &MemberScope)],
     ) -> bool {
         let file_ctx = OnceCell::new();
         let resolved = self.resolved_member_file(uri, symbol_map);
@@ -327,7 +397,7 @@ impl Backend {
             {
                 for &span_index in symbol_map.member_access_indices(member) {
                     if let Some((_, targets)) = recorded.resolved_access(span_index)
-                        && targets.iter().any(|fqn| hierarchy.contains(fqn.as_str()))
+                        && targets.iter().any(|fqn| hierarchy.contains(self, fqn))
                     {
                         return false;
                     }
@@ -353,7 +423,7 @@ impl Backend {
                     span.start,
                     "",
                 );
-                if subject_fqns.iter().any(|fqn| hierarchy.contains(fqn)) {
+                if subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
                     return false;
                 }
             }
@@ -412,7 +482,7 @@ impl Backend {
         struct PreparedQuery {
             member: Atom,
             is_static: bool,
-            hierarchy: Option<HashSet<String>>,
+            hierarchy: Option<MemberScope>,
         }
 
         if queries.is_empty() {
@@ -455,7 +525,7 @@ impl Backend {
         // Only a query that filters by hierarchy can rule a file out; the
         // name-only fallback accepts any receiver, so one such query in the
         // batch keeps every candidate.
-        let filtered: Option<Vec<(Atom, &HashSet<String>)>> = prepared
+        let filtered: Option<Vec<(Atom, &MemberScope)>> = prepared
             .iter()
             .map(|query| query.hierarchy.as_ref().map(|h| (query.member, h)))
             .collect();
@@ -512,10 +582,7 @@ impl Backend {
                         let Some(hierarchy) = prepared[query_index].hierarchy.as_ref() else {
                             continue;
                         };
-                        if subject_fqns
-                            .iter()
-                            .any(|fqn| hierarchy.contains(fqn.as_str()))
-                        {
+                        if subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
                             matches.push((
                                 query_index,
                                 Location {
@@ -593,10 +660,7 @@ impl Backend {
                 for &query_index in query_indices {
                     let query = &prepared[query_index];
                     if let Some(hierarchy) = &query.hierarchy {
-                        if !subject_fqns
-                            .iter()
-                            .any(|fqn| hierarchy.contains(fqn.as_str()))
-                        {
+                        if !subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn)) {
                             continue;
                         }
                     } else if query.is_static != *is_static {
@@ -947,8 +1011,8 @@ impl Backend {
         target_member: &str,
         target_is_static: bool,
         include_declaration: bool,
-        hierarchy: Option<&HashSet<String>>,
-        declaration_scope: Option<&HashSet<String>>,
+        hierarchy: Option<&MemberScope>,
+        declaration_scope: Option<&MemberScope>,
     ) -> Vec<Location> {
         let mut locations = Vec::new();
 
@@ -1060,7 +1124,7 @@ impl Backend {
                                 span.start,
                                 content,
                             );
-                            if !subject_fqns.iter().any(|fqn| hier.contains(fqn)) {
+                            if !subject_fqns.iter().any(|fqn| hier.contains(self, fqn)) {
                                 // The subject did not resolve to a class in
                                 // the target hierarchy — skip.  An
                                 // unresolved subject (empty `subject_fqns`)
@@ -1116,11 +1180,10 @@ impl Backend {
                                             })
                                             .min_by_key(|c| c.start_offset)
                                     });
-                                if let Some(enclosing) = enclosing {
-                                    let fqn = enclosing.fqn().to_string();
-                                    if !hier.contains(&fqn) {
-                                        continue;
-                                    }
+                                if let Some(enclosing) = enclosing
+                                    && !hier.contains(self, &enclosing.fqn())
+                                {
+                                    continue;
                                 }
                             }
 
@@ -1149,11 +1212,10 @@ impl Backend {
             // pick up property declaration sites.
             if include_declaration && let Some(classes) = self.shared_classes_for_uri(file_uri) {
                 for class in &classes {
-                    if let Some(hier) = declaration_scope.or(hierarchy) {
-                        let class_fqn = class.fqn().to_string();
-                        if !hier.contains(&class_fqn) {
-                            continue;
-                        }
+                    if let Some(hier) = declaration_scope.or(hierarchy)
+                        && !hier.contains(self, &class.fqn())
+                    {
+                        continue;
                     }
 
                     for prop in &class.properties {
@@ -1208,7 +1270,7 @@ impl Backend {
         span_start: u32,
         member_name: &str,
         mode: ReferenceSearchMode,
-    ) -> (Option<HashSet<String>>, Option<HashSet<String>>) {
+    ) -> (Option<MemberScope>, Option<MemberScope>) {
         let ctx = self.file_context(uri);
         let Some(content) = self.reference_file_content(uri) else {
             return (None, None);
@@ -1245,7 +1307,7 @@ impl Backend {
         member_name: &str,
         is_static: bool,
         mode: ReferenceSearchMode,
-    ) -> Option<HashSet<String>> {
+    ) -> Option<MemberScope> {
         let classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -1282,7 +1344,7 @@ impl Backend {
         member_name: &str,
         is_static: bool,
         mode: ReferenceSearchMode,
-    ) -> Option<HashSet<String>> {
+    ) -> Option<MemberScope> {
         let classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -1409,7 +1471,7 @@ impl Backend {
     /// - All ancestor FQNs (parent chain, interfaces, traits)
     /// - All descendant FQNs (classes that extend/implement any class in
     ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> HashSet<String> {
+    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> MemberScope {
         let mut hierarchy = HashSet::new();
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
 
@@ -1484,30 +1546,30 @@ impl Backend {
         // Walk down: collect descendants from the original target classes,
         // not every ancestor. This keeps a concrete class rename from
         // fanning out through an implemented interface into sibling classes.
-        let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
-        for fqn in seed_fqns {
-            queue.push_back(normalize_fqn(fqn).to_string());
-        }
-        for ext_fqn in &extensions {
-            queue.push_back(ext_fqn.clone());
-        }
-        for model_fqn in &model_seeds {
-            queue.push_back(normalize_fqn(model_fqn).to_string());
-        }
+        let descendant_roots: HashSet<String> = seed_fqns
+            .iter()
+            .map(|fqn| normalize_fqn(fqn).to_string())
+            .chain(extensions.iter().cloned())
+            .chain(model_seeds.iter().map(|fqn| normalize_fqn(fqn).to_string()))
+            .collect();
+        let mut queue: std::collections::VecDeque<String> =
+            descendant_roots.iter().cloned().collect();
 
-        let gti = self.symbols.gti_index.read();
-        while let Some(fqn) = queue.pop_front() {
-            if let Some(descendants) = gti.get(&fqn) {
-                for desc in descendants {
-                    let normalized = normalize_fqn(desc).to_string();
-                    if hierarchy.insert(normalized.clone()) {
-                        queue.push_back(normalized);
+        {
+            let gti = self.symbols.gti_index.read();
+            while let Some(fqn) = queue.pop_front() {
+                if let Some(descendants) = gti.get(&fqn) {
+                    for desc in descendants {
+                        let normalized = normalize_fqn(desc).to_string();
+                        if hierarchy.insert(normalized.clone()) {
+                            queue.push_back(normalized);
+                        }
                     }
                 }
             }
         }
 
-        hierarchy
+        MemberScope::descendants_of(descendant_roots, hierarchy)
     }
 
     fn collect_member_receiver_scope(
@@ -1516,7 +1578,7 @@ impl Backend {
         member_name: &str,
         is_static: bool,
         include_declaring_interfaces: bool,
-    ) -> Option<HashSet<String>> {
+    ) -> Option<MemberScope> {
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
         let mut roots = HashSet::new();
         let mut seen = HashSet::new();
@@ -1687,21 +1749,36 @@ impl Backend {
         }
     }
 
-    fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> HashSet<String> {
-        let mut scope = roots.clone();
-        let mut queue: std::collections::VecDeque<String> = roots.into_iter().collect();
-        let gti = self.symbols.gti_index.read();
-        while let Some(fqn) = queue.pop_front() {
-            if let Some(descendants) = gti.get(&fqn) {
-                for desc in descendants {
-                    let normalized = normalize_fqn(desc).to_string();
-                    if scope.insert(normalized.clone()) {
-                        queue.push_back(normalized);
+    fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> MemberScope {
+        let mut indexed = roots.clone();
+        let mut queue: std::collections::VecDeque<String> = roots.iter().cloned().collect();
+        {
+            let gti = self.symbols.gti_index.read();
+            while let Some(fqn) = queue.pop_front() {
+                if let Some(descendants) = gti.get(&fqn) {
+                    for desc in descendants {
+                        let normalized = normalize_fqn(desc).to_string();
+                        if indexed.insert(normalized.clone()) {
+                            queue.push_back(normalized);
+                        }
                     }
                 }
             }
         }
-        scope
+        MemberScope::descendants_of(roots, indexed)
+    }
+
+    /// Whether `fqn` inherits from any of `roots`, walking up from the class
+    /// itself.
+    ///
+    /// The walk loads the ancestors it needs, so it answers for a class the
+    /// reverse-inheritance index has no edge for — which is every class in a
+    /// package nothing has parsed yet.
+    fn inherits_from_any(&self, fqn: &str, roots: &HashSet<String>) -> bool {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let mut ancestors = HashSet::new();
+        self.collect_ancestors(fqn, &class_loader, &mut ancestors);
+        ancestors.iter().any(|ancestor| roots.contains(ancestor))
     }
 
     fn collect_macro_declaring_targets(
@@ -1727,24 +1804,13 @@ impl Backend {
         (!targets.is_empty()).then_some(targets)
     }
 
-    fn collect_macro_declaring_scope(&self, macro_targets: &[String]) -> HashSet<String> {
-        let mut scope: HashSet<String> = macro_targets
-            .iter()
-            .map(|fqn| normalize_fqn(fqn).to_string())
-            .collect();
-        let mut queue: std::collections::VecDeque<String> = scope.iter().cloned().collect();
-        let gti = self.symbols.gti_index.read();
-        while let Some(fqn) = queue.pop_front() {
-            if let Some(descendants) = gti.get(&fqn) {
-                for desc in descendants {
-                    let normalized = normalize_fqn(desc).to_string();
-                    if scope.insert(normalized.clone()) {
-                        queue.push_back(normalized);
-                    }
-                }
-            }
-        }
-        scope
+    fn collect_macro_declaring_scope(&self, macro_targets: &[String]) -> MemberScope {
+        self.collect_descendants_for_roots(
+            macro_targets
+                .iter()
+                .map(|fqn| normalize_fqn(fqn).to_string())
+                .collect(),
+        )
     }
 
     fn defines_member(

@@ -907,7 +907,9 @@ When the user triggers "Find References" on a method, property, or constant, the
 The hierarchy set is built in two passes:
 
 1. **Ancestors** — walk the parent chain, interfaces, traits, and mixins upward from the target class, collecting every FQN encountered.
-2. **Descendants** — scan all classes in `uri_classes_index` and `fqn_uri_index` for classes that extend, implement, or use anything already in the set. This repeats until no new FQNs are added (transitive closure), bounded by `MAX_INHERITANCE_DEPTH`.
+2. **Descendants** — walk the reverse inheritance index (`gti_index`) down from the declaring classes until no new FQNs are added (transitive closure).
+
+That index only holds classes from files something has parsed, so a receiver it does not account for (typically a class in a package nothing has needed yet) is settled by walking up from the receiver's own class to the declaring classes instead, loading the ancestors that walk needs. Without it the same search would answer differently depending on what the session parsed before it.
 
 For each candidate `MemberAccess` span, the subject text is resolved to class FQNs using a lightweight path:
 

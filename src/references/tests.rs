@@ -1254,8 +1254,9 @@ function run(Service $service): void {
 
     let consumer_map = symbol_map_of(&backend, CONSUMER_URI);
     let save = crate::atom::atom("save");
-    let other_hierarchy: std::collections::HashSet<String> =
-        std::iter::once("Other".to_string()).collect();
+    let other_hierarchy = crate::references::members::MemberScope::exact(
+        std::iter::once("Other".to_string()).collect(),
+    );
 
     assert!(
         !backend.member_accesses_ruled_out(
@@ -1275,8 +1276,9 @@ function run(Service $service): void {
         "the entry says the only `save` here is on Service, so a search for \
          Other::save can drop the file without reading it"
     );
-    let service_hierarchy: std::collections::HashSet<String> =
-        std::iter::once("Service".to_string()).collect();
+    let service_hierarchy = crate::references::members::MemberScope::exact(
+        std::iter::once("Service".to_string()).collect(),
+    );
     assert!(
         !backend.member_accesses_ruled_out(
             CONSUMER_URI,
@@ -1332,10 +1334,12 @@ function elsewhere(Service $service): void {
     }
 
     let purge = crate::atom::atom("purge");
-    let other_hierarchy: std::collections::HashSet<String> =
-        std::iter::once("Other".to_string()).collect();
-    let service_hierarchy: std::collections::HashSet<String> =
-        std::iter::once("Service".to_string()).collect();
+    let other_hierarchy = crate::references::members::MemberScope::exact(
+        std::iter::once("Other".to_string()).collect(),
+    );
+    let service_hierarchy = crate::references::members::MemberScope::exact(
+        std::iter::once("Service".to_string()).collect(),
+    );
     assert!(
         backend.member_accesses_ruled_out(
             CONSUMER_URI,

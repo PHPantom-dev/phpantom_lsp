@@ -290,7 +290,7 @@ fn symbol_candidate_names(target: &str, target_short: &str) -> Vec<String> {
 pub(super) fn member_candidate_keys(
     target_member: &str,
     target_is_static: bool,
-    hierarchy: Option<&HashSet<String>>,
+    hierarchy: Option<&members::MemberScope>,
 ) -> Vec<ReferenceIndexKey> {
     let mut keys = vec![ReferenceIndexKey::Member {
         name: target_member.to_string(),
