@@ -1201,6 +1201,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X17. Index the workspace's other folders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1782,6 +1793,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#x17-index-the-workspaces-other-folders" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        X17. Index the workspace's other folders
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2171,6 +2193,89 @@ users therefore have to restate those two lists under
 two settings, then link the issue from that section so users can track
 it. When it lands, the forwarding itself is a small change in Zed's
 official PHP extension, and the manual step in the docs goes away.</p>
+<h2 id="x17-index-the-workspaces-other-folders">X17. Index the workspace's other folders<a class="headerlink" href="#x17-index-the-workspaces-other-folders" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>A multi-root workspace is the one case where the editor already knows
+about PHP source outside a server's root and can say so without the user
+configuring anything, the same way <code>files.exclude</code> and
+<code>files.associations</code> already reach the server. The VS Code extension
+starts one server per workspace folder, each scoped to that folder, so a
+project whose shared library sits in a sibling folder resolves nothing
+across the boundary: the library's classes are missing from completion,
+go-to-definition, and find-references in the project that uses them.
+Intelephense splits a multi-root workspace the same way and asks the user
+to name the sibling explicitly; the folder list is already in front of
+the extension, so nothing needs naming.</p>
+<p>Forwarded through <code>ClientIndexingOptions</code> beside <code>exclude</code> and
+<code>extensions</code>, as a list of absolute directories:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;indexing&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;include_paths&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;/home/me/work/shared-lib&quot;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p><code>collectIndexFilters</code> fills it from <code>vscode.workspace.workspaceFolders</code>,
+dropping the client's own folder, and the extension re-sends on
+<code>onDidChangeWorkspaceFolders</code> the way it already re-sends on a
+<code>files.exclude</code> change. Because it travels inside the block the extension
+builds in one place, it cannot collide with the <code>phpantom</code> section VS
+Code's <code>synchronize</code> pushes: that blob has no <code>indexing</code> key, so
+<code>ClientIndexingOptions::from_client_settings</code> ignores it and the
+whole-value replacement in <code>set_client_indexing_options</code> stays safe.</p>
+<p>The shape stays generic, so a Zed or Neovim user can hand-write the same
+block for a directory their editor has no concept of.</p>
+<p><strong>Not in scope: a PHPantom setting for arbitrary directories.</strong> VS Code
+has no general setting that names extra source roots, so anything beyond
+the folder list means a <code>phpantom.*</code> setting the user types, which brings
+its own questions (variable and <code>~</code> expansion, a matching
+<code>.phpantom.toml</code> key so <code>analyze</code> sees what the editor sees, whether a
+named path overrides <code>exclude</code>, out-of-workspace watchers, and a document
+selector that covers a folder no client owns). A sibling folder needs
+none of that. File it separately if users ask for it.</p>
+<p><strong>Append to the existing roots slice.</strong> <code>walk_roots</code> already takes a
+roots slice and puts every root in a single <code>ignore</code> walk, which is what
+compiles each shared ancestor <code>.gitignore</code> once instead of once per root.
+Include roots belong in that slice, not in a walk of their own. Its
+attribute-by-depth accounting holds for a root whose files were reached
+through a followed link, pinned by
+<code>walk_roots_attributes_a_followed_link_to_the_root_that_reached_it</code>.</p>
+<p>Putting them in that slice also gets the duplicate protection for free:
+<code>LinkClaims</code> claims every root up front, so a symlink pointing at an
+include folder loses to the include folder's own walk rather than
+indexing the tree a second time under the link's spelling.</p>
+<p><strong>Two folders can still overlap.</strong> The guard above only sees symlinks,
+and VS Code lets a workspace hold both a folder and its parent. An
+include root that is a parent, child, or exact duplicate of another one
+(or of the server's own root) is walked twice, because nothing crossed a
+link to get there. Canonicalize the include roots when they are
+registered and drop the ones contained in another, the same containment
+test <code>LinkClaims::claim</code> already does.</p>
+<p><strong>Switch every walker together.</strong> <code>collect_php_files_gitignore</code>,
+<code>util::collect_php_files</code>, and <code>analyse::collect_php_files</code> each take a
+single root, so only <code>walk_roots</code> is multi-root today. Leaving the serial
+three behind would index classes from an include folder while
+find-references, rename, and go-to-implementation never see them, which
+is the half-wired state the symlink change avoided by moving all four
+walkers at once.</p>
+<p><strong>Fold the "did the inputs widen?" check into one place.</strong> Two entry
+points reconcile a live change, <code>reload_config</code> and
+<code>did_change_configuration</code>, and both compare the compiled filters.
+Include roots make a second input and a second bespoke comparison at each
+site. Replace them with one snapshot of everything that decides what a
+walk finds, so the next input is added once.</p>
+<p><strong>Confirm the watchers before building any.</strong> VS Code limits a
+string-pattern watcher to paths inside the workspace, and a sibling
+folder is inside it, so the <code>**/*.php</code> watchers every session registers
+should already report a change written in one. Verify that and stop
+there. The relative-pattern-per-base machinery followed links need
+(<code>watchable_followed_links</code>, the per-base list in <code>WatchedFileInputs</code>)
+exists for trees that sit outside the workspace altogether, which these
+do not, and server-side registration for such a path is reported not to
+deliver events at all
+(<a href="https://github.com/microsoft/vscode-languageserver-node/issues/1783">vscode-languageserver-node#1783</a>).</p>
+<p><strong>Resolution only: no diagnostics, no edits.</strong> The sibling folder has its
+own server publishing its own diagnostics, so a second pass from this one
+would duplicate every message the user sees on those files. Index an
+include root, resolve into it, and leave publishing and workspace-wide
+edits (rename, fix) to the server that owns the folder. That also keeps
+the extension's per-folder <code>documentSelector</code> as it is: a file opened
+from an include root is served by its own folder's client.</p>
 <h2 id="x13-decide-how-workspace-wide-edits-treat-excluded-files">X13. Decide how workspace-wide edits treat excluded files<a class="headerlink" href="#x13-decide-how-workspace-wide-edits-treat-excluded-files" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>collect_php_files_gitignore</code> feeds find-references and namespace
