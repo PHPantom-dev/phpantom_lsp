@@ -2390,4 +2390,30 @@ class User extends Model {
             "the withdrawn declaration's parent must not still list it"
         );
     }
+
+    /// An inheritance edge is deduplicated through the class's own list of
+    /// parents rather than through the parent's list of children, so a
+    /// re-parse that leaves the edge unchanged must still leave exactly one
+    /// entry for it.
+    #[test]
+    fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
+        let backend = Backend::new_test();
+        let src =
+            "<?php namespace Vendor; class Child extends Base implements Contract { use Helper; }";
+
+        backend.update_ast("file:///child.php", src);
+        backend.update_ast("file:///child.php", src);
+
+        let gti = backend.symbols.gti_index.read();
+        for parent in ["Vendor\\Base", "Vendor\\Contract", "Vendor\\Helper"] {
+            let kids = gti
+                .get(parent)
+                .unwrap_or_else(|| panic!("{parent} should list Child as an implementor"));
+            assert_eq!(
+                kids.iter().filter(|k| *k == "Vendor\\Child").count(),
+                1,
+                "{parent} should list Child exactly once, got {kids:?}"
+            );
+        }
+    }
 }

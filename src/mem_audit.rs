@@ -1712,7 +1712,8 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.symbols.global_defines.write().clear()
     });
     probe("gti_index", &mut || {
-        backend.symbols.gti_index.write().clear()
+        backend.symbols.gti_index.write().clear();
+        backend.symbols.gti_parents_index.write().clear();
     });
     probe("uri_globals_index", &mut || {
         backend.symbols.uri_globals_index.write().clear()

@@ -26,6 +26,7 @@ use tower_lsp::lsp_types::*;
 use super::cursor_context::{CursorContext, MemberContext, find_cursor_context};
 use crate::Backend;
 use crate::atom::bytes_to_str;
+use crate::code_actions::indent_of_line_at;
 use crate::code_actions::phpstan::fix_return_type::enrichment_return_type;
 use crate::completion::phpdoc::generation::{enrichment_plain, enrichment_plain_typed};
 use crate::completion::source::throws_analysis::{self, ThrowsContext};
@@ -428,7 +429,7 @@ fn build_info_for_function_like<'a>(
         .map(parse_doc_throws_from_info)
         .unwrap_or_default();
 
-    let indent = detect_indent(content, docblock_start);
+    let indent = indent_of_line_at(content, docblock_start);
 
     // Compute LSP position for throws analysis.
     let docblock_position = offset_to_position(content, docblock_start);
@@ -539,14 +540,6 @@ fn parse_doc_throws_from_info(info: &DocblockInfo) -> Vec<String> {
         }
     }
     results
-}
-
-/// Detect the indentation prefix from the source at the docblock position.
-fn detect_indent(content: &str, docblock_start: usize) -> String {
-    let before = &content[..docblock_start];
-    let line_start = before.rfind('\n').map(|p| p + 1).unwrap_or(0);
-    let prefix = &content[line_start..docblock_start];
-    prefix.chars().take_while(|c| c.is_whitespace()).collect()
 }
 
 // ── Diff and update logic ───────────────────────────────────────────────────

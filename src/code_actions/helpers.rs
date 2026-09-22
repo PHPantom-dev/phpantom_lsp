@@ -189,16 +189,7 @@ pub(crate) fn detect_indent_from_members<'a>(
     content: &str,
 ) -> String {
     if let Some(first) = members.first() {
-        let offset = first.span().start.offset as usize;
-        let line_start = content[..offset]
-            .rfind('\n')
-            .map(|pos| pos + 1)
-            .unwrap_or(0);
-        let line_prefix = &content[line_start..offset];
-        let indent: String = line_prefix
-            .chars()
-            .take_while(|c| c.is_whitespace())
-            .collect();
+        let indent = indent_of_line_at(content, first.span().start.offset as usize);
         if !indent.is_empty() {
             return indent;
         }

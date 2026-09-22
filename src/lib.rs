@@ -1728,52 +1728,76 @@ impl Backend {
     /// Populate the GTI (go-to-implementation) reverse inheritance index
     /// for the given classes.  For each class, inserts the class's FQN
     /// into the child list of every parent (parent_class, interfaces,
-    /// used_traits).
+    /// used_traits), and records the same edges under the class itself in
+    /// `gti_parents_index` so they can be withdrawn again without
+    /// searching for them.
     pub(crate) fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
         let mut gti = self.symbols.gti_index.write();
+        let mut parents_index = self.symbols.gti_parents_index.write();
         for cls in classes {
             if cls.name.starts_with("__anonymous@") {
                 continue;
             }
-            let child_fqn = cls.fqn().to_string();
+            if cls.parent_class.is_none() && cls.interfaces.is_empty() && cls.used_traits.is_empty()
+            {
+                continue;
+            }
 
-            if let Some(ref parent) = cls.parent_class {
-                let parent_str = parent.to_string();
-                let children = gti.entry(parent_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+            let child_fqn = cls.fqn().to_string();
+            let registered = parents_index.entry(child_fqn.clone()).or_default();
+
+            for parent in cls
+                .parent_class
+                .iter()
+                .chain(cls.interfaces.iter())
+                .chain(cls.used_traits.iter())
+            {
+                let parent_fqn: &str = parent;
+                // The edge is deduplicated against the child's own parents,
+                // a list as long as its `extends`/`implements`/`use`
+                // clauses, rather than against the parent's child list,
+                // which grows with the number of implementors.
+                if registered.iter().any(|p| p == parent_fqn) {
+                    continue;
                 }
-            }
-            for iface in &cls.interfaces {
-                let iface_str = iface.to_string();
-                let children = gti.entry(iface_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
-                }
-            }
-            for tr in &cls.used_traits {
-                let tr_str = tr.to_string();
-                let children = gti.entry(tr_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+                registered.push(parent_fqn.to_string());
+                match gti.get_mut(parent_fqn) {
+                    Some(children) => children.push(child_fqn.clone()),
+                    None => {
+                        gti.insert(parent_fqn.to_string(), vec![child_fqn.clone()]);
+                    }
                 }
             }
         }
     }
 
-    /// Remove all GTI entries where `child_fqn` appears as a child.
+    /// Remove all GTI entries where one of `fqns` appears as a child.
     /// Called before re-populating when a file is re-parsed.
+    ///
+    /// Only the parents each class was registered under are touched, so the
+    /// cost is the size of the re-parsed file's inheritance clauses rather
+    /// than the size of the workspace.
     pub(crate) fn evict_gti_for_fqns(&self, fqns: &[String]) {
         if fqns.is_empty() {
             return;
         }
-        let fqn_set: HashSet<&str> = fqns.iter().map(|s| s.as_str()).collect();
         let mut gti = self.symbols.gti_index.write();
-        for children in gti.values_mut() {
-            children.retain(|child| !fqn_set.contains(child.as_str()));
+        let mut parents_index = self.symbols.gti_parents_index.write();
+        for fqn in fqns {
+            let Some(parents) = parents_index.remove(fqn.as_str()) else {
+                continue;
+            };
+            for parent in parents {
+                let Some(children) = gti.get_mut(&parent) else {
+                    continue;
+                };
+                children.retain(|child| child != fqn);
+                // Remove empty entries to avoid unbounded growth.
+                if children.is_empty() {
+                    gti.remove(&parent);
+                }
+            }
         }
-        // Remove empty entries to avoid unbounded growth.
-        gti.retain(|_, v| !v.is_empty());
     }
 
     /// Re-scan a batch of files from disk, refreshing their discovery-level

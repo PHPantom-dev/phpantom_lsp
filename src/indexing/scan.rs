@@ -188,6 +188,7 @@ impl Backend {
         self.symbols.duplicate_classes.write().clear();
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
+        self.symbols.gti_parents_index.write().clear();
         self.clear_class_not_found_cache();
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();

@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Extract interface is offered only to editors that can create files.** The action writes the new interface to a file of its own, which an editor has to say it accepts (the `create` resource operation) before a server may send it. Editors that do not are no longer shown an action they cannot apply.
 - **Updated the bundled mago toolchain to 1.47.5.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.
 
+#### Performance and memory
+
+- **The workspace symbol picker no longer reads the whole project on every keystroke.** Searching for a symbol used to fetch the contents of every indexed file, once for each class the file declares, before it had looked at what you typed, so a file that is not open in the editor was read from disk again on each letter. A file is now read only when it declares something the search actually matches, once rather than once per class, and the positions of the symbols it contributes are worked out from a single pass over it instead of a fresh scan from the start of the file for each one.
+- **Editing a file no longer walks the inheritance of the entire workspace.** Every committed edit re-registers the edited file's classes with the index that answers "what extends this", and refreshing it meant scanning every parent in the project and testing each of their implementor lists. The edges a file contributes are now tracked per class, so an edit touches only those, and registering a class that implements a widely used interface no longer scans the list of everything else that implements it.
+
 ### Fixed
 
 - **A method that implements an interface or overrides a parent now keeps its reference-count lens.** The lens was built only when the method had no prototype, so implementing a contract traded the usage count for the `◆ Interface::method` navigation lens instead of showing both, and the very methods a project most wants a count for, the ones behind a contract, never showed one. Closes #412.
