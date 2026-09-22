@@ -653,6 +653,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#optional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Optional features
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#matching-the-released-binary" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1438,6 +1449,17 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
+  <a href="#optional-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Optional features
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#matching-the-released-binary" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1549,6 +1571,23 @@
 <p>The <code>build.rs</code> script automatically fetches the latest <a href="https://github.com/JetBrains/phpstorm-stubs">JetBrains phpstorm-stubs</a> from GitHub and embeds them directly into the binary. This gives the LSP full knowledge of built-in PHP classes, functions, and constants with no runtime dependencies.</p>
 <p>The stubs are downloaded on first build and cached in <code>stubs/</code>. To update to the latest stubs, delete the <code>stubs/</code> directory and rebuild.</p>
 <p>For details on how symbol resolution and stub loading work, see <a href="../ARCHITECTURE/">ARCHITECTURE.md</a>.</p>
+<h3 id="optional-features">Optional features<a class="headerlink" href="#optional-features" title="Permanent link">&para;</a></h3>
+<p>Both are off by default, so an editor build compiles neither.</p>
+<p><code>offline-stubs</code> keeps the build script from reaching the network: when
+the stubs are missing or stale it embeds an empty stub index and
+continues instead of downloading them. Stubs already present in
+<code>stubs/</code> are still embedded, so a machine that has built once keeps its
+standard library. A build without them resolves only the project's own
+code, so use it when the build must not make network calls rather than
+to save time.</p>
+<p><code>semantic-export</code> compiles <code>phpantom_lsp::semantic_export</code>, an API for
+programs that embed PHPantom as a library rather than talking to it
+over LSP. The caller supplies PHP documents as strings, and gets back
+declarations, occurrences, calls, byte ranges, and diagnostics as owned
+values that outlive the backend they came from. Nothing is read from
+disk and no server is started.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>cargo<span class="w"> </span>build<span class="w"> </span>--features<span class="w"> </span>semantic-export,offline-stubs
+</code></pre></div>
 <h3 id="matching-the-released-binary">Matching the released binary<a class="headerlink" href="#matching-the-released-binary" title="Permanent link">&para;</a></h3>
 <p>The Linux binaries we publish are static musl builds using mimalloc as
 the allocator (see the comment on the <code>mimalloc</code> dependency in
@@ -1558,9 +1597,9 @@ just musl — so day-to-day performance and memory testing on any Linux
 dev machine is representative without extra setup.</p>
 <p>To build the exact target we ship (e.g. to reproduce a memory or
 performance report bit-for-bit), build for musl:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>rustup<span class="w"> </span>target<span class="w"> </span>add<span class="w"> </span>x86_64-unknown-linux-musl
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>musl-tools<span class="w">   </span><span class="c1"># provides musl-gcc; adjust for your distro</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nv">CARGO_BUILD_TARGET</span><span class="o">=</span>x86_64-unknown-linux-musl<span class="w"> </span>cargo<span class="w"> </span>build<span class="w"> </span>--release
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>rustup<span class="w"> </span>target<span class="w"> </span>add<span class="w"> </span>x86_64-unknown-linux-musl
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>sudo<span class="w"> </span>apt<span class="w"> </span>install<span class="w"> </span>musl-tools<span class="w">   </span><span class="c1"># provides musl-gcc; adjust for your distro</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="nv">CARGO_BUILD_TARGET</span><span class="o">=</span>x86_64-unknown-linux-musl<span class="w"> </span>cargo<span class="w"> </span>build<span class="w"> </span>--release
 </code></pre></div>
 <p>This produces <code>target/x86_64-unknown-linux-musl/release/phpantom_lsp</code>
 alongside your normal build (it doesn't touch <code>target/release/</code>), so it
@@ -1576,24 +1615,26 @@ runs it client-side. See <a href="../wasm/">wasm.md</a> for the build command, t
 interface, and what the wasm build leaves out.</p>
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
 <p>Run the full test suite:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
 </code></pre></div>
 <h3 id="ci-checks">CI Checks<a class="headerlink" href="#ci-checks" title="Permanent link">&para;</a></h3>
 <p>Before submitting changes, run exactly what CI runs:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--tests<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--check
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a>find<span class="w"> </span>examples/php<span class="w"> </span>-name<span class="w"> </span><span class="s1">&#39;*.php&#39;</span><span class="w"> </span>-print0<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-0<span class="w"> </span>-n1<span class="w"> </span>php<span class="w"> </span>-l
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>php<span class="w"> </span>-d<span class="w"> </span>zend.assertions<span class="o">=</span><span class="m">1</span><span class="w"> </span>examples/php/scaffolding/assertions.php
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>cargo<span class="w"> </span><span class="nb">test</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--tests<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>cargo<span class="w"> </span>clippy<span class="w"> </span>--all-targets<span class="w"> </span>--features<span class="w"> </span>semantic-export<span class="w"> </span>--<span class="w"> </span>-D<span class="w"> </span>warnings
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>cargo<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--features<span class="w"> </span>semantic-export<span class="w"> </span>--lib<span class="w"> </span>semantic_export
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>cargo<span class="w"> </span>fmt<span class="w"> </span>--check
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a>find<span class="w"> </span>examples/php<span class="w"> </span>-name<span class="w"> </span><span class="s1">&#39;*.php&#39;</span><span class="w"> </span>-print0<span class="w"> </span><span class="p">|</span><span class="w"> </span>xargs<span class="w"> </span>-0<span class="w"> </span>-n1<span class="w"> </span>php<span class="w"> </span>-l
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>php<span class="w"> </span>-d<span class="w"> </span>zend.assertions<span class="o">=</span><span class="m">1</span><span class="w"> </span>examples/php/scaffolding/assertions.php
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>php<span class="w"> </span>-l<span class="w"> </span>examples/laravel/app/Demo.php
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>examples/laravel<span class="w"> </span>--no-colour
 </code></pre></div>
 <p>CI additionally builds the WebAssembly target and runs
 <code>scripts/wasm-smoke-test.mjs</code> against it, which is worth running locally
 if your change touches dependencies, <code>Cargo.toml</code>, or anything in the
 per-file request path. See <a href="../wasm/">wasm.md</a>.</p>
-<p>All eight must pass with zero warnings and zero failures, except the
+<p>All ten must pass with zero warnings and zero failures, except the
 final <code>analyze</code> run: <code>app/Demo.php</code> carries three deliberate mistakes,
 each demonstrating a diagnostic. <code>Artisan::call('does:not-exist')</code>
 demonstrates <code>invalid_laravel_command</code>, and one <code>view('welcome', …)</code>
@@ -1604,12 +1645,12 @@ misspelled key, demonstrating <code>missing_view_variable</code> and
 error on a different line, is a regression.</p>
 <h3 id="manual-lsp-testing">Manual LSP Testing<a class="headerlink" href="#manual-lsp-testing" title="Permanent link">&para;</a></h3>
 <p>The included <code>test_lsp.sh</code> script sends JSON-RPC messages to the server over stdin/stdout, exercising the full LSP protocol flow (initialize, open file, hover, completion, shutdown):</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>./test_lsp.sh
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>./test_lsp.sh
 </code></pre></div>
 <p>This is useful for verifying end-to-end behavior outside of an editor.</p>
 <h2 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h2>
 <p>Enable logging by setting the <code>RUST_LOG</code> environment variable:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="nv">RUST_LOG</span><span class="o">=</span>debug<span class="w"> </span>cargo<span class="w"> </span>run<span class="w"> </span><span class="m">2</span>&gt;phpantom.log
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="nv">RUST_LOG</span><span class="o">=</span>debug<span class="w"> </span>cargo<span class="w"> </span>run<span class="w"> </span><span class="m">2</span>&gt;phpantom.log
 </code></pre></div>
 <p>Logs are written to stderr, so redirect as needed.</p>
 <p>For editor setup instructions, see <a href="../editor-setup/">Editor Setup</a>.</p>
