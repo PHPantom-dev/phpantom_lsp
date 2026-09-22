@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790044931273,
+  "lastUpdate": 1790047809653,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28729,6 +28729,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "1009407069@qq.com",
+            "name": "liudashuang",
+            "username": "liudashuang"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "581a6fbc5abceafcf50cee4d2c1ed2c6743198b9",
+          "message": "feat(indexing): add [indexing] follow-links to walk symlinked directories inside the workspace (#386)",
+          "timestamp": "2026-09-22T05:12:42+02:00",
+          "tree_id": "5fb3bef872dbbdb42d7727eb0d085789b86c130b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/581a6fbc5abceafcf50cee4d2c1ed2c6743198b9"
+        },
+        "date": 1790047801568,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 68.4,
             "unit": "MiB"
           }
         ]
