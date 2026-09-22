@@ -37,6 +37,10 @@
 ///   checks the cache first via [`lookup_diagnostic_scope`] and returns
 ///   the pre-computed types in O(log N) time instead of re-walking the
 ///   body for every span.
+/// - **Member-reference searches**, which ask about an access or two in
+///   a candidate file rather than all of them, populate the same cache
+///   through [`build_diagnostic_scopes_for_offsets`], which walks only
+///   the bodies holding the offsets it is given.
 use std::cell::{Cell, RefCell};
 
 use mago_span::HasSpan;

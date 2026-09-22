@@ -14,9 +14,33 @@ use crate::types::ResolvedType;
 // member-access span, `lookup_diagnostic_scope` finds the nearest
 // snapshot at-or-before the requested offset and returns the variable's
 // types in O(log N) time — no backward scanning, no recursion.
+//
+// A member-reference search shares the cache but not the whole-file
+// walk: it fills the same map through
+// `build_diagnostic_scopes_for_offsets` for the bodies holding the
+// accesses it asked about, and `ScopeCoverage` below records which those
+// were, so a lookup elsewhere in the file is not answered from the
+// nearest body the walk happened to reach.
 
 /// Scope snapshot map: byte offset → variable name → resolved types.
 pub(crate) type ScopeSnapshotMap = BTreeMap<u32, AtomMap<Vec<ResolvedType>>>;
+
+/// Which part of the file the snapshots in [`DIAGNOSTIC_SCOPE`] describe.
+///
+/// A lookup answers from the nearest snapshot at-or-before the requested
+/// offset, which is only meaningful if the walk that recorded it also
+/// walked the offset being asked about.  After a whole-file walk that is
+/// every offset.  A targeted walk
+/// (`build_diagnostic_scopes_for_offsets`) walks only the bodies that
+/// enclose the offsets it was given, so for an offset it skipped the
+/// nearest preceding snapshot belongs to an unrelated function and must
+/// not answer for it.
+pub(crate) enum ScopeCoverage {
+    /// Every offset in the file was walked.
+    Whole,
+    /// Only these byte ranges were walked.
+    Regions(Vec<(u32, u32)>),
+}
 
 thread_local! {
     /// When `Some`, `lookup_diagnostic_scope` will consult this map.
@@ -25,11 +49,61 @@ thread_local! {
     pub(crate) static DIAGNOSTIC_SCOPE: RefCell<Option<ScopeSnapshotMap>> =
         const { RefCell::new(None) };
 
+    /// What [`DIAGNOSTIC_SCOPE`] is authoritative for.  Reset alongside
+    /// it by [`with_diagnostic_scope_cache`] and its guard.
+    static SCOPE_COVERAGE: RefCell<ScopeCoverage> =
+        const { RefCell::new(ScopeCoverage::Whole) };
+
     /// Set to `true` while `build_diagnostic_scopes` is populating the
     /// scope cache.  Code that would normally read from the cache should
     /// skip the lookup when this flag is set, because the cache is
     /// incomplete and may contain stale data from earlier offsets.
     pub(crate) static BUILDING_SCOPES: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Whether the active snapshots were built by a walk that covered
+/// `offset`.  Always true after a whole-file walk.
+pub(crate) fn scope_snapshots_cover(offset: u32) -> bool {
+    SCOPE_COVERAGE.with(|cell| match &*cell.borrow() {
+        ScopeCoverage::Whole => true,
+        ScopeCoverage::Regions(regions) => regions
+            .iter()
+            .any(|&(start, end)| (start..=end).contains(&offset)),
+    })
+}
+
+/// Whether the active snapshots came from a whole-file walk.
+pub(crate) fn scope_coverage_is_whole() -> bool {
+    SCOPE_COVERAGE.with(|cell| matches!(&*cell.borrow(), ScopeCoverage::Whole))
+}
+
+/// Declare that the snapshots about to be recorded describe only the
+/// regions passed to [`record_covered_region`].  A no-op when a targeted
+/// walk already narrowed the coverage, so a second targeted walk adds to
+/// what the first one covered instead of discarding it.
+pub(crate) fn begin_targeted_coverage() {
+    SCOPE_COVERAGE.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        if matches!(&*borrow, ScopeCoverage::Whole) {
+            *borrow = ScopeCoverage::Regions(Vec::new());
+        }
+    });
+}
+
+/// Declare that the snapshots describe every offset in the file.
+pub(crate) fn set_whole_scope_coverage() {
+    SCOPE_COVERAGE.with(|cell| {
+        *cell.borrow_mut() = ScopeCoverage::Whole;
+    });
+}
+
+/// Record that a targeted walk walked `start..=end`.
+pub(crate) fn record_covered_region(start: u32, end: u32) {
+    SCOPE_COVERAGE.with(|cell| {
+        if let ScopeCoverage::Regions(ref mut regions) = *cell.borrow_mut() {
+            regions.push((start, end));
+        }
+    });
 }
 
 /// RAII guard that clears the diagnostic scope cache on drop.
@@ -43,6 +117,7 @@ impl Drop for DiagnosticScopeGuard {
             DIAGNOSTIC_SCOPE.with(|cell| {
                 *cell.borrow_mut() = None;
             });
+            set_whole_scope_coverage();
             end_unreachable_collection();
         }
     }
@@ -80,6 +155,7 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
     DIAGNOSTIC_SCOPE.with(|cell| {
         *cell.borrow_mut() = Some(BTreeMap::new());
     });
+    set_whole_scope_coverage();
     begin_unreachable_collection();
     DiagnosticScopeGuard { owns: true }
 }
@@ -91,6 +167,9 @@ pub(crate) fn with_diagnostic_scope_cache() -> DiagnosticScopeGuard {
 /// `None` when the cache is not active or no snapshot covers the
 /// requested offset.
 pub(crate) fn lookup_diagnostic_scope(var_name: &str, offset: u32) -> Option<Vec<ResolvedType>> {
+    if !scope_snapshots_cover(offset) {
+        return None;
+    }
     DIAGNOSTIC_SCOPE.with(|cell| {
         let borrow = cell.borrow();
         let map = borrow.as_ref()?;

@@ -260,6 +260,63 @@ function run(Service $service): void {
     );
 }
 
+/// Building variable scopes is the type engine over a body, so a
+/// candidate file holding one access among a dozen bodies pays for that
+/// one body and no others.
+#[test]
+fn a_receiver_walk_builds_scopes_only_for_the_body_holding_the_access() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const CONSUMER: &str = r#"<?php
+class Consumer {
+    public function first(Service $service): void {
+        $other = $service;
+    }
+    public function second(Service $service): void {
+        $other = $service;
+        $other->save();
+    }
+    public function third(Service $service): void {
+        $other = $service;
+    }
+    public function fourth(Service $service): void {
+        $other = $service;
+    }
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_extra(&backend, SERVICE_URI, SERVICE);
+    parse_extra(&backend, CONSUMER_URI, CONSUMER);
+    lenses_for(&backend, SERVICE_URI, SERVICE);
+
+    crate::type_engine::variable::forward_walk::reset_test_body_walks();
+    backend.compute_pending_member_ref_counts();
+    let walks = crate::type_engine::variable::forward_walk::test_body_walks();
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    assert_eq!(
+        backend
+            .member_ref_locations_cached(
+                SERVICE_URI,
+                save_offset,
+                crate::atom::atom("Service"),
+                crate::atom::atom("save"),
+                false,
+            )
+            .unwrap()
+            .len(),
+        1,
+        "the one call on `$other` has to be found"
+    );
+    assert_eq!(
+        walks, 1,
+        "only `second()` holds the access; the other three bodies must not \
+         be walked for it"
+    );
+}
+
 #[test]
 fn ready_only_location_lookup_does_not_queue_background_work() {
     let backend = Backend::new_test();

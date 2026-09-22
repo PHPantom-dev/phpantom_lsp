@@ -3761,6 +3761,74 @@ async fn test_unrelated_class_same_method_excluded_cross_file() {
 }
 
 #[tokio::test]
+async fn method_references_type_receivers_without_walking_unrelated_bodies() {
+    // A candidate file holds the searched access in one body among
+    // several.  Only that body gets its variable scopes built, so the
+    // bodies around it must neither contribute their own `$item` to the
+    // answer nor be needed for it.
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",                               // L0
+        "class Target {\n",                      // L1
+        "    public function save(): void {}\n", // L2
+        "}\n",                                   // L3
+        "class Decoy {\n",                       // L4
+        "    public function save(): void {}\n", // L5
+        "    public function run(): void {}\n",  // L6
+        "}\n",                                   // L7
+    );
+    let text_b = concat!(
+        "<?php\n",                          // L0
+        "class Holder {\n",                 // L1
+        "    public function before() {\n", // L2
+        "        $item = new Decoy();\n",   // L3
+        "        $item->run();\n",          // L4
+        "    }\n",                          // L5
+        "    public function middle() {\n", // L6
+        "        $item = new Target();\n",  // L7
+        "        $item->save();\n",         // L8
+        "        $item->save();\n",         // L9
+        "    }\n",                          // L10
+        "    public function after() {\n",  // L11
+        "        $item = new Decoy();\n",   // L12
+        "        $item->run();\n",          // L13
+        "    }\n",                          // L14
+        "}\n",                              // L15
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+
+    // Find references to Target::save() from its declaration.
+    let locs = references_at(&backend, &uri_a, 2, 21, false).await;
+
+    let b_lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_b)
+        .map(|l| l.range.start.line)
+        .collect();
+    assert_eq!(
+        b_lines,
+        vec![8, 9],
+        "Both `save()` calls in middle() should resolve to Target; got: {:?}",
+        b_lines
+    );
+
+    // The same search for Decoy::save() finds nothing in b.php: the
+    // `$item` the skipped bodies hold is a Decoy, but neither body
+    // calls `save()` on it.
+    let decoy_locs = references_at(&backend, &uri_a, 5, 21, false).await;
+    assert!(
+        !decoy_locs.iter().any(|l| l.uri == uri_b),
+        "Decoy::save() has no call sites; got: {:?}",
+        decoy_locs
+    );
+}
+
+#[tokio::test]
 async fn test_inherited_method_references_included() {
     // A child class inherits a method from its parent.  Find References
     // on the parent's method should include calls via the child.

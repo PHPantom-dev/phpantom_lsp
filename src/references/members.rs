@@ -414,7 +414,10 @@ impl Backend {
                 // hot.  A file whose searched accesses all have a
                 // `$this` or static receiver never needs them, which
                 // is most of the scope-building cost of a workspace
-                // scan.
+                // scan.  When it does need them, only the bodies
+                // holding those accesses are walked: a candidate file
+                // holds an access or two out of dozens of methods, and
+                // walking the rest answers nothing.
                 let _scope_guard =
                     crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
                 let needs_variable_scopes = access_indices.iter().any(|&span_index| {
@@ -438,13 +441,18 @@ impl Backend {
                         config_resolver: Some(&config_resolver),
                         trans_resolver: Some(&trans_resolver),
                     };
-                    crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                    let scope_offsets: Vec<u32> = access_indices
+                        .iter()
+                        .map(|&span_index| symbol_map.spans[span_index].start)
+                        .collect();
+                    crate::type_engine::variable::forward_walk::build_diagnostic_scopes_for_offsets(
                         &content,
                         &file_ctx.classes,
                         &class_loader,
                         Some(self),
                         loaders,
                         Some(&self.resolved_class_cache),
+                        &scope_offsets,
                     );
                 }
 

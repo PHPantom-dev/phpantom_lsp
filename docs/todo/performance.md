@@ -1220,44 +1220,6 @@ in `reference_counts/`, `ResolvedMemberFile` in `reference_index.rs`,
 
 ---
 
-## P60. A receiver walk builds variable scopes for a whole file to type one access
-
-**Impact: High · Complexity: Medium-High**
-
-Resolving the receiver of a member access needs the enclosing function's
-variable scopes, and `member_declaration_references_batch_in` gets them
-from `build_diagnostic_scopes`, which forward-walks every function in
-the file. A candidate file usually holds one or two accesses the search
-is interested in, in one function, out of dozens.
-
-On the measurement recorded under P55 (a 6,700-file Laravel application,
-eight method declarations in one controller, nine references between
-them), 542 of the 1,225 candidate files needed variable scopes, and
-building them was 116 of the burst's 122 CPU-seconds: 95% of what is
-left once the search stopped resolving accesses nobody asked about. The
-remaining 6 seconds resolve the 7,259 accesses that are actually
-candidates.
-
-### Fix
-
-Build scopes for the function that encloses the access being resolved
-rather than for the file. The walker already descends per function from
-`build_diagnostic_scopes`; what it lacks is a way to say which ones a
-caller needs, and a scope cache keyed finely enough that a second access
-in the same function reuses the first one's walk.
-
-The whole-file entry point has to stay for diagnostics, which do want
-every function. This is an additional entry point, not a replacement,
-and both must populate the same cache so the two consumers cannot
-disagree about a type.
-
-**Where to look:** `build_diagnostic_scopes` and `DIAGNOSTIC_SCOPE` in
-`type_engine/variable/forward_walk/diagnostic_walk.rs`, and the
-`resolved_file` closure in `member_declaration_references_batch_in`
-(`references/members.rs`).
-
----
-
 ## P61. Member-reference candidates are selected by member name alone
 
 **Impact: Medium-High · Complexity: High**

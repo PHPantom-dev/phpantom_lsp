@@ -1420,11 +1420,16 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
         return (!from_scope.is_empty()).then_some(from_scope);
     }
 
-    if forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes() {
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && forward_walk::scope_snapshots_cover(ctx.cursor_offset)
+    {
         // The snapshot is authoritative here: the walker records `$this`
         // exactly when something narrowed or seeded it, so a miss means
         // there is no proof to find and re-walking would only repeat the
-        // pass that built the snapshot, once per `$this->` site.
+        // pass that built the snapshot, once per `$this->` site.  That
+        // only holds where the walk actually went, which a targeted walk
+        // limits to the bodies it was asked about.
         return forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
             .filter(|types| !types.is_empty());
     }
