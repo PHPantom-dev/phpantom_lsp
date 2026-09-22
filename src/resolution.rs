@@ -791,7 +791,7 @@ impl Backend {
                 }
                 .map(crate::atom::atom);
             }
-            cls.cache_fqn();
+            cls.cache_fqn_in_uri(uri);
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies

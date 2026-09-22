@@ -2069,6 +2069,10 @@ pub struct ClassInfo {
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────
 
+/// Prefix of the synthetic name the parser gives an anonymous class
+/// (`__anonymous@<offset of its opening brace>`).
+pub const ANONYMOUS_CLASS_PREFIX: &str = "__anonymous@";
+
 impl ClassInfo {
     /// Return the fully-qualified name of this class.
     ///
@@ -2098,6 +2102,30 @@ impl ClassInfo {
     #[inline]
     pub fn cache_fqn(&mut self) {
         self.fqn = Some(self.compute_fqn());
+    }
+
+    /// Populate the cached FQN for a class parsed out of `uri`.
+    ///
+    /// Identical to [`cache_fqn`] for a named class. An anonymous class is
+    /// named after the offset of its opening brace *within its own file* and
+    /// is deliberately kept out of the workspace declaration index, so nothing
+    /// else makes it unique across the workspace. Boilerplate-identical files
+    /// put that brace on the same offset (every Laravel migration is
+    /// `return new class extends Migration {` after the same header), and the
+    /// stores keyed by FQN — the resolved-class cache and the method store —
+    /// would then let whichever file resolved first answer for both. The URI
+    /// goes into the FQN rather than into `name`, which reaches the user
+    /// through hover and the outline.
+    pub fn cache_fqn_in_uri(&mut self, uri: &str) {
+        if self.name.starts_with(ANONYMOUS_CLASS_PREFIX) {
+            self.fqn = Some(crate::atom::atom(&format!(
+                "{}@{}",
+                self.compute_fqn(),
+                uri
+            )));
+        } else {
+            self.cache_fqn();
+        }
     }
 
     /// Rebuild the `method_index` from the current `methods` vec.

@@ -836,7 +836,7 @@ impl Backend {
                 .map(|(c, ns)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
-                    cls.cache_fqn();
+                    cls.cache_fqn_in_uri(uri);
                     // Keyed by FQN, so this has to wait until the class
                     // carries one.
                     crate::stub_patches::apply_third_party_class_patches(&mut cls);
@@ -884,6 +884,12 @@ impl Backend {
             old_classes: Vec<ClassInfo>,
             old_fqns: Vec<String>,
             new_fqns: Vec<String>,
+            /// The anonymous classes this file declared on its *previous*
+            /// parse, which `old_fqns` deliberately leaves out because they
+            /// never reach the declaration index.  They do occupy the
+            /// resolved-class cache, so they still have to be evicted from it.
+            /// Empty on a first parse, where nothing can be cached yet.
+            old_anon_fqns: Vec<String>,
             classes: Vec<Arc<ClassInfo>>,
             use_map: HashMap<String, String>,
             resolved_names: Arc<OwnedResolvedNames>,
@@ -950,6 +956,11 @@ impl Backend {
                 .filter(|class| !class.name.starts_with("__anonymous@"))
                 .map(|class| class.fqn().to_string())
                 .collect();
+            let old_anon_fqns: Vec<String> = old_classes
+                .iter()
+                .filter(|class| class.name.starts_with("__anonymous@"))
+                .map(|class| class.fqn().to_string())
+                .collect();
 
             all_old_fqns.extend(old_fqns.iter().cloned());
             all_new_fqns.extend(new_fqns.iter().cloned());
@@ -961,6 +972,7 @@ impl Backend {
                 old_classes,
                 old_fqns,
                 new_fqns,
+                old_anon_fqns,
                 classes,
                 use_map: update.use_map,
                 resolved_names: update.resolved_names,
@@ -1271,6 +1283,18 @@ impl Backend {
         {
             let mut cache = self.resolved_class_cache.write();
             for update in &prepared {
+                // An anonymous class keeps its FQN across an edit that leaves
+                // its opening brace where it was, so a cache entry from the
+                // previous parse would keep answering for a body that has
+                // since changed.  Comparing signatures is not worth it here:
+                // the name is already offset-specific, so an edit that reaches
+                // one at all has almost certainly changed it.
+                for fqn in &update.old_anon_fqns {
+                    changed_names.push(crate::resolution_deps::dep_key(fqn));
+                    evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
+                    any_signature_changed = true;
+                }
+
                 if update.old_fqns.is_empty() {
                     continue;
                 }
