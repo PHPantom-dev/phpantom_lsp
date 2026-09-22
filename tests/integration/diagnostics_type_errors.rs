@@ -12128,3 +12128,59 @@ function collectAll(string $text): void
         messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument")
     );
 }
+
+/// A variable that takes a first-class callable of itself names itself as the
+/// callable to resolve, so the resolution has to stop rather than follow the
+/// name back to the same assignment forever.
+#[test]
+fn a_first_class_callable_assigned_from_itself_terminates() {
+    let php = r#"<?php
+function g($callback, $b) {
+    $callback = $callback(...);
+
+    return $callback($b);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// The cycle can be spread over two variables, so stopping only when the
+/// callable names the variable the resolution started from is not enough.
+#[test]
+fn a_first_class_callable_cycle_across_two_variables_terminates() {
+    let php = r#"<?php
+function g($a, $b, $value) {
+    $a = $b(...);
+    $b = $a(...);
+
+    return $a($value);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// Breaking the cycle must not cost a first-class callable chain that does
+/// terminate: `$b` still resolves through `$a` to the function it names.
+#[test]
+fn a_first_class_callable_forwarded_through_another_variable_still_resolves() {
+    let php = r#"<?php
+function takesInt(int $value): void {}
+
+function g() {
+    $a = takesInt(...);
+    $b = $a(...);
+
+    $b('not an int');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
