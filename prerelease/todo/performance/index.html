@@ -3313,35 +3313,6 @@ in <code>reference_counts/</code>, <code>ResolvedMemberFile</code> in <code>refe
 <code>find_or_load_class_typed</code> in <code>resolution.rs</code>, and
 <code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>.</p>
 <hr />
-<h2 id="p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access">P60. A receiver walk builds variable scopes for a whole file to type one access<a class="headerlink" href="#p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Medium-High</strong></p>
-<p>Resolving the receiver of a member access needs the enclosing function's
-variable scopes, and <code>member_declaration_references_batch_in</code> gets them
-from <code>build_diagnostic_scopes</code>, which forward-walks every function in
-the file. A candidate file usually holds one or two accesses the search
-is interested in, in one function, out of dozens.</p>
-<p>On the measurement recorded under P55 (a 6,700-file Laravel application,
-eight method declarations in one controller, nine references between
-them), 542 of the 1,225 candidate files needed variable scopes, and
-building them was 116 of the burst's 122 CPU-seconds: 95% of what is
-left once the search stopped resolving accesses nobody asked about. The
-remaining 6 seconds resolve the 7,259 accesses that are actually
-candidates.</p>
-<h3 id="fix_4">Fix<a class="headerlink" href="#fix_4" title="Permanent link">&para;</a></h3>
-<p>Build scopes for the function that encloses the access being resolved
-rather than for the file. The walker already descends per function from
-<code>build_diagnostic_scopes</code>; what it lacks is a way to say which ones a
-caller needs, and a scope cache keyed finely enough that a second access
-in the same function reuses the first one's walk.</p>
-<p>The whole-file entry point has to stay for diagnostics, which do want
-every function. This is an additional entry point, not a replacement,
-and both must populate the same cache so the two consumers cannot
-disagree about a type.</p>
-<p><strong>Where to look:</strong> <code>build_diagnostic_scopes</code> and <code>DIAGNOSTIC_SCOPE</code> in
-<code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>, and the
-<code>resolved_file</code> closure in <code>member_declaration_references_batch_in</code>
-(<code>references/members.rs</code>).</p>
-<hr />
 <h2 id="p61-member-reference-candidates-are-selected-by-member-name-alone">P61. Member-reference candidates are selected by member name alone<a class="headerlink" href="#p61-member-reference-candidates-are-selected-by-member-name-alone" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: High</strong></p>
 <p><code>member_candidate_keys</code> keys the reference index by member name and
