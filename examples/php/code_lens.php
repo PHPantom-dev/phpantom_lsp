@@ -30,3 +30,22 @@ class CodeLensDemo extends Scaffolding\ScaffoldingAbstractShape implements Scaff
     // ◆ Scaffolding\ScaffoldingDrawable::draw  — interface implementations use ◆
     public function draw(string $color, float $opacity = 1.0): void {}
 }
+
+
+// ── Code Lens: reference counts on declarations ─────────────────────────────
+// Above a declaration PHPantom shows how many places use it, for a class,
+// method, property, constant, or a function declared outside any class, so a
+// plain helpers file gets them as well. Click the count to list the usages.
+
+function codeLensFormatLabel(string $text): string
+{
+    return ucfirst($text);
+}
+
+// codeLensFormatLabel above shows "2 references": the two calls below.
+$codeLensFirstLabel = codeLensFormatLabel('first');
+$codeLensSecondLabel = codeLensFormatLabel('second');
+
+// A function nothing calls shows "0 references", which is the quickest way
+// to spot dead code in a procedural file.
+function codeLensUnusedHelper(): void {}

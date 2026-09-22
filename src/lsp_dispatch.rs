@@ -12,13 +12,14 @@ use serde_json::{Value, json};
 use tower_lsp::lsp_types::{
     CompletionItem, CompletionParams, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentHighlightParams, GotoDefinitionParams, HoverParams,
-    RenameParams, SignatureHelpParams, Url,
+    Position, RenameParams, SignatureHelpParams, TextDocumentPositionParams, Url,
 };
 
 use crate::Backend;
 use std::sync::Arc;
 
 /// JSON-RPC error codes we return, from the LSP specification.
+const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 const INVALID_PARAMS: i64 = -32602;
 
@@ -150,15 +151,10 @@ impl LspDispatcher {
 
     fn hover(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: HoverParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position_params.position;
-        let uri = params.text_document_position_params.text_document.uri;
-        let Some((uri, content)) = self.buffer(&uri) else {
-            return Ok(Value::Null);
-        };
-        Ok(self
-            .backend
-            .handle_hover(&uri, &content, position)
-            .map_or(Value::Null, to_value))
+        self.dispatch_position_request(
+            params.text_document_position_params,
+            |uri, content, position| self.backend.handle_hover(uri, content, position),
+        )
     }
 
     fn definition(&self, params: Value) -> Result<Value, (i64, String)> {
@@ -182,15 +178,13 @@ impl LspDispatcher {
 
     fn document_highlight(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: DocumentHighlightParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position_params.position;
-        let uri = params.text_document_position_params.text_document.uri;
-        let Some((uri, content)) = self.buffer(&uri) else {
-            return Ok(Value::Null);
-        };
-        Ok(self
-            .backend
-            .handle_document_highlight(&uri, &content, position)
-            .map_or(Value::Null, to_value))
+        self.dispatch_position_request(
+            params.text_document_position_params,
+            |uri, content, position| {
+                self.backend
+                    .handle_document_highlight(uri, content, position)
+            },
+        )
     }
 
     fn rename(&self, params: Value) -> Result<Value, (i64, String)> {
@@ -200,23 +194,40 @@ impl LspDispatcher {
         let Some((uri, content)) = self.buffer(&uri) else {
             return Ok(Value::Null);
         };
-        Ok(self
+        match self
             .backend
             .handle_rename(&uri, &content, position, &params.new_name)
-            .map_or(Value::Null, to_value))
+        {
+            Ok(edit) => Ok(edit.map_or(Value::Null, to_value)),
+            // The move's destination is taken; the reason is the whole
+            // point of the response.
+            Err(message) => Err((INVALID_REQUEST, message)),
+        }
     }
 
     fn signature_help(&self, params: Value) -> Result<Value, (i64, String)> {
         let params: SignatureHelpParams = serde_json::from_value(params).map_err(bad_params)?;
-        let position = params.text_document_position_params.position;
-        let uri = params.text_document_position_params.text_document.uri;
+        self.dispatch_position_request(
+            params.text_document_position_params,
+            |uri, content, position| self.backend.handle_signature_help(uri, content, position),
+        )
+    }
+
+    /// Resolve the buffer for `text_document_position_params` and call
+    /// `handler` with `(uri, content, position)`, producing `Value::Null`
+    /// when the document was never opened or the handler found nothing.
+    /// Shared tail of `hover`, `document_highlight`, and `signature_help`.
+    fn dispatch_position_request<T: serde::Serialize>(
+        &self,
+        text_document_position_params: TextDocumentPositionParams,
+        handler: impl FnOnce(&str, &str, Position) -> Option<T>,
+    ) -> Result<Value, (i64, String)> {
+        let position = text_document_position_params.position;
+        let uri = text_document_position_params.text_document.uri;
         let Some((uri, content)) = self.buffer(&uri) else {
             return Ok(Value::Null);
         };
-        Ok(self
-            .backend
-            .handle_signature_help(&uri, &content, position)
-            .map_or(Value::Null, to_value))
+        Ok(handler(&uri, &content, position).map_or(Value::Null, to_value))
     }
 
     /// The stored buffer for `uri`, as the `(uri, content)` pair the `handle_*`

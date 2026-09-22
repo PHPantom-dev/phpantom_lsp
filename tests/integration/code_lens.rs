@@ -1,4 +1,5 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, open_php};
+use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 /// Helper: open a file in the backend and return its code lenses.
@@ -13,6 +14,531 @@ fn lens_titles(lenses: &[CodeLens]) -> Vec<&str> {
         .iter()
         .filter_map(|l| l.command.as_ref().map(|c| c.title.as_str()))
         .collect()
+}
+
+#[tokio::test]
+async fn zero_candidate_reference_lenses_need_no_resolve_requests() {
+    let content = r#"<?php
+namespace App;
+
+final class LargeTestCase {
+    public function case01(): void {}
+    public function case02(): void {}
+    public function case03(): void {}
+    public function case04(): void {}
+    public function case05(): void {}
+    public function case06(): void {}
+    public function case07(): void {}
+    public function case08(): void {}
+    public function case09(): void {}
+    public function case10(): void {}
+    public function case11(): void {}
+    public function case12(): void {}
+    public function case13(): void {}
+    public function case14(): void {}
+    public function case15(): void {}
+    public function case16(): void {}
+    public function case17(): void {}
+    public function case18(): void {}
+    public function case19(): void {}
+    public function case20(): void {}
+    public function case21(): void {}
+    public function case22(): void {}
+    public function case23(): void {}
+    public function case24(): void {}
+    public function case25(): void {}
+    public function case26(): void {}
+    public function case27(): void {}
+    public function case28(): void {}
+    public function case29(): void {}
+    public function case30(): void {}
+    public function case31(): void {}
+    public function case32(): void {}
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/LargeTestCase.php", content)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/LargeTestCase.php")).unwrap();
+    open_php(&backend, &uri, content).await;
+
+    // Drive workspace indexing through the public LSP path, as a real client
+    // would before requesting lenses from an index reported as ready.
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 12),
+            },
+            context: ReferenceContext {
+                include_declaration: true,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let reference_lenses: Vec<_> = lenses
+        .iter()
+        .filter(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title.ends_with("references"))
+        })
+        .collect();
+
+    assert_eq!(reference_lenses.len(), 33);
+    assert!(reference_lenses.iter().all(|lens| {
+        lens.command
+            .as_ref()
+            .is_some_and(|command| command.title == "0 references")
+            && lens.data.is_none()
+    }));
+}
+
+#[tokio::test]
+async fn member_reference_lens_resolves_only_the_declaring_hierarchy() {
+    let order = r#"<?php
+namespace App;
+final class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+    $order->save();
+}
+"#;
+    let unrelated = r#"<?php
+namespace App;
+final class Unrelated {
+    public function save(): void {}
+}
+function persistUnrelated(Unrelated $value): void {
+    $value->save();
+    $value->save();
+    $value->save();
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Order.php", order), ("src/Unrelated.php", unrelated)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    open_php(&backend, &uri, order).await;
+
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 20),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == 3 && lens.command.is_none())
+        .expect("expected an unresolved reference lens above Order::save");
+
+    let resolved = backend
+        .code_lens_resolve(lens)
+        .await
+        .expect("reference lens should resolve");
+    assert_eq!(
+        resolved
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("2 references")
+    );
+    let locations: Vec<Location> = serde_json::from_value(
+        resolved
+            .command
+            .as_ref()
+            .and_then(|command| command.arguments.as_ref())
+            .and_then(|arguments| arguments.get(2))
+            .cloned()
+            .expect("expected reference locations"),
+    )
+    .expect("reference targets should be locations");
+    assert_eq!(locations.len(), 2);
+    assert!(locations.iter().all(|location| location.uri == uri));
+}
+
+#[tokio::test]
+async fn refresh_capable_clients_receive_only_warm_member_reference_lenses() {
+    let content = r#"<?php
+namespace App;
+final class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/Order.php", content)],
+    );
+    let initialize = backend
+        .initialize(
+            serde_json::from_value(serde_json::json!({
+                "capabilities": {
+                    "workspace": {
+                        "codeLens": { "refreshSupport": true }
+                    }
+                }
+            }))
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        initialize.capabilities.code_lens_provider,
+        Some(CodeLensOptions {
+            resolve_provider: Some(true)
+        })
+    ));
+
+    let uri = Url::from_file_path(dir.path().join("src/Order.php")).unwrap();
+    open_php(&backend, &uri, content).await;
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 20),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let params = CodeLensParams {
+        text_document: TextDocumentIdentifier { uri },
+        work_done_progress_params: WorkDoneProgressParams::default(),
+        partial_result_params: PartialResultParams::default(),
+    };
+    let cold = backend
+        .code_lens(params.clone())
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let cold_lens = cold
+        .iter()
+        .find(|lens| lens.range.start.line == 3)
+        .unwrap_or_else(|| panic!("the member lens should hold its line while cold: {cold:?}"));
+    assert_eq!(
+        cold_lens
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("- references"),
+        "a cold lens carries a placeholder, not a count it cannot back up"
+    );
+    assert!(
+        cold_lens.data.is_none(),
+        "and no resolve payload, which would make the client resolve it eagerly"
+    );
+
+    let warm = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let lenses = backend
+                .code_lens(params.clone())
+                .await
+                .unwrap()
+                .unwrap_or_default();
+            if let Some(lens) = lenses.into_iter().find(|lens| {
+                lens.range.start.line == 3
+                    && lens
+                        .command
+                        .as_ref()
+                        .is_some_and(|command| command.title == "1 reference")
+            }) {
+                break lens;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("background member-reference cache did not warm");
+    assert!(warm.data.is_none());
+}
+
+#[tokio::test]
+async fn class_and_function_reference_lenses_resolve_exact_locations() {
+    let content = r#"<?php
+namespace App;
+final class Widget {}
+function makeWidget(): Widget { return new Widget(); }
+makeWidget();
+makeWidget();
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/functions.php", content)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/functions.php")).unwrap();
+    open_php(&backend, &uri, content).await;
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(2, 12),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected class and function reference lenses");
+
+    for (line, expected_title) in [(2, "2 references"), (3, "2 references")] {
+        let lens = lenses
+            .iter()
+            .find(|lens| lens.range.start.line == line && lens.command.is_none())
+            .unwrap_or_else(|| panic!("expected an unresolved lens on line {line}: {lenses:?}"));
+        let resolved = backend
+            .code_lens_resolve(lens.clone())
+            .await
+            .expect("reference lens should resolve");
+        assert_eq!(
+            resolved
+                .command
+                .as_ref()
+                .map(|command| command.title.as_str()),
+            Some(expected_title)
+        );
+    }
+}
+
+/// The title of the reference lens on `line`, resolved the way a client
+/// that displays it does.
+async fn resolved_reference_title(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    line: u32,
+) -> Option<String> {
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == line)?;
+    backend
+        .code_lens_resolve(lens)
+        .await
+        .unwrap()
+        .command
+        .map(|command| command.title)
+}
+
+/// Drive workspace indexing the way a client does before asking for lenses.
+async fn warm_workspace_index(backend: &phpantom_lsp::Backend, uri: &Url, position: Position) {
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position,
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_function_lens_counts_unqualified_calls_from_a_namespaced_file() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service =
+        "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &uri, helpers).await;
+    warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 1).await.as_deref(),
+        Some("2 references"),
+        "an unqualified call in a namespaced file falls back to the global function"
+    );
+}
+
+#[tokio::test]
+async fn a_function_lens_ignores_the_case_a_call_is_spelled_with() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service = "<?php\nnamespace App;\nfunction run(): void {\n    HELPER();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &uri, helpers).await;
+    warm_workspace_index(&backend, &uri, Position::new(1, 9)).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &uri, 1).await.as_deref(),
+        Some("1 reference"),
+        "PHP function names are case-insensitive"
+    );
+}
+
+/// A method PHP or Laravel can reach through a static call is indexed under
+/// the static member key, so the lens must not answer a conclusive zero from
+/// the instance key alone.
+#[tokio::test]
+async fn statically_forwarded_instance_method_is_not_reported_as_zero() {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/", "Illuminate\\": "vendor/illuminate/" } } }"#,
+        &[
+            (
+                "vendor/illuminate/Model.php",
+                "<?php namespace Illuminate\\Database\\Eloquent; abstract class Model { public static function query() {} }",
+            ),
+            (
+                "vendor/illuminate/Builder.php",
+                "<?php namespace Illuminate\\Database\\Eloquent; class Builder { /** @return $this */ public function where($c) { return $this; } }",
+            ),
+            (
+                "src/Models/UserBuilder.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Builder;
+class UserBuilder extends Builder {
+    /** @return $this */
+    public function active() { return $this; }
+}
+"#,
+            ),
+            (
+                "src/Models/User.php",
+                r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Attributes\UseEloquentBuilder;
+#[UseEloquentBuilder(UserBuilder::class)]
+class User extends Model {}
+"#,
+            ),
+            (
+                "usage.php",
+                "<?php\nuse App\\Models\\User;\n\nUser::active();\n",
+            ),
+        ],
+    );
+    for path in [
+        "vendor/illuminate/Builder.php",
+        "vendor/illuminate/Model.php",
+        "src/Models/UserBuilder.php",
+        "src/Models/User.php",
+        "usage.php",
+    ] {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let text = std::fs::read_to_string(dir.path().join(path)).unwrap();
+        open_php(&backend, &uri, &text).await;
+    }
+
+    let builder_uri = Url::from_file_path(dir.path().join("src/Models/UserBuilder.php")).unwrap();
+    // Drive the workspace index the way a client would before asking for lenses.
+    backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier::new(builder_uri.clone()),
+                position: Position::new(5, 21),
+            },
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap();
+
+    let lenses = backend
+        .code_lens(CodeLensParams {
+            text_document: TextDocumentIdentifier::new(builder_uri),
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        })
+        .await
+        .unwrap()
+        .expect("expected declaration reference lenses");
+    let lens = lenses
+        .into_iter()
+        .find(|lens| lens.range.start.line == 5)
+        .expect("expected a reference lens above UserBuilder::active");
+    assert!(
+        lens.command.is_none(),
+        "`User::active()` is indexed as a static access, so a zero drawn from \
+         the instance key alone would contradict Find References: {lens:?}"
+    );
+
+    let resolved = backend
+        .code_lens_resolve(lens)
+        .await
+        .expect("reference lens should resolve");
+    assert_eq!(
+        resolved
+            .command
+            .as_ref()
+            .map(|command| command.title.as_str()),
+        Some("1 reference")
+    );
 }
 
 // ─── Basic Override Detection ───────────────────────────────────────────────
@@ -448,8 +974,9 @@ class Handler extends Base {
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
-    assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0], "↑ Base::handle");
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"↑ Base::handle"));
+    assert!(titles.contains(&"0 references"));
 }
 
 // ─── Abstract Method Implementation ────────────────────────────────────────
@@ -581,8 +1108,9 @@ class Document implements Printable {
         .unwrap_or_default();
     let titles = lens_titles(&lenses);
 
-    assert_eq!(titles.len(), 1);
-    assert_eq!(titles[0], "◆ Printable::print");
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"◆ Printable::print"));
+    assert!(titles.contains(&"0 references"));
 }
 
 // ─── PHPUnit Coverage Lens ("which tests cover this class") ────────────────
@@ -828,4 +1356,370 @@ class Consumer {
         !titles.iter().any(|t| t.starts_with("Tests:")),
         "titles: {titles:?}"
     );
+}
+
+// ─── Reference counts on declarations ───────────────────────────────────
+//
+// These drive `handle_code_lens` / `resolve_code_lens_item` directly so a
+// count is asserted the way a client that displays the lens sees it, with
+// the background search run to completion first.
+
+/// Seed `uri` as an open file the way `didOpen` would, for a client that
+/// supports lens refresh and a workspace that has finished indexing.
+fn seed_open_file(backend: &phpantom_lsp::Backend, uri: &str, content: &str) {
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
+    backend.update_ast(uri, content);
+    backend.mark_workspace_indexed();
+    backend.set_supports_code_lens_refresh(true);
+}
+
+/// Open a file and return its lenses once the member references the first
+/// request queued have been computed.
+fn declaration_lenses(backend: &phpantom_lsp::Backend, uri: &str, content: &str) -> Vec<CodeLens> {
+    seed_open_file(backend, uri, content);
+
+    backend.handle_code_lens(uri, content);
+    backend.compute_pending_member_ref_counts();
+    backend.handle_code_lens(uri, content).unwrap_or_default()
+}
+
+/// The title of the lens on `line`, resolved the way a client that
+/// displays it would.
+fn title_on_line(
+    backend: &phpantom_lsp::Backend,
+    lenses: &[CodeLens],
+    line: u32,
+) -> Option<String> {
+    let lens = lenses.iter().find(|lens| lens.range.start.line == line)?;
+    backend
+        .resolve_code_lens_item(lens.clone())
+        .command
+        .map(|command| command.title)
+}
+
+/// The title of the lens on `line` as `handle_code_lens` returns it,
+/// without the resolve round-trip.
+fn unresolved_title_on_line(lenses: &[CodeLens], line: u32) -> Option<String> {
+    lenses
+        .iter()
+        .find(|lens| lens.range.start.line == line)
+        .and_then(|lens| lens.command.as_ref())
+        .map(|command| command.title.clone())
+}
+
+#[test]
+fn a_function_nothing_calls_is_reported_as_zero() {
+    let backend = create_test_backend();
+
+    let lenses = declaration_lenses(
+        &backend,
+        "file:///helpers.php",
+        "<?php\nfunction unused(): void {}\n",
+    );
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 1).as_deref(),
+        Some("0 references"),
+        "a file with no classes at all still reports its functions"
+    );
+}
+
+#[test]
+fn a_magic_method_gets_no_reference_lens() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public function __construct() {}
+    public function save(): void {}
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert!(lenses.iter().any(|lens| lens.range.start.line == 1));
+    assert!(lenses.iter().any(|lens| lens.range.start.line == 3));
+    assert!(!lenses.iter().any(|lens| lens.range.start.line == 2));
+}
+
+#[test]
+fn a_member_lens_ignores_a_member_of_the_same_name_on_another_class() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class User {
+    public int $id = 0;
+    public function save(): void {}
+}
+class Order {
+    public int $id = 0;
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    echo $order->id;
+    $order->save();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 6).as_deref(),
+        Some("1 reference")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 7).as_deref(),
+        Some("1 reference")
+    );
+}
+
+#[test]
+fn a_member_lens_counts_references_through_a_subclass() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order extends Model {
+}
+function persist(Order $order, Model $model): void {
+    $order->save();
+    $model->save();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 2).as_deref(),
+        Some("2 references")
+    );
+}
+
+/// A method that overrides a parent still gets its own reference-count
+/// lens alongside the `↑ Parent::method` navigation lens (GH #412):
+/// implementing a contract should not hide the usage count.
+#[test]
+fn an_overriding_method_keeps_its_reference_count_lens() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Shape {
+    public function area(): float { return 0.0; }
+}
+class Circle extends Shape {
+    public function area(): float { return 3.14; }
+}
+function measure(Circle $circle): void {
+    $circle->area();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+    let titles: Vec<String> = lenses
+        .iter()
+        .filter(|lens| lens.range.start.line == 5)
+        .map(|lens| backend.resolve_code_lens_item(lens.clone()))
+        .filter_map(|lens| lens.command.map(|c| c.title))
+        .collect();
+
+    assert_eq!(titles.len(), 2);
+    assert!(titles.contains(&"↑ Shape::area".to_string()));
+    assert!(titles.contains(&"1 reference".to_string()));
+}
+
+#[test]
+fn a_class_lens_ignores_a_class_of_the_same_name_in_another_namespace() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Widget {}
+namespace App;
+class Widget {}
+function build(): void {
+    $first = new \App\Widget();
+    $second = new \App\Widget();
+}
+"#;
+
+    let lenses = declaration_lenses(&backend, "file:///test.php", content);
+
+    assert_eq!(
+        title_on_line(&backend, &lenses, 1).as_deref(),
+        Some("0 references")
+    );
+    assert_eq!(
+        title_on_line(&backend, &lenses, 3).as_deref(),
+        Some("2 references")
+    );
+}
+
+#[test]
+fn a_new_parent_class_recomputes_the_count() {
+    const URI: &str = "file:///test.php";
+    let backend = create_test_backend();
+    let unrelated = r#"<?php
+class Model {
+    public function save(): void {}
+}
+class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let lenses = declaration_lenses(&backend, URI, unrelated);
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 2).as_deref(),
+        Some("0 references")
+    );
+
+    let inherited = unrelated.replace(
+        "class Order {\n    public function save(): void {}",
+        "class Order extends Model {",
+    );
+    seed_open_file(&backend, URI, &inherited);
+    backend.handle_code_lens(URI, &inherited);
+    assert!(backend.compute_pending_member_ref_counts());
+    let lenses = backend
+        .handle_code_lens(URI, &inherited)
+        .unwrap_or_default();
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 2).as_deref(),
+        Some("1 reference")
+    );
+}
+
+#[test]
+fn chain_cache_does_not_leak_a_resolution_across_files() {
+    let backend = create_test_backend();
+
+    const URI_A: &str = "file:///PenA.php";
+    const URI_B: &str = "file:///PenB.php";
+    const URI_CONSUMER_A: &str = "file:///ConsumerA.php";
+    const URI_CONSUMER_B: &str = "file:///ConsumerB.php";
+
+    // Two unrelated classes that happen to share a bare name and an
+    // identically-shaped `make()->write()` chain, each imported under
+    // that bare name by its own consumer file.
+    let pen_a = r#"<?php
+namespace App\A;
+
+class Pen {
+    public static function make(): self {
+        return new self();
+    }
+
+    public function write(): void {}
+}
+"#;
+    let pen_b = pen_a.replace("App\\A", "App\\B");
+
+    let consumer_a = r#"<?php
+namespace App;
+
+use App\A\Pen;
+
+function useA(): void {
+    Pen::make()->write();
+}
+"#;
+    let consumer_b = consumer_a
+        .replace("App\\A", "App\\B")
+        .replace("useA", "useB");
+
+    seed_open_file(&backend, URI_A, pen_a);
+    seed_open_file(&backend, URI_B, &pen_b);
+    seed_open_file(&backend, URI_CONSUMER_A, consumer_a);
+    seed_open_file(&backend, URI_CONSUMER_B, &consumer_b);
+
+    // Queue both `write()` declarations for a count, then resolve them in
+    // the same `compute_pending_member_ref_counts` pass so both consumer
+    // files are scanned under one chain-cache activation — the scenario
+    // where a text-only cache key leaks a resolution from one file's `use`
+    // scope into the other's.
+    backend.handle_code_lens(URI_A, pen_a);
+    backend.handle_code_lens(URI_B, &pen_b);
+    backend.compute_pending_member_ref_counts();
+
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend.handle_code_lens(URI_A, pen_a).unwrap_or_default(),
+            8
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "App\\A\\Pen::write must only count ConsumerA's call, not ConsumerB's \
+         identically-spelled `Pen::make()->write()` against `App\\B\\Pen`"
+    );
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend.handle_code_lens(URI_B, &pen_b).unwrap_or_default(),
+            8
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "App\\B\\Pen::write must only count ConsumerB's call"
+    );
+}
+
+#[tokio::test]
+async fn the_request_path_counts_off_the_request() {
+    const URI: &str = "file:///test.php";
+    const ONE_CALL: &str = r#"<?php
+class Order {
+    public function save(): void {}
+}
+function persist(Order $order): void {
+    $order->save();
+}
+"#;
+    let backend = create_test_backend();
+    seed_open_file(&backend, URI, ONE_CALL);
+
+    let params = CodeLensParams {
+        text_document: TextDocumentIdentifier {
+            uri: Url::parse(URI).unwrap(),
+        },
+        work_done_progress_params: Default::default(),
+        partial_result_params: Default::default(),
+    };
+
+    let first = backend
+        .code_lens(params.clone())
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    assert_eq!(
+        unresolved_title_on_line(&first, 2).as_deref(),
+        Some("- references"),
+        "the first request answers before the count is known"
+    );
+
+    let counted = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let lenses = backend
+                .code_lens(params.clone())
+                .await
+                .unwrap()
+                .unwrap_or_default();
+            if let Some(title) = unresolved_title_on_line(&lenses, 2)
+                && title != "- references"
+            {
+                break title;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the background count did not land");
+    assert_eq!(counted, "1 reference");
 }

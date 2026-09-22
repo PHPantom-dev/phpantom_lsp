@@ -16,6 +16,13 @@ use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_d
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
+use crate::symbol_map::extraction::laravel::{chain_roots_at_facade, is_laravel_container_expr};
+
+/// How many `->` links a `Route::…->group(path)` registration may put
+/// between the facade and the `group()` call. `Route::middleware(…)
+/// ->prefix(…)->name(…)->group(…)` is already longer than a provider
+/// realistically writes, and the bound keeps the walk linear.
+const ROUTE_GROUP_CHAIN_DEPTH: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderResource {
@@ -139,6 +146,12 @@ pub(crate) struct ProviderResources {
     /// which this scan cannot see.  An empty prefix is the prefix-less
     /// registration, whose templates every un-namespaced tag can address.
     pub anonymous_component_paths: Vec<(String, PathBuf)>,
+    /// `Blade::directive('datetime', …)` and `Blade::if('admin', …)`
+    /// registrations, in registration order.  These name directives the
+    /// preprocessor would otherwise mask as comments, and the four members
+    /// of a `Blade::if()` family are expanded from the single name recorded
+    /// here (`crate::blade::directives::CustomDirectives`).
+    pub custom_directives: Vec<crate::blade::directives::CustomDirective>,
     /// `View::share('key', $value)` registrations, which put a variable in
     /// every template's scope.
     pub shared_view_vars: Vec<SharedViewVar>,
@@ -170,6 +183,7 @@ impl ProviderResources {
             .extend(other.anonymous_component_namespaces);
         self.anonymous_component_paths
             .extend(other.anonymous_component_paths);
+        self.custom_directives.extend(other.custom_directives);
         self.shared_view_vars.extend(other.shared_view_vars);
         self.view_composers.extend(other.view_composers);
         self.folio_mounts.extend(other.folio_mounts);
@@ -326,6 +340,15 @@ impl ProviderScans {
         true
     }
 
+    /// Drop one provider's scan, for a file deleted from disk.  Its FQN stays
+    /// registered, so a file that declares the provider again rejoins the
+    /// table the moment it parses.  Returns whether anything was dropped.
+    pub fn remove(&mut self, uri: &str) -> bool {
+        let before = self.scans.len();
+        self.scans.retain(|scan| scan.uri != uri);
+        self.scans.len() != before
+    }
+
     /// The merged table every consumer reads, with aliases resolved against
     /// the complete set of bindings.
     pub fn merged(&self) -> ProviderResources {
@@ -419,18 +442,27 @@ pub(crate) fn extract_provider_resources(
                 .rsplit(|&b| b == b'\\')
                 .next()
                 .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Blade"))
-            && record_component_registration(
-                &method.value.to_ascii_lowercase(),
-                &sc.argument_list,
-                content,
-                &scope,
-                &PathContext {
-                    file_dir,
-                    workspace_root,
-                    program,
-                },
-                &mut resources,
-            )
+            && {
+                let method_lower = method.value.to_ascii_lowercase();
+                record_component_registration(
+                    &method_lower,
+                    &sc.argument_list,
+                    content,
+                    &scope,
+                    &PathContext {
+                        file_dir,
+                        workspace_root,
+                        program,
+                    },
+                    &mut resources,
+                ) || record_directive_registration(
+                    &method_lower,
+                    &sc.argument_list,
+                    content,
+                    &scope,
+                    &mut resources,
+                )
+            }
         {
             return ControlFlow::Continue(());
         }
@@ -466,7 +498,9 @@ pub(crate) fn extract_provider_resources(
         // argument is either a closure (inline routes, ignored here) or a path
         // to a file whose routes we must scan.
         if method_lower == b"group"
-            && chain_roots_at_route(mc.object)
+            && chain_roots_at_facade(mc.object, ROUTE_GROUP_CHAIN_DEPTH, &|name| {
+                name.eq_ignore_ascii_case("Route")
+            })
             && let Some(first_arg) = mc.argument_list.arguments.iter().next()
             && let Some(path) = resolve_path_arg(
                 first_arg.value(),
@@ -485,7 +519,7 @@ pub(crate) fn extract_provider_resources(
         // `bind()`: the key is the second one, and the first names what it
         // stands for.
         if method_lower == b"alias"
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(target) = mc.argument_list.arguments.iter().next()
             && let Some(key_arg) = mc.argument_list.arguments.iter().nth(1)
             && let Some(key) = alias_key(key_arg.value(), content, &scope, &resolved)
@@ -528,7 +562,7 @@ pub(crate) fn extract_provider_resources(
         // through `$this->app`, not `$this`, so this is checked ahead of the
         // `$this->…` resource loaders below.
         if BINDING_METHODS.contains(&method_lower.as_slice())
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(key_arg) = mc.argument_list.arguments.iter().next()
             && let Some(key) = const_string(key_arg.value(), content, &scope)
         {
@@ -584,41 +618,45 @@ pub(crate) fn extract_provider_resources(
             return ControlFlow::Continue(());
         }
 
+        // `$blade->directive(…)` / `$blade->if(…)`, written the same way.
+        // Unlike the component-namespace methods above, these two have
+        // names an unrelated fluent API could plausibly carry (`->if()`
+        // most of all), so the receiver has to actually name Blade's
+        // compiler.
+        if is_blade_compiler_expr(mc.object, content, &scope, &resolved)
+            && record_directive_registration(
+                &method_lower,
+                &mc.argument_list,
+                content,
+                &scope,
+                &mut resources,
+            )
+        {
+            return ControlFlow::Continue(());
+        }
+
         if !is_this_expr(mc.object) {
             return ControlFlow::Continue(());
         }
 
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
-        if method_lower == b"mergeconfigfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+        // The namespaced `load*From(path, namespace)` registrations differ
+        // only in which list they land in.
+        let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
+            b"mergeconfigfrom" => Some(&mut resources.config_files),
+            b"loadviewsfrom" => Some(&mut resources.view_dirs),
+            b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
+            _ => None,
+        };
+        if let Some(target) = namespaced {
+            if args.len() >= 2
+                && let Some(path) =
+                    resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
                 && let Some((ns, _, _)) =
                     super::helpers::extract_string_literal(args[1].value(), content)
             {
-                resources.config_files.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
-            }
-        } else if method_lower == b"loadviewsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
-            {
-                resources.view_dirs.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
-            }
-        } else if method_lower == b"loadtranslationsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
-            {
-                resources.trans_dirs.push(ProviderResource {
+                target.push(ProviderResource {
                     path,
                     namespace: ns.to_string(),
                 });
@@ -824,6 +862,98 @@ fn record_component_registration(
     true
 }
 
+/// Record a `Blade::directive('datetime', …)` or `Blade::if('admin', …)`
+/// registration, and report whether the call was one of them.
+///
+/// Only the name matters: the handler is a callback returning whatever PHP
+/// it likes, which no static scan can evaluate.  Knowing the directive
+/// exists is what stops a template's use of it from being masked as a
+/// comment, and a `Blade::if()` name stands for the whole family Blade
+/// synthesizes from it.
+fn record_directive_registration(
+    method: &[u8],
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+    resources: &mut ProviderResources,
+) -> bool {
+    let conditional = match method {
+        b"directive" => false,
+        b"if" => true,
+        _ => return false,
+    };
+    // A registration whose name is only known at runtime registers a
+    // directive no template can be checked against, so the call is still
+    // recognised (nothing else it could be) but records nothing.
+    if let Some(first) = argument_list.arguments.iter().next()
+        && let Some(name) = const_string(first.value(), content, scope)
+    {
+        resources
+            .custom_directives
+            .push(crate::blade::directives::CustomDirective { name, conditional });
+    }
+    true
+}
+
+/// Whether `expr` names Blade's compiler, i.e. the receiver a provider
+/// registers a directive on when it does not go through the facade.
+///
+/// Covers the `$blade` a `callAfterResolving('blade.compiler', …)` callback
+/// receives and the container lookups a provider reaches the compiler by,
+/// which is the whole set of shapes Laravel's own documentation and the
+/// packages that follow it use.
+fn is_blade_compiler_expr(
+    expr: &Expression<'_>,
+    content: &str,
+    scope: &Scope,
+    resolved: &OwnedResolvedNames,
+) -> bool {
+    /// The parameter names Laravel's docs and packages give the compiler a
+    /// deferred callback receives.
+    const COMPILER_VARIABLES: [&[u8]; 3] = [b"$blade", b"$bladeCompiler", b"$compiler"];
+    /// The container key the compiler is bound under.
+    const COMPILER_KEY: &str = "blade.compiler";
+
+    match expr {
+        Expression::Variable(Variable::Direct(dv)) => COMPILER_VARIABLES
+            .iter()
+            .any(|name| dv.name.eq_ignore_ascii_case(name)),
+        // `$this->app['blade.compiler']`
+        Expression::ArrayAccess(access) => {
+            const_string(access.index, content, scope).as_deref() == Some(COMPILER_KEY)
+        }
+        // `app('blade.compiler')` and `$this->app->make(BladeCompiler::class)`
+        Expression::Call(Call::Function(fc)) => {
+            names_blade_compiler(&fc.argument_list, content, scope, resolved)
+        }
+        Expression::Call(Call::Method(mc)) => {
+            names_blade_compiler(&mc.argument_list, content, scope, resolved)
+        }
+        Expression::Parenthesized(inner) => {
+            is_blade_compiler_expr(inner.expression, content, scope, resolved)
+        }
+        _ => false,
+    }
+}
+
+/// Whether a container lookup's first argument names Blade's compiler,
+/// either by its container key or by the compiler class itself.
+fn names_blade_compiler(
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+    resolved: &OwnedResolvedNames,
+) -> bool {
+    let Some(first) = argument_list.arguments.iter().next() else {
+        return false;
+    };
+    let named = const_string(first.value(), content, scope)
+        .or_else(|| class_string_fqn(first.value(), resolved));
+    named.is_some_and(|name| {
+        name == "blade.compiler" || crate::util::short_name(&name) == "BladeCompiler"
+    })
+}
+
 /// The (tag prefix, view directory) pair an `anonymousComponentNamespace()`
 /// call registers.
 ///
@@ -879,31 +1009,6 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
         expr,
         Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
     )
-}
-
-/// Whether `expr` names the service container: `$this->app` in a provider
-/// method, the `$app` a deferred callback receives, or the `app()` helper.
-pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Variable(Variable::Direct(dv)) => dv.name == b"$app",
-        Expression::Access(Access::Property(pa)) => {
-            is_this_expr(pa.object)
-                && matches!(
-                    &pa.property,
-                    ClassLikeMemberSelector::Identifier(ident)
-                        if ident.value.eq_ignore_ascii_case(b"app")
-                )
-        }
-        Expression::Call(Call::Function(fc)) => {
-            matches!(fc.function, Expression::Identifier(id)
-                if id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"app")))
-                && fc.argument_list.arguments.is_empty()
-        }
-        _ => false,
-    }
 }
 
 /// The concrete class a container binding puts behind its key.
@@ -1211,26 +1316,6 @@ fn last_assignment_before<'ast, 'arena>(
     best.map(|(_, rhs)| rhs)
 }
 
-/// Check whether an instance-method call chain roots at the `Route` facade,
-/// i.e. `Route::middleware(...)->namespace(...)->…`.  Walks down the `->object`
-/// chain until it reaches the static entry point and matches its class name.
-fn chain_roots_at_route(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Call(Call::Method(mc)) => chain_roots_at_route(mc.object),
-        Expression::Call(Call::StaticMethod(sc)) => {
-            if let Expression::Identifier(id) = sc.class {
-                id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Route"))
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1310,6 +1395,73 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn records_registered_custom_directives() {
+        // Both registration methods, on the facade and on the compiler
+        // instance a deferred callback receives.  Only the name is recorded:
+        // the handler returns PHP no static scan can evaluate.
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function boot(): void {\n\
+                    Blade::directive('datetime', fn ($e) => \"<?php echo ($e); ?>\");\n\
+                    Blade::if('admin', fn () => auth()->user()?->isAdmin());\n\
+                    $this->callAfterResolving('blade.compiler', function ($blade) {\n\
+                        $blade->directive('money', fn ($e) => $e);\n\
+                    });\n\
+                    $this->app['blade.compiler']->if('subscribed', fn () => true);\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.custom_directives,
+            vec![
+                crate::blade::directives::CustomDirective {
+                    name: "datetime".to_string(),
+                    conditional: false,
+                },
+                crate::blade::directives::CustomDirective {
+                    name: "admin".to_string(),
+                    conditional: true,
+                },
+                crate::blade::directives::CustomDirective {
+                    name: "money".to_string(),
+                    conditional: false,
+                },
+                crate::blade::directives::CustomDirective {
+                    name: "subscribed".to_string(),
+                    conditional: true,
+                },
+            ]
+        );
+    }
+
+    /// `directive` and `if` are names an unrelated fluent API can carry, so
+    /// a call on anything but Blade's compiler registers nothing.
+    #[test]
+    fn ignores_a_directive_call_on_an_unrelated_receiver() {
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function boot(): void {\n\
+                    $this->schedule->if('daily', fn () => true);\n\
+                    $builder->directive('weird', fn () => true);\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert!(resources.custom_directives.is_empty());
     }
 
     #[test]

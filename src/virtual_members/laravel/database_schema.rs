@@ -1215,19 +1215,11 @@ fn apply_migration_method_stmt(
             apply_migration_expr(index, expr.expression, content, connection)
         }
         Statement::If(if_stmt) => {
-            for stmt in if_stmt.body.statements() {
-                apply_migration_method_stmt(index, stmt, content, connection);
-            }
-            for stmts in if_stmt.body.else_if_statements() {
-                for stmt in stmts {
+            crate::parser::for_each_if_branch(if_stmt, |statements| {
+                for stmt in statements {
                     apply_migration_method_stmt(index, stmt, content, connection);
                 }
-            }
-            if let Some(stmts) = if_stmt.body.else_statements() {
-                for stmt in stmts {
-                    apply_migration_method_stmt(index, stmt, content, connection);
-                }
-            }
+            });
         }
         Statement::Block(block) => {
             for stmt in block.statements.iter() {
@@ -1406,19 +1398,11 @@ fn process_blueprint_stmt(
             }
         }
         Statement::If(if_stmt) => {
-            for stmt in if_stmt.body.statements() {
-                process_blueprint_stmt(index, connection, table_name, stmt, content);
-            }
-            for stmts in if_stmt.body.else_if_statements() {
-                for stmt in stmts {
+            crate::parser::for_each_if_branch(if_stmt, |statements| {
+                for stmt in statements {
                     process_blueprint_stmt(index, connection, table_name, stmt, content);
                 }
-            }
-            if let Some(stmts) = if_stmt.body.else_statements() {
-                for stmt in stmts {
-                    process_blueprint_stmt(index, connection, table_name, stmt, content);
-                }
-            }
+            });
         }
         _ => {}
     }

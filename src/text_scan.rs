@@ -10,6 +10,18 @@
 
 use std::borrow::Cow;
 
+/// The first occurrence of `needle` in `bytes[from..limit]`, as an offset
+/// into `bytes`.  `None` when the window is empty or out of range.
+pub(crate) fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize> {
+    let window = bytes.get(from..limit)?;
+    memchr::memmem::find(window, needle).map(|at| from + at)
+}
+
+/// The first `needle` byte at or after `from`, as an offset into `bytes`.
+pub(crate) fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
+    memchr::memchr(needle, bytes.get(from..)?).map(|at| from + at)
+}
+
 /// Skip past a string literal starting at `pos` (which must point to the
 /// opening quote). Returns the position after the closing quote.
 pub(crate) fn skip_string_forward(bytes: &[u8], pos: usize) -> usize {
@@ -46,7 +58,22 @@ pub(crate) fn skip_block_comment(bytes: &[u8], pos: usize) -> usize {
         }
         i += 1;
     }
-    i
+    bytes.len()
+}
+
+/// The offset just past the PHP comment opening at `pos`, or `None` when
+/// no comment opens there.
+///
+/// `//` and `#` run to the end of the line, `/* … */` to its terminator,
+/// and an unterminated block comment to the end of the input. `#[` opens
+/// a PHP attribute rather than a comment.
+pub(crate) fn skip_php_comment(bytes: &[u8], pos: usize) -> Option<usize> {
+    match (bytes.get(pos)?, bytes.get(pos + 1)) {
+        (b'#', Some(b'[')) => None,
+        (b'#', _) | (b'/', Some(b'/')) => Some(skip_line_comment(bytes, pos)),
+        (b'/', Some(b'*')) => Some(skip_block_comment(bytes, pos)),
+        _ => None,
+    }
 }
 
 /// Skip backward past a string literal ending at position `end` (which
@@ -74,6 +101,28 @@ pub(crate) fn skip_string_backward(chars: &[char], end: usize, q: char) -> usize
         j -= 1;
     }
     0
+}
+
+/// Whether `b` can appear in a PHP identifier (`[A-Za-z0-9_]`).
+///
+/// Not `\` or Unicode-aware: identifiers this project scans backward
+/// from a cursor are always the tail of a `$variable` or bare word, never
+/// a qualified name.
+pub(crate) fn is_ident_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Walk `bytes` backward from `pos`, stopping at the first byte that is
+/// not an identifier character, and return that stopping offset.
+///
+/// Used to find where the identifier under (or just before) the cursor
+/// starts, e.g. completing `$obj->get|` or a bare partial keyword.
+pub(crate) fn scan_ident_backward(bytes: &[u8], pos: usize) -> usize {
+    let mut i = pos.min(bytes.len());
+    while i > 0 && is_ident_byte(bytes[i - 1]) {
+        i -= 1;
+    }
+    i
 }
 
 /// Remove surrounding single or double quotes from a PHP string literal.
@@ -341,73 +390,129 @@ pub(crate) fn find_semicolon_balanced(s: &str) -> Option<usize> {
 ///
 /// `open` and `close` are the opening and closing byte values (e.g.
 /// `b'{'` / `b'}'` or `b'('` / `b')'`).  The scan is aware of string
-/// literals (`'…'` and `"…"` with backslash escaping) and both styles
-/// of PHP comment (`// …` and `/* … */`), so delimiters inside strings
-/// or comments are not counted.
+/// literals (`'…'` and `"…"` with backslash escaping) and PHP comments
+/// (see [`skip_php_comment`]), so delimiters inside strings or comments
+/// are not counted.
 pub(crate) fn find_matching_forward(
     text: &str,
     open_pos: usize,
     open: u8,
     close: u8,
 ) -> Option<usize> {
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-    if open_pos >= len || bytes[open_pos] != open {
+    find_matching_forward_bytes(text.as_bytes(), open_pos, open, close)
+}
+
+/// [`find_matching_forward`] over a byte slice, for scanners that already
+/// work on bytes.
+pub(crate) fn find_matching_forward_bytes(
+    bytes: &[u8],
+    open_pos: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    if open_pos >= bytes.len() || bytes[open_pos] != open {
         return None;
     }
-    let mut depth = 1u32;
-    let mut pos = open_pos + 1;
-    let mut in_single = false;
-    let mut in_double = false;
-    while pos < len && depth > 0 {
-        let b = bytes[pos];
-        if in_single {
-            if b == b'\\' {
-                pos += 1;
-            } else if b == b'\'' {
-                in_single = false;
+    find_unmatched_close_bytes(bytes, open_pos + 1, open, close)
+}
+
+/// Find the first `close` that is not matched by an `open` at or after
+/// `from`: the delimiter that ends the scope `from` sits in.
+///
+/// `None` when the scope runs to the end of `bytes`. Like
+/// [`find_matching_forward`], string literals and PHP comments are
+/// skipped, so a delimiter inside one does not end the scope.
+pub(crate) fn find_unmatched_close_bytes(
+    bytes: &[u8],
+    from: usize,
+    open: u8,
+    close: u8,
+) -> Option<usize> {
+    let mut depth = 0u32;
+    let mut pos = from;
+    while pos < bytes.len() {
+        if let Some(past) = skip_php_comment(bytes, pos) {
+            pos = past;
+            continue;
+        }
+        match bytes[pos] {
+            b'\'' | b'"' => {
+                pos = skip_string_forward(bytes, pos);
+                continue;
             }
-        } else if in_double {
-            if b == b'\\' {
-                pos += 1;
-            } else if b == b'"' {
-                in_double = false;
-            }
-        } else {
-            match b {
-                b'\'' => in_single = true,
-                b'"' => in_double = true,
-                b if b == open => depth += 1,
-                b if b == close => {
-                    depth -= 1;
-                    if depth == 0 {
-                        return Some(pos);
-                    }
+            b if b == open => depth += 1,
+            b if b == close => {
+                if depth == 0 {
+                    return Some(pos);
                 }
-                b'/' if pos + 1 < len => {
-                    if bytes[pos + 1] == b'/' {
-                        // Line comment — skip to end of line
-                        while pos < len && bytes[pos] != b'\n' {
-                            pos += 1;
-                        }
-                        continue;
-                    }
-                    if bytes[pos + 1] == b'*' {
-                        // Block comment — skip to `*/`
-                        pos += 2;
-                        while pos + 1 < len {
-                            if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
-                                pos += 1;
-                                break;
-                            }
-                            pos += 1;
-                        }
-                    }
-                }
-                _ => {}
+                depth -= 1;
             }
+            _ => {}
         }
         pos += 1;
+    }
+    None
+}
+
+/// What a top-level scan makes of the byte it is looking at.
+pub(crate) enum ScanStep {
+    /// Step over this many bytes without interpreting them further.
+    Skip(usize),
+    /// Stop and report this offset.
+    Stop,
+    /// Stop and report nothing: what was found rules the whole scan out.
+    Abort,
+}
+
+/// Walk the top level of `bytes`, calling `at_depth_zero` on every byte
+/// that is not inside a quote, a comment, or a bracket.
+///
+/// Quoting (`'…'` and `"…"`, with backslash escapes), PHP comments (see
+/// [`skip_php_comment`]) and nesting (`(`, `[`, `{`) are handled here, so
+/// a scanner only has to say what it makes of the operators it is looking
+/// for. A closer with nothing open is stepped over rather than offered to
+/// the visitor, so a scan over the inside of a bracket pair never sees the
+/// pair itself.
+///
+/// Returns the offset the visitor stopped at, or `None` when it aborted or
+/// the scan ran to the end.
+pub(crate) fn scan_top_level(
+    bytes: &[u8],
+    at_depth_zero: impl Fn(&[u8], usize) -> ScanStep,
+) -> Option<usize> {
+    let mut depth: u32 = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        if let Some(past) = skip_php_comment(bytes, i) {
+            i = past;
+            continue;
+        }
+        match bytes[i] {
+            b'\'' | b'"' => {
+                i = skip_string_forward(bytes, i);
+                continue;
+            }
+            b'(' | b'[' | b'{' => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if depth > 0 {
+            i += 1;
+            continue;
+        }
+        match at_depth_zero(bytes, i) {
+            ScanStep::Skip(n) => i += n.max(1),
+            ScanStep::Stop => return Some(i),
+            ScanStep::Abort => return None,
+        }
     }
     None
 }
@@ -663,6 +768,179 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
     None
 }
 
+// ─── `use` statement scanning ───────────────────────────────────────────────
+
+/// Call `visit` with the fully-qualified name and local name of every class
+/// `use` item in the file, including the members of a group import.
+pub(crate) fn for_each_class_import(content: &str, visit: &mut dyn FnMut(&str, &str)) {
+    for statement in content.split(';') {
+        let Some(clause) = use_clause(statement) else {
+            continue;
+        };
+        // `use function …` / `use const …` import other symbol tables.
+        let mut words = clause.split_ascii_whitespace();
+        if words.next().is_some_and(|word| {
+            word.eq_ignore_ascii_case("function") || word.eq_ignore_ascii_case("const")
+        }) {
+            continue;
+        }
+
+        match clause.split_once('{') {
+            Some((prefix, items)) => {
+                let Some(items) = items.rsplit_once('}').map(|(items, _)| items) else {
+                    continue;
+                };
+                let prefix = prefix
+                    .trim()
+                    .trim_start_matches('\\')
+                    .trim_end_matches('\\');
+                for item in items.split(',') {
+                    if let Some((name, local)) = use_item(item) {
+                        visit(&format!("{prefix}\\{name}"), local);
+                    }
+                }
+            }
+            None => {
+                for item in clause.split(',') {
+                    if let Some((name, local)) = use_item(item) {
+                        visit(name, local);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Whether the file imports `fqn` under the local name `local`.
+pub(crate) fn imports_class_as(content: &str, fqn: &str, local: &str) -> bool {
+    let mut imported = false;
+    for_each_class_import(content, &mut |imported_fqn, imported_local| {
+        imported |=
+            imported_local.eq_ignore_ascii_case(local) && imported_fqn.eq_ignore_ascii_case(fqn);
+    });
+    imported
+}
+
+/// The text after the `use` keyword of a statement that opens with one.
+///
+/// Only the line the keyword sits on is examined, so an expression that
+/// happens to precede the statement does not turn into an import.
+fn use_clause(statement: &str) -> Option<&str> {
+    let mut offset = 0usize;
+    for line in statement.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use "))
+        {
+            let leading = line.len() - trimmed.len();
+            return Some(statement[offset + leading + 4..].trim());
+        }
+        offset += line.len();
+    }
+    None
+}
+
+/// Split one `use` item into its imported name and the local name it binds.
+fn use_item(item: &str) -> Option<(&str, &str)> {
+    let mut words = item.split_whitespace();
+    let name = words.next()?.trim_start_matches('\\');
+    let local = match words.next() {
+        Some(keyword) if keyword.eq_ignore_ascii_case("as") => words.next()?,
+        // Anything else is not an import PHP would accept.
+        Some(_) => return None,
+        None => name.rsplit('\\').next().unwrap_or(name),
+    };
+    if words.next().is_some() || name.is_empty() || local.is_empty() {
+        return None;
+    }
+    Some((name, local))
+}
+
+/// The first line a statement may be inserted on, after the file's
+/// header.
+///
+/// PHP requires `declare(strict_types=1)` to be the file's very first
+/// statement, so a `namespace` or a `use` written between `<?php` and a
+/// `declare` is a fatal error rather than a formatting quibble. The
+/// answer is therefore the line after the opening tag and any `declare`
+/// that follows it; blank lines in between are stepped over, and anything
+/// else ends the header.
+pub(crate) fn header_insert_line(content: &str) -> u32 {
+    let mut insert_line = 0u32;
+    for (i, line) in content.lines().enumerate() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("<?php")
+            || trimmed.starts_with("declare(")
+            || trimmed.starts_with("declare (")
+        {
+            insert_line = (i + 1) as u32;
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        break;
+    }
+    insert_line
+}
+
+/// Whether the file declares a namespace.  An unqualified name in a file
+/// without one resolves in the global namespace, where Laravel's class
+/// aliases live.
+pub(crate) fn source_declares_namespace(content: &str) -> bool {
+    content.lines().any(|line| {
+        let mut line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("<?php") {
+            line = rest.trim_start();
+        }
+        line.get(..9)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("namespace"))
+            && line.as_bytes().get(9).is_some_and(u8::is_ascii_whitespace)
+    })
+}
+
 #[cfg(test)]
 #[path = "text_scan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+mod scan_top_level_tests {
+    use super::{ScanStep, find_matching_forward, scan_top_level};
+
+    fn first_top_level_comma(text: &str) -> Option<usize> {
+        scan_top_level(text.as_bytes(), |bytes, i| {
+            if bytes[i] == b',' {
+                ScanStep::Stop
+            } else {
+                ScanStep::Skip(1)
+            }
+        })
+    }
+
+    #[test]
+    fn a_comma_inside_a_comment_string_or_bracket_is_not_top_level() {
+        let text = "foo(1, 2) // a, b\n# c, d\n/* e, f */ 'g, h' [i, j] {k, l}, m";
+        assert_eq!(first_top_level_comma(text), text.rfind(','));
+    }
+
+    #[test]
+    fn an_attribute_is_not_a_comment() {
+        assert_eq!(first_top_level_comma("#[Pure] fn () => 1, 2"), Some(18));
+    }
+
+    #[test]
+    fn an_unterminated_comment_or_string_ends_the_scan() {
+        assert_eq!(first_top_level_comma("/* a, b"), None);
+        assert_eq!(first_top_level_comma("'a, b"), None);
+    }
+
+    #[test]
+    fn a_hash_comment_does_not_close_a_bracket() {
+        let text = "(1, # )\n 2)";
+        assert_eq!(
+            find_matching_forward(text, 0, b'(', b')'),
+            Some(text.len() - 1)
+        );
+    }
+}

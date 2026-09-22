@@ -5,6 +5,8 @@
 //! rewrite or remove tags inside it.  This module owns the single
 //! implementation they share.
 
+use crate::text_position::line_start_byte_offset;
+
 /// Information about a docblock found above a given line.
 pub(crate) struct DocblockAbove {
     /// Byte offset of the start of the docblock (first char of the `/**`
@@ -65,29 +67,19 @@ pub(crate) fn find_docblock_above_line(content: &str, line: usize) -> Option<Doc
 
     let start_line = doc_start_line?;
 
-    // Convert line numbers to byte offsets.
-    let mut byte_offset = 0;
-    let mut start_byte = 0;
-    let mut end_byte = 0;
-    for (i, line_text) in lines.iter().enumerate() {
-        if i == start_line {
-            start_byte = byte_offset;
-        }
-        byte_offset += line_text.len() + 1; // +1 for newline
-        if i == end_line {
-            end_byte = byte_offset; // include trailing newline
-        }
-    }
-
-    let text = content
-        .get(start_byte..end_byte.min(content.len()))
-        .unwrap_or("")
-        .to_string();
+    // Convert line numbers to byte offsets.  Counting the bytes of each
+    // line and adding one for its terminator would be a line short per
+    // `\r\n`, so the offsets come from the line index instead.
+    let start_byte = line_start_byte_offset(content, start_line);
+    // The docblock ends where the line after its last one begins, so the
+    // trailing newline is part of the span and deleting it takes the
+    // whole line with it.
+    let end_byte = line_start_byte_offset(content, end_line + 1).min(content.len());
 
     Some(DocblockAbove {
         start: start_byte,
-        end: end_byte.min(content.len()),
-        text,
+        end: end_byte,
+        text: content.get(start_byte..end_byte).unwrap_or("").to_string(),
     })
 }
 

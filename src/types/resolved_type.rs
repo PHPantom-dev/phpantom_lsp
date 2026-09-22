@@ -595,12 +595,7 @@ impl ResolvedType {
                 }
             }
         }
-        let mut idx = 0;
-        entries.retain(|_| {
-            let k = keep[idx];
-            idx += 1;
-            k
-        });
+        crate::util::retain_by_mask(entries, &keep);
     }
 
     /// Combine the type strings of all entries into a single [`PhpType`].
@@ -699,23 +694,7 @@ fn restrict_union_to_classes(ty: &PhpType, survives: &impl Fn(&str) -> bool) -> 
             .collect();
         return restricted.then(|| PhpType::intersection(narrowed));
     }
-    let TypeKind::Union(members) = ty.kind() else {
-        return None;
-    };
-    let kept: Vec<PhpType> = members
-        .iter()
-        .filter(|m| union_member_names_class(m, survives))
-        .cloned()
-        .collect();
-    if kept.is_empty() || kept.len() == members.len() {
-        return None;
-    }
-    // `PhpType::union` does not normalise, so a lone survivor has to be
-    // unwrapped here rather than left as a one-member union.
-    match kept.len() {
-        1 => kept.into_iter().next(),
-        _ => Some(PhpType::union(kept)),
-    }
+    filter_union_members(ty, |m| union_member_names_class(m, survives))
 }
 
 /// Drop the `type_string` union alternatives that name a class an
@@ -736,22 +715,26 @@ fn subtract_classes_from_union(ty: &PhpType, ruled_out: &impl Fn(&str) -> bool) 
             None => None,
         };
     }
+    // Nothing left, or the ruled-out class was never named here and the
+    // union says nothing about what narrowing concluded.  Either way
+    // `filter_union_members` reports `None` and the caller drops the
+    // entry, as it did before this refinement.
+    filter_union_members(ty, |m| !union_member_names_class(m, ruled_out))
+}
+
+/// Keep the union members `keep` accepts, or `None` when that changes
+/// nothing: either every member survives, or none does.
+///
+/// `PhpType::union` does not normalise, so a lone survivor is unwrapped
+/// rather than left as a one-member union.
+fn filter_union_members(ty: &PhpType, keep: impl Fn(&PhpType) -> bool) -> Option<PhpType> {
     let TypeKind::Union(members) = ty.kind() else {
         return None;
     };
-    let kept: Vec<PhpType> = members
-        .iter()
-        .filter(|m| !union_member_names_class(m, ruled_out))
-        .cloned()
-        .collect();
-    // Nothing left, or the ruled-out class was never named here and the
-    // union says nothing about what narrowing concluded.  Either way the
-    // caller drops the entry, as it did before this refinement.
+    let kept: Vec<PhpType> = members.iter().filter(|m| keep(m)).cloned().collect();
     if kept.is_empty() || kept.len() == members.len() {
         return None;
     }
-    // `PhpType::union` does not normalise, so a lone survivor has to be
-    // unwrapped here rather than left as a one-member union.
     match kept.len() {
         1 => kept.into_iter().next(),
         _ => Some(PhpType::union(kept)),

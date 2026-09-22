@@ -23,8 +23,9 @@ use super::tag_kind::TagKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use crate::atom::atom;
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
-use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
+use crate::types::{AssertionKind, ParameterInfo, PhpVersion, TypeAssertion};
 
 use super::parser::{
     DocblockInfo, TagInfo, TagValueInfo, collapse_newlines, parse_docblock_for_tags,
@@ -762,6 +763,78 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
     }
 
     None
+}
+
+/// Merge a function or method's `@param` docblock tags into its parsed
+/// native parameters: richer docblock types, per-parameter descriptions,
+/// `@param-closure-this` binding, and extra `@param` tags naming a
+/// parameter `func_get_args()` reads that the native signature has none
+/// for.
+///
+/// A `@param` tag that omits its variable name (common in
+/// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
+/// by position instead, once the name-based pass leaves a parameter
+/// unenriched.
+pub(crate) fn merge_param_docblock_into_parameters(
+    info: &DocblockInfo,
+    parameters: &mut Vec<ParameterInfo>,
+) {
+    for param in parameters.iter_mut() {
+        let param_doc_type = extract_param_raw_type_from_info(info, &param.name);
+        if let Some(ref doc_type) = param_doc_type {
+            let effective = resolve_effective_type_typed(param.type_hint.as_ref(), Some(doc_type));
+            if effective.is_some() {
+                param.type_hint = effective;
+            }
+        }
+        param.description = extract_param_description_from_info(info, &param.name);
+    }
+
+    // Positional fallback for `@param` tags that omit the parameter name.
+    // When the name-based merge above didn't enrich a parameter's type
+    // hint, try matching unnamed `@param` tags by position.
+    let positional_tags = extract_param_types_positional_from_info(info);
+    for (idx, param) in parameters.iter_mut().enumerate() {
+        let already_enriched = extract_param_raw_type_from_info(info, &param.name).is_some();
+        if already_enriched {
+            continue;
+        }
+        if let Some((None, doc_type)) = positional_tags.get(idx) {
+            let effective = resolve_effective_type_typed(param.type_hint.as_ref(), Some(doc_type));
+            if effective.is_some() {
+                param.type_hint = effective;
+            }
+        }
+    }
+
+    // Populate `closure_this_type` from `@param-closure-this` tags so
+    // that `$this` inside a closure argument resolves to the declared
+    // type instead of the lexical class.
+    for (this_type, param_name) in extract_param_closure_this_from_info(info) {
+        if let Some(param) = parameters.iter_mut().find(|p| p.name == param_name) {
+            param.closure_this_type = Some(this_type);
+        }
+    }
+
+    // Append extra `@param` tags that don't match any native parameter.
+    // These document parameters accessed via `func_get_args()` or
+    // similar mechanisms and should appear in hover/signature.
+    for (tag_name, tag_type) in extract_all_param_tags_from_info(info) {
+        if !parameters.iter().any(|p| p.name == tag_name) {
+            let description = extract_param_description_from_info(info, &tag_name);
+            parameters.push(ParameterInfo {
+                name: atom(&tag_name),
+                is_required: false,
+                type_hint: Some(tag_type),
+                native_type_hint: None,
+                description,
+                default_value: None,
+                is_variadic: false,
+                is_reference: false,
+                closure_this_type: None,
+            });
+        }
+    }
 }
 
 /// Extract all `@param` tags from a docblock as `(name, type)` pairs.

@@ -2,8 +2,7 @@
 //! call that changes the type the walker tracks for its receiver, the way
 //! an assignment changes a variable's type.
 
-use crate::common::create_test_backend;
-use phpantom_lsp::Backend;
+use crate::common::{create_test_backend, hover_at, hover_text};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -30,20 +29,6 @@ final class Pen { public function write(): string { return ''; } }
 final class Pencil { public function sketch(): string { return ''; } }
 "#;
 
-fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
-    backend.update_ast(uri, content);
-    backend
-        .handle_hover(uri, content, Position { line, character })
-        .expect("expected hover")
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
-
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 /// After `$box->replace('x')`, the walker must read `$box` as
@@ -66,7 +51,7 @@ function f(MutableBox $box): void {{
     );
 
     // Hover on `$box;` on the last statement of `f`.
-    let hover = hover_at(&backend, uri, &content, 26, 4);
+    let hover = hover_at(&backend, uri, &content, 26, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("MutableBox<string>"),
@@ -97,7 +82,7 @@ function f(MutableBox $box): void {{
     );
 
     // Hover on `$box;`, the statement before the `replace()` call.
-    let hover = hover_at(&backend, uri, &content, 25, 4);
+    let hover = hover_at(&backend, uri, &content, 25, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("MutableBox<int>"),
@@ -131,7 +116,7 @@ function f(MutableBox $box): void {{
     backend.update_ast(uri, &content);
 
     // `@return T` on get() must resolve through the post-call binding.
-    let hover = hover_at(&backend, uri, &content, 26, 11);
+    let hover = hover_at(&backend, uri, &content, 26, 11).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("Pencil"),
@@ -183,7 +168,7 @@ function f(Box $box): void {
 }
 "#;
 
-    let hover = hover_at(&backend, uri, content, 16, 4);
+    let hover = hover_at(&backend, uri, content, 16, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("Box<int>"),

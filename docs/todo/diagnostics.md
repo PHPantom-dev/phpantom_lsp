@@ -238,3 +238,165 @@ places, so retiring it wants the resolver to answer `list<X>` for the
 shapes that genuinely are lists (literal arrays, `array_values()`,
 appended-to locals) first. Pay for it with resolver precision, the same
 way the supertype-where-subtype hatch was retired.
+
+---
+
+## D19. `invalid_member_access` cannot tell a property read from a write
+
+**Impact: Low-Medium · Complexity: Medium**
+
+PHP dispatches an unreachable property to a different magic method
+depending on what is being done to it: `__get` for a read, `__set` for a
+write, `__isset` for `isset()`, and `__unset` for `unset()`. The span the
+visibility check runs on records only that a property was accessed, so
+the check cannot pick the handler that actually applies and treats the
+presence of any of the four as reason enough to stand down.
+
+The result is a missed report rather than a wrong one. A class that
+declares `__set` but no `__get` silences a read it would in fact fatal
+on, and the same holds for every other mismatched pairing.
+
+**Fix:** Carry the operation on the `MemberAccess` span — read, write,
+`isset`, `unset` — the way `readonly_writes.rs` recovers write targets
+from the AST, and require the handler that matches it. The same
+information would let the readonly check drop its own separate walk.
+
+---
+
+## D20. `Foo::$bar` and `Foo::bar` are the same span
+
+**Impact: Low · Complexity: Medium**
+
+Symbol extraction strips the `$` from a static property access
+(`member_access.rs`) and records only a name plus `is_static`, so a
+static property and a class constant of the same name are
+indistinguishable downstream. Every consumer has to guess a precedence;
+the visibility check tries the constant first.
+
+Two classes of mistake follow, both needing a class that declares a
+constant and a static property under one name:
+
+```php
+class Collision {
+    private const token = 'constant';
+    public static string $token = 'property';
+}
+
+echo Collision::$token;   // reported as a private constant
+```
+
+and the reverse pairing, where a genuinely unreachable static property
+is passed off as a public constant and nothing is reported.
+
+**Fix:** Record the member kind the syntax actually names — instance
+property, static property, constant, or method — rather than a name and
+a static flag.
+
+---
+
+## D21. A union of an unreachable and a missing member is reported by neither check
+
+**Impact: Low · Complexity: Medium-High**
+
+`Known|Other` where `Known::$x` is private and `Other` has no `$x` at all
+fails on every runtime branch, and nothing reports it. Both checks are
+conservative in the same direction and each assumes the other covers what
+it declines to judge: the unknown-member check stays silent because the
+member exists on one branch, and the visibility check stays silent
+because it does not exist on the other.
+
+A related gap sits one layer earlier: the resolver hands the diagnostics
+only the branches it could load and drops the rest, so neither check can
+see that a union had a branch it failed to resolve. Any verdict that
+wants to distinguish "no branch permits this" from "we could not read
+one of the branches" needs that information preserved.
+
+**Fix:** Give the branches of a resolved union a verdict of their own —
+accessible, inaccessible, missing, unresolved — instead of collapsing
+them to a list of loaded classes, and decide the union once from those.
+
+---
+
+## D22. Member provenance is recomputed instead of recorded
+
+**Impact: Medium · Complexity: Medium-High**
+
+The inheritance merge knows which class each member it folds in came
+from — `merge_traits_into()` is handed the host FQN — and drops that on
+the floor. `MethodInfo`, `PropertyInfo`, and `ConstantInfo` have no field
+for it, so the assembled class says what a class *has* and never who
+declared it.
+
+Every check that needs the declaring class therefore recomputes it by
+walking the raw hierarchy, and every such walk is a partial
+reimplementation of the merge's own rules. `invalid_member_access` has
+one, and it is already known to be incomplete: it does not apply
+`trait_aliases`, so a member a `use` clause renamed is untraceable and
+the access goes unreported.
+
+```php
+trait Opens { public function open(): void {} }
+
+class Vault { use Opens { open as private hidden; } }
+
+class Intruder {
+    public function probe(Vault $vault): void
+    {
+        $vault->hidden();   // fatal at runtime, reported by nothing
+    }
+}
+```
+
+The access has to be written inside a class to show the gap. From
+outside every class the check reports anyway, because no scope can reach
+a non-public member whoever declared it, and it falls back to naming the
+receiver when the declaration cannot be traced.
+
+**Fix:** Record the declaring class during the merge and let the checks
+read it, rather than each one re-deriving the merge's rules. The cost is
+a field on every member across the whole index, so it wants measuring
+against the memory the index already uses before it is committed to.
+
+---
+
+## D23. A rebound closure's scope is added to the lexical one rather than replacing it
+
+**Impact: Low-Medium · Complexity: Medium**
+
+A closure can run with a different class as its scope than the one it is
+written in — Laravel's `Macroable`, anything through `Closure::bind`, and
+anything a `@param-closure-this` tag describes. The resolver already
+works this out. The visibility check does not read it; it infers from the
+subject text that `$this`, `self`, or `static` names a binding and adds
+the receiver as an *additional* scope, keeping the enclosing class as
+well.
+
+Adding rather than replacing is safe in the direction that matters — it
+cannot invent a report — but it hides one:
+
+```php
+class Owner {
+    private static function hidden(): void {}
+
+    public function boot(): void
+    {
+        Target::macro('x', function (): void {
+            self::hidden();      // fatal: the closure's scope is Target
+        });
+    }
+}
+
+class Target extends Owner {
+    /** @param-closure-this static $macro */
+    public static function macro(string $name, callable $macro): void {}
+}
+```
+
+The closure is written inside `Owner`, so the enclosing class permits the
+call, while at runtime the scope is `Target` and a parent's private
+member is out of reach.
+
+**Fix:** Take the bound class from the resolver, which already computes
+it, and let it replace the enclosing class rather than joining it.
+Inferring a binding from the spelling of the subject is guessing at
+something the type engine has already decided.

@@ -616,18 +616,6 @@ still partially lack:
   empty string as the value). No fix when the group file itself doesn't
   exist yet; that case still just diagnoses.
 
-#### L25. Storage disk name strings
-
-**Impact: Low-Medium · Complexity: Low**
-
-`Storage::disk('...')` and the `#[Storage]` container attribute already
-complete against `filesystems.disks.*`, navigate to the disk's entry in
-`config/filesystems.php`, and flag an unknown disk. `Storage::fake()`,
-`persistentFake()`, and `forgetDisk()` still name a disk with none of
-that: their return type is patched to `FilesystemAdapter`, but the
-disk-name argument itself gets no completion, go-to-definition, or
-diagnostic.
-
 #### L27. Legacy `Controller@method` action strings
 
 **Impact: Low · Complexity: Low**
@@ -688,14 +676,15 @@ moving the Blade file — defer that one until the rest is in place.
 
 **Impact: Medium · Complexity: Medium**
 
-L25 (storage disks) is one instance of a general pattern: a method
-argument names an entry under a known config subtree, and the config
-scanner already parses those files. Auth guards (`auth('...')`,
+Storage disks are one instance of a general pattern: a method argument
+names an entry under a known config subtree, and the config scanner
+already parses those files. Auth guards (`auth('...')`,
 `Auth::guard()`, `->middleware('auth:web')`), cache stores
 (`Cache::store()`), log channels (`Log::channel()`), and storage disks
-(L25) already complete against their config subtree — but all of them
-route through the generic `LaravelStringKind::Config` kind rather than
-a dedicated one, so they get completion plus the shared config
+(`Storage::disk()`, test fakes, disk eviction, and `#[Storage]`) already
+complete against their config subtree — but all of them route through
+the generic `LaravelStringKind::Config` kind rather than a dedicated
+one, so they get completion plus the shared config
 diagnostics/go-to-definition and nothing family-specific (a "cache
 store" hovers with the same generic wording as any other config key).
 `Log::stack()` (array values) isn't recognized at all. Generalize into
@@ -839,25 +828,6 @@ where possible and otherwise leaving placeholders.
 pattern used by other "declare the missing thing" fixes;
 `virtual_members/laravel/route_names.rs` for the existing scanner
 this reuses for the diagnostic and the insertion point.
-
-#### L52. "Create missing view" quick-fix for an unresolved view name
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The `invalid_laravel_view` diagnostic (`diagnostics/mod.rs`, fed by the
-same view-key set completion and go-to-definition already resolve
-against) has no accompanying fix, the same gap L50 fixes for route
-names. The official `laravel/lsp` already ships this exact action:
-on an unresolved `view('name')`/`View::make('name')` string it offers
-"Create missing view", which creates
-`resources/views/{name with dots as slashes}.blade.php` (respecting a
-project's configured view paths, not just the default) via a
-`workspace/applyEdit` document-create change, then opens the new file.
-
-**Where to look:** `code_actions/` for the code-action registration
-pattern used by other "declare the missing thing" fixes; wherever the
-view-key set backing `invalid_laravel_view` and view-name completion
-is built, for the configured view roots to create the file under.
 
 #### L51. "Convert facade call to dependency injection" refactor
 

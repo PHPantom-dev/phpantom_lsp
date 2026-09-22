@@ -2,6 +2,13 @@ use super::docblock::is_navigable_type;
 use super::extraction::extract_symbol_map;
 use super::*;
 
+/// Pair a map with the source it was extracted from, for the subject-text
+/// assertions below.
+fn mapped<'a>(map: &SymbolMap, php: &'a str) -> MappedSource<'a> {
+    map.source(php)
+        .expect("the map under test was extracted from this text")
+}
+
 // ── SymbolMap::lookup tests ─────────────────────────────────────────
 
 fn make_span(start: u32, end: u32, name: &str) -> SymbolSpan {
@@ -138,6 +145,23 @@ fn parse_and_extract(php: &str) -> SymbolMap {
 }
 
 #[test]
+fn a_map_refuses_to_pair_with_a_different_revision() {
+    let php = "<?php\n$service->handle();\n";
+    let map = parse_and_extract(php);
+    assert!(map.source(php).is_some());
+
+    // Every shape of "different text" the same URI can be handed: an
+    // edited buffer, and a Blade template whose map describes the far
+    // longer virtual PHP it lowers to.
+    assert!(map.source("<?php\n$svc->handle();\n").is_none());
+    assert!(map.source("<?php\n").is_none());
+    assert!(
+        map.source(&format!("{php}// appended\n")).is_none(),
+        "a longer revision is a different revision too"
+    );
+}
+
+#[test]
 fn class_declaration_produces_class_declaration() {
     let php = "<?php\nclass Foo {}\n";
     let map = parse_and_extract(php);
@@ -254,7 +278,7 @@ fn method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "bar");
-        assert_eq!(subject_text.as_str(php), "$this");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
         assert!(!is_static);
         assert!(is_method_call);
     } else {
@@ -278,7 +302,7 @@ fn static_method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "create");
-        assert_eq!(subject_text.as_str(php), "self");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
         assert!(is_static);
         assert!(is_method_call);
     } else {
@@ -421,7 +445,10 @@ fn chained_method_call_subject_text() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "find");
-        assert_eq!(subject_text.as_str(php), "$this->getService()");
+        assert_eq!(
+            subject_text.as_str(mapped(&map, php)),
+            "$this->getService()"
+        );
     } else {
         panic!("Expected MemberAccess");
     }
@@ -3693,7 +3720,7 @@ fn see_tag_member_method() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(is_static, "@see members are treated as static access");
     } else {
@@ -3736,7 +3763,7 @@ fn see_tag_member_hash_fragment() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(!is_static, "@see `#` fragments are instance members");
     } else {
@@ -3776,7 +3803,7 @@ fn see_tag_member_property() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "channel_type");
         assert!(is_static);
     } else {
@@ -3808,7 +3835,7 @@ fn see_tag_member_constant() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "STATUS_PENDING");
         assert!(is_static);
     } else {
@@ -4149,7 +4176,7 @@ fn see_tag_self_member_spans_emitted() {
             docblock_ref,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "self");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
             assert_eq!(member_name, "bar");
             assert!(*is_static);
             assert_eq!(*docblock_ref, DocblockMemberRef::See);
@@ -4508,7 +4535,10 @@ fn array_callable_class_const_emits_member_access() {
             is_method_call,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "IndexPageController");
+            assert_eq!(
+                subject_text.as_str(mapped(&map, php)),
+                "IndexPageController"
+            );
             assert_eq!(member_name, "indexPage");
             assert!(*is_static);
             assert!(*is_method_call);
@@ -4531,7 +4561,7 @@ fn array_callable_variable_emits_instance_member_access() {
             is_static,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "$this");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
             assert_eq!(member_name, "handle");
             assert!(!*is_static);
         }
@@ -4601,7 +4631,259 @@ fn real_member_access_is_not_marked_as_array_callable() {
     }
 }
 
-// ── Container binding key spans ─────────────────────────────────────
+// ── Storage disk config-key spans ───────────────────────────────────
+
+/// Every config-key span whose canonical path names a filesystem disk, with
+/// its access flags, in source order.
+fn storage_disk_keys(map: &SymbolMap) -> Vec<(String, bool, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                is_write,
+                is_optional,
+            } if key.starts_with("filesystems.disks.") => {
+                Some((key.clone(), *is_write, *is_optional))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_storage_disk_method_records_a_canonical_config_key() {
+    for (method, is_write, is_optional) in [
+        ("disk", false, false),
+        ("fake", true, false),
+        ("persistentFake", true, false),
+        ("forgetDisk", false, true),
+    ] {
+        let php = format!("<?php\nStorage::{method}('archive');\n");
+        let map = parse_and_extract(&php);
+        assert_eq!(
+            storage_disk_keys(&map),
+            vec![(
+                "filesystems.disks.archive".to_string(),
+                is_write,
+                is_optional,
+            )],
+            "Storage::{method}() should name the configured disk"
+        );
+
+        let offset = php.find("archive").unwrap() as u32;
+        let span = map.lookup(offset).expect("disk name should have a span");
+        assert_eq!(span.start, offset);
+        assert_eq!(span.end, offset + "archive".len() as u32);
+    }
+}
+
+#[test]
+fn storage_disk_methods_select_reordered_named_arguments() {
+    let php = r#"<?php
+Storage::disk(name: 'archive');
+Storage::fake(config: ['visibility' => 'private'], disk: 'testing');
+Storage::persistentFake(config: [], disk: 'persistent');
+Storage::forgetDisk(disk: 'forgotten');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), false, false),
+            ("filesystems.disks.testing".to_string(), true, false),
+            ("filesystems.disks.persistent".to_string(), true, false,),
+            ("filesystems.disks.forgotten".to_string(), false, true),
+        ]
+    );
+}
+
+#[test]
+fn forget_disk_accepts_scalar_and_both_array_spellings() {
+    let php = r#"<?php
+Storage::forgetDisk('scalar');
+Storage::forgetDisk(['archive', 'label' => 'backup', $dynamic, ...$more]);
+Storage::forgetDisk(array('legacy', 'label' => 'cold', $dynamic));
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.scalar".to_string(), false, true),
+            ("filesystems.disks.archive".to_string(), false, true),
+            ("filesystems.disks.backup".to_string(), false, true),
+            ("filesystems.disks.legacy".to_string(), false, true),
+            ("filesystems.disks.cold".to_string(), false, true),
+        ]
+    );
+}
+
+#[test]
+fn fully_qualified_storage_facade_records_a_disk_key() {
+    let php = r#"<?php
+\Illuminate\Support\Facades\Storage::fake('archive');
+\ILLUMINATE\SUPPORT\FACADES\STORAGE::DISK('backup');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), true, false),
+            ("filesystems.disks.backup".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn imported_storage_facade_names_work_without_matching_a_local_homonym() {
+    let imported = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Storage;
+Storage::disk('archive');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(imported)),
+        vec![("filesystems.disks.archive".to_string(), false, false,)]
+    );
+
+    let aliased = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Storage as LaravelStorage;
+LaravelStorage::fake('testing');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(aliased)),
+        vec![("filesystems.disks.testing".to_string(), true, false,)]
+    );
+
+    let homonym = r#"<?php
+namespace App;
+class Storage {}
+Storage::disk('local');
+"#;
+    assert!(storage_disk_keys(&parse_and_extract(homonym)).is_empty());
+
+    let root_qualified = r#"<?php
+namespace App;
+\Storage::disk('root-alias');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(root_qualified)),
+        vec![("filesystems.disks.root-alias".to_string(), false, false,)]
+    );
+}
+
+/// The completion side offers disk names for a group import, so the symbol
+/// map has to record them there too — otherwise the name it inserts has no
+/// hover, no definition and no references.
+#[test]
+fn group_imported_storage_facades_and_attributes_record_a_disk_key() {
+    let facade = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\{Cache, Storage as Disks};
+Disks::disk('archive');
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(facade)),
+        vec![("filesystems.disks.archive".to_string(), false, false)]
+    );
+
+    let attribute = r#"<?php
+namespace App;
+use Illuminate\Container\Attributes\{Config, Storage};
+#[Storage('backup')]
+class GroupImported {}
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(attribute)),
+        vec![("filesystems.disks.backup".to_string(), false, false)]
+    );
+}
+
+#[test]
+fn unrelated_storage_classes_receivers_and_methods_name_no_disk() {
+    for call in [
+        "OtherStorage::disk('archive')",
+        "StorageManager::disk('archive')",
+        "\\Acme\\Storage::disk('archive')",
+        "Storage::extend('archive', fn () => null)",
+        "$storage->disk('archive')",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            storage_disk_keys(&map).is_empty(),
+            "`{call}` should not name a Laravel storage disk"
+        );
+    }
+}
+
+#[test]
+fn unreadable_storage_disk_arguments_name_no_disk() {
+    for call in [
+        "Storage::disk()",
+        "Storage::disk('')",
+        "Storage::disk($disk)",
+        "Storage::disk('arch' . 'ive')",
+        "Storage::disk(\"disk-{$id}\")",
+        "Storage::fake(config: [], disk: $disk)",
+        "Storage::forgetDisk([$disk, ...$more])",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert!(
+            storage_disk_keys(&map).is_empty(),
+            "`{call}` should not record a runtime-only disk name"
+        );
+    }
+}
+
+#[test]
+fn storage_container_attribute_records_a_canonical_config_key() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Storage;
+#[Storage(disk: 'archive')]
+class ImportedStorage {}
+#[\Illuminate\Container\Attributes\Storage('backup')]
+class QualifiedStorage {}
+"#;
+    assert_eq!(
+        storage_disk_keys(&parse_and_extract(php)),
+        vec![
+            ("filesystems.disks.archive".to_string(), false, false),
+            ("filesystems.disks.backup".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn unrelated_storage_attributes_name_no_disk() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Config;
+#[Storage(disk: 'local')]
+class LocalHomonym {}
+#[\Acme\Storage(disk: 'acme')]
+class OtherNamespace {}
+"#;
+    assert!(storage_disk_keys(&parse_and_extract(php)).is_empty());
+}
+
+#[test]
+fn generic_config_container_attribute_behavior_is_preserved() {
+    let php = r#"<?php
+use Illuminate\Container\Attributes\Config;
+#[Config('app.name')]
+class Service {}
+"#;
+    let map = parse_and_extract(php);
+    assert!(map.spans.iter().any(|span| matches!(
+        &span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::Config,
+            key,
+            is_write: false,
+            is_optional: false,
+        } if key == "app.name"
+    )));
+}
+
+// ── Container binding key spans ────────────────────────────────────
 
 /// Every `ContainerBinding` key the map records, with whether the call
 /// registers it, in source order.
@@ -4861,7 +5143,11 @@ fn the_checked_model_is_recorded_in_each_spelling() {
             .first()
             .unwrap_or_else(|| panic!("`{subject}` should be recorded as the checked model"));
         assert_eq!(recorded.is_static, is_static, "for `{subject}`");
-        assert_eq!(recorded.subject_text.as_str(&php), text, "for `{subject}`");
+        assert_eq!(
+            recorded.subject_text.as_str(mapped(&map, &php)),
+            text,
+            "for `{subject}`"
+        );
     }
 }
 
@@ -4913,7 +5199,7 @@ fn authorize_for_user_reads_its_shifted_arguments() {
     assert_eq!(
         map.gate_subjects
             .first()
-            .map(|s| s.subject_text.as_str(php)),
+            .map(|s| s.subject_text.as_str(mapped(&map, php))),
         Some("$post")
     );
 
@@ -5137,6 +5423,60 @@ fn get_many_names_every_config_key_it_lists() {
     assert_eq!(
         string_keys_of(&map, LaravelStringKind::Config),
         vec!["app.name".to_string()]
+    );
+}
+
+/// Every config key the map records, with whether the call declares it, in
+/// source order.
+fn config_keys_written(map: &SymbolMap) -> Vec<(String, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::Config,
+                key,
+                is_write,
+                ..
+            } => Some((key.clone(), *is_write)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The array form of a `set()`-shaped call declares every key it lists: the
+/// keys are on the left, and the value each is given says nothing.
+#[test]
+fn the_array_form_of_a_config_write_declares_every_key_it_lists() {
+    for call in [
+        "config(['app.name' => 'Acme', 'app.timezone' => 'UTC'])",
+        "Config::set(['app.name' => 'Acme', 'app.timezone' => 'UTC'])",
+        "config()->set(array('app.name' => 'Acme', 'app.timezone' => 'UTC'))",
+    ] {
+        let map = parse_and_extract(&format!("<?php\n{call};\n"));
+        assert_eq!(
+            config_keys_written(&map),
+            vec![
+                ("app.name".to_string(), true),
+                ("app.timezone".to_string(), true),
+            ],
+            "`{call}` should declare both keys"
+        );
+    }
+}
+
+/// The single-key spellings are unchanged by the array form sharing their
+/// path: `config('app.name')` still reads, and `set()` still writes.
+#[test]
+fn the_single_key_form_of_config_still_reads_and_writes() {
+    assert_eq!(
+        config_keys_written(&parse_and_extract("<?php\nconfig('app.name');\n")),
+        vec![("app.name".to_string(), false)]
+    );
+    assert_eq!(
+        config_keys_written(&parse_and_extract(
+            "<?php\nConfig::set('app.name', 'Acme');\n"
+        )),
+        vec![("app.name".to_string(), true)]
     );
 }
 

@@ -26,6 +26,8 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    env:
+      MACOS_RELEASE_SIGNING_ENABLED: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_CERTIFICATE_PASSWORD != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_ID != '' && secrets.APPLE_ID_PASSWORD != '' && secrets.APPLE_TEAM_ID != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -114,8 +116,18 @@ jobs:
 
       # --- macOS: import certificate and sign the binary ---
 
+      - name: Require signing credentials on the upstream repository
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED != 'true' && github.repository_owner == 'PHPantom-dev'
+        run: |
+          echo "::error::Apple signing credentials are missing or incomplete. Set APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_ID_PASSWORD and APPLE_TEAM_ID."
+          exit 1
+
+      - name: Report unsigned macOS build
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED != 'true'
+        run: echo "::warning::Apple signing credentials are unavailable; packaging an unsigned, un-notarized macOS binary that Gatekeeper will flag."
+
       - name: Import Apple Developer ID certificate
-        if: matrix.macos_sign
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED == 'true'
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -144,7 +156,7 @@ jobs:
           rm certificate.p12
 
       - name: Sign binary (macOS)
-        if: matrix.macos_sign
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED == 'true'
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
         run: |
@@ -157,7 +169,7 @@ jobs:
             target/${{ matrix.target }}/release/phpantom_lsp
 
       - name: Notarize binary (macOS)
-        if: matrix.macos_sign
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED == 'true'
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_ID_PASSWORD: ${{ secrets.APPLE_ID_PASSWORD }}
@@ -177,7 +189,7 @@ jobs:
           rm phpantom_lsp-notarize.zip
 
       - name: Delete temporary keychain
-        if: matrix.macos_sign && always()
+        if: matrix.macos_sign && env.MACOS_RELEASE_SIGNING_ENABLED == 'true' && always()
         run: |
           security delete-keychain phpantom.keychain || true
 

@@ -2,48 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, find_action_titled, get_code_actions_at};
 use tower_lsp::lsp_types::*;
-
-/// Helper: send a code action request at the given line/character.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
-
-/// Find the "Extract interface" code action from a list.
-fn find_extract_interface(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title == "Extract interface" => Some(ca),
-        _ => None,
-    })
-}
 
 #[test]
 fn offered_on_class_with_public_methods() {
@@ -68,8 +28,8 @@ class User
 
     // Cursor on the class body.
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 5, 4);
-    let action = find_extract_interface(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 4);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_some(), "Should offer Extract interface");
 }
 
@@ -86,8 +46,8 @@ interface UserInterface
     let backend = create_test_backend();
 
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 3, 4);
-    let action = find_extract_interface(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 4);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_none(), "Should not offer on interfaces");
 }
 
@@ -104,8 +64,8 @@ class User
     let backend = create_test_backend();
 
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 3, 4);
-    let action = find_extract_interface(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 3, 4);
+    let action = find_action_titled(&actions, "Extract interface");
     assert!(action.is_none(), "Should not offer without public methods");
 }
 
@@ -132,8 +92,8 @@ class User
     let backend = create_test_backend();
 
     backend.update_ast(uri, content);
-    let actions = get_code_actions(&backend, uri, content, 5, 4);
-    let action = find_extract_interface(&actions).expect("should have action");
+    let actions = get_code_actions_at(&backend, uri, content, 5, 4);
+    let action = find_action_titled(&actions, "Extract interface").expect("should have action");
 
     // Resolve the deferred action.
     backend

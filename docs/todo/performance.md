@@ -913,6 +913,53 @@ lengths where it shows.
 
 ---
 
+## P56. Folding array shapes across branches costs superlinear time
+
+**Impact: Low · Complexity: Medium**
+
+`join_shapes` keeps a variable at one tracked shape no matter how many
+branches write to it, which is what stops a merge from having to compare
+a variant per branch pairwise. The fold itself is not free, though:
+`join_shape_entries` builds a fresh `Vec<ShapeEntry>` and interns a new
+shape on every merge, so a variable that gains a key per branch pays for
+hashing a shape whose entry count grows with the branch count. The work
+is quadratic in the number of conditional writes.
+
+Measured on a release build, over a generated function assigning a
+distinct array shape under each of N sequential `if`s:
+
+| N writes | analyse wall clock |
+| -------- | ------------------ |
+| 400      | 0.30s              |
+| 800      | 0.90s              |
+| 1200     | 2.10s              |
+
+Doubling the writes roughly triples the time, and the same file with the
+shapes left un-merged (each write pushing its own alternative instead)
+runs in half of that, so folding is the more expensive of the two
+strategies at these sizes. It is still the right default: the variant-per-
+branch alternative grows the *type* without bound, which costs every
+later consumer rather than just the merge. What is missing is the cheap
+exit that would make the fold linear in the common case:
+
+1. **Skip the rebuild when nothing changes.** Most merges join a shape
+   with one whose keys it already covers, and the result is the existing
+   shape. Comparing entry lists before allocating would return the
+   interned handle unchanged rather than rebuilding and re-hashing it.
+
+2. **Fold in place along a chain of merges.** A run of merges against the
+   same variable rebuilds the accumulator from scratch each time. Joining
+   into a reusable buffer and interning once at the end of the run would
+   drop the repeated hashing.
+
+**Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
+in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
+`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+does not reach the sizes where this shows; generated code and long
+procedural report builders do.
+
+---
+
 ## P50. Cache the top-level scope for `global` keyword resolution
 
 **Impact: Low-Medium · Complexity: High**
@@ -1080,3 +1127,122 @@ through a separate flag, so the cached value has to carry both.
 `type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
 path) and `narrowed_by_rewalk` in
 `type_engine/variable/rhs_resolution/mod.rs`.
+
+---
+
+## P55. A signature edit re-resolves every member-reference candidate file
+
+**Impact: Medium-High · Complexity: Medium**
+
+An edit that only reparses files now rescans those files alone: a cached
+member result records which files went stale, and the recomputation
+searches those and merges the rest of the cached locations back in.
+Typing inside a method body costs no workspace search at all.
+
+A change to a *signature* is still a blanket invalidation, from the
+`any_signature_changed || any_function_changed` branch of `update_ast`.
+That branch is correct and cannot be narrowed by which classes changed:
+a chain such as `$b->makeC()->handle()` resolves its receiver through a
+class the file never names, so the files whose receivers a change can
+affect are not the files that mention it. The cost lands in two places:
+
+- The branch clears `resolved_members`, so the next search rebuilds the
+  per-file receiver layer for every candidate file rather than reusing
+  it. On a large application, with a common member name (`handle`,
+  `get`, `name`) a candidate in thousands of files, one such burst is
+  tens of CPU-seconds even though most of those files were not touched.
+- `member_declaration_references_batch` calls
+  `reference_file_content_arc` per candidate file, which falls through
+  to `get_file_content_arc`, an uncached `std::fs::read_to_string` for
+  any file not open in the editor.
+
+### Fix
+
+**Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
+already packs the resolved receiver atoms per symbol-span index; it does
+not carry the LSP `Range` for the access, which is the only other thing
+`scan_file` needs the file's text for. Storing the range alongside the
+targets (16 bytes per access) would let a warm candidate file be
+filtered without reading it at all, which also removes the file reads
+above.
+
+That leaves the layer being cleared wholesale on a signature change.
+Before narrowing it, measure how much of a burst is the rebuild and how
+much is the scan: the layer is shared with Find References, so a
+narrowing that gets it wrong shows up as missing references, not as a
+slow lens.
+
+**Where to look:** `Staleness` and `compute_pending_member_ref_counts`
+in `reference_counts.rs`, `ResolvedMemberFile` in `reference_index.rs`,
+`member_declaration_references_batch_in` in `references/members.rs`,
+`clear_resolved_member_files` in `parser/ast_update.rs`, and
+`get_file_content_arc` in `backend/file_access.rs`.
+
+---
+
+## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
+
+**Impact: Medium · Complexity: Medium-High**
+
+A `ClassInfo`'s members are `SharedVec`s, so the struct is often called
+cheap to clone, but it still owns a `method_index` with one entry per
+method plus a dozen other `Vec`/`AtomMap` fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.
+
+The narrowing layer pays that on every crossing, in both directions:
+
+- `ResolvedType::apply_narrowing` collects `arc.as_ref().clone()` for
+  every candidate on the way in, and pushes survivors back through
+  `from_class`, which wraps each copy in a *fresh* `Arc`. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every `instanceof`,
+  `assert`, `in_array`, and identity guard the forward walk sees.
+- `apply_property_narrowing` unwraps the whole vector with
+  `Arc::unwrap_or_clone` and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  `Vec<ClassInfo>`. The `Arc`s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.
+- `resolved_type_with_lookup` clones a class out of the index only to
+  hand it to `from_both`, which allocates a new `Arc` around the copy.
+  Fifteen call sites, essentially every method-call return type.
+- `narrowing/resolve.rs`, `narrowing/instanceof.rs`, and
+  `narrowing/assertions.rs` repeat the pattern, the last one deep-copying
+  a `MethodInfo` out of its `Arc`.
+
+`ResolvedType::from_arc` and `from_both_arc` already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+`Vec<ClassInfo>` to `Vec<Arc<ClassInfo>>` — `apply_narrowing`'s closure,
+the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
+`resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
+is only allocated where one is genuinely constructed.
+`apply_property_narrowing`'s unwrap/rewrap then disappears.
+
+This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
+on a different path, and it is worth measuring the two together.
+
+**Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
+`from_both`, and `from_both_arc` in `types/resolved_type.rs`;
+`apply_property_narrowing` in `type_engine/resolver/property_narrowing.rs`;
+`resolved_type_with_lookup` in
+`type_engine/variable/rhs_resolution/mod.rs`;
+`type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.
+
+## P58. A member-completion cache hit copies the whole item list
+
+**Impact: Low · Complexity: Low**
+
+The member-completion cache exists so that each keystroke in
+`$model->wh…` reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached `Vec<CompletionItem>` wholesale, which for an
+Eloquent model is several hundred items each carrying several `String`s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.
+
+Store an `Arc<Vec<CompletionItem>>` and have the filter take a slice,
+cloning only the items that survive.
+
+**Where to look:** `member_completion_cache` and
+`filter_member_completion_items` in
+`completion/handler/member_access.rs`.

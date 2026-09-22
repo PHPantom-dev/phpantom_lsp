@@ -4,7 +4,6 @@
 /// (class bodies, function/method bodies, closures, arrays, control-flow
 /// blocks, argument/parameter lists), and scans trivia for doc-block and
 /// consecutive single-line comment ranges.
-use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
@@ -16,27 +15,41 @@ use crate::Backend;
 impl Backend {
     /// Compute folding ranges for the given file content.
     ///
-    /// Re-parses the source with `mago_syntax` (the raw AST is not cached)
-    /// and walks every statement/expression to emit `FoldingRange` entries.
-    pub fn handle_folding_range(&self, content: &str) -> Option<Vec<FoldingRange>> {
-        let arena = LocalArena::new();
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+    /// Walks every statement/expression of the parsed source to emit
+    /// `FoldingRange` entries.  `content` is the virtual PHP the
+    /// preprocessor emits for a Blade file, so its ranges are translated
+    /// back to the original template through the source map before
+    /// Blade-native fold regions (directive blocks, component tag bodies)
+    /// are added on top, in Blade coordinates directly.
+    pub fn handle_folding_range(&self, uri: &str, content: &str) -> Option<Vec<FoldingRange>> {
+        let mut ranges: Vec<FoldingRange> =
+            crate::parser::with_parsed_program(content, "folding_range", |program, content| {
+                // Precompute line starts once. Each folding range converts
+                // two byte offsets to positions, and a large file has many
+                // nested blocks, so converting each offset by rescanning
+                // from the start would be O(n²).
+                let idx = crate::text_position::LineIndex::new(content);
+                let mut ranges = Vec::new();
 
-        // Precompute line starts once. Each folding range converts two byte
-        // offsets to positions, and a large file has many nested blocks, so
-        // converting each offset by rescanning from the start would be O(n²).
-        let idx = crate::text_position::LineIndex::new(content);
+                // ── AST walk ──
+                for stmt in program.statements.iter() {
+                    collect_from_statement(stmt, &idx, &mut ranges);
+                }
 
-        let mut ranges: Vec<FoldingRange> = Vec::new();
+                // ── Trivia (comments) ──
+                collect_comment_ranges(&program.trivia, &idx, &mut ranges);
+                ranges
+            });
 
-        // ── AST walk ──
-        for stmt in program.statements.iter() {
-            collect_from_statement(stmt, &idx, &mut ranges);
+        if self.is_blade_file(uri) {
+            ranges = ranges
+                .into_iter()
+                .filter_map(|r| self.translate_folding_range(uri, r))
+                .collect();
+            if let Some(raw) = self.get_file_content_arc(uri) {
+                collect_blade_native_folds(&raw, &mut ranges);
+            }
         }
-
-        // ── Trivia (comments) ──
-        collect_comment_ranges(&program.trivia, &idx, &mut ranges);
 
         ranges.retain(|r| r.start_line < r.end_line);
         ranges.sort_by(|a, b| {
@@ -46,6 +59,65 @@ impl Backend {
         });
 
         Some(ranges)
+    }
+
+    /// Translate a `FoldingRange` in virtual-PHP coordinates back to the
+    /// original Blade template, dropping it when either end lands in the
+    /// injected prologue (no template text to attach to).
+    fn translate_folding_range(&self, uri: &str, range: FoldingRange) -> Option<FoldingRange> {
+        let start = self.try_translate_php_to_blade(
+            uri,
+            tower_lsp::lsp_types::Position {
+                line: range.start_line,
+                character: range.start_character.unwrap_or(0),
+            },
+        )?;
+        let end = self.try_translate_php_to_blade(
+            uri,
+            tower_lsp::lsp_types::Position {
+                line: range.end_line,
+                character: range.end_character.unwrap_or(0),
+            },
+        )?;
+        Some(FoldingRange {
+            start_line: start.line,
+            start_character: Some(start.character),
+            end_line: end.line,
+            end_character: Some(end.character),
+            kind: range.kind,
+            collapsed_text: range.collapsed_text,
+        })
+    }
+}
+
+/// Add fold regions the underlying PHP has no concept of: block directives
+/// (`@if`/`@endif` and friends, `@section`/`@endsection`,
+/// `@push`/`@endpush`, …) and `<x-component>`…`</x-component>` tag bodies.
+/// Reads the raw Blade source directly, so ranges land in Blade
+/// coordinates without any translation.
+fn collect_blade_native_folds(raw: &str, ranges: &mut Vec<FoldingRange>) {
+    let idx = crate::text_position::LineIndex::new(raw);
+
+    for pair in crate::blade::balance::block_pairs(raw) {
+        ranges.push(range_from_offsets(
+            &idx,
+            pair.opener.start as u32,
+            pair.closer.end as u32,
+            None,
+        ));
+    }
+
+    // A tag with no closing tag of its own has no body to fold away.
+    for tag in crate::blade::component_tags::tag_spans(raw) {
+        if !tag.closed {
+            continue;
+        }
+        ranges.push(range_from_offsets(
+            &idx,
+            tag.span.start as u32,
+            tag.span.end as u32,
+            None,
+        ));
     }
 }
 

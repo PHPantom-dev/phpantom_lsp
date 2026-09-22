@@ -4,7 +4,7 @@
 //! supply every document as source text; the exporter performs no workspace
 //! discovery and starts no language-server transport.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, HashSet};
 use std::error::Error;
 use std::fmt;
 use std::path::PathBuf;
@@ -13,7 +13,10 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::Backend;
-use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap};
+use crate::inheritance::ancestry::find_declaring_ancestor;
+use crate::symbol_map::{
+    ClassRefContext, MappedSource, SelfStaticParentKind, SymbolKind, SymbolMap,
+};
 use crate::types::{ClassInfo, ClassLikeKind, FileContext, FunctionInfo};
 
 const RESOLVED_CLASS_CACHE_WINDOW: usize = 512;
@@ -232,6 +235,11 @@ pub struct ExportBatch {
 }
 
 /// Reusable configuration for semantic export.
+///
+/// The configuration is reusable, the work is not: every export call
+/// builds its own project, including the standard-library index, and
+/// drops it again. Hand each call as many documents as resolve together
+/// rather than calling it once per file.
 pub struct SemanticExporter {
     workspace_root: PathBuf,
 }
@@ -319,7 +327,9 @@ fn export_document(backend: &Backend, source: &SourceDocument) -> ExportDocument
     let mut declarations = export_declarations(backend, source, &context, symbol_map.as_deref());
     let mut output = SpanExportOutput::default();
 
-    if let Some(map) = symbol_map.as_deref() {
+    if let Some(map) = symbol_map.as_deref()
+        && let Some(mapped_source) = map.source(&source.source)
+    {
         let variable_definition_offsets =
             (map.var_defs.len() > VARIABLE_DEFINITION_INDEX_THRESHOLD).then(|| {
                 map.var_defs
@@ -330,6 +340,7 @@ fn export_document(backend: &Backend, source: &SourceDocument) -> ExportDocument
         let export_context = SpanExportContext {
             backend,
             source,
+            mapped_source,
             file_context: &context,
             variable_definitions: &map.var_defs,
             variable_definition_offsets: variable_definition_offsets.as_ref(),
@@ -579,6 +590,9 @@ fn export_class(source: &str, class: &ClassInfo, output: &mut Vec<ExportDeclarat
 struct SpanExportContext<'a> {
     backend: &'a Backend,
     source: &'a SourceDocument,
+    /// The document text paired with the map the spans came from, so a
+    /// range-backed member subject slices the revision it indexes.
+    mapped_source: MappedSource<'a>,
     file_context: &'a FileContext,
     variable_definitions: &'a [crate::symbol_map::VarDefSite],
     variable_definition_offsets: Option<&'a HashSet<u32>>,
@@ -700,7 +714,7 @@ fn export_span(
             ..
         } => {
             let kind = member_occurrence_kind(&source.source, range, *is_static, *is_method_call);
-            let subject = subject_text.as_str(&source.source);
+            let subject = subject_text.as_str(export_context.mapped_source);
             let target = MemberTargetResolver {
                 backend,
                 context,
@@ -972,6 +986,12 @@ fn resolve_member_owner(
     (names.len() == 1).then(|| names[0].trim_start_matches('\\').to_string())
 }
 
+/// The class that actually declares `member_name`, so an occurrence on a
+/// subclass resolves to the prototype rather than to the receiver.
+///
+/// The walk is the shared one every other feature uses, so the precedence
+/// it applies (own members, then traits, then the parent chain, then
+/// interfaces) stays in step with go-to-definition and hover.
 fn resolve_declaring_member_owner(
     backend: &Backend,
     context: &FileContext,
@@ -981,63 +1001,12 @@ fn resolve_declaring_member_owner(
 ) -> Option<String> {
     let class_loader = backend.class_loader(context);
     let class = class_loader(owner)?;
-    let mut visited = BTreeSet::new();
-    find_declaring_member(&class, member_name, kind, &class_loader, &mut visited, 0)
-}
-
-fn find_declaring_member(
-    class: &ClassInfo,
-    member_name: &str,
-    kind: OccurrenceKind,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    visited: &mut BTreeSet<String>,
-    depth: usize,
-) -> Option<String> {
-    const MAX_DEPTH: usize = 64;
-    if depth > MAX_DEPTH || !visited.insert(class.fqn().to_string().to_ascii_lowercase()) {
-        return None;
-    }
-    if member_exists(class, member_name, kind) {
+    let declares = |candidate: &ClassInfo| member_exists(candidate, member_name, kind);
+    if declares(&class) {
         return Some(class.fqn().to_string());
     }
-    for trait_name in &class.used_traits {
-        if let Some(trait_class) = class_loader(trait_name)
-            && let Some(owner) = find_declaring_member(
-                &trait_class,
-                member_name,
-                kind,
-                class_loader,
-                visited,
-                depth + 1,
-            )
-        {
-            return Some(owner);
-        }
-    }
-    if let Some(parent_name) = class.parent_class
-        && let Some(parent) = class_loader(&parent_name)
-        && let Some(owner) =
-            find_declaring_member(&parent, member_name, kind, class_loader, visited, depth + 1)
-    {
-        return Some(owner);
-    }
-    if matches!(kind, OccurrenceKind::Method | OccurrenceKind::Constant) {
-        for interface_name in &class.interfaces {
-            if let Some(interface) = class_loader(interface_name)
-                && let Some(owner) = find_declaring_member(
-                    &interface,
-                    member_name,
-                    kind,
-                    class_loader,
-                    visited,
-                    depth + 1,
-                )
-            {
-                return Some(owner);
-            }
-        }
-    }
-    None
+    find_declaring_ancestor(&class, &class_loader, &declares)
+        .map(|(_, declaring)| declaring.fqn().to_string())
 }
 
 fn member_exists(class: &ClassInfo, member_name: &str, kind: OccurrenceKind) -> bool {
@@ -1216,6 +1185,14 @@ mod tests {
         }
     }
 
+    fn document<'a>(batch: &'a ExportBatch, suffix: &str) -> &'a ExportDocument {
+        batch
+            .documents
+            .iter()
+            .find(|document| document.uri.ends_with(suffix))
+            .unwrap()
+    }
+
     #[test]
     fn resolves_across_documents_and_keeps_owned_results() {
         let batch = SemanticExporter::new("/workspace")
@@ -1231,15 +1208,71 @@ mod tests {
             ])
             .unwrap();
 
-        let use_document = batch
-            .documents
-            .iter()
-            .find(|document| document.uri.ends_with("/use.php"))
-            .unwrap();
+        let use_document = document(&batch, "/use.php");
         assert!(use_document.occurrences.iter().any(|occurrence| {
             occurrence.resolved_symbol.as_deref() == Some("App\\User::name")
         }));
         assert!(use_document.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn inherited_members_resolve_to_the_class_that_declares_them() {
+        let batch = SemanticExporter::new("/workspace")
+            .export([
+                source(
+                    "file:///workspace/Base.php",
+                    "<?php namespace App; class Base { public function shared(): void {} }",
+                ),
+                source(
+                    "file:///workspace/Child.php",
+                    "<?php namespace App; class Child extends Base {}",
+                ),
+                source(
+                    "file:///workspace/use.php",
+                    "<?php namespace App; (new Child())->shared();",
+                ),
+            ])
+            .unwrap();
+
+        let use_document = document(&batch, "/use.php");
+        assert!(
+            use_document
+                .calls
+                .iter()
+                .any(|call| call.resolved_symbol.as_deref() == Some("App\\Base::shared"))
+        );
+        assert!(use_document.diagnostics.is_empty());
+    }
+
+    #[test]
+    fn a_trait_member_wins_over_the_same_name_in_a_parent() {
+        let batch = SemanticExporter::new("/workspace")
+            .export([
+                source(
+                    "file:///workspace/Base.php",
+                    "<?php namespace App; class Base { public function run(): void {} }",
+                ),
+                source(
+                    "file:///workspace/Runner.php",
+                    "<?php namespace App; trait Runner { public function run(): void {} }",
+                ),
+                source(
+                    "file:///workspace/Child.php",
+                    "<?php namespace App; class Child extends Base { use Runner; }",
+                ),
+                source(
+                    "file:///workspace/use.php",
+                    "<?php namespace App; (new Child())->run();",
+                ),
+            ])
+            .unwrap();
+
+        assert!(
+            document(&batch, "/use.php")
+                .calls
+                .iter()
+                .any(|call| call.resolved_symbol.as_deref() == Some("App\\Runner::run"))
+        );
     }
 
     #[test]

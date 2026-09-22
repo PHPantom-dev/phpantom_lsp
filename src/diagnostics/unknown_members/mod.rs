@@ -79,15 +79,16 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{
-    ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
+use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{
-    FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
-    find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
+use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
 
 /// Diagnostic code used for unknown-member diagnostics so that code
@@ -177,6 +178,9 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         let file_use_map = &ctx.file.use_map;
         let file_namespace = &ctx.file.namespace;
         let file_resolved_names = &ctx.file.resolved_names;
@@ -267,7 +271,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
@@ -305,6 +309,15 @@ impl Backend {
             };
 
             let current_class = find_innermost_enclosing_class(local_classes, span.start);
+
+            // `$this`, `self`, and `static` name whatever class the code
+            // is bound to, which is normally the one it sits in — but a
+            // closure can be bound elsewhere, and then the class it binds
+            // to is the scope PHP checks visibility against.  Only the
+            // bare keywords qualify: in a chain like `$this->rel()->x`
+            // the receiver is whatever the chain returned, not the
+            // binding.
+            let subject_binds_scope = matches!(subject_text, "$this" | "self" | "static");
 
             // ── Suppress inside traits for self-referencing subjects ────
             // Traits are incomplete: they expect host classes to provide
@@ -345,18 +358,18 @@ impl Backend {
                 .entry(cache_key)
                 .or_insert_with(|| {
                     let rctx = ResolutionCtx {
-                        current_class,
-                        all_classes: local_classes,
-                        content,
-                        cursor_offset: span.start,
-                        class_loader: &class_loader,
-                        backend: Some(self),
-                        laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                        resolved_class_cache: Some(resolved_cache),
-                        function_loader: Some(&function_loader),
-                        scope_var_resolver: None,
                         is_in_static_method: symbol_map.is_in_static_method(span.start),
-                        preserve_static: false,
+                        ..self.resolution_ctx_at(
+                            current_class,
+                            local_classes,
+                            content,
+                            span.start,
+                            CtxLoaders::new(
+                                &class_loader,
+                                &function_loader,
+                                &laravel_macro_this_resolver,
+                            ),
+                        )
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -501,6 +514,8 @@ impl Backend {
                         is_static,
                         is_method_call,
                         is_docblock_ref,
+                        current_class,
+                        subject_binds_scope,
                         &class_loader,
                         resolved_cache,
                         content,
@@ -520,18 +535,18 @@ impl Backend {
                     let (result, diags) =
                         if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
-                                current_class,
-                                all_classes: local_classes,
-                                content,
-                                cursor_offset: span.start,
-                                class_loader: &class_loader,
-                                backend: Some(self),
-                                laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                                resolved_class_cache: Some(resolved_cache),
-                                function_loader: Some(&function_loader),
-                                scope_var_resolver: None,
                                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                preserve_static: false,
+                                ..self.resolution_ctx_at(
+                                    current_class,
+                                    local_classes,
+                                    content,
+                                    span.start,
+                                    CtxLoaders::new(
+                                        &class_loader,
+                                        &function_loader,
+                                        &laravel_macro_this_resolver,
+                                    ),
+                                )
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {
@@ -543,6 +558,8 @@ impl Backend {
                                     is_static,
                                     is_method_call,
                                     is_docblock_ref,
+                                    current_class,
+                                    subject_binds_scope,
                                     &class_loader,
                                     resolved_cache,
                                     content,
@@ -578,6 +595,61 @@ impl Backend {
         }
     }
 
+    /// Emit an access diagnostic when the member exists but the calling
+    /// scope may not reach it.  Returns whether one was emitted.
+    ///
+    /// Called wherever the member check has settled what the classes
+    /// hold: at the two points that declare the member found, and once
+    /// more before reporting it missing, since a parent's private member
+    /// is unreachable rather than absent.
+    ///
+    /// A docblock reference is exempt — `@see Foo::$secret` documents a
+    /// member, it does not read one.
+    #[allow(clippy::too_many_arguments)]
+    fn push_inaccessible_member(
+        &self,
+        uri: &str,
+        classes: &[Arc<ClassInfo>],
+        member_name: &str,
+        is_static: bool,
+        is_method_call: bool,
+        is_docblock_ref: bool,
+        current_class: Option<&ClassInfo>,
+        subject_binds_scope: bool,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        content: &str,
+        start: u32,
+        end: u32,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) -> bool {
+        if is_docblock_ref {
+            return false;
+        }
+        let Some(message) = inaccessible_member_message(
+            classes,
+            member_name,
+            is_static,
+            is_method_call,
+            current_class,
+            subject_binds_scope,
+            class_loader,
+        ) else {
+            return false;
+        };
+        let Some(range) =
+            self.offset_range_to_lsp_range(uri, content, start as usize, end as usize)
+        else {
+            return false;
+        };
+        diagnostics.push(make_diagnostic(
+            range,
+            DiagnosticSeverity::ERROR,
+            INVALID_MEMBER_ACCESS_CODE,
+            message,
+        ));
+        true
+    }
+
     /// Check whether a member exists on the resolved classes and emit
     /// a diagnostic if it does not.
     ///
@@ -593,6 +665,8 @@ impl Backend {
         is_static: bool,
         is_method_call: bool,
         is_docblock_ref: bool,
+        current_class: Option<&ClassInfo>,
+        subject_binds_scope: bool,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         cache: &crate::virtual_members::ResolvedClassCache,
         content: &str,
@@ -628,8 +702,14 @@ impl Backend {
         if base_classes.iter().any(|c| c.name == "stdClass") {
             return (MemberCheckResult::Ok, diagnostics);
         }
+        // This shortcut may be looking at a class that has not been
+        // merged yet, which is enough to confirm a member is reachable
+        // but not enough to judge one that is not: a magic handler or
+        // the declaration's real owner can both live further up.  So it
+        // settles only the public case and lets everything else fall
+        // through to the merged classes below.
         if base_classes.iter().any(|c| {
-            member_exists(c, member_name, is_static, is_method_call)
+            member_is_public(c, member_name, is_static, is_method_call)
                 || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
@@ -670,6 +750,21 @@ impl Backend {
             member_exists(c, member_name, is_static, is_method_call)
                 || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
         }) {
+            self.push_inaccessible_member(
+                uri,
+                &resolved_classes,
+                member_name,
+                is_static,
+                is_method_call,
+                is_docblock_ref,
+                current_class,
+                subject_binds_scope,
+                class_loader,
+                content,
+                start,
+                end,
+                &mut diagnostics,
+            );
             return (MemberCheckResult::Ok, diagnostics);
         }
 
@@ -694,6 +789,29 @@ impl Backend {
                     .any(|c| has_magic_method_for_access(c, is_static, true, report_magic)));
         if has_magic_call {
             return (MemberCheckResult::MagicFallback, diagnostics);
+        }
+
+        // ── A parent's private member is unreachable, not missing ──
+        // The inheritance merge drops it, so without this the access
+        // would be reported as an unknown member and the real reason
+        // — that PHP does not inherit private members — would be lost.
+        if self.push_inaccessible_member(
+            uri,
+            &resolved_classes,
+            member_name,
+            is_static,
+            is_method_call,
+            is_docblock_ref,
+            current_class,
+            subject_binds_scope,
+            class_loader,
+            content,
+            start,
+            end,
+            &mut diagnostics,
+        ) {
+            // The member is real, so its type still carries the chain.
+            return (MemberCheckResult::Ok, diagnostics);
         }
 
         // ── Member is unresolved on ALL branches — emit diagnostic ──
@@ -837,6 +955,56 @@ fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: 
     }
     // Check constants.
     class.constants.iter().any(|c| c.name == member_name)
+}
+
+/// Check whether a member exists on the class *and* is public.
+///
+/// Used by the shortcut that runs before the inheritance merge, where a
+/// non-public member cannot be judged: the class in hand may be missing
+/// the magic handler that would answer for it and the ancestor that
+/// really declares it.  Confirming a public member is safe there, since
+/// nothing further up can make a public member unreachable.
+fn member_is_public(
+    class: &ClassInfo,
+    member_name: &str,
+    is_static: bool,
+    is_method_call: bool,
+) -> bool {
+    use crate::types::Visibility;
+
+    if is_method_call {
+        return class.methods.iter().any(|m| {
+            m.name.eq_ignore_ascii_case(member_name) && m.visibility == Visibility::Public
+        });
+    }
+
+    if is_static {
+        if class
+            .constants
+            .iter()
+            .any(|c| c.name == member_name && c.visibility == Visibility::Public)
+        {
+            return true;
+        }
+        return class.properties.iter().any(|p| {
+            p.is_static
+                && (p.name == member_name || format!("${}", p.name) == member_name)
+                && p.visibility == Visibility::Public
+        });
+    }
+
+    if class
+        .properties
+        .iter()
+        .any(|p| p.name == member_name && p.visibility == Visibility::Public)
+    {
+        return true;
+    }
+
+    // An Eloquent relation reached as a property is synthesized rather
+    // than declared, so it carries no visibility of its own and is
+    // always public in practice.
+    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
 }
 
 /// Check whether a member exists on the fully-resolved class.

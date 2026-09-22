@@ -40,7 +40,9 @@ use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
 
+use super::file_contributions::FileContributions;
 use super::helpers::{extract_string_literal, walks_parent_chain};
+use crate::parser::with_parsed_program;
 use crate::php_type::PhpType;
 use crate::types::{ClassInfo, PropertySource};
 
@@ -116,21 +118,11 @@ pub(crate) struct CommandEntry {
 /// merged by-name lookup.
 #[derive(Default)]
 pub(crate) struct LaravelCommandIndex {
-    by_uri: HashMap<String, Vec<CommandEntry>>,
+    pub(crate) files: FileContributions<Vec<CommandEntry>>,
     by_name: HashMap<String, CommandEntry>,
 }
 
 impl LaravelCommandIndex {
-    /// Replace the commands contributed by `uri`.  An empty vector removes
-    /// the file's contribution.  Call [`Self::rebuild`] afterwards.
-    pub(crate) fn set_file(&mut self, uri: String, entries: Vec<CommandEntry>) {
-        if entries.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, entries);
-        }
-    }
-
     /// Rebuild the merged name → entry lookup from per-file contributions.
     ///
     /// Primary names are inserted before aliases so a command that *is*
@@ -141,14 +133,14 @@ impl LaravelCommandIndex {
     /// acceptable for a diagnostic / navigation aid.
     pub(crate) fn rebuild(&mut self) {
         let mut by_name = HashMap::new();
-        for entries in self.by_uri.values() {
+        for entries in self.files.values() {
             for entry in entries {
                 by_name
                     .entry(entry.name.clone())
                     .or_insert_with(|| entry.clone());
             }
         }
-        for entries in self.by_uri.values() {
+        for entries in self.files.values() {
             for entry in entries {
                 for alias in &entry.aliases {
                     by_name
@@ -158,11 +150,6 @@ impl LaravelCommandIndex {
             }
         }
         self.by_name = by_name;
-    }
-
-    /// Whether `uri` currently contributes any commands.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
     }
 
     /// Whether the index contains no commands at all.
@@ -182,7 +169,7 @@ impl LaravelCommandIndex {
     /// accessor types need.  Commands number in the tens even in a large
     /// project, so the scan is cheaper than a second index.
     pub(crate) fn get_by_fqn(&self, fqn: &str) -> Option<&CommandEntry> {
-        self.by_uri
+        self.files
             .values()
             .flatten()
             .find(|entry| entry.fqn.as_deref() == Some(fqn))
@@ -942,6 +929,16 @@ fn string_property_value_ref<'c>(
 
 // ─── Enclosing-signature lookup ────────────────────────────────────────────────
 
+/// The command class enclosing an offset, and the `$signature` it declares.
+pub(crate) struct EnclosingCommand {
+    /// Byte range of the class body, so a caller checking several offsets in
+    /// the same class can tell when the answer still applies.
+    pub body: std::ops::Range<u32>,
+    /// The parsed `$signature`, absent when the class declares none (e.g. a
+    /// `$name`-only or dynamically-built command).
+    pub signature: Option<CommandSignature>,
+}
+
 /// Parse the command `$signature` of the class enclosing `offset`, if any.
 ///
 /// Used for completing / validating `$this->argument('user')` and
@@ -952,24 +949,35 @@ pub(crate) fn command_signature_at_offset(
     content: &str,
     offset: usize,
 ) -> Option<CommandSignature> {
-    let arena = LocalArena::new();
-    let file_id = FileId::new(b"input.php");
-    let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
-    let mut found: Option<CommandSignature> = None;
-    for stmt in program.statements.iter() {
-        find_signature_at_offset(stmt, offset as u32, content, &mut found);
-        if found.is_some() {
-            break;
-        }
-    }
-    found
+    command_enclosing_signature(content, offset)?.signature
+}
+
+/// [`command_signature_at_offset`] keeping the enclosing class' body range.
+pub(crate) fn command_enclosing_signature(
+    content: &str,
+    offset: usize,
+) -> Option<EnclosingCommand> {
+    with_parsed_program(
+        content,
+        "command_signature_at_offset",
+        |program, content| {
+            let mut found: Option<EnclosingCommand> = None;
+            for stmt in program.statements.iter() {
+                find_signature_at_offset(stmt, offset as u32, content, &mut found);
+                if found.is_some() {
+                    break;
+                }
+            }
+            found
+        },
+    )
 }
 
 fn find_signature_at_offset(
     stmt: &Statement<'_>,
     offset: u32,
     content: &str,
-    out: &mut Option<CommandSignature>,
+    out: &mut Option<EnclosingCommand>,
 ) {
     match stmt {
         Statement::Namespace(ns) => {
@@ -983,11 +991,12 @@ fn find_signature_at_offset(
         Statement::Class(class) => {
             let start = class.left_brace.start.offset;
             let end = class.right_brace.end.offset;
-            if offset >= start
-                && offset <= end
-                && let Some((sig, _)) = command_signature_value(class, content)
-            {
-                *out = Some(parse_signature(sig));
+            if offset >= start && offset <= end {
+                *out = Some(EnclosingCommand {
+                    body: start..end,
+                    signature: command_signature_value(class, content)
+                        .map(|(sig, _)| parse_signature(sig)),
+                });
             }
         }
         _ => {}

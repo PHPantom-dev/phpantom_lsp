@@ -1,10 +1,10 @@
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::diagnostics::class_case_mismatch::CLASS_CASE_MISMATCH_CODE;
 use crate::diagnostics::helpers::make_diagnostic;
+
+use super::single_edit;
 
 impl Backend {
     /// Offer a quick fix that rewrites a mis-cased class reference to its
@@ -37,23 +37,15 @@ impl Backend {
                 m.message.clone(),
             );
 
-            let mut changes = HashMap::new();
-            changes.insert(
-                parsed_uri.clone(),
-                vec![TextEdit {
-                    range: m.range,
-                    new_text: m.corrected.clone(),
-                }],
-            );
-
             out.push(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!("Fix case to `{}`", m.corrected),
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diag]),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
+                edit: Some(single_edit(
+                    parsed_uri.clone(),
+                    m.range,
+                    m.corrected.clone(),
+                )),
                 is_preferred: Some(true),
                 ..Default::default()
             }));

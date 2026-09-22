@@ -310,7 +310,16 @@ impl Backend {
         let visited: Vec<PathBuf> = visited.into_iter().collect();
         {
             let mut paths = self.symbols.autoload_file_paths.write();
-            paths.extend(visited.iter().cloned());
+            // A rediscovery pass walks the same autoload chain again, so
+            // record only what is new; the fallback lookups that read
+            // this list would otherwise re-check the same file per pass.
+            let known: HashSet<&PathBuf> = paths.iter().collect();
+            let mut fresh: Vec<PathBuf> = visited
+                .iter()
+                .filter(|path| !known.contains(path))
+                .cloned()
+                .collect();
+            paths.append(&mut fresh);
         }
         if let Some(p) = progress {
             p.begin_phase(0.4, 1.0, "Parsing autoload helpers");

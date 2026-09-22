@@ -1,5 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
+use crate::common::{complete_labels_at, create_psr4_workspace, create_test_backend};
 use tower_lsp::lsp_types::*;
 
 // ─── Template parameter bounds completion tests ─────────────────────────────
@@ -8,44 +7,6 @@ use tower_lsp::lsp_types::*;
 // template parameter (e.g. `TNode`), the resolver falls back to the upper
 // bound declared in `@template TNode of SomeClass` so that completion and
 // go-to-definition still work.
-
-/// Helper: open a document, send a completion request, return item labels.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<String> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items.iter().map(|i| i.label.clone()).collect(),
-        _ => vec![],
-    }
-}
 
 // ─── Basic template bound on promoted constructor property ──────────────────
 
@@ -78,7 +39,7 @@ async fn test_template_bound_on_constructor_param() {
     );
 
     // Cursor after `$this->node->` on line 16
-    let names = complete_at(&backend, &uri, text, 16, 22).await;
+    let names = complete_labels_at(&backend, &uri, text, 16, 22).await;
     assert!(
         names.iter().any(|n| n.starts_with("getParent(")),
         "Should offer PDependNode::getParent() via template bound, got: {names:?}"
@@ -115,7 +76,7 @@ async fn test_template_bound_on_var_property() {
     );
 
     // Cursor after `$this->occupant->` on line 11
-    let names = complete_at(&backend, &uri, text, 11, 26).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 26).await;
     assert!(
         names.iter().any(|n| n.starts_with("speak(")),
         "Should offer Animal::speak() via template bound on @var, got: {names:?}"
@@ -146,7 +107,7 @@ async fn test_phpstan_template_bound() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 11, 26).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 26).await;
     assert!(
         names.iter().any(|n| n.starts_with("render(")),
         "Should offer Renderer::render() via @phpstan-template bound, got: {names:?}"
@@ -178,7 +139,7 @@ async fn test_template_covariant_bound() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 11, 22).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 22).await;
     assert!(
         names.iter().any(|n| n.starts_with("area(")),
         "Should offer Shape::area() via @template-covariant bound, got: {names:?}"
@@ -209,7 +170,7 @@ async fn test_template_without_bound_no_crash() {
     );
 
     // Should not crash; may return empty or limited results.
-    let names = complete_at(&backend, &uri, text, 8, 23).await;
+    let names = complete_labels_at(&backend, &uri, text, 8, 23).await;
     // We just verify it doesn't panic. The result set may be empty.
     let _ = names;
 }
@@ -240,7 +201,7 @@ async fn test_multiple_templates_one_with_bound() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 12, 23).await;
+    let names = complete_labels_at(&backend, &uri, text, 12, 23).await;
     assert!(
         names.iter().any(|n| n.starts_with("getId(")),
         "Should offer Entity::getId() for TEntity with bound, got: {names:?}"
@@ -290,7 +251,7 @@ async fn test_template_bound_cross_file() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 9, 22).await;
+    let names = complete_labels_at(&backend, &uri, text, 9, 22).await;
     assert!(
         names.iter().any(|n| n.starts_with("save(")),
         "Should offer BaseModel::save() via cross-file template bound, got: {names:?}"
@@ -326,7 +287,7 @@ async fn test_template_bound_fqn() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 11, 23).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 23).await;
     assert!(
         names.iter().any(|n| n.starts_with("log(")),
         "Should offer Logger::log() via template bound, got: {names:?}"
@@ -440,7 +401,7 @@ async fn test_trait_template_bound_fallback_without_use_annotation() {
         "}\n",
     );
 
-    let items = complete_at(&backend, &uri, text, 15, 19).await;
+    let items = complete_labels_at(&backend, &uri, text, 15, 19).await;
     assert!(
         items.iter().any(|i| i.starts_with("baseMethod")),
         "Expected 'baseMethod' from bound type BaseObj, got: {:?}",
@@ -478,7 +439,7 @@ async fn test_trait_template_with_use_annotation_overrides_bound() {
         "}\n",
     );
 
-    let items = complete_at(&backend, &uri, text, 19, 19).await;
+    let items = complete_labels_at(&backend, &uri, text, 19, 19).await;
     assert!(
         items.iter().any(|i| i.starts_with("specialMethod")),
         "Expected 'specialMethod' from explicit SpecialObj, got: {:?}",
@@ -510,7 +471,7 @@ async fn test_trait_template_no_bound_no_crash() {
     );
 
     // Should not crash; no completions expected since T has no bound.
-    let items = complete_at(&backend, &uri, text, 12, 19).await;
+    let items = complete_labels_at(&backend, &uri, text, 12, 19).await;
     // Just verify it didn't panic — items may be empty or contain mixed members.
     let _ = items;
 }

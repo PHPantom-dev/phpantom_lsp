@@ -57,11 +57,11 @@ class InlayHintsDemo
         // return type shows after the closing parenthesis.
 
         // Arrow function: "User " before $u, ": string" after parens.
-        $names = $this->mapUsers(fn($u) => $u->name);
+        $names = $this->mapUsers(fn($u) => $u->getName());
 
         // Long-form closure gets the same treatment:
         $upper = $this->mapUsers(function ($u) {
-            return strtoupper($u->name);
+            return strtoupper($u->getName());
         });
 
         // Partial typing: only the untyped $b gets a hint.
@@ -100,22 +100,3 @@ class InlayHintsDemo
     public function filterOrders(callable $fn): array { return []; }
 }
 
-
-// ── Reference counts on declarations ────────────────────────────────────────
-// Beside a declaration PHPantom shows how many places use it, the same way
-// it does for a class, method, property, or constant. A function declared
-// outside any class is counted too, so a plain helpers file gets them as
-// well — click the count to list the usages.
-
-function inlayFormatLabel(string $text): string
-{
-    return ucfirst($text);
-}
-
-// inlayFormatLabel above shows "2 references": the two calls below.
-$inlayFirstLabel = inlayFormatLabel('first');
-$inlaySecondLabel = inlayFormatLabel('second');
-
-// A function nothing calls shows "0 references", which is the quickest way
-// to spot dead code in a procedural file.
-function inlayUnusedHelper(): void {}

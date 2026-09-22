@@ -68,18 +68,8 @@ enum Command {
         #[arg(long, default_value = "all")]
         severity: SeverityArg,
 
-        /// Disable coloured output.
-        #[arg(long)]
-        no_colour: bool,
-
-        /// Project root directory. Defaults to the current working directory.
-        #[arg(long, value_name = "DIR")]
-        project_root: Option<std::path::PathBuf>,
-
-        /// Output format. When running in GitHub Actions the default
-        /// automatically includes workflow annotations alongside the table.
-        #[arg(long, value_name = "FORMAT")]
-        format: Option<FormatArg>,
+        #[command(flatten)]
+        project: ProjectArgs,
 
         /// Print each file path as it is analyzed and disable the progress
         /// bar. Combine with -v/-vv/-vvv for timing and memory detail.
@@ -118,18 +108,65 @@ enum Command {
         #[arg(long)]
         with_phpstan: bool,
 
-        /// Disable coloured output.
+        #[command(flatten)]
+        project: ProjectArgs,
+    },
+
+    /// Format PHP files and Blade templates across the project.
+    ///
+    /// Runs the same formatter the editor runs on save: a Laravel Pint,
+    /// php-cs-fixer, or PHP_CodeSniffer the project depends on, and the
+    /// built-in formatter otherwise. Blade templates are reindented by
+    /// the built-in reindenter unless the project formats them with Pint.
+    ///
+    /// With --check nothing is written: the files that are not formatted
+    /// are listed and the command exits non-zero, so a CI job can require
+    /// that a pull request ran the formatter.
+    Format {
+        /// Paths to format (files or directories). Defaults to the entire project.
+        #[arg(value_name = "PATH")]
+        paths: Vec<std::path::PathBuf>,
+
+        /// List the files that are not formatted and write nothing.
+        ///
+        /// Exits with code 0 when every file is already formatted, or
+        /// code 2 when at least one would change.
         #[arg(long)]
-        no_colour: bool,
+        check: bool,
 
-        /// Project root directory. Defaults to the current working directory.
-        #[arg(long, value_name = "DIR")]
-        project_root: Option<std::path::PathBuf>,
+        /// Spaces per indentation level for Blade templates.
+        ///
+        /// Only the built-in Blade reindenter reads this; it takes the
+        /// value from the editor over LSP and has no other source for it
+        /// on the command line. PHP files are formatted to the project's
+        /// own rules either way.
+        #[arg(long, value_name = "N", default_value_t = 4)]
+        indent_size: usize,
 
-        /// Output format. When running in GitHub Actions the default
-        /// automatically includes workflow annotations alongside the table.
-        #[arg(long, value_name = "FORMAT")]
-        format: Option<FormatArg>,
+        /// Indent Blade templates with tabs instead of spaces.
+        #[arg(long, conflicts_with = "indent_size")]
+        use_tabs: bool,
+
+        #[command(flatten)]
+        project: ProjectArgs,
+    },
+
+    /// Move a class, namespace, PHP file, or PSR-4 directory.
+    Move {
+        /// Source FQN, namespace, PHP file, or directory.
+        #[arg(value_name = "FROM")]
+        from: String,
+
+        /// Destination FQN, namespace, PHP file, or directory.
+        #[arg(value_name = "TO")]
+        to: String,
+
+        /// Show what would change without writing files.
+        #[arg(long)]
+        dry_run: bool,
+
+        #[command(flatten)]
+        project: ProjectArgs,
     },
 
     /// Create a default .phpantom.toml configuration file.
@@ -165,6 +202,52 @@ enum Command {
         #[arg(long)]
         no_confirm: bool,
     },
+}
+
+/// The options every project-wide subcommand takes.
+#[derive(clap::Args)]
+struct ProjectArgs {
+    /// Disable coloured output.
+    #[arg(long)]
+    no_colour: bool,
+
+    /// Project root directory. Defaults to the current working directory.
+    #[arg(long, value_name = "DIR")]
+    project_root: Option<std::path::PathBuf>,
+
+    /// Output format. When running in GitHub Actions the default
+    /// automatically includes workflow annotations alongside the
+    /// human-readable output.
+    #[arg(long, value_name = "FORMAT")]
+    format: Option<FormatArg>,
+}
+
+/// The settled form of [`ProjectArgs`].
+struct ProjectOptions {
+    workspace_root: std::path::PathBuf,
+    use_colour: bool,
+    output_format: phpantom_lsp::analyse::OutputFormat,
+}
+
+impl ProjectArgs {
+    /// Settle the root (exiting when the current directory is unknown),
+    /// the colour choice, and the output format.
+    fn resolve(self) -> ProjectOptions {
+        let workspace_root = self
+            .project_root
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| {
+                eprintln!("Error: cannot determine project root directory");
+                std::process::exit(1);
+            });
+        ProjectOptions {
+            workspace_root,
+            use_colour: !self.no_colour && atty_stdout(),
+            output_format: self
+                .format
+                .map_or(phpantom_lsp::analyse::OutputFormat::Table, Into::into),
+        }
+    }
 }
 
 /// Minimum severity level for the analyze command.
@@ -299,24 +382,15 @@ async fn async_main() {
         Some(Command::Analyze {
             paths,
             severity,
-            no_colour,
-            project_root,
-            format,
+            project,
             debug,
             verbose,
         }) => {
-            let workspace_root = project_root
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("Error: cannot determine project root directory");
-                    std::process::exit(1);
-                });
-            let use_colour = !no_colour && atty_stdout();
-
-            let output_format = match format {
-                Some(f) => f.into(),
-                None => phpantom_lsp::analyse::OutputFormat::Table,
-            };
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
 
             let options = phpantom_lsp::analyse::AnalyseOptions {
                 workspace_root,
@@ -340,22 +414,13 @@ async fn async_main() {
             rules,
             dry_run,
             with_phpstan,
-            no_colour,
-            project_root,
-            format,
+            project,
         }) => {
-            let workspace_root = project_root
-                .or_else(|| std::env::current_dir().ok())
-                .unwrap_or_else(|| {
-                    eprintln!("Error: cannot determine project root directory");
-                    std::process::exit(1);
-                });
-            let use_colour = !no_colour && atty_stdout();
-
-            let output_format = match format {
-                Some(f) => f.into(),
-                None => phpantom_lsp::analyse::OutputFormat::Table,
-            };
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
 
             let options = phpantom_lsp::fix::FixOptions {
                 workspace_root,
@@ -369,6 +434,62 @@ async fn async_main() {
             };
 
             let exit_code = phpantom_lsp::fix::run(options).await;
+            std::process::exit(exit_code);
+        }
+        Some(Command::Format {
+            paths,
+            check,
+            indent_size,
+            use_tabs,
+            project,
+        }) => {
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
+
+            let options = phpantom_lsp::format_cli::FormatOptions {
+                workspace_root,
+                path_filters: paths
+                    .into_iter()
+                    .map(|p| resolve_path_filter(p, 1))
+                    .collect(),
+                check,
+                indent: if use_tabs {
+                    "\t".to_string()
+                } else {
+                    " ".repeat(indent_size)
+                },
+                use_colour,
+                output_format,
+                global_config: phpantom_lsp::config::global_config_path(),
+            };
+
+            let exit_code = phpantom_lsp::format_cli::run(options);
+            std::process::exit(exit_code);
+        }
+        Some(Command::Move {
+            from,
+            to,
+            dry_run,
+            project,
+        }) => {
+            let ProjectOptions {
+                workspace_root,
+                use_colour,
+                output_format,
+            } = project.resolve();
+            let options = phpantom_lsp::move_cli::MoveOptions {
+                from,
+                to,
+                workspace_root,
+                dry_run,
+                use_colour,
+                output_format,
+                global_config: phpantom_lsp::config::global_config_path(),
+            };
+            let exit_code = phpantom_lsp::move_cli::run(options).await;
             std::process::exit(exit_code);
         }
         // The wasm build drives the server through the exported `lsp_handle`

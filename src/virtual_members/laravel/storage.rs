@@ -43,6 +43,7 @@ use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo};
 
 use super::config_values::ConfigNode;
+use super::file_contributions::FileContributions;
 use super::macros::{
     closure_signature, expr_source_text, resolve_hint_target_fqn, resolve_target_fqn,
     string_literal_value,
@@ -324,34 +325,17 @@ fn build_driver_registration(
 /// driver name.
 ///
 /// Stored on [`Backend`] and built alongside the macro index (both are
-/// recovered from the same service-provider scan). `by_uri` is the source of
+/// recovered from the same service-provider scan). `files` is the source of
 /// truth, so an edit to one file replaces just that file's registrations;
 /// `merged` is the derived lookup consulted when a disk's driver is
 /// classified.
 #[derive(Default)]
 pub(crate) struct LaravelStorageDriverIndex {
-    by_uri: HashMap<String, Vec<StorageDriverRegistration>>,
+    pub(crate) files: FileContributions<Vec<StorageDriverRegistration>>,
     merged: HashMap<String, PhpType>,
 }
 
 impl LaravelStorageDriverIndex {
-    /// Replace the registrations contributed by `uri`.  Passing an empty
-    /// vector removes the file's contributions.  Call [`Self::rebuild`]
-    /// afterwards to refresh the merged lookup map (deferred so a bulk build
-    /// rebuilds once rather than per file).
-    pub(crate) fn set_file(&mut self, uri: String, regs: Vec<StorageDriverRegistration>) {
-        if regs.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, regs);
-        }
-    }
-
-    /// Whether `uri` currently contributes any registrations.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
-    }
-
     /// Whether the merged map holds no drivers at all.
     pub(crate) fn is_empty(&self) -> bool {
         self.merged.is_empty()
@@ -371,11 +355,8 @@ impl LaravelStorageDriverIndex {
     /// the first URI in sort order, so a rebuild never flips the disk type
     /// on hash-iteration order alone.
     pub(crate) fn rebuild(&mut self) {
-        let mut uris: Vec<&String> = self.by_uri.keys().collect();
-        uris.sort_unstable();
-
         let mut merged: HashMap<String, PhpType> = HashMap::new();
-        for regs in uris.iter().filter_map(|uri| self.by_uri.get(*uri)) {
+        for (_, regs) in self.files.iter_sorted() {
             for reg in regs {
                 let Some(ty) = reg.return_type.as_ref() else {
                     continue;
@@ -390,6 +371,62 @@ impl LaravelStorageDriverIndex {
         }
         self.merged = merged;
     }
+}
+
+// ─── Storage facade name resolution ─────────────────────────────────────────
+
+/// The local names Laravel's `Storage` facade answers to in a file.
+///
+/// Resolution is textual because the same question has to be answered for the
+/// mid-edit buffer completion runs on and for the parsed file the symbol map
+/// walks; an AST is only available on one of those. The result is a short list
+/// (usually one name), so callers hold on to it for the file rather than
+/// re-scanning per call site.
+///
+/// A file with no `namespace` declaration reaches the facade through Laravel's
+/// global class alias, so the bare short name counts there unless another
+/// import has taken it.
+pub(crate) fn storage_facade_local_names(content: &str) -> Vec<String> {
+    let mut names: Vec<String> = Vec::new();
+    let mut short_name_taken = false;
+
+    crate::text_scan::for_each_class_import(content, &mut |imported, local| {
+        if imported.eq_ignore_ascii_case(STORAGE_FACADE_FQN) {
+            names.push(local.to_string());
+        } else if local.eq_ignore_ascii_case("Storage") {
+            short_name_taken = true;
+        }
+    });
+
+    if !short_name_taken
+        && !names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case("Storage"))
+        && !crate::text_scan::source_declares_namespace(content)
+    {
+        names.push("Storage".to_string());
+    }
+    names
+}
+
+/// Whether a written class name is Laravel's `Storage` facade, given the
+/// local names [`storage_facade_local_names`] found for the file.
+pub(crate) fn is_storage_facade_name(class_name: &str, local_names: &[String]) -> bool {
+    let is_root_qualified = class_name.starts_with('\\');
+    let class_name = class_name.trim_start_matches('\\');
+    if class_name.eq_ignore_ascii_case(STORAGE_FACADE_FQN) {
+        return true;
+    }
+    if class_name.contains('\\') {
+        return false;
+    }
+    if is_root_qualified {
+        // `\Storage` names the global alias whatever the file imports.
+        return class_name.eq_ignore_ascii_case("Storage");
+    }
+    local_names
+        .iter()
+        .any(|local| local.eq_ignore_ascii_case(class_name))
 }
 
 #[cfg(test)]

@@ -1046,17 +1046,8 @@ impl Backend {
         let content = self.get_file_content(uri)?;
         // Blade files are diagnosed on their preprocessed virtual PHP
         // content (produced by `update_ast` during indexing).
-        let blade_content;
-        let effective: &str = if self.is_blade_file(uri) {
-            if let Some(vc) = self.blade_virtual_content.read().get(uri) {
-                blade_content = vc.clone();
-                &blade_content
-            } else {
-                &content
-            }
-        } else {
-            &content
-        };
+        let content_view = self.analysable_content_or(uri, &content);
+        let effective: &str = &content_view;
 
         crate::util::catch_panic_unwind_safe("workspace_diagnostics", uri, None, || {
             let _parse_guard = crate::parser::with_parse_cache(effective);
@@ -1313,7 +1304,7 @@ impl Backend {
     }
 
     /// The single-file worker that shares a source's per-file cache.
-    fn external_tool_worker(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
+    fn external_tool_for_source(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
         Some(match source {
             "phpstan" => &self.phpstan_tool,
             "phpcs" => &self.phpcs_tool,
@@ -1339,7 +1330,7 @@ impl Backend {
         results: HashMap<PathBuf, Vec<Diagnostic>>,
         generations: HashMap<String, u64>,
     ) {
-        let Some(worker) = self.external_tool_worker(source) else {
+        let Some(worker) = self.external_tool_for_source(source) else {
             return;
         };
         let cache = &worker.last_diags;

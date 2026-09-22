@@ -11,11 +11,14 @@
 //! - [`preload`] — autoload preloading and the `ensure_workspace_indexed*`
 //!   parallel parse pipeline.
 //! - [`watch`] — applying `didChangeWatchedFiles` batches to the indexes.
+//! - [`reconcile`] — realigning the indexes with the file filters when
+//!   those change mid-session.
 
 use std::path::{Path, PathBuf};
 
 mod init;
 pub(crate) mod preload;
+mod reconcile;
 mod scan;
 mod watch;
 

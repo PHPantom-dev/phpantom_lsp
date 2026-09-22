@@ -9,7 +9,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -98,19 +98,6 @@ mod tests {
         create_psr4_workspace(COMPOSER, &all)
     }
 
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, language_id: &str, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: language_id.to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
-
     /// The file name go-to-definition at `line`/`character` lands in.
     async fn definition_file(
         backend: &phpantom_lsp::Backend,
@@ -124,7 +111,7 @@ mod tests {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        open(backend, &uri, language_id, &text).await;
+        open_document(backend, &uri, language_id, &text).await;
 
         let response = backend
             .goto_definition(GotoDefinitionParams {
@@ -157,7 +144,7 @@ mod tests {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        open(backend, &uri, language_id, &text).await;
+        open_document(backend, &uri, language_id, &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
         let uri = uri.to_string();
@@ -186,7 +173,7 @@ mod tests {
         let path = dir.path().join(relative);
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        open(backend, &uri, language_id, &text).await;
+        open_document(backend, &uri, language_id, &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
         let uri = uri.to_string();
@@ -339,7 +326,7 @@ mod tests {
         let path = dir.path().join("resources/views/page.blade.php");
         let text = std::fs::read_to_string(&path).unwrap();
         let uri = Url::from_file_path(&path).unwrap();
-        open(&backend, &uri, "blade", &text).await;
+        open_document(&backend, &uri, "blade", &text).await;
 
         let effective = backend.blade_virtual_php(uri.as_str()).unwrap_or(text);
         let mut diags = Vec::new();

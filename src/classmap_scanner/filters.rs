@@ -17,16 +17,62 @@
 //! whitelist-first semantics would invert the meaning of an exclude
 //! list containing a `!` pattern.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 
+use ignore::WalkBuilder;
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
+
+/// The `ignore` walk every workspace scan starts from: the repository's
+/// gitignore rules (its own, the global one, `.git/info/exclude`, parent
+/// directories, and ripgrep-style `.ignore` files) plus the two
+/// exclusions that hold regardless of what git ignores. `skip_dirs`
+/// (vendor trees scanned through `installed.json`, monorepo subproject
+/// roots another pipeline covers) are never entered, and `[indexing]
+/// exclude` matches are pruned through `filters`.
+///
+/// Dotfiles are skipped unless `include_dotfiles` is set, in which case
+/// `.git` itself is still pruned. Callers add further roots, set the
+/// thread count, or keep the walk serial as their scan needs.
+pub fn workspace_walk_builder(
+    root: &Path,
+    skip_dirs: Arc<Vec<PathBuf>>,
+    filters: Arc<IndexFilters>,
+    include_dotfiles: bool,
+) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(root);
+    builder
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .hidden(!include_dotfiles)
+        .parents(true)
+        .ignore(true)
+        .filter_entry(move |entry| {
+            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+            if is_dir {
+                if include_dotfiles && entry.file_name() == ".git" {
+                    return false;
+                }
+                if skip_dirs.iter().any(|dir| dir == entry.path()) {
+                    return false;
+                }
+            }
+            !filters.is_excluded_entry(entry.path(), is_dir)
+        });
+    builder
+}
 
 /// Compiled exclude matcher and extra-extension set for file discovery.
 pub struct IndexFilters {
     /// Compiled `[indexing] exclude` globs, `None` when no valid
     /// pattern is configured so the hot path is a single branch.
     excludes: Option<Gitignore>,
+    /// The raw patterns `excludes` was compiled from, kept only so
+    /// [`may_admit_more_than`](Self::may_admit_more_than) can tell a
+    /// widened exclude list from a narrowed one; `Gitignore` does not
+    /// hand its patterns back.
+    exclude_patterns: Vec<String>,
     /// Lowercase extra extensions (without the dot) treated as PHP.
     extensions: Vec<String>,
 }
@@ -67,6 +113,7 @@ impl IndexFilters {
 
         Self {
             excludes,
+            exclude_patterns: exclude.to_vec(),
             extensions,
         }
     }
@@ -78,6 +125,7 @@ impl IndexFilters {
         Arc::clone(EMPTY.get_or_init(|| {
             Arc::new(IndexFilters {
                 excludes: None,
+                exclude_patterns: Vec::new(),
                 extensions: Vec::new(),
             })
         }))
@@ -125,6 +173,36 @@ impl IndexFilters {
     /// The configured extra extensions (lowercase, without the dot).
     pub fn extra_extensions(&self) -> &[String] {
         &self.extensions
+    }
+
+    /// Whether replacing `previous` with `self` can let a file into the
+    /// index that `previous` kept out, so the caller knows a rescan of
+    /// the workspace is needed rather than an eviction pass alone.
+    ///
+    /// Answered from the patterns rather than the filesystem, and
+    /// deliberately errs towards `true`. Only two edits can re-admit a
+    /// path: dropping a pattern, and adding a `!` re-include. A plain
+    /// pattern that was not there before can only exclude more, whatever
+    /// position it lands in, because gitignore's last-match-wins rule
+    /// still only ever lets a non-negated pattern say "ignore".
+    pub fn may_admit_more_than(&self, previous: &IndexFilters) -> bool {
+        if self
+            .extensions
+            .iter()
+            .any(|ext| !previous.extensions.contains(ext))
+        {
+            return true;
+        }
+        if previous
+            .exclude_patterns
+            .iter()
+            .any(|pattern| !self.exclude_patterns.contains(pattern))
+        {
+            return true;
+        }
+        self.exclude_patterns
+            .iter()
+            .any(|pattern| pattern.starts_with('!') && !previous.exclude_patterns.contains(pattern))
     }
 }
 
@@ -206,6 +284,59 @@ mod tests {
         assert!(f.is_php_file(&PathBuf::from("/ws/foo.MODULE")));
         assert!(f.is_php_file(&PathBuf::from("/ws/foo.php")));
         assert!(!f.is_php_file(&PathBuf::from("/ws/foo.txt")));
+    }
+
+    /// A leading `/` anchors to the workspace root. Editor clients rely
+    /// on this to translate a rootless glob from a dialect where that
+    /// means "at the root" (VS Code's `files.exclude`) into gitignore,
+    /// where a bare name would instead match at any depth.
+    #[test]
+    fn leading_slash_anchors_to_root() {
+        let f = filters(&["/node_modules"], &[]);
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/node_modules"), true));
+        assert!(!f.is_excluded_entry(&PathBuf::from("/ws/pkg/node_modules"), true));
+    }
+
+    /// A directory whose name begins with `!` or `#` has to stay
+    /// excludable, so both are escapable rather than being read as a
+    /// negation and a comment.
+    #[test]
+    fn a_leading_bang_or_hash_can_be_escaped_to_a_literal() {
+        let f = filters(&["\\!important", "\\#tmp"], &[]);
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/!important"), true));
+        assert!(f.is_excluded_entry(&PathBuf::from("/ws/#tmp"), true));
+    }
+
+    /// Excluding more is the common editor-settings edit, and it needs
+    /// no disk access to honour: everything newly excluded is already in
+    /// the index, so eviction alone finishes the job.
+    #[test]
+    fn adding_an_exclude_admits_nothing_new() {
+        let before = filters(&["generated"], &[]);
+        let after = filters(&["generated", "build"], &[]);
+        assert!(!after.may_admit_more_than(&before));
+    }
+
+    /// The three edits that put files back in scope. Each one needs a
+    /// walk to find what is now indexable, since nothing in memory
+    /// records the files that were skipped.
+    #[test]
+    fn re_including_anything_needs_a_rescan() {
+        let before = filters(&["generated", "build"], &[]);
+        assert!(filters(&["generated"], &[]).may_admit_more_than(&before));
+        assert!(
+            filters(&["generated", "build", "!build/keep.php"], &[]).may_admit_more_than(&before)
+        );
+        assert!(filters(&["generated", "build"], &["module"]).may_admit_more_than(&before));
+    }
+
+    /// Clients re-push settings that repeat what is already in force, so
+    /// an unchanged list must not read as a re-include.
+    #[test]
+    fn an_unchanged_filter_set_admits_nothing_new() {
+        let before = filters(&["generated", "!generated/keep.php"], &["module"]);
+        let after = filters(&["generated", "!generated/keep.php"], &["module"]);
+        assert!(!after.may_admit_more_than(&before));
     }
 
     #[test]

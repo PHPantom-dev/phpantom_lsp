@@ -230,6 +230,23 @@ pub(crate) fn extract_pivot_type_typed(return_type: &PhpType) -> Option<&PhpType
     None
 }
 
+/// Extract the literal `TAccessor` name from a many-to-many relationship's
+/// fourth generic argument.
+///
+/// Given `BelongsToMany<User, $this, Membership, 'participation'>`, returns
+/// `participation`. Non-literal or empty accessor types cannot name a virtual
+/// property and return `None`.
+pub(crate) fn extract_pivot_accessor_typed(return_type: &PhpType) -> Option<crate::atom::Atom> {
+    let TypeKind::Generic(g) = return_type.kind() else {
+        return None;
+    };
+    let accessor = g.args.get(3)?.as_literal()?.string_content()?;
+    if accessor.is_empty() {
+        return None;
+    }
+    Some(atom(&accessor))
+}
+
 /// Pre-built `Illuminate\Database\Eloquent\Model` type for fallback related types.
 fn eloquent_model_type() -> PhpType {
     PhpType::named(atom("Illuminate\\Database\\Eloquent\\Model"))
@@ -390,6 +407,21 @@ pub(super) fn count_property_name(method_name: &str) -> String {
     format!("{}_count", camel_to_snake(method_name))
 }
 
+/// Extract a literal custom pivot accessor from an `->as('name')` chained
+/// call in a many-to-many relationship method body.
+///
+/// Returns `None` when no `->as(...)` call is present, its argument is not a
+/// string literal, or the literal is empty.
+pub(crate) fn extract_pivot_accessor(body_text: &str) -> Option<crate::atom::Atom> {
+    let needle = "->as(";
+    let call_pos = body_text.find(needle)?;
+    let after_paren = &body_text[call_pos + needle.len()..];
+    let end = after_paren.find(')')?;
+    string_literal_argument(after_paren[..end].trim())
+        .filter(|accessor| !accessor.is_empty())
+        .map(atom)
+}
+
 /// Extract the custom pivot class from a `->using(X::class)` chained call
 /// in a many-to-many relationship method body.
 ///
@@ -424,7 +456,7 @@ pub(crate) fn extract_with_pivot_columns(body_text: &str) -> Vec<String> {
                 if let Some(col) = string_literal_argument(segment.trim())
                     && !col.is_empty()
                 {
-                    columns.push(col);
+                    columns.push(col.to_string());
                 }
             }
             rest = &after_paren[end..];
@@ -438,7 +470,7 @@ pub(crate) fn extract_with_pivot_columns(body_text: &str) -> Vec<String> {
 /// Extract a single-quoted or double-quoted string literal from an argument
 /// fragment, e.g. `'expires_at'` → `expires_at`.  Returns `None` for
 /// non-literal fragments (variables, constants, array spreads).
-fn string_literal_argument(fragment: &str) -> Option<String> {
+fn string_literal_argument(fragment: &str) -> Option<&str> {
     let bytes = fragment.as_bytes();
     let quote = *bytes.first()?;
     if quote != b'\'' && quote != b'"' {
@@ -446,7 +478,7 @@ fn string_literal_argument(fragment: &str) -> Option<String> {
     }
     let inner = &fragment[1..];
     let close = inner.find(quote as char)?;
-    Some(inner[..close].to_string())
+    Some(&inner[..close])
 }
 
 /// Walk a dot-separated relation chain starting from `model` and return

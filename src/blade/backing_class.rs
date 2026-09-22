@@ -140,7 +140,7 @@ impl Backend {
         // including the ones no name transform predicts — an index
         // component (`components.card` → `App\View\Components\Card\Card`)
         // is only findable by having seen the file.
-        if let Some(tag) = super::component_tags::component_tag_for_view_name(view_name)
+        if let Some(tag) = super::component_names::component_tag_for_view_name(view_name)
             && let Some(fqn) = self.blade_component_fqn(&tag)
             && let Some(class) = self.component_class_named(&fqn, COMPONENT_BASE)
         {

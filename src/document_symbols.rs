@@ -16,10 +16,17 @@
 //!
 //! 3. **`global_defines`** — provides `DefineInfo` records for
 //!    `define()` / top-level `const` declarations.
+//!
+//! For a Blade template those three describe the virtual PHP the
+//! preprocessor emits, so the tree they build is translated back to the
+//! template's own coordinates and the template's own landmarks (its
+//! sections, stacks, and component tags) are added on top. See
+//! [`crate::blade::outline`].
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::blade::outline::OutlineEntry;
 use crate::text_position::LineIndex;
 use crate::types::{
     ClassInfo, ClassLikeKind, ConstantInfo, FunctionInfo, MethodInfo, PropertyInfo, Visibility,
@@ -90,6 +97,10 @@ impl Backend {
             }
         }
 
+        if self.is_blade_file(uri) {
+            return self.blade_document_symbols(uri, symbols);
+        }
+
         // Sort by position so the outline matches source order.
         symbols.sort_by(|a, b| {
             a.range
@@ -105,6 +116,124 @@ impl Backend {
             Some(DocumentSymbolResponse::Nested(symbols))
         }
     }
+
+    /// The outline of a Blade template: `php_symbols`, built from the
+    /// virtual PHP, translated back to the template, with the template's
+    /// own sections, stacks, and component tags added.
+    ///
+    /// Everything is then nested by containment, so a component tag
+    /// written inside a `@section` (or a class declared inside a `@php`
+    /// block inside one) is listed under it.
+    fn blade_document_symbols(
+        &self,
+        uri: &str,
+        php_symbols: Vec<DocumentSymbol>,
+    ) -> Option<DocumentSymbolResponse> {
+        let content = self.get_file_content_arc(uri)?;
+        let idx = LineIndex::new(&content);
+
+        let mut symbols: Vec<DocumentSymbol> = php_symbols
+            .into_iter()
+            .filter_map(|symbol| self.translate_symbol(uri, symbol))
+            .collect();
+        symbols.extend(
+            self.blade_outline(&content)
+                .into_iter()
+                .map(|entry| entry_to_symbol(entry, &idx)),
+        );
+
+        if symbols.is_empty() {
+            return None;
+        }
+        Some(DocumentSymbolResponse::Nested(nest_by_containment(symbols)))
+    }
+
+    /// Translate a symbol built from the virtual PHP back to the
+    /// template, dropping it when either of its ranges lands in the
+    /// preprocessor's prologue: that code stands behind no template text,
+    /// so there is nowhere in the file to list it.
+    fn translate_symbol(&self, uri: &str, symbol: DocumentSymbol) -> Option<DocumentSymbol> {
+        let range = self.try_translate_blade_range(uri, symbol.range)?;
+        let selection_range = self.try_translate_blade_range(uri, symbol.selection_range)?;
+        let children = symbol.children.map(|children| {
+            children
+                .into_iter()
+                .filter_map(|child| self.translate_symbol(uri, child))
+                .collect()
+        });
+        Some(DocumentSymbol {
+            range,
+            selection_range,
+            children,
+            ..symbol
+        })
+    }
+}
+
+/// Build the symbol for one Blade outline entry.
+#[allow(deprecated)]
+fn entry_to_symbol(entry: OutlineEntry, idx: &LineIndex<'_>) -> DocumentSymbol {
+    DocumentSymbol {
+        name: entry.name,
+        detail: entry.detail,
+        kind: entry.kind,
+        tags: None,
+        deprecated: None,
+        range: Range::new(idx.position(entry.span.start), idx.position(entry.span.end)),
+        selection_range: Range::new(
+            idx.position(entry.selection.start),
+            idx.position(entry.selection.end),
+        ),
+        children: None,
+    }
+}
+
+/// Nest a flat list of symbols so that each one becomes a child of the
+/// innermost symbol whose range encloses it.
+///
+/// Symbols that overlap without enclosing (a directive block opened
+/// inside a component tag and closed outside it, which Blade itself
+/// tolerates) end up as siblings rather than nested, which is what the
+/// source says: neither contains the other.
+fn nest_by_containment(mut symbols: Vec<DocumentSymbol>) -> Vec<DocumentSymbol> {
+    symbols.sort_by_key(|symbol| {
+        let start = (symbol.range.start.line, symbol.range.start.character);
+        let end = (symbol.range.end.line, symbol.range.end.character);
+        // The enclosing symbol comes first: same start, later end.
+        (start, std::cmp::Reverse(end))
+    });
+
+    let mut roots: Vec<DocumentSymbol> = Vec::new();
+    let mut open: Vec<DocumentSymbol> = Vec::new();
+    for symbol in symbols {
+        while open
+            .last()
+            .is_some_and(|parent| !encloses(&parent.range, &symbol.range))
+        {
+            let closed = open.pop().expect("the loop only runs with a last entry");
+            attach(closed, &mut open, &mut roots);
+        }
+        open.push(symbol);
+    }
+    while let Some(closed) = open.pop() {
+        attach(closed, &mut open, &mut roots);
+    }
+    roots
+}
+
+/// Add a finished symbol to the innermost symbol still open around it,
+/// or to the top level when there is none.
+fn attach(symbol: DocumentSymbol, open: &mut [DocumentSymbol], roots: &mut Vec<DocumentSymbol>) {
+    match open.last_mut() {
+        Some(parent) => parent.children.get_or_insert_default().push(symbol),
+        None => roots.push(symbol),
+    }
+}
+
+/// Whether `outer` covers all of `inner`.
+fn encloses(outer: &Range, inner: &Range) -> bool {
+    let position = |p: &Position| (p.line, p.character);
+    position(&outer.start) <= position(&inner.start) && position(&inner.end) <= position(&outer.end)
 }
 
 // ── Converters ──────────────────────────────────────────────────────
@@ -147,7 +276,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         if constant.is_virtual {
             continue;
         }
-        if let Some(sym) = constant_to_symbol(constant, idx, class.kind == ClassLikeKind::Enum) {
+        if let Some(sym) = constant_to_symbol(constant, idx) {
             children.push(sym);
         }
     }
@@ -248,170 +377,121 @@ fn statement_declaration_end(content: &str, name_offset: usize, name_len: usize)
         .unwrap_or(fallback)
 }
 
+/// Build a leaf `DocumentSymbol` for a member declaration.
+///
+/// The selection range covers the name, which is what an editor
+/// highlights and jumps to; the full range covers the whole declaration,
+/// so folding the outline entry folds the member. `declaration_end` says
+/// where that declaration finishes, since a callable ends at its body's
+/// brace and a property or constant at its `;`.
+///
+/// A member with no recorded offset was synthesised rather than written,
+/// so it has no place in the outline and yields `None`.
+#[allow(deprecated)] // DocumentSymbol::deprecated is deprecated in the LSP types crate
+#[allow(clippy::too_many_arguments)]
+fn member_symbol(
+    (name, name_offset, name_len): (String, u32, usize),
+    kind: SymbolKind,
+    detail: Option<String>,
+    deprecated: bool,
+    idx: &LineIndex<'_>,
+    declaration_end: fn(&str, usize, usize) -> usize,
+) -> Option<DocumentSymbol> {
+    if name_offset == 0 {
+        return None;
+    }
+    let start = idx.position(name_offset as usize);
+    let selection_range = Range::new(start, idx.position(name_offset as usize + name_len));
+    let decl_end = declaration_end(idx.content(), name_offset as usize, name_len);
+    Some(DocumentSymbol {
+        name,
+        detail,
+        kind,
+        tags: deprecated.then(|| vec![SymbolTag::DEPRECATED]),
+        deprecated: None,
+        range: Range::new(start, idx.position(decl_end)),
+        selection_range,
+        children: None,
+    })
+}
+
 /// Convert a `MethodInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn method_to_symbol(method: &MethodInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if method.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(method.name_offset as usize);
-    let name_end = idx.position(method.name_offset as usize + method.name.len());
-    let selection_range = Range::new(pos, name_end);
-
-    // The full range must enclose the whole declaration (signature and
-    // body), with the selection range (the name) nested inside it.
-    let decl_end = callable_declaration_end(
-        idx.content(),
-        method.name_offset as usize,
-        method.name.len(),
-    );
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = build_method_detail(method);
-    let tags = if method.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
     let kind = if method.name == "__construct" {
         SymbolKind::CONSTRUCTOR
     } else {
         SymbolKind::METHOD
     };
-
-    Some(DocumentSymbol {
-        name: method.name.to_string(),
-        detail,
+    member_symbol(
+        (
+            method.name.to_string(),
+            method.name_offset,
+            method.name.len(),
+        ),
         kind,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+        build_method_detail(method),
+        method.deprecation_message.is_some(),
+        idx,
+        callable_declaration_end,
+    )
 }
 
 /// Convert a `PropertyInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if prop.name_offset == 0 {
-        return None;
-    }
-
-    // The name_offset points to the `$` of the property name.
-    let dollar_name_len = prop.name.len() + 1; // `$` + name
-    let pos = idx.position(prop.name_offset as usize);
-    let name_end = idx.position(prop.name_offset as usize + dollar_name_len);
-    let selection_range = Range::new(pos, name_end);
-    let decl_end =
-        statement_declaration_end(idx.content(), prop.name_offset as usize, dollar_name_len);
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = prop.type_hint_str();
-    let tags = if prop.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    Some(DocumentSymbol {
-        name: format!("${}", prop.name),
-        detail,
-        kind: SymbolKind::PROPERTY,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+    member_symbol(
+        // The name offset points at the `$`, which is part of the name.
+        (
+            format!("${}", prop.name),
+            prop.name_offset,
+            prop.name.len() + 1,
+        ),
+        SymbolKind::PROPERTY,
+        prop.type_hint_str(),
+        prop.deprecation_message.is_some(),
+        idx,
+        statement_declaration_end,
+    )
 }
 
 /// Convert a `ConstantInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn constant_to_symbol(
-    constant: &ConstantInfo,
-    idx: &LineIndex<'_>,
-    is_enum: bool,
-) -> Option<DocumentSymbol> {
-    if constant.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(constant.name_offset as usize);
-    let name_end = idx.position(constant.name_offset as usize + constant.name.len());
-    let selection_range = Range::new(pos, name_end);
-    let decl_end = statement_declaration_end(
-        idx.content(),
-        constant.name_offset as usize,
-        constant.name.len(),
-    );
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let kind = if constant.is_enum_case {
-        SymbolKind::ENUM_MEMBER
+fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
+    let (kind, detail) = if constant.is_enum_case {
+        (SymbolKind::ENUM_MEMBER, constant.enum_value.clone())
     } else {
-        SymbolKind::CONSTANT
+        (
+            SymbolKind::CONSTANT,
+            constant.type_hint_str().or_else(|| constant.value.clone()),
+        )
     };
 
-    let detail = if constant.is_enum_case {
-        constant.enum_value.clone()
-    } else {
-        constant.type_hint_str().or_else(|| constant.value.clone())
-    };
-
-    let tags = if constant.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    let _ = is_enum;
-
-    Some(DocumentSymbol {
-        name: constant.name.to_string(),
-        detail,
+    member_symbol(
+        (
+            constant.name.to_string(),
+            constant.name_offset,
+            constant.name.len(),
+        ),
         kind,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+        detail,
+        constant.deprecation_message.is_some(),
+        idx,
+        statement_declaration_end,
+    )
 }
 
 /// Convert a `FunctionInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
 fn function_to_symbol(func: &FunctionInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
-    if func.name_offset == 0 {
-        return None;
-    }
-
-    let pos = idx.position(func.name_offset as usize);
-    let name_end = idx.position(func.name_offset as usize + func.name.len());
-    let selection_range = Range::new(pos, name_end);
-    let decl_end =
-        callable_declaration_end(idx.content(), func.name_offset as usize, func.name.len());
-    let range = Range::new(pos, idx.position(decl_end));
-
-    let detail = build_function_detail(func);
-    let tags = if func.deprecation_message.is_some() {
-        Some(vec![SymbolTag::DEPRECATED])
-    } else {
-        None
-    };
-
-    Some(DocumentSymbol {
-        name: func.name.to_string(),
-        detail,
-        kind: SymbolKind::FUNCTION,
-        tags,
-        deprecated: None,
-        range,
-        selection_range,
-        children: None,
-    })
+    member_symbol(
+        (func.name.to_string(), func.name_offset, func.name.len()),
+        SymbolKind::FUNCTION,
+        build_function_detail(func),
+        func.deprecation_message.is_some(),
+        idx,
+        callable_declaration_end,
+    )
 }
 
 // ── Detail string builders ──────────────────────────────────────────
@@ -548,6 +628,65 @@ mod tests {
         assert_eq!(short_name("Foo\\Bar\\Baz"), "Baz");
         assert_eq!(short_name("Simple"), "Simple");
         assert_eq!(short_name(""), "");
+    }
+
+    // ── Nesting by containment ──────────────────────────────────────
+
+    /// A symbol named `name` spanning `start`..`end` on line 0.
+    #[allow(deprecated)]
+    fn symbol(name: &str, start: u32, end: u32) -> DocumentSymbol {
+        let range = Range::new(Position::new(0, start), Position::new(0, end));
+        DocumentSymbol {
+            name: name.to_string(),
+            detail: None,
+            kind: SymbolKind::NAMESPACE,
+            tags: None,
+            deprecated: None,
+            range,
+            selection_range: range,
+            children: None,
+        }
+    }
+
+    /// The tree as `(name, depth)` pairs, in outline order.
+    fn tree(symbols: &[DocumentSymbol]) -> Vec<(String, usize)> {
+        fn walk(symbols: &[DocumentSymbol], depth: usize, out: &mut Vec<(String, usize)>) {
+            for symbol in symbols {
+                out.push((symbol.name.clone(), depth));
+                if let Some(children) = &symbol.children {
+                    walk(children, depth + 1, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(symbols, 0, &mut out);
+        out
+    }
+
+    #[test]
+    fn an_enclosed_symbol_becomes_a_child() {
+        let nested = nest_by_containment(vec![
+            symbol("inner", 2, 4),
+            symbol("outer", 0, 10),
+            symbol("after", 6, 8),
+        ]);
+        assert_eq!(
+            tree(&nested),
+            [
+                ("outer".to_string(), 0),
+                ("inner".to_string(), 1),
+                ("after".to_string(), 1),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_symbol_reaching_past_its_neighbour_stays_a_sibling() {
+        let nested = nest_by_containment(vec![symbol("first", 0, 6), symbol("second", 4, 10)]);
+        assert_eq!(
+            tree(&nested),
+            [("first".to_string(), 0), ("second".to_string(), 0)]
+        );
     }
 
     #[test]

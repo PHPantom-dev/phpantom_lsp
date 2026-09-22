@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// PHP parsing and AST extraction.
 ///
@@ -764,8 +765,10 @@ fn extract_string_literal_value(
 /// content string.  The arena and program are populated on the first
 /// [`with_parsed_program`] call whose content matches.
 struct ParseCacheEntry {
-    /// Owned copy of the source text.  Must outlive `program_ptr`.
-    content: String,
+    /// The source text, shared with the caller that installed the cache
+    /// when it already held it behind an `Arc`.  Must outlive
+    /// `program_ptr`.
+    content: Arc<String>,
     /// LocalArena that owns all AST nodes.  `None` until the first
     /// `with_parsed_program` call triggers a lazy parse.
     arena: Option<mago_allocator::LocalArena>,
@@ -808,6 +811,130 @@ impl Drop for ParseCacheGuard {
     }
 }
 
+/// Unwrap parenthesized expressions to their inner expression.
+pub(crate) fn unwrap_parens<'a>(
+    expr: &'a mago_syntax::cst::Expression<'a>,
+) -> &'a mago_syntax::cst::Expression<'a> {
+    match expr {
+        mago_syntax::cst::Expression::Parenthesized(p) => unwrap_parens(p.expression),
+        other => other,
+    }
+}
+
+/// The elements of an array literal, in either spelling (`[…]` and the
+/// legacy `array(…)`).
+///
+/// `None` for anything that is not an array literal.
+pub(crate) fn array_literal_elements<'a, 'ast>(
+    expr: &'a mago_syntax::cst::Expression<'ast>,
+) -> Option<
+    &'a mago_syntax::cst::sequence::TokenSeparatedSequence<
+        'ast,
+        mago_syntax::cst::array::ArrayElement<'ast>,
+    >,
+> {
+    use mago_syntax::cst::Expression;
+    match expr {
+        Expression::Array(array) => Some(&array.elements),
+        Expression::LegacyArray(array) => Some(&array.elements),
+        _ => None,
+    }
+}
+
+/// The value expression of an array element, or `None` for a hole in a
+/// list (`[$a, , $c]`).
+pub(crate) fn array_element_value<'b>(
+    elem: &'b mago_syntax::cst::array::ArrayElement<'b>,
+) -> Option<&'b mago_syntax::cst::Expression<'b>> {
+    use mago_syntax::cst::array::ArrayElement;
+    match elem {
+        ArrayElement::KeyValue(kv) => Some(kv.value),
+        ArrayElement::Value(v) => Some(v.value),
+        ArrayElement::Variadic(v) => Some(v.value),
+        ArrayElement::Missing(_) => None,
+    }
+}
+
+/// The key expression of an array element written as `key => value`.
+pub(crate) fn array_element_key<'b>(
+    elem: &'b mago_syntax::cst::array::ArrayElement<'b>,
+) -> Option<&'b mago_syntax::cst::Expression<'b>> {
+    use mago_syntax::cst::array::ArrayElement;
+    match elem {
+        mago_syntax::cst::array::ArrayElement::KeyValue(kv) => Some(kv.key),
+        ArrayElement::Value(_) | ArrayElement::Variadic(_) | ArrayElement::Missing(_) => None,
+    }
+}
+
+/// The member list of a class-like node, in any of the four spellings.
+///
+/// `None` for an interface (whose methods have no body) and for every
+/// other node kind, which a walker treats as "nothing to descend into
+/// here".
+pub(crate) fn class_like_members<'ast>(
+    node: mago_syntax::cst::node::Node<'ast, 'ast>,
+) -> Option<&'ast [mago_syntax::cst::class_like::member::ClassLikeMember<'ast>]> {
+    use mago_syntax::cst::node::Node;
+    match node {
+        Node::Class(class) => Some(class.members.as_slice()),
+        Node::AnonymousClass(class) => Some(class.members.as_slice()),
+        Node::Trait(trait_) => Some(trait_.members.as_slice()),
+        Node::Enum(enum_) => Some(enum_.members.as_slice()),
+        _ => None,
+    }
+}
+
+/// Call `visit` for each method of `members` that has a body, handing it
+/// the method and the block.
+pub(crate) fn for_each_concrete_method<'ast>(
+    members: &'ast [mago_syntax::cst::class_like::member::ClassLikeMember<'ast>],
+    mut visit: impl FnMut(
+        &'ast mago_syntax::cst::class_like::method::Method<'ast>,
+        &'ast mago_syntax::cst::Block<'ast>,
+    ),
+) {
+    use mago_syntax::cst::class_like::member::ClassLikeMember;
+    use mago_syntax::cst::class_like::method::MethodBody;
+    for member in members {
+        if let ClassLikeMember::Method(method) = member
+            && let MethodBody::Concrete(body) = &method.body
+        {
+            visit(method, body);
+        }
+    }
+}
+
+/// Call `visit` with each statement list an `if` can run: the body, the
+/// body of every `elseif`, and the `else`.
+///
+/// Both spellings of an `if` (braced and `:`-delimited) are covered, since
+/// `IfBody` already unifies them.
+pub(crate) fn for_each_if_branch(
+    if_stmt: &mago_syntax::cst::If<'_>,
+    mut visit: impl FnMut(&[mago_syntax::cst::Statement<'_>]),
+) {
+    let _ = try_for_each_if_branch(if_stmt, |statements| {
+        visit(statements);
+        std::ops::ControlFlow::<()>::Continue(())
+    });
+}
+
+/// [`for_each_if_branch`] for a walker that stops early: the first branch
+/// `visit` breaks on ends the walk and its value comes back.
+pub(crate) fn try_for_each_if_branch<B>(
+    if_stmt: &mago_syntax::cst::If<'_>,
+    mut visit: impl FnMut(&[mago_syntax::cst::Statement<'_>]) -> std::ops::ControlFlow<B>,
+) -> std::ops::ControlFlow<B> {
+    visit(if_stmt.body.statements())?;
+    for statements in if_stmt.body.else_if_statements() {
+        visit(statements)?;
+    }
+    if let Some(statements) = if_stmt.body.else_statements() {
+        visit(statements)?;
+    }
+    std::ops::ControlFlow::Continue(())
+}
+
 /// Activate the thread-local parse cache for `content`.
 ///
 /// While the returned [`ParseCacheGuard`] is alive, every call to
@@ -826,22 +953,37 @@ impl Drop for ParseCacheGuard {
 pub(crate) fn with_parse_cache(content: &str) -> ParseCacheGuard {
     // If there's already an active cache (nested call), just return a
     // no-op guard — the outermost guard owns the lifetime.
-    let already_active = PARSE_CACHE.with(|cell| cell.borrow().is_some());
-    if already_active {
+    if parse_cache_active() {
+        return ParseCacheGuard { owns_cache: false };
+    }
+    with_parse_cache_arc(Arc::new(content.to_string()))
+}
+
+/// [`with_parse_cache`] for a caller that already holds the content
+/// behind an `Arc`, which the cache then shares instead of copying.
+///
+/// Every LSP request passes through here, so the copy would otherwise be
+/// paid once per request whether or not anything goes on to parse.
+pub(crate) fn with_parse_cache_arc(content: Arc<String>) -> ParseCacheGuard {
+    if parse_cache_active() {
         return ParseCacheGuard { owns_cache: false };
     }
 
-    // Store only the content string.  The actual parse is deferred
-    // until the first `with_parsed_program` call that hits the cache.
+    // Store only the content.  The actual parse is deferred until the
+    // first `with_parsed_program` call that hits the cache.
     PARSE_CACHE.with(|cell| {
         *cell.borrow_mut() = Some(ParseCacheEntry {
-            content: content.to_string(),
+            content,
             arena: None,
             program_ptr: None,
         });
     });
 
     ParseCacheGuard { owns_cache: true }
+}
+
+fn parse_cache_active() -> bool {
+    PARSE_CACHE.with(|cell| cell.borrow().is_some())
 }
 
 /// Parse `content` with the mago-syntax parser and pass the resulting
@@ -868,7 +1010,7 @@ pub(crate) fn with_parsed_program<T: Default>(
     let cache_state: u8 = PARSE_CACHE.with(|cell| {
         let borrow = cell.borrow();
         match borrow.as_ref() {
-            Some(e) if e.content == content => {
+            Some(e) if e.content.as_str() == content => {
                 if e.program_ptr.is_some() {
                     2
                 } else {
@@ -921,7 +1063,7 @@ pub(crate) fn with_parsed_program<T: Default>(
                 // the reference.
                 let program: &Program<'_> =
                     unsafe { &*(entry.program_ptr.unwrap().cast::<Program<'_>>()) };
-                f(program, &entry.content)
+                f(program, entry.content.as_str())
             })
         }));
 
@@ -1299,22 +1441,7 @@ impl Backend {
                             result.push((cls, block_ns.clone()));
                         }
                     }
-                    Statement::Class(_)
-                    | Statement::Interface(_)
-                    | Statement::Trait(_)
-                    | Statement::Enum(_)
-                    // Class-likes can also be declared inside top-level
-                    // conditional / control-flow blocks (version guards,
-                    // `if (! class_exists(...))` shims, etc.). Route these
-                    // through the extractor, which descends into the bodies.
-                    | Statement::If(_)
-                    | Statement::Block(_)
-                    | Statement::Try(_)
-                    | Statement::Switch(_)
-                    | Statement::While(_)
-                    | Statement::DoWhile(_)
-                    | Statement::For(_)
-                    | Statement::Foreach(_) => {
+                    statement if Self::is_classlike_extraction_candidate(statement) => {
                         let mut top_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             std::iter::once(statement),

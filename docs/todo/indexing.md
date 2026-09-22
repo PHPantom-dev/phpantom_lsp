@@ -321,76 +321,6 @@ ready to implement.
 
 ---
 
-## X9. Accept client-supplied file filters (`initializationOptions`)
-
-**Impact: Medium · Complexity: Medium**
-
-The `.phpantom.toml` side of editor-filter support has shipped:
-`[indexing] exclude` and `[indexing] extensions` compile into
-`classmap_scanner::IndexFilters`, which every workspace walker, the
-file watcher, and `analyze` consult. The server, however, reads no
-`initializationOptions` at all today (and has no
-`workspace/didChangeConfiguration` handler), so an editor extension
-has nothing to forward the editor's own settings to, and a user has
-to mirror `files.exclude` / `files.associations` into
-`.phpantom.toml` by hand.
-
-Teach `initialize` to read a generic shape from
-`initializationOptions`:
-
-```json
-{ "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
-```
-
-held as a client layer beside the `.phpantom.toml` layer:
-`Backend::index_filters()` compiles the union of the two, so a config
-reload keeps the client's contribution and a client update keeps the
-config file's. Accept the same shape via
-`workspace/didChangeConfiguration` so a settings change mid-session
-recompiles the filters; a changed `extensions` list also needs the
-watcher re-registration tracked as B1 in
-[`bugs.md`](bugs.md#b1-adding-an-indexing-extensions-entry-needs-a-restart-to-be-watched).
-
-Keep the interface generic (a list of gitignore-style globs and a
-list of extensions), never editor-specific setting names: any client
-can supply them, and Zed already forwards the user's
-`lsp.phpantom.initialization_options` from `settings.json` to the
-server verbatim, so this task alone gives Zed users a working path
-with no extension changes at all (see X11).
-
-## X10. VS Code: forward `files.exclude` and `files.associations` (depends on X9)
-
-**Impact: Medium · Complexity: Medium**
-
-The client half of X9 for VS Code; the work lives in the extension
-repo (filed there as V9). The client passes no
-`initializationOptions` today. Gather the effective `files.exclude`
-entries that are enabled, translating VS Code's glob dialect to the
-gitignore lines X9 accepts, and the `files.associations` patterns
-mapped to `php`, reduced to extensions (`*.module` → `module`). Pass
-both at startup and re-send them from
-`workspace.onDidChangeConfiguration`. Clients are spawned one per
-workspace folder, so read folder-scoped configuration for each. This
-is the same merge Intelephense's middleware performs with VS Code's
-native settings.
-
-## X11. Zed: file filters via `initialization_options` (depends on X9)
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-Zed's extension API serves extensions only the `language`, `lsp`, and
-`context_servers` settings categories (`get_settings` in the
-`extension_host` crate), so the PHP extension cannot read the
-editor's `file_scan_exclusions` or `file_types` to forward them;
-automatic parity with the editor's own excludes is blocked on an
-upstream Zed change. What is achievable now: Zed merges the user's
-`lsp.phpantom.initialization_options` from `settings.json` over
-whatever the extension supplies, so once X9 lands the whole feature
-is a documentation section. Document the shape in
-[`editor-setup.md`](../editor-setup.md), and file the upstream
-request to expose those two settings to extensions so the manual
-step can eventually disappear.
-
 ## X12. Say when an exclude hid the class a diagnostic names
 
 **Impact: Low-Medium · Complexity: Medium-High**
@@ -405,6 +335,47 @@ the cause ("defined in `src/Generated/Foo.php`, which `[indexing]
 exclude` skips"). The PSR-4 mapping makes the probe a single stat
 plus an already-compiled glob match on the failure path only;
 classmap-only projects get no probe rather than a disk walk.
+
+## X16. Composer's own class lists bypass `[indexing] exclude`
+
+**Impact: Low-Medium · Complexity: Low**
+
+Every workspace walker honours `exclude`, but three sources write
+straight into `fqn_uri_index` without consulting it: the Composer
+classmap (`parse_autoload_classmap`, used under `strategy = "composer"`
+and `"none"`), the PSR-0 map (`parse_autoload_namespaces`), and the
+bootstrap classes `vendor/composer` requires before any autoloader
+exists. A class any of those name stays resolvable from a path the user
+excluded, so `exclude` means one thing for a file a walk found and
+another for a file a list named.
+
+It also costs the mid-session reconciliation some precision. The
+eviction pass applies only the *change* (a file both the old and the new
+filters exclude is left alone) exactly so an unrelated settings edit
+cannot drop these entries, which leaves one asymmetry: excluding such a
+path mid-session evicts it, while a restart would index it again.
+Filtering the three where they merge into the index makes one rule out
+of two and removes the asymmetry; the cost is one already-compiled glob
+match per entry, skipped outright when no exclude is configured.
+
+## X14. Ask Zed to expose `file_scan_exclusions` and `file_types` to extensions
+
+**Impact: Low · Complexity: Low**
+
+An upstream request, not a code change here. Zed's extension API serves
+extensions only the `language`, `lsp`, and `context_servers` settings
+categories (the `category` match in `get_settings`, `extension_host`
+crate), so the PHP extension cannot read the editor's own
+`file_scan_exclusions` or `file_types` and forward them the way the VS
+Code extension forwards `files.exclude` and `files.associations`. Zed
+users therefore have to restate those two lists under
+`lsp.phpantom.initialization_options`, which
+[`editor-setup.md`](../editor-setup.md) documents as the workaround.
+
+File the request against `zed-industries/zed` for read access to those
+two settings, then link the issue from that section so users can track
+it. When it lands, the forwarding itself is a small change in Zed's
+official PHP extension, and the manual step in the docs goes away.
 
 ## X13. Decide how workspace-wide edits treat excluded files
 

@@ -12,6 +12,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::find_class_at_offset;
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind, MethodInfo, ParameterInfo, Visibility};
@@ -34,22 +35,10 @@ impl Backend {
 
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
 
-        // Find the class the cursor is inside.  Use keyword_offset as the
-        // lower bound so the action also triggers when the cursor is on
-        // the `class Foo implements Bar` declaration line (before the `{`).
-        let current_class = match ctx
-            .classes
-            .iter()
-            .filter(|c| {
-                let effective_start = if c.keyword_offset > 0 {
-                    c.keyword_offset
-                } else {
-                    c.start_offset
-                };
-                cursor_offset >= effective_start && cursor_offset <= c.end_offset
-            })
-            .min_by_key(|c| c.end_offset - c.start_offset)
-        {
+        // Find the class the cursor is inside. `find_class_at_offset`'s
+        // lower bound also covers the `class Foo implements Bar`
+        // declaration line (and any attributes above it), before the `{`.
+        let current_class = match find_class_at_offset(&ctx.classes, cursor_offset) {
             Some(c) => c,
             None => return,
         };

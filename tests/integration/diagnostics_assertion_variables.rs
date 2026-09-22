@@ -4,24 +4,8 @@
 //! truthy check on `$ok` must narrow `$x` exactly as the original
 //! `instanceof` expression would.
 
-use crate::common::create_test_backend;
+use crate::common::{create_test_backend, unknown_member_diagnostics_with_scope_cache};
 use tower_lsp::lsp_types::*;
-
-fn unknown_member_diagnostics(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 fn argument_diagnostics(backend: &phpantom_lsp::Backend, uri: &str, text: &str) -> Vec<Diagnostic> {
     backend.update_ast(uri, text);
@@ -64,7 +48,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A boolean holding an instanceof result should narrow in the \
@@ -89,7 +73,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A boolean holding an instanceof result should narrow inside \
@@ -114,7 +98,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A guard clause on the negated boolean should leave the subject \
@@ -139,7 +123,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A boolean assertion in an `&&` chain should narrow the subject, \
@@ -167,7 +151,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "A stale assertion must not re-narrow a reassigned subject, \
@@ -194,7 +178,7 @@ class C {{
 }}
 "
     );
-    let diags = unknown_member_diagnostics(&backend, uri, &text);
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, &text);
     assert!(
         diags.is_empty(),
         "Rebinding the boolean must not keep narrowing, got: {diags:?}"
