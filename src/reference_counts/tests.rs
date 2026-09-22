@@ -118,8 +118,11 @@ function persist(Order $order): void {
     );
 }
 
+/// A receiver walk is the type engine over a whole file, so a query pays for
+/// the member names it asked about and no others.  A later name adds its own
+/// accesses to the same entry rather than re-resolving the ones already there.
 #[test]
-fn later_member_batches_reuse_the_semantic_file_index() {
+fn later_member_batches_extend_the_semantic_file_index() {
     const SERVICE_URI: &str = "file:///Service.php";
     const CONSUMER_URI: &str = "file:///Consumer.php";
     const SERVICE: &str = r#"<?php
@@ -163,11 +166,23 @@ function run(Service $service): void {
         .get(CONSUMER_URI)
         .cloned()
         .unwrap();
+    let save_span = consumer_map.member_access_indices("save")[0];
+    let cancel_span = consumer_map.member_access_indices("cancel")[0];
+
+    let indexed = backend
+        .resolved_member_file(CONSUMER_URI, &consumer_map)
+        .expect("the first member query should index its candidate file");
     assert!(
-        backend
-            .resolved_member_file(CONSUMER_URI, &consumer_map)
-            .is_some(),
-        "the first member query should index every receiver in its candidate file"
+        indexed.covers([crate::atom::atom("save")]),
+        "the query's own member name has to be covered"
+    );
+    assert!(
+        !indexed.covers([crate::atom::atom("cancel")]),
+        "a name nothing asked about must not be walked for"
+    );
+    assert!(
+        !indexed.targets_for_span(save_span).is_empty(),
+        "the receiver the query did ask about has to be resolved"
     );
 
     let cancel_offset = SERVICE.find("cancel").unwrap() as u32;
@@ -182,12 +197,34 @@ function run(Service $service): void {
             )
             .is_none()
     );
-    crate::type_engine::variable::resolution::reset_test_scope_cache_hits();
     backend.compute_pending_member_ref_counts();
+
     assert_eq!(
-        crate::type_engine::variable::resolution::test_scope_cache_hits(),
-        0,
-        "a later member name must not rebuild or query the file's variable scopes"
+        backend
+            .member_ref_locations_cached(
+                SERVICE_URI,
+                cancel_offset,
+                class_fqn,
+                crate::atom::atom("cancel"),
+                false,
+            )
+            .unwrap()
+            .len(),
+        1,
+        "the second name is still found in a file the first name already walked"
+    );
+    let extended = backend
+        .resolved_member_file(CONSUMER_URI, &consumer_map)
+        .expect("the entry survives the second query");
+    assert!(
+        extended.covers([crate::atom::atom("save"), crate::atom::atom("cancel")]),
+        "the entry now answers for both names"
+    );
+    assert!(
+        !extended.targets_for_span(save_span).is_empty()
+            && !extended.targets_for_span(cancel_span).is_empty(),
+        "the second query carries the first query's resolutions over rather \
+         than discarding them"
     );
 }
 

@@ -121,17 +121,35 @@ struct ResolvedMemberAccess {
     target_len: u32,
 }
 
-/// Receiver classes resolved for every member access in one immutable symbol
-/// map.  Targets are packed into one allocation; the access table points into
-/// it and stays sorted by symbol-span index for binary lookup.
+/// Receiver classes resolved for the accesses to a set of member names in one
+/// immutable symbol map.  Targets are packed into one allocation; the access
+/// table points into it and stays sorted by symbol-span index for binary
+/// lookup.
+///
+/// Resolving a receiver means running the type engine over the whole enclosing
+/// file, so an entry only covers the member names a search actually asked
+/// about: a file with two hundred member accesses and one `->save()` pays for
+/// the one.  `covered` records which names those were, because an absent
+/// access and an access that resolved to nothing are indistinguishable in the
+/// table below — without it a later search for a different name would read
+/// this entry as "no receiver anywhere" and silently drop every reference in
+/// the file.
 pub(crate) struct ResolvedMemberFile {
     symbol_map: Arc<SymbolMap>,
+    /// The member names this entry resolved the accesses of, sorted.
+    covered: Box<[Atom]>,
     accesses: Vec<ResolvedMemberAccess>,
     targets: Vec<Atom>,
 }
 
 impl ResolvedMemberFile {
-    pub(crate) fn new(symbol_map: Arc<SymbolMap>, mut resolved: Vec<(usize, Vec<Atom>)>) -> Self {
+    pub(crate) fn new(
+        symbol_map: Arc<SymbolMap>,
+        mut covered: Vec<Atom>,
+        mut resolved: Vec<(usize, Vec<Atom>)>,
+    ) -> Self {
+        covered.sort_unstable();
+        covered.dedup();
         resolved.sort_unstable_by_key(|(span_index, _)| *span_index);
         let target_count = resolved.iter().map(|(_, targets)| targets.len()).sum();
         let mut accesses = Vec::with_capacity(resolved.len());
@@ -152,9 +170,34 @@ impl ResolvedMemberFile {
         }
         Self {
             symbol_map,
+            covered: covered.into_boxed_slice(),
             accesses,
             targets: packed_targets,
         }
+    }
+
+    /// Whether this entry already answers for every one of `members`.
+    pub(crate) fn covers(&self, members: impl IntoIterator<Item = Atom>) -> bool {
+        members
+            .into_iter()
+            .all(|member| self.covered.binary_search(&member).is_ok())
+    }
+
+    pub(crate) fn covered(&self) -> &[Atom] {
+        &self.covered
+    }
+
+    /// The resolutions already recorded, so a search that needs one more
+    /// member name carries them over instead of walking the file again for
+    /// names a previous search already paid for.
+    pub(crate) fn resolutions(&self) -> impl Iterator<Item = (usize, Vec<Atom>)> + '_ {
+        self.accesses.iter().map(|access| {
+            let start = access.target_start as usize;
+            (
+                access.span_index as usize,
+                self.targets[start..start + access.target_len as usize].to_vec(),
+            )
+        })
     }
 
     pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
@@ -181,8 +224,11 @@ impl ResolvedMemberFile {
         (
             self.accesses.len(),
             self.accesses.capacity() * std::mem::size_of::<ResolvedMemberAccess>()
-                + self.targets.capacity() * std::mem::size_of::<Atom>(),
-            usize::from(self.accesses.capacity() > 0) + usize::from(self.targets.capacity() > 0),
+                + self.targets.capacity() * std::mem::size_of::<Atom>()
+                + self.covered.len() * std::mem::size_of::<Atom>(),
+            usize::from(self.accesses.capacity() > 0)
+                + usize::from(self.targets.capacity() > 0)
+                + usize::from(!self.covered.is_empty()),
         )
     }
 }
@@ -219,6 +265,8 @@ pub(crate) fn new_reference_index() -> ReferenceIndex {
 }
 
 impl Backend {
+    /// The entry cached for `uri`, when it describes the same symbol map and
+    /// already covers every member name the caller is searching for.
     pub(crate) fn resolved_member_file(
         &self,
         uri: &str,
@@ -236,9 +284,14 @@ impl Backend {
         &self,
         uri: &str,
         symbol_map: Arc<SymbolMap>,
+        covered: Vec<Atom>,
         resolved: Vec<(usize, Vec<Atom>)>,
     ) -> Arc<ResolvedMemberFile> {
-        let built = Arc::new(ResolvedMemberFile::new(Arc::clone(&symbol_map), resolved));
+        let built = Arc::new(ResolvedMemberFile::new(
+            Arc::clone(&symbol_map),
+            covered,
+            resolved,
+        ));
 
         // A didChange parse may have replaced the symbol map while the
         // semantic walk was running. The result remains usable by its caller,
@@ -253,10 +306,15 @@ impl Backend {
         }
 
         let mut index = self.reference_index.write();
+        // A concurrent worker may have cached the same file first.  Keep its
+        // entry only when it answers for at least as many member names as this
+        // one, or the narrower entry would drop the names this walk just paid
+        // for and the next search would walk the file again.
         if let Some(existing) = index
             .resolved_members
             .get(uri)
             .filter(|file| file.matches_symbol_map(&symbol_map))
+            .filter(|file| file.covers(built.covered().iter().copied()))
         {
             return Arc::clone(existing);
         }

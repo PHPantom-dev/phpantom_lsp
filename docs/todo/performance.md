@@ -1167,16 +1167,98 @@ filtered without reading it at all, which also removes the file reads
 above.
 
 That leaves the layer being cleared wholesale on a signature change.
-Before narrowing it, measure how much of a burst is the rebuild and how
-much is the scan: the layer is shared with Find References, so a
-narrowing that gets it wrong shows up as missing references, not as a
-slow lens.
+The measurement that was asked for here has been taken, on a 6,700-file
+Laravel application, opening a controller that declares eight methods
+(`index`, `create`, `save`, `update`, `edit`, `delete`, `featured`,
+`publish`) whose counts come to nine references in total:
+
+| | candidate files | receiver walks | wall | CPU |
+| --- | --- | --- | --- | --- |
+| first open | 1,225 | 1,118 | 8.6 s | 122 s |
+| after renaming one method | 1,122 | 1,078 | 8.5 s | 117 s |
+
+The second row is the cost this item is about: the rename reaches
+`clear_resolved_member_files`, every warm entry goes, and the burst pays
+the same price again. Nothing else in the second row is new work; a
+rename that did not clear the layer would have been served from it.
+
+The layer is shared with Find References, so a narrowing that gets it
+wrong shows up as missing references, not as a slow lens.
 
 **Where to look:** `Staleness` and `compute_pending_member_ref_counts`
 in `reference_counts.rs`, `ResolvedMemberFile` in `reference_index.rs`,
 `member_declaration_references_batch_in` in `references/members.rs`,
 `clear_resolved_member_files` in `parser/ast_update.rs`, and
 `get_file_content_arc` in `backend/file_access.rs`.
+
+---
+
+## P58. A receiver walk builds variable scopes for a whole file to type one access
+
+**Impact: High · Complexity: Medium-High**
+
+Resolving the receiver of a member access needs the enclosing function's
+variable scopes, and `member_declaration_references_batch_in` gets them
+from `build_diagnostic_scopes`, which forward-walks every function in
+the file. A candidate file usually holds one or two accesses the search
+is interested in, in one function, out of dozens.
+
+On the measurement recorded under P55 (a 6,700-file Laravel application,
+eight method declarations in one controller, nine references between
+them), 542 of the 1,225 candidate files needed variable scopes, and
+building them was 116 of the burst's 122 CPU-seconds: 95% of what is
+left once the search stopped resolving accesses nobody asked about. The
+remaining 6 seconds resolve the 7,259 accesses that are actually
+candidates.
+
+### Fix
+
+Build scopes for the function that encloses the access being resolved
+rather than for the file. The walker already descends per function from
+`build_diagnostic_scopes`; what it lacks is a way to say which ones a
+caller needs, and a scope cache keyed finely enough that a second access
+in the same function reuses the first one's walk.
+
+The whole-file entry point has to stay for diagnostics, which do want
+every function. This is an additional entry point, not a replacement,
+and both must populate the same cache so the two consumers cannot
+disagree about a type.
+
+**Where to look:** `build_diagnostic_scopes` and `DIAGNOSTIC_SCOPE` in
+`type_engine/variable/forward_walk/diagnostic_walk.rs`, and the
+`resolved_file` closure in `member_declaration_references_batch_in`
+(`references/members.rs`).
+
+---
+
+## P59. Member-reference candidates are selected by member name alone
+
+**Impact: Medium-High · Complexity: High**
+
+`member_candidate_keys` keys the reference index by member name and
+static-ness only, so the candidate set for a declaration is every file
+that accesses *any* member of that name. In the P55 measurement, eight
+declarations on one controller selected 1,225 files, and the hierarchy
+each was filtered against held exactly one class. Over a thousand files
+were walked to find nine references.
+
+The narrowing that suggests itself, intersecting with the files that
+mention a class in the hierarchy, is not sound: a receiver reaches its
+type through return types declared elsewhere, so
+`$repo->find()->publish()` names neither `Article` nor the controller.
+It is precisely the models, the classes most often returned from another
+file, that it would break.
+
+A sound narrowing needs the index to record what a file's accesses
+resolve *to*, not just what they are named, which is the same
+information `ResolvedMemberFile` holds lazily. Making it a product of
+the workspace index rather than of the first search that needs it is the
+substantial part, and it interacts with P55: a durable index has to be
+invalidated by dependency rather than wholesale.
+
+**Where to look:** `member_candidate_keys` and
+`member_declaration_references_batch_in` in `references/members.rs`,
+`ReferenceIndexKey` and `ResolvedMemberFile` in `reference_index.rs`.
 
 ---
 

@@ -1671,6 +1671,75 @@ function useA(): void {
     );
 }
 
+/// A receiver walk resolves only the member names the search asked about,
+/// and caches the file under those names.  A later search for a different
+/// name in an already-walked file has to walk it again rather than read the
+/// narrower entry as "this file has no receivers".
+#[test]
+fn a_second_member_name_is_still_found_in_an_already_walked_file() {
+    let backend = create_test_backend();
+
+    const URI_ALPHA: &str = "file:///Alpha.php";
+    const URI_BETA: &str = "file:///Beta.php";
+    const URI_CONSUMER: &str = "file:///Consumer.php";
+
+    let alpha = r#"<?php
+namespace App;
+
+class Alpha {
+    public function ring(): void {}
+}
+"#;
+    let beta = r#"<?php
+namespace App;
+
+class Beta {
+    public function chime(): void {}
+}
+"#;
+    // One file calls both, so the first count walks it for `ring` alone and
+    // the second has to come back for `chime`.
+    let consumer = r#"<?php
+namespace App;
+
+function play(Alpha $alpha, Beta $beta): void {
+    $alpha->ring();
+    $beta->chime();
+}
+"#;
+
+    seed_open_file(&backend, URI_ALPHA, alpha);
+    seed_open_file(&backend, URI_BETA, beta);
+    seed_open_file(&backend, URI_CONSUMER, consumer);
+
+    backend.handle_code_lens(URI_ALPHA, alpha);
+    backend.compute_pending_member_ref_counts();
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend
+                .handle_code_lens(URI_ALPHA, alpha)
+                .unwrap_or_default(),
+            4
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "Alpha::ring is called once from Consumer.php"
+    );
+
+    backend.handle_code_lens(URI_BETA, beta);
+    backend.compute_pending_member_ref_counts();
+    assert_eq!(
+        unresolved_title_on_line(
+            &backend.handle_code_lens(URI_BETA, beta).unwrap_or_default(),
+            4
+        )
+        .as_deref(),
+        Some("1 reference"),
+        "Beta::chime is called once from Consumer.php, which the count for \
+         Alpha::ring already walked for `ring` alone"
+    );
+}
+
 #[tokio::test]
 async fn the_request_path_counts_off_the_request() {
     const URI: &str = "file:///test.php";

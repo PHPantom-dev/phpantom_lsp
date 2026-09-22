@@ -301,90 +301,126 @@ impl Backend {
             };
             let needs_receiver = prepared.iter().any(|query| query.hierarchy.is_some());
             let resolved_file = needs_receiver.then(|| {
-                self.resolved_member_file(file_uri, symbol_map)
-                    .unwrap_or_else(|| {
-                        let _parse_cache_guard = crate::parser::with_parse_cache(&content);
-                        let file_ctx = self.file_context(file_uri);
-                        let all_access_indices: Vec<_> = symbol_map
-                            .spans
-                            .iter()
-                            .enumerate()
-                            .filter_map(|(index, span)| {
-                                matches!(span.kind, SymbolKind::MemberAccess { .. })
-                                    .then_some(index)
-                            })
-                            .collect();
+                // Only the accesses this search asks about are worth
+                // resolving: a receiver walk costs a pass of the type engine
+                // over the whole file, and a file that holds one `->save()`
+                // among two hundred other member accesses would otherwise pay
+                // for all of them.  What an earlier search resolved is carried
+                // over rather than walked again.
+                let searched: Vec<Atom> = by_member.keys().copied().collect();
+                let previous = self.resolved_member_file(file_uri, symbol_map);
+                if let Some(covering) = previous
+                    .as_ref()
+                    .filter(|file| file.covers(searched.iter().copied()))
+                {
+                    return Arc::clone(covering);
+                }
 
-                        // Build variable scopes once, then resolve every
-                        // member access while those snapshots are hot.
-                        // Later declaration names reuse this packed
-                        // per-file result without reopening the PHP file.
-                        let _scope_guard =
-                            crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache(
-                            );
-                        let needs_variable_scopes = all_access_indices.iter().any(|&span_index| {
-                            let SymbolKind::MemberAccess { subject_text, .. } =
-                                &symbol_map.spans[span_index].kind
-                            else {
-                                return false;
-                            };
-                            let subject = subject_text.as_str(source).trim_start();
-                            subject.starts_with('$') && !subject.starts_with("$this")
-                        });
-                        if needs_variable_scopes {
-                            let class_loader = self.class_loader(&file_ctx);
-                            let function_loader = self.function_loader(&file_ctx);
-                            let constant_loader = self.constant_loader(&file_ctx);
-                            let config_resolver = |key: &str| self.resolve_config_type(key);
-                            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-                            let loaders = crate::type_engine::resolver::Loaders {
-                                function_loader: Some(&function_loader),
-                                constant_loader: Some(&constant_loader),
-                                config_resolver: Some(&config_resolver),
-                                trans_resolver: Some(&trans_resolver),
-                            };
-                            crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                let carried: Vec<(usize, Vec<Atom>)> = previous
+                    .as_ref()
+                    .map(|file| file.resolutions().collect())
+                    .unwrap_or_default();
+                let mut access_indices: Vec<usize> = Vec::new();
+                for member in &searched {
+                    let already_resolved = previous
+                        .as_ref()
+                        .is_some_and(|file| file.covers(std::iter::once(*member)));
+                    if !already_resolved {
+                        access_indices.extend_from_slice(symbol_map.member_access_indices(member));
+                    }
+                }
+                access_indices.sort_unstable();
+                access_indices.dedup();
+
+                let covered: Vec<Atom> = previous
+                    .as_ref()
+                    .map(|file| file.covered().to_vec())
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(searched.iter().copied())
+                    .collect();
+
+                if access_indices.is_empty() {
+                    return self.cache_resolved_member_file(
+                        file_uri,
+                        Arc::clone(symbol_map),
+                        covered,
+                        carried,
+                    );
+                }
+
+                let _parse_cache_guard = crate::parser::with_parse_cache(&content);
+                let file_ctx = self.file_context(file_uri);
+
+                // Build variable scopes once, then resolve every
+                // access being searched for while those snapshots are
+                // hot.  A file whose searched accesses all have a
+                // `$this` or static receiver never needs them, which
+                // is most of the scope-building cost of a workspace
+                // scan.
+                let _scope_guard =
+                    crate::type_engine::variable::forward_walk::with_diagnostic_scope_cache();
+                let needs_variable_scopes = access_indices.iter().any(|&span_index| {
+                    let SymbolKind::MemberAccess { subject_text, .. } =
+                        &symbol_map.spans[span_index].kind
+                    else {
+                        return false;
+                    };
+                    let subject = subject_text.as_str(source).trim_start();
+                    subject.starts_with('$') && !subject.starts_with("$this")
+                });
+                if needs_variable_scopes {
+                    let class_loader = self.class_loader(&file_ctx);
+                    let function_loader = self.function_loader(&file_ctx);
+                    let constant_loader = self.constant_loader(&file_ctx);
+                    let config_resolver = |key: &str| self.resolve_config_type(key);
+                    let trans_resolver = |key: &str| self.resolve_trans_type(key);
+                    let loaders = crate::type_engine::resolver::Loaders {
+                        function_loader: Some(&function_loader),
+                        constant_loader: Some(&constant_loader),
+                        config_resolver: Some(&config_resolver),
+                        trans_resolver: Some(&trans_resolver),
+                    };
+                    crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
+                        &content,
+                        &file_ctx.classes,
+                        &class_loader,
+                        Some(self),
+                        loaders,
+                        Some(&self.resolved_class_cache),
+                    );
+                }
+
+                let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+                let _resolver_guard =
+                    crate::type_engine::call_resolution::activate_type_engine_caches();
+                let resolved = carried
+                    .into_iter()
+                    .chain(access_indices.into_iter().filter_map(|span_index| {
+                        let span = &symbol_map.spans[span_index];
+                        let SymbolKind::MemberAccess {
+                            subject_text,
+                            is_static,
+                            ..
+                        } = &span.kind
+                        else {
+                            return None;
+                        };
+                        let targets = self
+                            .resolve_subject_to_fqns(
+                                subject_text.as_str(source),
+                                *is_static,
+                                &file_ctx,
+                                span.start,
                                 &content,
-                                &file_ctx.classes,
-                                &class_loader,
-                                Some(self),
-                                loaders,
-                                Some(&self.resolved_class_cache),
-                            );
-                        }
-
-                        let _chain_guard =
-                            crate::type_engine::resolver::with_chain_resolution_cache();
-                        let _resolver_guard =
-                            crate::type_engine::call_resolution::activate_type_engine_caches();
-                        let resolved = all_access_indices
+                            )
                             .into_iter()
-                            .filter_map(|span_index| {
-                                let span = &symbol_map.spans[span_index];
-                                let SymbolKind::MemberAccess {
-                                    subject_text,
-                                    is_static,
-                                    ..
-                                } = &span.kind
-                                else {
-                                    return None;
-                                };
-                                let targets = self
-                                    .resolve_subject_to_fqns(
-                                        subject_text.as_str(source),
-                                        *is_static,
-                                        &file_ctx,
-                                        span.start,
-                                        &content,
-                                    )
-                                    .into_iter()
-                                    .map(|target| crate::atom::atom(&target))
-                                    .collect();
-                                Some((span_index, targets))
-                            })
+                            .map(|target| crate::atom::atom(&target))
                             .collect();
-                        self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), resolved)
-                    })
+                        Some((span_index, targets))
+                    }))
+                    .collect();
+                self.cache_resolved_member_file(file_uri, Arc::clone(symbol_map), covered, resolved)
             });
 
             let mut matches = Vec::new();
