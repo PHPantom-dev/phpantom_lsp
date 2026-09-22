@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790036878692,
+  "lastUpdate": 1790038039276,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28627,6 +28627,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "amattie@gmail.com",
+            "name": "Andrew",
+            "username": "aaaaaandrew"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "cbe14c51b76eedd0fd2d8bc12427cd916c47e0bf",
+          "message": "feat: add owned semantic export API (#417)",
+          "timestamp": "2026-09-22T02:30:28+02:00",
+          "tree_id": "4565a5137d389eea25d07dc814f5cf0c43e32fb9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/cbe14c51b76eedd0fd2d8bc12427cd916c47e0bf"
+        },
+        "date": 1790038032132,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.8,
             "unit": "MiB"
           }
         ]
