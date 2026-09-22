@@ -1491,7 +1491,12 @@ back into the template and dropping the ones that land in the prologue.
 The template-aware <code>use</code> insertion exists too: <code>use_block_for</code>
 (<code>src/completion/use_edit.rs</code>) reads a template's own <code>@use</code> directives and
 writes a new import as one, so the "Import class" action already has an
-edit the template can take. What remains is the server-side gate in
+edit the template can take. "Replace FQCN with import" does not yet:
+<code>replace_fqcn.rs</code> calls <code>analyze_use_block(content)</code> directly, so its <code>use</code>
+edit lands in the virtual prologue and is dropped. Switch it to
+<code>use_block_for(uri, content)</code>. The PHPStan-only actions that also call
+<code>analyze_use_block</code> (<code>add_throws.rs</code>, <code>add_override.rs</code>) never fire in a
+template and can simply be filtered out. What remains is the server-side gate in
 <code>code_action</code> (<code>src/server.rs</code>), which still answers nothing for a
 template; translating the request range and its diagnostics into the
 virtual PHP before the collectors run; and discarding an action whose

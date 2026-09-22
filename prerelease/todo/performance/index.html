@@ -3075,8 +3075,8 @@ exit that would make the fold linear in the common case:</p>
 </li>
 </ol>
 <p><strong>Where to look:</strong> <code>join_shapes</code>, <code>join_shape_entries</code>, and <code>join_values</code>
-in <code>php_type/mod.rs</code>, and the shape-folding branch of <code>merge_scopes</code> in
-<code>type_engine/variable/forward_walk/scope_state.rs</code>. Hand-written code
+in <code>php_type/mod.rs</code>, and the shape-folding branch of <code>merge_branch</code> in
+<code>type_engine/variable/forward_walk/scope_state/merge.rs</code>. Hand-written code
 does not reach the sizes where this shows; generated code and long
 procedural report builders do.</p>
 <hr />
@@ -3344,9 +3344,9 @@ mostly of entries neither path touches. Recording what a branch actually
 wrote and merging only those entries, or sharing the untouched part
 rather than cloning it, would make a merge proportional to the branch
 instead of to the file.</p>
-<p><strong>Where to look:</strong> <code>merge_branch</code>, <code>describes_same_state_as</code>, and
-<code>merge_scopes</code> in <code>type_engine/variable/forward_walk/scope_state.rs</code>, and
-the branch handling in <code>type_engine/variable/forward_walk/control_flow.rs</code>.</p>
+<p><strong>Where to look:</strong> <code>merge_branch</code>, <code>describes_same_state_as</code>, and the join
+helpers under them in <code>type_engine/variable/forward_walk/scope_state/merge.rs</code>,
+and the branch handling in <code>type_engine/variable/forward_walk/control_flow.rs</code>.</p>
 
 
 
