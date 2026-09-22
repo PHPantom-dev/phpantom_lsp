@@ -4,6 +4,7 @@
 
 use crate::Backend;
 use crate::type_engine::resolver::CtxLoaders;
+use crate::virtual_members::laravel::file_contributions::refresh_file;
 
 impl Backend {
     /// Publish a freshly built storage-driver index, invalidating the memoized
@@ -49,19 +50,15 @@ impl Backend {
             return;
         }
         let config_changed = uri.contains("/config/");
-        let had = self.laravel_storage_drivers.read().files.has_uri(uri);
-        let mut regs =
-            crate::virtual_members::laravel::extract_storage_driver_registrations(content);
-        if !config_changed && !had && regs.is_empty() {
-            return;
-        }
-        if had || !regs.is_empty() {
+        let touched = refresh_file(&self.laravel_storage_drivers, uri, true, || {
+            let mut regs =
+                crate::virtual_members::laravel::extract_storage_driver_registrations(content);
             self.infer_storage_driver_return_types(&mut regs, uri, content);
-            let mut index = self.laravel_storage_drivers.write();
-            index.files.set_file(uri.to_string(), regs);
-            index.rebuild();
+            regs
+        });
+        if config_changed || touched {
+            self.invalidate_storage_disk_type();
         }
-        self.invalidate_storage_disk_type();
     }
 
     /// Fill in the type each `Storage::extend()` closure builds when it does

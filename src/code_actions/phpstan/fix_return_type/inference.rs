@@ -190,21 +190,16 @@ pub(crate) fn infer_return_type(
                 }
 
                 let ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class: &enclosing_class,
-                    all_classes: local_classes,
-                    content,
-                    cursor_offset: start as u32,
-                    class_loader,
                     backend,
                     loaders: Loaders::with_function(function_loader),
-                    resolved_class_cache: None,
-                    enclosing_return_type: None,
-                    branch_aware: true,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        &enclosing_class,
+                        local_classes,
+                        content,
+                        start as u32,
+                        class_loader,
+                    )
                 };
 
                 let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);

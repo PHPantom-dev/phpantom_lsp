@@ -151,7 +151,6 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     // ── 1. Open the project (config and source layout, no index) ────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
     let formatting_config = cfg.formatting.clone();
-    let follow_links = cfg.indexing.follow_links();
     let backend = Backend::new_headless();
     crate::analyse::open_headless_project_unindexed(&backend, root, cfg);
     let php_version = backend.php_version();
@@ -186,7 +185,7 @@ fn collect(options: &FormatOptions) -> Option<Outcomes> {
     }
 
     // ── 3. Discover files ───────────────────────────────────────────
-    let files = crate::analyse::discover_user_files(&backend, root, &options.path_filters, follow_links);
+    let files = crate::analyse::discover_user_files(&backend, root, &options.path_filters);
     if files.is_empty() {
         eprintln!("No PHP files found.");
         return None;

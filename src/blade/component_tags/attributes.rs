@@ -285,7 +285,7 @@ pub(crate) fn scan_component_tag_slots(content: &str, tag_names: &[String]) -> V
             }
             let name_start = i + 2 + "x-".len();
             let j = tag_name_end(bytes, name_start);
-            let Some(close) = find_byte(&masked, j, b'>') else {
+            let Some(close) = find_byte(bytes, j, b'>') else {
                 break;
             };
             let name = &masked[name_start..j];

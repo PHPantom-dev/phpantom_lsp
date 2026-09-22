@@ -29,8 +29,8 @@ use std::collections::HashSet;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::text_position::offset_to_position;
-use crate::types::{ClassLikeKind, DefineInfo, FunctionInfo};
+use crate::text_position::{LineIndex, offset_to_position};
+use crate::types::{ClassInfo, ClassLikeKind, DefineInfo, FunctionInfo};
 
 /// Maximum number of symbols returned for a single workspace/symbol request.
 ///
@@ -122,6 +122,54 @@ fn ascii_contains_ignore_case(s: &str, needle_lower: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
+/// Match tier for a property name, which the user may search for with or
+/// without its leading `$`.
+fn property_match_tier(name: &str, query_lower: &str) -> Option<MatchTier> {
+    match_tier(name, query_lower).or_else(|| {
+        // The `$`-prefixed form can only match where the bare name does not
+        // when the query itself contains a `$`, so the rest of the time the
+        // formatting is skipped.
+        if query_lower.contains('$') {
+            match_tier(&format!("${name}"), query_lower)
+        } else {
+            None
+        }
+    })
+}
+
+/// Whether `class` declares any symbol the query matches.
+///
+/// This mirrors the match tests of the emit loop in
+/// [`Backend::handle_workspace_symbol`]; it exists so that the file's
+/// content, which is read from disk when the file is not open in the
+/// editor, is only fetched for a file that contributes a result.
+fn class_matches_query(class: &ClassInfo, query_lower: &str) -> bool {
+    if class.name.is_empty() || class.name.starts_with("anonymous@") {
+        return false;
+    }
+
+    if class.keyword_offset != 0
+        && (match_tier(&class.fqn(), query_lower).is_some()
+            || match_tier(&class.name, query_lower).is_some())
+    {
+        return true;
+    }
+
+    class.methods.iter().any(|method| {
+        !method.is_virtual
+            && method.name_offset != 0
+            && match_tier(&method.name, query_lower).is_some()
+    }) || class.properties.iter().any(|prop| {
+        !prop.is_virtual
+            && prop.name_offset != 0
+            && property_match_tier(&prop.name, query_lower).is_some()
+    }) || class.constants.iter().any(|constant| {
+        !constant.is_virtual
+            && constant.name_offset != 0
+            && match_tier(&constant.name, query_lower).is_some()
+    })
+}
+
 /// Extract the short name from a symbol name for relevance ranking.
 ///
 /// For namespaced names like `"App\\Models\\User"`, returns `"User"`.
@@ -168,6 +216,25 @@ impl Backend {
         {
             let uri_classes = self.symbols.uri_classes_index.read();
             for (file_uri, classes) in uri_classes.iter() {
+                // A file that is not open in the editor is read from disk, so
+                // the query decides whether the file is worth reading at all,
+                // and the content is fetched once per file rather than once
+                // per class the file declares.
+                if !classes
+                    .iter()
+                    .any(|class| class_matches_query(class, &query_lower))
+                {
+                    continue;
+                }
+
+                let Some(content) = self.get_file_content_arc(file_uri) else {
+                    continue;
+                };
+                // One line table per file: every symbol below converts an
+                // offset, and a fresh `offset_to_position` scan each time is
+                // quadratic in the file size.
+                let idx = LineIndex::new(&content);
+
                 for class in classes {
                     // Skip anonymous classes (empty name or name starting with
                     // "anonymous@" which the parser uses for anonymous classes).
@@ -175,12 +242,7 @@ impl Backend {
                         continue;
                     }
 
-                    let fqn = class.fqn().to_string();
-
-                    let content = match self.get_file_content_arc(file_uri) {
-                        Some(c) => c,
-                        None => continue,
-                    };
+                    let fqn = class.fqn();
 
                     // ── The class itself ─────────────────────────────
                     // Match against both the FQN and the short class name.
@@ -190,7 +252,7 @@ impl Backend {
                     if let Some(tier) = class_tier
                         && class.keyword_offset != 0
                     {
-                        let pos = offset_to_position(&content, class.keyword_offset as usize);
+                        let pos = idx.position(class.keyword_offset as usize);
                         let kind = match class.kind {
                             ClassLikeKind::Class => SymbolKind::CLASS,
                             ClassLikeKind::Interface => SymbolKind::INTERFACE,
@@ -203,11 +265,11 @@ impl Backend {
                             .as_ref()
                             .map(|_| vec![SymbolTag::DEPRECATED]);
 
-                        seen_fqns.insert(fqn.clone());
+                        seen_fqns.insert(fqn.to_string());
 
                         ranked.push(RankedSymbol {
                             symbol: make_symbol(
-                                fqn.clone(),
+                                fqn.to_string(),
                                 kind,
                                 tags,
                                 file_uri,
@@ -233,7 +295,7 @@ impl Backend {
                             None => continue,
                         };
 
-                        let pos = offset_to_position(&content, method.name_offset as usize);
+                        let pos = idx.position(method.name_offset as usize);
 
                         let tags = method
                             .deprecation_message
@@ -247,7 +309,7 @@ impl Backend {
                                 tags,
                                 file_uri,
                                 pos,
-                                Some(fqn.clone()),
+                                Some(fqn.to_string()),
                             ),
                             tier,
                         });
@@ -262,16 +324,12 @@ impl Backend {
                             continue;
                         }
 
-                        // Match against the property name (without $).
-                        let match_name = format!("${}", prop.name);
-                        let tier = match_tier(&prop.name, &query_lower)
-                            .or_else(|| match_tier(&match_name, &query_lower));
-                        let tier = match tier {
+                        let tier = match property_match_tier(&prop.name, &query_lower) {
                             Some(t) => t,
                             None => continue,
                         };
 
-                        let pos = offset_to_position(&content, prop.name_offset as usize);
+                        let pos = idx.position(prop.name_offset as usize);
 
                         let tags = prop
                             .deprecation_message
@@ -285,7 +343,7 @@ impl Backend {
                                 tags,
                                 file_uri,
                                 pos,
-                                Some(fqn.clone()),
+                                Some(fqn.to_string()),
                             ),
                             tier,
                         });
@@ -305,7 +363,7 @@ impl Backend {
                             None => continue,
                         };
 
-                        let pos = offset_to_position(&content, constant.name_offset as usize);
+                        let pos = idx.position(constant.name_offset as usize);
 
                         let tags = constant
                             .deprecation_message
@@ -326,7 +384,7 @@ impl Backend {
                                 tags,
                                 file_uri,
                                 pos,
-                                Some(fqn.clone()),
+                                Some(fqn.to_string()),
                             ),
                             tier,
                         });

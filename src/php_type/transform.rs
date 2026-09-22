@@ -462,10 +462,7 @@ impl PhpType {
                         }
                     }
                 }
-                match members.len() {
-                    1 => members.into_iter().next().expect("checked length"),
-                    _ => PhpType::union(members),
-                }
+                PhpType::union(members)
             }
             _ => self.map_children(&recurse),
         }
@@ -714,10 +711,7 @@ impl PhpType {
                         _ => flat.push(t),
                     }
                 }
-                match flat.len() {
-                    1 => flat.into_iter().next().expect("checked length"),
-                    _ => PhpType::union(flat),
-                }
+                PhpType::union(flat)
             }
 
             TypeKind::Intersection(types) => {

@@ -46,8 +46,8 @@ sit next to.
 src/
 ├── lib.rs                  # Backend struct, state, module declarations, shared constants (PARSE_WORKER_STACK_SIZE, …)
 ├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
-├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …) + workspace init/indexing
-├── backend.rs, backend/    # Backend construction and file access
+├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
+├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
 ├── config.rs               # .phpantom.toml / workspace configuration
 │
 │   # Data model
@@ -747,6 +747,8 @@ The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.to
 The merged pipeline works in three steps: (1) load `autoload_classmap.php` into a `HashMap<String, PathBuf>`, (2) collect the classmap's file paths into a `HashSet<PathBuf>` skip set, (3) self-scan all PSR-4 and vendor directories, skipping files already in the skip set. The result is a merged index: classmap entries for everything Composer already knew about, plus self-scanned entries for everything it missed. When the classmap is complete (the common case), the self-scanner walks directories but skips every file, finishing almost instantly. When the classmap is empty or absent, it falls back to a full self-scan. When the classmap is partial (e.g. vendor classes only), vendor files are skipped and only user code is scanned. Every state of the classmap helps.
 
 When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
+
+**Directory symlinks.** The walkers descend into a symlinked directory, so a project that keeps its framework or a shared library outside the repository and links it into the tree gets the linked code indexed with the rest. Every path keeps the symlink spelling rather than the target's, which is what makes a file reached through the link the same file the editor opened. `LinkClaims` gives each walk one visit per target directory: the walk's own roots and its skipped trees are claimed up front, and each link claims its target the first time it is descended, so two links to one tree, a link pointing back at something the walk already covers, and a chain of directories holding several links apiece all cost one pass rather than one per route. `orchestra/testbench-core` ships `laravel/vendor -> <project>/vendor`, which is why the skipped trees are claimed and not merely pruned by path. Each link the index reached through also gets a watcher based at it (see `build_watched_file_registration`), since a workspace-relative watcher pattern never covers a path outside the workspace folders.
 
 The scan results are converted to URI strings and inserted into `fqn_uri_index`. Everything downstream (resolution, diagnostics, go-to-definition) uses the unified index.
 

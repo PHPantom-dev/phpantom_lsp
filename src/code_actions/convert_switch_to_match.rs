@@ -14,6 +14,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::indent_of_line_at;
 use crate::text_position::{offset_to_position, position_to_byte_offset};
 
 impl Backend {
@@ -319,7 +320,7 @@ fn try_convert_switch(sw: &control_flow::switch::Switch<'_>, content: &str) -> O
     };
 
     let switch_start = sw.span().start.offset as usize;
-    let indent = detect_indent(content, switch_start);
+    let indent = indent_of_line_at(content, switch_start);
 
     // Build the match expression.
     let subject = source_text(content, sw.expression.span());
@@ -396,15 +397,6 @@ fn strip_trailing_break<'a>(statements: &'a [Statement<'a>]) -> (&'a [Statement<
         return (&statements[..statements.len() - 1], true);
     }
     (statements, false)
-}
-
-/// Detect the indentation at the start of the line containing `offset`.
-fn detect_indent(content: &str, offset: usize) -> String {
-    let before = &content[..offset];
-    let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
-    let line = &content[line_start..offset];
-    let indent_len = line.len() - line.trim_start().len();
-    line[..indent_len].to_string()
 }
 
 fn source_text(content: &str, span: mago_span::Span) -> &str {

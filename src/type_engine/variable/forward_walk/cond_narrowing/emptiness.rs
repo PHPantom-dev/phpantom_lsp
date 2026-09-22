@@ -124,7 +124,7 @@ fn count_call_subject(expr: &Expression<'_>) -> Option<String> {
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,
     };
-    expr_to_var_name(arg).or_else(|| narrowing::expr_to_subject_key(arg))
+    expr_to_subject(arg)
 }
 
 /// The bound a `count()` comparison is written against: a plain decimal
@@ -197,6 +197,24 @@ pub(super) fn apply_literal_identity_narrowing(
     }
 }
 
+/// Rebuild a union from what a per-member refinement leaves of it.
+///
+/// Every refinement below distributes over a union this way: `None` when
+/// no member survives, the member itself when exactly one does. Each one
+/// therefore calls this on its way in and then only has to answer for a
+/// single type.
+fn refine_union_members(
+    members: &[PhpType],
+    refine: impl Fn(&PhpType) -> Option<PhpType>,
+) -> Option<PhpType> {
+    let refined: Vec<PhpType> = members.iter().filter_map(refine).collect();
+    match refined.len() {
+        0 => None,
+        1 => refined.into_iter().next(),
+        _ => Some(PhpType::union(refined)),
+    }
+}
+
 /// Remove every alternative of `ty` that the literal `excluded` covers,
 /// returning `None` when that leaves nothing.
 ///
@@ -206,15 +224,7 @@ pub(super) fn apply_literal_identity_narrowing(
 /// type.
 pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Option<PhpType> {
     if let TypeKind::Union(members) = ty.kind() {
-        let kept: Vec<PhpType> = members
-            .iter()
-            .filter_map(|member| strip_literal_from_type(member, excluded))
-            .collect();
-        return match kept.len() {
-            0 => None,
-            1 => kept.into_iter().next(),
-            _ => Some(PhpType::union(kept)),
-        };
+        return refine_union_members(members, |member| strip_literal_from_type(member, excluded));
     }
     if let TypeKind::Nullable(inner) = ty.kind() {
         if excluded.is_null() {
@@ -230,15 +240,7 @@ pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Optio
 /// `None` when every member was the empty value being ruled out.
 pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
     if let TypeKind::Union(members) = ty.kind() {
-        let refined: Vec<PhpType> = members
-            .iter()
-            .filter_map(|member| refine_non_empty_type(member, empty))
-            .collect();
-        return match refined.len() {
-            0 => None,
-            1 => refined.into_iter().next(),
-            _ => Some(PhpType::union(refined)),
-        };
+        return refine_union_members(members, |member| refine_non_empty_type(member, empty));
     }
 
     match empty {
@@ -269,15 +271,7 @@ pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<P
 /// `None` when the type cannot hold the empty value at all.
 pub(super) fn refine_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {
     if let TypeKind::Union(members) = ty.kind() {
-        let refined: Vec<PhpType> = members
-            .iter()
-            .filter_map(|member| refine_empty_type(member, empty))
-            .collect();
-        return match refined.len() {
-            0 => None,
-            1 => refined.into_iter().next(),
-            _ => Some(PhpType::union(refined)),
-        };
+        return refine_union_members(members, |member| refine_empty_type(member, empty));
     }
 
     match empty {

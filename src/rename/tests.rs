@@ -107,10 +107,8 @@ fn edits_for_uri(edit: &WorkspaceEdit, uri: &Url) -> Vec<TextEdit> {
 
 #[tokio::test]
 async fn rename_namespace_updates_use_statements_in_indexed_unopened_file() {
-    use std::path::PathBuf;
-
-    let workspace = PathBuf::from("/tmp/test_workspace_ns_indexed_unopened");
-    let _ = std::fs::create_dir_all(&workspace);
+    let dir = tempfile::tempdir().expect("temp dir");
+    let workspace = dir.path().to_path_buf();
 
     let backend = Backend::new_test_with_workspace(workspace.clone(), Vec::new());
     let uri_a = Url::from_file_path(workspace.join("a.php")).unwrap();
@@ -155,8 +153,6 @@ async fn rename_namespace_updates_use_statements_in_indexed_unopened_file() {
         "Use statement should be updated in indexed unopened file: {}",
         result_b
     );
-
-    let _ = std::fs::remove_dir_all(&workspace);
 }
 
 #[tokio::test]

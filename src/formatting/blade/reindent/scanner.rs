@@ -7,8 +7,10 @@ use std::ops::Range;
 
 use crate::blade::balance::{BLOCKS, opens_block};
 use crate::blade::component_tags::{is_attr_name_char, is_tag_name_char};
-use crate::blade::signature::{matching_paren, skip_php_comment};
+use crate::blade::directives::{DirectiveHead, boundary_before, directive_head, word_end};
+use crate::blade::signature::{echo_delimiters, is_echo_start};
 use crate::text_position::LineIndex;
+use crate::text_scan::{find, find_byte, skip_php_comment};
 
 use super::elements::{
     INLINE_ELEMENTS, UNINDENTED_ELEMENTS, VOID_ELEMENTS, element_region_kind, is_component_name,
@@ -554,36 +556,6 @@ impl<'a> Scanner<'a> {
     }
 }
 
-/// Whether the byte before `at` lets an `@` there start a directive, which
-/// is Blade's own word-boundary rule.
-pub(super) fn boundary_before(bytes: &[u8], at: usize) -> bool {
-    at == 0 || !(bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1]))
-}
-
-/// The end of the `\w+` run starting at `from`.
-pub(super) fn word_end(bytes: &[u8], from: usize) -> usize {
-    let mut i = from;
-    while i < bytes.len() && is_word_byte(bytes[i]) {
-        i += 1;
-    }
-    i
-}
-
-pub(crate) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
-    bytes[at..].starts_with(b"{{") || bytes[at..].starts_with(b"{!!")
-}
-
-/// The opening and closing delimiters of the echo at `at`.
-pub(crate) fn echo_delimiters(bytes: &[u8], at: usize) -> (&'static str, &'static str) {
-    if bytes[at..].starts_with(b"{{{") {
-        ("{{{", "}}}")
-    } else if bytes[at..].starts_with(b"{!!") {
-        ("{!!", "!!}")
-    } else {
-        ("{{", "}}")
-    }
-}
-
 /// The tag name starting at `from`: a static name, or a dynamic
 /// `{{ $tag }}` echo.
 pub(crate) fn tag_name(src: &str, from: usize) -> Option<(String, usize)> {
@@ -621,27 +593,6 @@ pub(crate) fn find_closing_tag(src: &str, from: usize, name: &str) -> Option<Ran
         i = at + 2;
     }
     None
-}
-
-pub(super) fn is_word_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
-}
-
-pub(crate) fn find(bytes: &[u8], from: usize, limit: usize, needle: &[u8]) -> Option<usize> {
-    if from >= limit || needle.len() > limit - from {
-        return None;
-    }
-    bytes[from..limit]
-        .windows(needle.len())
-        .position(|window| window == needle)
-        .map(|at| from + at)
-}
-
-pub(crate) fn find_byte(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
-    bytes[from..]
-        .iter()
-        .position(|b| *b == needle)
-        .map(|at| from + at)
 }
 
 /// The next `@name` directive at or after `from`, honouring Blade's
@@ -687,86 +638,6 @@ pub(crate) fn find_marker_comment(
         i = close + 4;
     }
     None
-}
-
-/// What parsing the `@` at a candidate directive position found.
-pub(crate) enum DirectiveHead<'a> {
-    /// Not a directive: the word-boundary rule failed, the name was
-    /// empty, or this is a `@click="…"`-style JavaScript framework
-    /// binding that the caller reads as an attribute instead. The
-    /// offset is where the caller should resume scanning.
-    None(usize),
-    /// `@@name` is the escape for a literal `@name`.
-    Escaped(usize),
-    /// `@{{ … }}` is a literal echo, whose braces are text rather than a
-    /// directive.
-    LiteralEcho(usize),
-    /// A directive name, and where its argument list opens and (if it
-    /// closes within `limit`) the argument list's full range.
-    Named {
-        name: &'a str,
-        name_end: usize,
-        open: usize,
-        args: Option<Range<usize>>,
-    },
-}
-
-/// Parse the directive head at the `@` at `at`: its name and, when
-/// present, its argument list. `limit` bounds the search for the
-/// argument list's closing paren and the literal echo's closing
-/// delimiter, so a caller working on a fragment does not read past it.
-pub(crate) fn directive_head<'a>(
-    src: &'a str,
-    bytes: &[u8],
-    at: usize,
-    limit: usize,
-) -> DirectiveHead<'a> {
-    if !boundary_before(bytes, at) {
-        return DirectiveHead::None(at + 1);
-    }
-    match bytes.get(at + 1) {
-        // `@@if` is the escape for a literal `@if`.
-        Some(b'@') => return DirectiveHead::Escaped(at + 2),
-        // `@{{ … }}` is a literal echo, whose braces are text.
-        Some(b'{') if is_echo_start(bytes, at + 1) => {
-            let (open, close) = echo_delimiters(bytes, at + 1);
-            let body_start = at + 1 + open.len();
-            let end = find(bytes, body_start, limit, close.as_bytes())
-                .map_or(body_start, |end| end + close.len());
-            return DirectiveHead::LiteralEcho(end);
-        }
-        _ => {}
-    }
-    let name_end = word_end(bytes, at + 1);
-    if name_end == at + 1 {
-        return DirectiveHead::None(at + 1);
-    }
-    let name = &src[at + 1..name_end];
-    // `@click="…"` is a JavaScript framework's binding; the caller reads
-    // it as an attribute.
-    if bytes.get(name_end) == Some(&b'=') {
-        return DirectiveHead::None(name_end);
-    }
-
-    // Blade allows spaces and tabs, but no newline, between a directive's
-    // name and its argument list.
-    let mut open = name_end;
-    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
-        open += 1;
-    }
-    let args = (bytes.get(open) == Some(&b'('))
-        .then(|| {
-            matching_paren(bytes, open)
-                .filter(|close| *close < limit)
-                .map(|close| open..close + 1)
-        })
-        .flatten();
-    DirectiveHead::Named {
-        name,
-        name_end,
-        open,
-        args,
-    }
 }
 
 /// Where an attribute's value starts, once its name and any `=` have

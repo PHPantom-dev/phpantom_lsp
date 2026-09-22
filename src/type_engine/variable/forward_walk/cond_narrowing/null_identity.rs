@@ -27,9 +27,7 @@ pub(super) fn apply_identity_comparison_null_narrowing<'b>(
     collect_identity_comparisons(condition, truthy, &mut compared);
 
     for (subject, comparand) in compared {
-        let Some(key) =
-            expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))
-        else {
+        let Some(key) = expr_to_subject(subject) else {
             continue;
         };
         // The cheap half first: with no null to rule out there is

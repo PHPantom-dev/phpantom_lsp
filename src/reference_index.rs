@@ -94,7 +94,7 @@ impl ReferenceIndexKey {
 /// per-file `Arc<str>`) mapped to the number of spans in that URI that
 /// reference the key's name — the two facts consumers actually read
 /// (`reference_candidate_uris_for_keys` needs the URI set,
-/// `inlay_hints::ref_count` needs the count). Declarations and the
+/// `indexed_reference_count` needs the count). Declarations and the
 /// alias keys a reference is merely searchable under contribute a URI
 /// but no count, so a class is never credited with the references to a
 /// namesake in another namespace. The per-span `start`/`end` offsets and
@@ -285,11 +285,12 @@ impl Backend {
         };
         evict_reference_index_uri_locked(&mut index, uri);
         drop(index);
+        let evicted: HashSet<Arc<str>> = std::iter::once(Arc::from(uri)).collect();
         if track_members {
-            self.member_ref_counts.invalidate_locations_all();
+            self.member_ref_counts.invalidate_locations_in(&evicted);
         }
         for name in dropped.into_keys() {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &evicted);
         }
         self.forget_class_shape(uri);
     }
@@ -421,8 +422,19 @@ impl Backend {
         }
         crate::util::retain_by_mask(&mut rebuilt, &keep);
 
-        if track_members && !rebuilt.is_empty() {
-            self.member_ref_counts.invalidate_locations_all();
+        // Only the files this pass reparsed can have moved an access, so a
+        // cached result is rescanned in those files alone rather than being
+        // thrown away and searched for across the workspace again.
+        let reparsed: HashSet<Arc<str>> = if track_members {
+            rebuilt
+                .iter()
+                .map(|(uri, _)| Arc::from(uri.as_str()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        if track_members {
+            self.member_ref_counts.invalidate_locations_in(&reparsed);
         }
 
         // Which member names each file contributed a reference to, so the
@@ -478,7 +490,7 @@ impl Backend {
         drop(index);
 
         for name in stale {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &reparsed);
         }
     }
 

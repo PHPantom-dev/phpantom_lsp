@@ -102,11 +102,26 @@ impl<'a> LineIndex<'a> {
         }
     }
 
+    /// Byte offset of the first character of the 0-based `line`, or the
+    /// content length when `line` is past the last one.
+    pub(crate) fn line_start(&self, line: usize) -> usize {
+        self.line_starts
+            .get(line)
+            .copied()
+            .unwrap_or(self.content.len())
+    }
+
     /// Convert a byte `offset` to an LSP [`Position`] (0-based line, UTF-16
     /// column). Offsets past the end of the content clamp to the content
-    /// length, matching [`offset_to_position`].
+    /// length, matching [`offset_to_position`]. An offset inside a
+    /// multi-byte character is walked forward to the next character
+    /// boundary, also matching [`offset_to_position`], rather than slicing
+    /// mid-character and panicking.
     pub(crate) fn position(&self, offset: usize) -> Position {
-        let offset = offset.min(self.content.len());
+        let mut offset = offset.min(self.content.len());
+        while !self.content.is_char_boundary(offset) {
+            offset += 1;
+        }
         let line = self.line_of(offset);
         let line_start = self.line_starts[line];
         let character = self.content[line_start..offset]
@@ -363,6 +378,17 @@ mod tests {
                 "mismatch at offset {offset}"
             );
         }
+    }
+
+    #[test]
+    fn line_index_matches_offset_to_position_mid_character() {
+        // An offset landing inside the multi-byte 'é' must not panic, and
+        // must agree with `offset_to_position`'s "answer the position
+        // after that character" rule.
+        let content = "<?php\nclass /*é*/ Foo {}\n";
+        let index = LineIndex::new(content);
+        let mid = content.find('é').unwrap() + 1;
+        assert_eq!(index.position(mid), offset_to_position(content, mid));
     }
 
     #[test]

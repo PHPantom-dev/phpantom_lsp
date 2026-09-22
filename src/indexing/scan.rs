@@ -108,7 +108,7 @@ impl Backend {
                 &explicit_deps,
                 &self.index_filters(),
                 None,
-                self.config().indexing.follow_links(),
+                Some(self.followed_links()),
             );
             // Package roots came out of the same `installed.json` parse
             // `scan_vendor_packages_with_skip` already did; no need to
@@ -189,6 +189,7 @@ impl Backend {
         self.symbols.duplicate_classes.write().clear();
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
+        self.symbols.gti_parents_index.write().clear();
         self.clear_class_not_found_cache();
         self.resolved_class_cache.write().clear();
         self.member_completion_cache.lock().clear();
@@ -527,7 +528,7 @@ impl Backend {
                             &skip_dirs,
                             &self.index_filters(),
                             progress,
-                            self.config().indexing.follow_links(),
+                            Some(self.followed_links()),
                         );
                     }
                 }
@@ -563,7 +564,7 @@ impl Backend {
             skip_paths,
             &filters,
             progress,
-            self.config().indexing.follow_links(),
+            Some(self.followed_links()),
         );
 
         // Scan vendor packages from installed.json.
@@ -578,7 +579,7 @@ impl Backend {
             &explicit_deps,
             &filters,
             progress,
-            self.config().indexing.follow_links(),
+            Some(self.followed_links()),
         );
 
         let mut result = WorkspaceScanResult {

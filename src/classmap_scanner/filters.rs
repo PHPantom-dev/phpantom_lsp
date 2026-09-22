@@ -32,18 +32,24 @@ use ignore::gitignore::{Gitignore, GitignoreBuilder};
 /// exclude` matches are pruned through `filters`.
 ///
 /// Dotfiles are skipped unless `include_dotfiles` is set, in which case
-/// `.git` itself is still pruned. Directory symlinks are only descended
-/// into when `follow_links` is set (passed straight to
-/// [`ignore::WalkBuilder::follow_links`]); the default `false` yields a
-/// symlinked directory as the symlink itself. Callers add further roots,
-/// set the thread count, or keep the walk serial as their scan needs.
+/// `.git` itself is still pruned. A directory symlink is descended into
+/// the first time the walk reaches its target and skipped every later
+/// time, so no directory is walked twice under two spellings; see
+/// [`LinkClaims`]. Callers add further roots, set the thread count, or
+/// keep the walk serial as their scan needs.
 pub fn workspace_walk_builder(
     root: &Path,
     skip_dirs: Arc<Vec<PathBuf>>,
     filters: Arc<IndexFilters>,
     include_dotfiles: bool,
-    follow_links: bool,
+    claims: LinkClaims,
 ) -> WalkBuilder {
+    // Pruning a skipped tree by path only stops the walk reaching it
+    // *directly*.  A link pointing into one arrives under a different
+    // path, so the prune above never fires and the tree is walked after
+    // all, under a spelling nested inside whatever held the link.
+    claims.cover(skip_dirs.iter().cloned());
+
     let mut builder = WalkBuilder::new(root);
     builder
         .git_ignore(true)
@@ -52,7 +58,7 @@ pub fn workspace_walk_builder(
         .hidden(!include_dotfiles)
         .parents(true)
         .ignore(true)
-        .follow_links(follow_links)
+        .follow_links(true)
         .filter_entry(move |entry| {
             let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
             if is_dir {
@@ -62,10 +68,182 @@ pub fn workspace_walk_builder(
                 if skip_dirs.iter().any(|dir| dir == entry.path()) {
                     return false;
                 }
+                // Depth 0 is a root the caller asked for by name, even
+                // when it is itself a symlink, so it is never a second
+                // spelling of anything.
+                if entry.depth() > 0 && entry.path_is_symlink() && !claims.claim(entry.path()) {
+                    return false;
+                }
             }
             !filters.is_excluded_entry(entry.path(), is_dir)
         });
     builder
+}
+
+/// The link targets a single walk has already committed to descending
+/// into, so no directory is walked twice under two spellings.
+///
+/// One instance covers one walk. A walk that reports into a
+/// [`FollowedLinks`] registry also tells it which links it went through,
+/// which is what lets the watcher registration ask the client to watch
+/// the trees behind them.
+///
+/// `ignore` refuses a symlink pointing at one of its own ancestors,
+/// which bounds a true cycle, and nothing else. Three shapes slip past
+/// it, all of them real: two links to the same tree, a link pointing
+/// back inside the workspace the walk is already covering, and a chain
+/// of directories holding two links apiece, which reaches the leaf 2^n
+/// ways without ever forming a cycle. Each one walks the same files
+/// again under a different path, so a class resolves to an arbitrary
+/// spelling of its file, find-references reports every hit as many times
+/// as the walk found it, and the fan-out case buys that with exponential
+/// work.
+///
+/// Claiming a target's real path the first time a link reaches it makes
+/// every directory visited once however many ways the links spell it.
+/// The walk's own roots are claimed up front, so a link pointing back
+/// inside one of them loses to the spelling the walk already had. Two
+/// links to the *same* tree outside the roots are equally arbitrary and
+/// a parallel walk picks whichever gets there first; that one is not
+/// reproducible across runs, where indexing both was reproducibly wrong.
+///
+/// A claim covers the whole walk rather than the root that made it, even
+/// though [`walk_roots`](super::discovery) otherwise keeps each root's
+/// files separate so it can namespace-filter them against that root's own
+/// PSR-4 prefix. Two roots whose links converge on one tree therefore see
+/// it once between them, which costs nothing real: a PHP file declares a
+/// single namespace, so at most one root's prefix could ever have
+/// accepted it, and the classmap the rest feeds is a flat first-wins map
+/// where the second copy is discarded anyway.
+///
+/// Only directories are tracked. A symlinked file costs a bounded amount
+/// of duplicate work, and paying a `canonicalize` per file to find that
+/// out would cost more than it saves.
+#[derive(Clone)]
+pub struct LinkClaims {
+    claimed: Arc<parking_lot::Mutex<Vec<PathBuf>>>,
+    followed: Option<FollowedLinks>,
+}
+
+impl LinkClaims {
+    /// Start a walk with `roots` already covered, reporting the links it
+    /// descends through into `followed` when one is given.
+    ///
+    /// A root that cannot be canonicalized is left out rather than
+    /// failing the walk: the walk still yields it, and the only loss is
+    /// that a link pointing back into it is followed instead of skipped.
+    pub fn new(roots: impl IntoIterator<Item = PathBuf>, followed: Option<&FollowedLinks>) -> Self {
+        let claimed = roots
+            .into_iter()
+            .filter_map(|root| std::fs::canonicalize(root).ok())
+            .collect();
+        Self {
+            claimed: Arc::new(parking_lot::Mutex::new(claimed)),
+            followed: followed.cloned(),
+        }
+    }
+
+    /// Treat `paths` as trees the walk already accounts for, so a link
+    /// pointing into one of them is skipped in favour of the spelling that
+    /// tree is covered under.
+    ///
+    /// This is what a walk's `skip_dirs` need: a vendor tree scanned
+    /// through `installed.json`, or a monorepo subproject another pipeline
+    /// walks, is already indexed under its own path.
+    /// `orchestra/testbench-core` ships `laravel/vendor -> <project>/vendor`
+    /// and is installed in a great many Laravel projects, so a walk of the
+    /// vendor packages meets exactly this link and would otherwise index
+    /// every package a second time beneath it.
+    pub(crate) fn cover(&self, paths: impl IntoIterator<Item = PathBuf>) {
+        let covered = paths
+            .into_iter()
+            .filter_map(|path| std::fs::canonicalize(path).ok());
+        self.claimed.lock().extend(covered);
+    }
+
+    /// Whether the walk should descend through the directory symlink at
+    /// `link`, claiming its target when it should.
+    ///
+    /// A broken link, or one whose target is already covered by a root
+    /// or by an earlier link, answers `false`.
+    pub(crate) fn claim(&self, link: &Path) -> bool {
+        let Ok(target) = std::fs::canonicalize(link) else {
+            return false;
+        };
+        let mut claimed = self.claimed.lock();
+        if claimed.iter().any(|seen| target.starts_with(seen)) {
+            return false;
+        }
+        claimed.push(target.clone());
+        drop(claimed);
+        if let Some(followed) = &self.followed {
+            followed.record(link.to_path_buf(), target);
+        }
+        true
+    }
+}
+
+/// Every directory symlink the workspace walks have indexed through,
+/// paired with the real directory it resolves to.
+///
+/// Owned by the `Backend` and filled in by the walks themselves, because
+/// a link is only interesting once something was indexed behind it. Two
+/// consumers need it, and both would otherwise be guessing:
+///
+/// - **Watcher registration.** A client watches its workspace folders,
+///   and a tree behind a link is not in one of them. Each link here
+///   becomes a [`RelativePattern`](tower_lsp::lsp_types::RelativePattern)
+///   watcher based at the link, which is what asks the client for those
+///   events.
+/// - **Event paths.** A client that resolves the base it was handed
+///   reports the real path, which matches nothing in an index that holds
+///   the symlink spelling. [`Self::to_link_spelling`] maps it back.
+///
+/// Links accumulate: a rediscovery walk re-records the ones still there
+/// rather than starting over, so a link deleted from disk leaves a
+/// watcher for a path that no longer exists until the session ends. The
+/// client is watching a path that produces no events, which costs one
+/// dead registration and nothing else.
+#[derive(Clone, Default)]
+pub struct FollowedLinks {
+    /// Link path as the walk spelled it → the canonical directory it
+    /// resolves to. Keyed by link so re-walking is idempotent, and small
+    /// enough (one entry per symlink a project deliberately checked in)
+    /// that the reverse lookup is a scan.
+    links: Arc<parking_lot::RwLock<std::collections::BTreeMap<PathBuf, PathBuf>>>,
+}
+
+impl FollowedLinks {
+    fn record(&self, link: PathBuf, target: PathBuf) {
+        self.links.write().insert(link, target);
+    }
+
+    /// Whether any walk has indexed through a symlink yet.
+    pub fn is_empty(&self) -> bool {
+        self.links.read().is_empty()
+    }
+
+    /// The link spellings, sorted, for the watcher registration to base
+    /// its patterns on.
+    pub fn link_paths(&self) -> Vec<PathBuf> {
+        self.links.read().keys().cloned().collect()
+    }
+
+    /// Rewrite a real path that falls inside a followed link's target
+    /// into the spelling the index holds, or `None` when it is already a
+    /// path the walk could have produced.
+    ///
+    /// The longest matching target wins, so a link nested inside another
+    /// link's tree maps to the nearer of the two.
+    pub fn to_link_spelling(&self, path: &Path) -> Option<PathBuf> {
+        let links = self.links.read();
+        let (link, rest) = links
+            .iter()
+            .filter(|(link, _)| !path.starts_with(link))
+            .filter_map(|(link, target)| path.strip_prefix(target).ok().map(|rest| (link, rest)))
+            .min_by_key(|(_, rest)| rest.components().count())?;
+        Some(link.join(rest))
+    }
 }
 
 /// Compiled exclude matcher and extra-extension set for file discovery.
@@ -350,5 +528,50 @@ mod tests {
         assert!(!f.is_excluded_path(&PathBuf::from("/ws/anything"), true));
         assert!(f.is_php_file(&PathBuf::from("/ws/foo.php")));
         assert!(!f.is_php_file(&PathBuf::from("/ws/foo.module")));
+    }
+
+    /// A link inside another link's tree has to win for paths under it,
+    /// or a file two links deep is respelled through the outer link and
+    /// names a path that does not exist.
+    #[test]
+    fn to_link_spelling_prefers_the_nearest_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let outer_target = dir.path().join("outer");
+        let inner_target = dir.path().join("inner");
+        std::fs::create_dir_all(outer_target.join("nested")).unwrap();
+        std::fs::create_dir_all(&inner_target).unwrap();
+
+        let links = FollowedLinks::default();
+        links.record(PathBuf::from("/ws/outer"), outer_target.clone());
+        links.record(
+            PathBuf::from("/ws/outer/nested/inner"),
+            inner_target.clone(),
+        );
+
+        assert_eq!(
+            links.to_link_spelling(&outer_target.join("A.php")),
+            Some(PathBuf::from("/ws/outer/A.php"))
+        );
+        assert_eq!(
+            links.to_link_spelling(&inner_target.join("B.php")),
+            Some(PathBuf::from("/ws/outer/nested/inner/B.php"))
+        );
+    }
+
+    /// A path already spelled through a link is what the walk produced, so
+    /// it must pass through untouched rather than being rewritten again.
+    #[test]
+    fn to_link_spelling_leaves_an_already_linked_path_alone() {
+        let links = FollowedLinks::default();
+        links.record(PathBuf::from("/ws/link"), PathBuf::from("/opt/real"));
+
+        assert_eq!(
+            links.to_link_spelling(&PathBuf::from("/ws/link/A.php")),
+            None
+        );
+        assert_eq!(
+            links.to_link_spelling(&PathBuf::from("/elsewhere/A.php")),
+            None
+        );
     }
 }

@@ -57,12 +57,11 @@ pub(crate) async fn open_project(
     root: &Path,
     cfg: Config,
     path_filters: &[PathBuf],
-    follow_links: bool,
 ) -> Option<OpenedProject> {
     let backend = Backend::new_headless();
     super::open_headless_project(&backend, root, cfg).await;
 
-    let files = super::discover_user_files(&backend, root, path_filters, follow_links);
+    let files = super::discover_user_files(&backend, root, path_filters);
     if files.is_empty() {
         eprintln!("No PHP files found.");
         return None;

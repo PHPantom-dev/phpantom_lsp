@@ -144,9 +144,9 @@ pub(crate) mod where_property;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
-    LaravelCommandIndex, command_signature_at_offset, is_command_accessor,
-    is_command_directory_uri, resolve_accessor_type as resolve_command_accessor_type,
-    scan_command_file,
+    EnclosingCommand, LaravelCommandIndex, command_enclosing_signature,
+    command_signature_at_offset, is_command_accessor, is_command_directory_uri,
+    resolve_accessor_type as resolve_command_accessor_type, scan_command_file,
 };
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
@@ -231,7 +231,9 @@ use where_property::{build_where_property_methods_for_class, lowercase_method_na
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
 pub use factory::LaravelFactoryProvider;
@@ -247,7 +249,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
+    PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -478,14 +480,16 @@ fn custom_collection_for_model(
     model: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
-    let mut current = class_loader(model)?;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
-            return collection.base_name().map(str::to_owned);
-        }
-        current = class_loader(current.parent_class.as_ref()?)?;
-    }
-    None
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_collection.as_ref())
+            .and_then(|collection| collection.base_name())
+            .map(str::to_owned)
+    };
+    let model_class = class_loader(model)?;
+    declared(&model_class)
+        .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
 /// Build the replacement type for a custom collection class, matching its

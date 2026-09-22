@@ -205,7 +205,7 @@ fn collect_hits(
         std::sync::Arc::new(vendor_dirs),
         backend.index_filters(),
         true,
-        false,
+        crate::classmap_scanner::LinkClaims::new([root.to_path_buf()], None),
     );
     builder.threads(
         std::thread::available_parallelism()

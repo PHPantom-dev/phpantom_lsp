@@ -1712,7 +1712,8 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.symbols.global_defines.write().clear()
     });
     probe("gti_index", &mut || {
-        backend.symbols.gti_index.write().clear()
+        backend.symbols.gti_index.write().clear();
+        backend.symbols.gti_parents_index.write().clear();
     });
     probe("uri_globals_index", &mut || {
         backend.symbols.uri_globals_index.write().clear()
@@ -1746,7 +1747,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
     probe("laravel_aliases", &mut || {
-        *backend.laravel_aliases.write() = None
+        backend.laravel_aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
         backend.laravel_macro_seeds.write().clear();

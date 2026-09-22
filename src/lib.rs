@@ -131,11 +131,24 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
 pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 
-/// The `[indexing] extensions` set and Laravel classification last pushed
-/// to the client as a `workspace/didChangeWatchedFiles` registration:
-/// `(extra_extensions, is_laravel)`. `None` until the first registration.
-/// See [`Backend::registered_watcher_state`].
-pub(crate) type WatchedFileRegistrationState = Option<(Vec<String>, bool)>;
+/// What the last `workspace/didChangeWatchedFiles` registration pushed to
+/// the client was built from, so the next one can tell whether anything
+/// it watches has moved. See [`Backend::registered_watcher_state`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WatchedFileInputs {
+    /// The `[indexing] extensions` set, one watcher each.
+    pub(crate) extra_extensions: Vec<String>,
+    /// Whether the project was classified as Laravel, which adds the
+    /// schema watchers.
+    pub(crate) is_laravel: bool,
+    /// Directory symlinks the index reached through, one relative-pattern
+    /// watcher each. Empty when the client cannot match a relative
+    /// pattern, since then there is nothing to ask it for.
+    pub(crate) followed_links: Vec<std::path::PathBuf>,
+}
+
+/// `None` until the first registration.
+pub(crate) type WatchedFileRegistrationState = Option<WatchedFileInputs>;
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
@@ -284,6 +297,8 @@ pub(crate) mod scope_collector;
 mod selection_range;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod self_update;
+#[cfg(feature = "semantic-export")]
+pub mod semantic_export;
 mod semantic_tokens;
 mod server;
 mod signature_help;
@@ -584,7 +599,7 @@ pub struct Backend {
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
     /// subcommands, which parse every file but never issue a
-    /// find-references, rename, or inlay-hints request, so populating
+    /// find-references, rename, or CodeLens request, so populating
     /// the index would be pure wasted CPU and short-lived allocation.
     pub(crate) skip_reference_index: bool,
     /// Per-file parse errors from the Mago parser.
@@ -901,6 +916,17 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client can match a watcher pattern against a base URI
+    /// (`workspace.didChangeWatchedFiles.relativePatternSupport`).
+    ///
+    /// A plain `**/*.php` pattern is matched against the files of the
+    /// workspace folders, which gives a client no reason to watch a
+    /// directory living outside them, and nothing obliges it to traverse a
+    /// symlink to find one. A relative pattern names the link outright,
+    /// which is the only way in the protocol to ask for those events;
+    /// without the capability, a tree reached through a link is indexed but
+    /// not watched.
+    pub(crate) supports_relative_pattern_watchers: Arc<std::sync::atomic::AtomicBool>,
     /// The `[indexing] extensions` set and Laravel classification last
     /// pushed to the client as a `workspace/didChangeWatchedFiles`
     /// registration. `None` until `initialized` performs the first
@@ -937,12 +963,12 @@ pub struct Backend {
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
-    /// `workspace.inlayHint.refreshSupport` capability.  The reference
-    /// counts shown on declarations are computed in the background, so
-    /// without a refresh the editor keeps the hints it pulled before they
-    /// were ready.
+    /// `workspace.inlayHint.refreshSupport` capability.  Hints resolve
+    /// against the workspace index and a background parse, so without a
+    /// refresh the editor keeps the ones it pulled before either was
+    /// ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Exact member references shared by declaration inlay hints and lenses.
+    /// Exact member references behind the declaration CodeLens.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -1212,6 +1238,7 @@ impl Backend {
                 std::sync::atomic::AtomicBool::new(false),
             ),
             registered_watcher_state: Arc::new(RwLock::new(None)),
+            supports_relative_pattern_watchers: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1329,6 +1356,7 @@ impl Backend {
                 std::sync::atomic::AtomicBool::new(false),
             ),
             registered_watcher_state: Arc::new(RwLock::new(None)),
+            supports_relative_pattern_watchers: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1581,6 +1609,23 @@ impl Backend {
         &self.open_files
     }
 
+    /// Mark the workspace as indexed (used by integration tests that need
+    /// the state `ensure_workspace_indexed` leaves behind without running
+    /// a real workspace scan).
+    pub fn mark_workspace_indexed(&self) {
+        self.workspace_indexed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Declare whether the client supports `workspace/codeLens/refresh`,
+    /// which decides whether a lens may be answered cold and refreshed
+    /// once its count lands (used by integration tests to pick the path
+    /// without going through `initialize`).
+    pub fn set_supports_code_lens_refresh(&self, supported: bool) {
+        self.supports_code_lens_refresh
+            .store(supported, std::sync::atomic::Ordering::Release);
+    }
+
     pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
         self.package_info_for_uri(uri).0
     }
@@ -1711,52 +1756,76 @@ impl Backend {
     /// Populate the GTI (go-to-implementation) reverse inheritance index
     /// for the given classes.  For each class, inserts the class's FQN
     /// into the child list of every parent (parent_class, interfaces,
-    /// used_traits).
+    /// used_traits), and records the same edges under the class itself in
+    /// `gti_parents_index` so they can be withdrawn again without
+    /// searching for them.
     pub(crate) fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
         let mut gti = self.symbols.gti_index.write();
+        let mut parents_index = self.symbols.gti_parents_index.write();
         for cls in classes {
             if cls.name.starts_with("__anonymous@") {
                 continue;
             }
-            let child_fqn = cls.fqn().to_string();
+            if cls.parent_class.is_none() && cls.interfaces.is_empty() && cls.used_traits.is_empty()
+            {
+                continue;
+            }
 
-            if let Some(ref parent) = cls.parent_class {
-                let parent_str = parent.to_string();
-                let children = gti.entry(parent_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+            let child_fqn = cls.fqn().to_string();
+            let registered = parents_index.entry(child_fqn.clone()).or_default();
+
+            for parent in cls
+                .parent_class
+                .iter()
+                .chain(cls.interfaces.iter())
+                .chain(cls.used_traits.iter())
+            {
+                let parent_fqn: &str = parent;
+                // The edge is deduplicated against the child's own parents,
+                // a list as long as its `extends`/`implements`/`use`
+                // clauses, rather than against the parent's child list,
+                // which grows with the number of implementors.
+                if registered.iter().any(|p| p == parent_fqn) {
+                    continue;
                 }
-            }
-            for iface in &cls.interfaces {
-                let iface_str = iface.to_string();
-                let children = gti.entry(iface_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
-                }
-            }
-            for tr in &cls.used_traits {
-                let tr_str = tr.to_string();
-                let children = gti.entry(tr_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+                registered.push(parent_fqn.to_string());
+                match gti.get_mut(parent_fqn) {
+                    Some(children) => children.push(child_fqn.clone()),
+                    None => {
+                        gti.insert(parent_fqn.to_string(), vec![child_fqn.clone()]);
+                    }
                 }
             }
         }
     }
 
-    /// Remove all GTI entries where `child_fqn` appears as a child.
+    /// Remove all GTI entries where one of `fqns` appears as a child.
     /// Called before re-populating when a file is re-parsed.
+    ///
+    /// Only the parents each class was registered under are touched, so the
+    /// cost is the size of the re-parsed file's inheritance clauses rather
+    /// than the size of the workspace.
     pub(crate) fn evict_gti_for_fqns(&self, fqns: &[String]) {
         if fqns.is_empty() {
             return;
         }
-        let fqn_set: HashSet<&str> = fqns.iter().map(|s| s.as_str()).collect();
         let mut gti = self.symbols.gti_index.write();
-        for children in gti.values_mut() {
-            children.retain(|child| !fqn_set.contains(child.as_str()));
+        let mut parents_index = self.symbols.gti_parents_index.write();
+        for fqn in fqns {
+            let Some(parents) = parents_index.remove(fqn.as_str()) else {
+                continue;
+            };
+            for parent in parents {
+                let Some(children) = gti.get_mut(&parent) else {
+                    continue;
+                };
+                children.retain(|child| child != fqn);
+                // Remove empty entries to avoid unbounded growth.
+                if children.is_empty() {
+                    gti.remove(&parent);
+                }
+            }
         }
-        // Remove empty entries to avoid unbounded growth.
-        gti.retain(|_, v| !v.is_empty());
     }
 
     /// Re-scan a batch of files from disk, refreshing their discovery-level
@@ -2012,6 +2081,9 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_relative_pattern_watchers: Arc::clone(
+                &self.supports_relative_pattern_watchers,
+            ),
             registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
@@ -2051,6 +2123,14 @@ impl Backend {
     /// `.phpantom.toml` (or the default config when the file is missing).
     pub fn config(&self) -> config::Config {
         self.workspace.config.lock().clone()
+    }
+
+    /// The directory symlinks the workspace walks have indexed through.
+    ///
+    /// Walks report into it as they discover links; the watcher
+    /// registration and the watched-file handler read it back.
+    pub(crate) fn followed_links(&self) -> &crate::classmap_scanner::FollowedLinks {
+        &self.workspace.followed_links
     }
 
     /// Replace the current configuration.

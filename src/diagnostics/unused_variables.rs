@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::*;
 
-use super::helpers::make_tagged_diagnostic;
+use super::helpers::{SUPERGLOBALS, make_tagged_diagnostic};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
@@ -32,23 +32,6 @@ use crate::types::PhpVersion;
 
 /// Diagnostic code used for unused-variable diagnostics.
 pub(crate) const UNUSED_VARIABLE_CODE: &str = "unused_variable";
-
-/// PHP superglobals that should never be flagged.
-const SUPERGLOBALS: &[&str] = &[
-    "$_GET",
-    "$_POST",
-    "$_SERVER",
-    "$_REQUEST",
-    "$_SESSION",
-    "$_COOKIE",
-    "$_FILES",
-    "$_ENV",
-    "$GLOBALS",
-    "$argc",
-    "$argv",
-    "$http_response_header",
-    "$php_errormsg",
-];
 
 impl Backend {
     /// Collect unused-variable diagnostics for a single file.

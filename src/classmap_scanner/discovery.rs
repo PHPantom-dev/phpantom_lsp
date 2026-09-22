@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use memchr::memmem;
 
-use super::filters::IndexFilters;
+use super::filters::{FollowedLinks, IndexFilters};
 use super::{ScanResult, WorkspaceScanResult, read_for_scan, scan_content};
 use crate::progress::ScanProgress;
 
@@ -69,14 +69,14 @@ fn thread_count() -> usize {
 pub fn scan_directories(
     dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> HashMap<String, PathBuf> {
     let skip_paths = HashSet::new();
     let opts = WalkOptions::new(
         vendor_dir_paths.to_vec(),
         &skip_paths,
         IndexFilters::empty(),
-        follow_links,
+        followed,
     );
     let paths: Vec<PathBuf> = walk_roots(dirs, &opts).into_iter().flatten().collect();
     scan_files_parallel_classes(&paths, None)
@@ -103,7 +103,7 @@ pub fn scan_psr4_directories(
     psr4: &[(String, PathBuf)],
     classmap_dirs: &[PathBuf],
     vendor_dir_paths: &[PathBuf],
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> HashMap<String, PathBuf> {
     scan_psr4_directories_with_skip(
         psr4,
@@ -112,7 +112,7 @@ pub fn scan_psr4_directories(
         &HashSet::new(),
         &IndexFilters::empty(),
         None,
-        follow_links,
+        followed,
     )
 }
 
@@ -128,14 +128,14 @@ pub fn scan_psr4_directories_with_skip(
     skip_paths: &HashSet<PathBuf>,
     filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> HashMap<String, PathBuf> {
     // ── Walk the PSR-4 and classmap roots in one parallel pass ──────
     let opts = WalkOptions::new(
         vendor_dir_paths.to_vec(),
         skip_paths,
         std::sync::Arc::clone(filters),
-        follow_links,
+        followed,
     );
     let mut roots: Vec<PathBuf> = psr4.iter().map(|(_, dir)| dir.clone()).collect();
     roots.extend(classmap_dirs.iter().cloned());
@@ -179,7 +179,7 @@ pub fn scan_vendor_packages(workspace_root: &Path, vendor_dir: &str) -> Workspac
         &HashSet::new(),
         &IndexFilters::empty(),
         None,
-        false,
+        None,
     )
 }
 
@@ -210,23 +210,13 @@ pub(crate) fn vendor_package_roots(
     explicit_deps: &HashSet<String>,
 ) -> Vec<(PathBuf, crate::ClassCompletionOrigin, String)> {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return Vec::new();
     };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return Vec::new();
-    };
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return Vec::new();
-    };
-    let composer_dir = vendor_path.join("composer");
+    let composer_dir = &installed.composer_dir;
     let mut roots = Vec::new();
-    for package in packages {
+    for package in &installed.packages {
         let pkg_name = package
             .get("name")
             .and_then(|n| n.as_str())
@@ -413,33 +403,18 @@ pub fn scan_vendor_packages_with_skip(
     explicit_deps: &HashSet<String>,
     filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> WorkspaceScanResult {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
 
-    let Ok(content) = std::fs::read_to_string(&installed_path) else {
+    let Some(installed) = crate::composer::read_installed_packages(workspace_root, vendor_dir)
+    else {
         return WorkspaceScanResult::default();
     };
-
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return WorkspaceScanResult::default();
-    };
-
-    // installed.json has two formats:
-    //   Composer 1: top-level array of packages
-    //   Composer 2: { "packages": [...] }
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return WorkspaceScanResult::default();
-    };
-
-    // The directory containing installed.json — install-path values
-    // are relative to this directory.
-    let composer_dir = vendor_path.join("composer");
+    let packages = installed.packages.as_slice();
+    // install-path values are relative to the directory containing
+    // installed.json.
+    let composer_dir = installed.composer_dir;
 
     // Phase 1: read every package's autoload section and resolve the
     // paths it declares, without walking any of them.  Packages are
@@ -509,7 +484,7 @@ pub fn scan_vendor_packages_with_skip(
         vec![vendor_path.clone()],
         skip_paths,
         std::sync::Arc::clone(filters),
-        follow_links,
+        followed,
     );
     let mut roots: Vec<PathBuf> = Vec::new();
     for (_, sources) in &collected {
@@ -573,9 +548,9 @@ pub fn scan_vendor_packages_with_skip(
 pub fn scan_workspace_fallback(
     workspace_root: &Path,
     vendor_dir_paths: &[PathBuf],
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> HashMap<String, PathBuf> {
-    scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths, follow_links)
+    scan_directories(&[workspace_root.to_path_buf()], vendor_dir_paths, followed)
 }
 
 /// Scan `files` in parallel, calling `emit` on each to append the
@@ -855,7 +830,7 @@ pub fn scan_workspace_fallback_full(
     skip_dirs: &HashSet<PathBuf>,
     filters: &std::sync::Arc<IndexFilters>,
     progress: Option<&ScanProgress>,
-    follow_links: bool,
+    followed: Option<&FollowedLinks>,
 ) -> WorkspaceScanResult {
     // Phase 1: collect file paths
     let skip_paths = HashSet::new();
@@ -863,7 +838,7 @@ pub fn scan_workspace_fallback_full(
         skip_dirs.iter().cloned().collect(),
         &skip_paths,
         std::sync::Arc::clone(filters),
-        follow_links,
+        followed,
     );
     let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
         walk_roots(&[workspace_root.to_path_buf()], &opts)
@@ -985,11 +960,11 @@ struct WalkOptions<'a> {
     skip_paths: &'a HashSet<PathBuf>,
     /// Compiled `[indexing]` exclude globs and extra PHP extensions.
     filters: std::sync::Arc<IndexFilters>,
-    /// Whether to follow directory symlinks found inside a walk root.
-    /// Passed straight to [`ignore::WalkBuilder::follow_links`]; when
-    /// `false` (the default) a symlinked directory is yielded as the
-    /// symlink itself and never descended into.
-    follow_links: bool,
+    /// Where to report the directory symlinks this walk descends
+    /// through, so the client can be asked to watch the trees behind
+    /// them. `None` for a walk whose caller has no watchers to register
+    /// (the `analyze`, `fix`, and `format` pipelines).
+    followed: Option<&'a FollowedLinks>,
 }
 
 impl<'a> WalkOptions<'a> {
@@ -997,13 +972,13 @@ impl<'a> WalkOptions<'a> {
         skip_dirs: Vec<PathBuf>,
         skip_paths: &'a HashSet<PathBuf>,
         filters: std::sync::Arc<IndexFilters>,
-        follow_links: bool,
+        followed: Option<&'a FollowedLinks>,
     ) -> Self {
         Self {
             skip_dirs: std::sync::Arc::new(skip_dirs),
             skip_paths,
             filters,
-            follow_links,
+            followed,
         }
     }
 }
@@ -1056,12 +1031,17 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
         return out;
     };
 
+    // Every root is claimed up front, so a link inside one root pointing
+    // into another is skipped in favour of that root's own walk.
     let mut builder = super::workspace_walk_builder(
         first_root,
         std::sync::Arc::clone(&opts.skip_dirs),
         std::sync::Arc::clone(&opts.filters),
         false,
-        opts.follow_links,
+        super::LinkClaims::new(
+            distinct_roots.iter().map(|r| r.to_path_buf()),
+            opts.followed,
+        ),
     );
     for dir in other_roots {
         builder.add(dir);
@@ -1083,11 +1063,11 @@ fn walk_roots(roots: &[PathBuf], opts: &WalkOptions) -> Vec<Vec<PathBuf>> {
             if file_type.is_some_and(|ft| ft.is_dir())
                 || !filters.is_php_file(path)
                 || skip_paths.contains(path)
-                // `ignore` reports a symlink's own type when not
-                // following; with follow-links the type is the target's.
-                // Either way, confirm the target is a regular file before
-                // indexing it.  The tests above keep this stat off the
-                // common path.
+                // `ignore` reports the target's type for a symlink it
+                // followed, and the symlink's own for one it did not
+                // (a claimed target, a broken link), so confirm the
+                // target is a regular file before indexing it.  The
+                // tests above keep this stat off the common path.
                 || !(file_type.is_some_and(|ft| ft.is_file()) || path.is_file())
             {
                 return WalkState::Continue;

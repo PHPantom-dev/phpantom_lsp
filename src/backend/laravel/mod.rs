@@ -19,6 +19,7 @@ mod schema;
 mod storage;
 
 use crate::Backend;
+use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};
 
 impl Backend {
     /// Collect the FQNs of every Laravel service provider that could register a
@@ -87,6 +88,34 @@ impl Backend {
         }
 
         providers
+    }
+
+    /// Scan every registered service provider's file into `files`, one
+    /// contribution per file, and report how many files were read.
+    ///
+    /// A file two providers share is read once, and a scan that registers
+    /// nothing leaves no entry.  The caller rebuilds the registry's derived
+    /// lookups afterwards, so a bulk build rebuilds once.
+    fn scan_providers_into<C: Contribution>(
+        &self,
+        files: &mut FileContributions<C>,
+        mut scan: impl FnMut(&str) -> C,
+    ) -> usize {
+        let mut scanned = 0usize;
+        for fqn in self.laravel_provider_fqns() {
+            let Some(uri) = self.resolve_class_uri(&fqn) else {
+                continue;
+            };
+            if files.has_uri(&uri) {
+                continue;
+            }
+            let Some(content) = self.get_file_content(&uri) else {
+                continue;
+            };
+            scanned += 1;
+            files.set_file(uri, scan(&content));
+        }
+        scanned
     }
 
     /// Resolve a class FQN to the URI of the file that declares it, loading the

@@ -224,9 +224,8 @@ pub async fn run(options: FixOptions) -> i32 {
 
     // ── 1. Open the project and discover the files to fix ───────────
     let cfg = crate::analyse::load_config_or_default(root, options.global_config.as_deref());
-    let follow_links = cfg.indexing.follow_links();
     let Some(OpenedProject { backend, files }) =
-        open_project(root, cfg, options.path_filter.as_slice(), follow_links).await
+        open_project(root, cfg, options.path_filter.as_slice()).await
     else {
         return 0;
     };

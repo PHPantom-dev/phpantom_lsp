@@ -17,6 +17,7 @@
 //! properties have their template parameter references replaced with the
 //! concrete types.
 
+pub mod ancestry;
 pub mod enrichment;
 pub mod generics;
 pub mod traits;
@@ -32,6 +33,7 @@ use crate::virtual_members::{
 };
 
 // Re-export functions that are used internally
+pub(crate) use ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 

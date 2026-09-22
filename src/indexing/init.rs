@@ -176,9 +176,12 @@ impl Backend {
                     p.begin_phase(0.0, 0.3, "Scanning workspace files");
                 }
                 let filters = self.index_filters();
-                let follow_links = self.config().indexing.follow_links();
                 let mut scan = classmap_scanner::scan_workspace_fallback_full(
-                    root, &skip_dirs, &filters, progress, follow_links,
+                    root,
+                    &skip_dirs,
+                    &filters,
+                    progress,
+                    Some(self.followed_links()),
                 );
 
                 // Merge vendor packages (excluded from the workspace
@@ -193,7 +196,7 @@ impl Backend {
                     &explicit_deps,
                     &filters,
                     progress,
-                    self.config().indexing.follow_links(),
+                    Some(self.followed_links()),
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
 
@@ -392,17 +395,6 @@ impl Backend {
             ),
         )
         .await;
-
-        // When symlink-following is enabled, tell the user it is active so
-        // a configuration mistake (or a deliberate `git pull` into a linked
-        // framework) is diagnosable from the log alone.
-        if self.config().indexing.follow_links() && has_interior_symlink(root) {
-            self.log(
-                MessageType::INFO,
-                "PHPantom: symlink-following enabled — indexing directories reached through workspace symlinks. Changes inside a linked target on disk do not trigger a re-index; reload the window after a `git pull` or similar.".to_string(),
-            )
-            .await;
-        }
     }
 
     /// Initialize a monorepo workspace (no root `composer.json`, but
@@ -581,7 +573,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
-            self.config().indexing.follow_links(),
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
         {
@@ -637,7 +629,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
-            self.config().indexing.follow_links(),
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
 
@@ -665,18 +657,4 @@ impl Backend {
         )
         .await;
     }
-}
-
-/// Return `true` when any entry directly under `root` is a symlink to a
-/// directory.  Used only to decide whether the "symlink-following
-/// enabled" startup notice is worth printing; the walks themselves do
-/// the real work.
-fn has_interior_symlink(root: &std::path::Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return false;
-    };
-    entries.flatten().any(|e| {
-        e.file_type().is_ok_and(|ft| ft.is_symlink())
-            && std::fs::metadata(e.path()).is_ok_and(|m| m.is_dir())
-    })
 }

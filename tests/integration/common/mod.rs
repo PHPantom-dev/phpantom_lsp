@@ -813,20 +813,15 @@ pub fn inject_phpstan_diag_with_data(
     diag
 }
 
-/// Send a code action request for an arbitrary range.
-pub fn get_code_actions_in_range(
-    backend: &Backend,
-    uri: &str,
-    content: &str,
-    range: Range,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
+/// The one place these helpers build `CodeActionParams`.
+fn code_action_params(uri: &str, range: Range, diagnostics: Vec<Diagnostic>) -> CodeActionParams {
+    CodeActionParams {
         text_document: TextDocumentIdentifier {
             uri: uri.parse().unwrap(),
         },
         range,
         context: CodeActionContext {
-            diagnostics: vec![],
+            diagnostics,
             only: None,
             trigger_kind: None,
         },
@@ -836,8 +831,37 @@ pub fn get_code_actions_in_range(
         partial_result_params: PartialResultParams {
             partial_result_token: None,
         },
-    };
-    backend.handle_code_action(uri, content, &params)
+    }
+}
+
+/// Send a code action request for an arbitrary range.
+pub fn get_code_actions_in_range(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    range: Range,
+) -> Vec<CodeActionOrCommand> {
+    backend.handle_code_action(uri, content, &code_action_params(uri, range, vec![]))
+}
+
+/// Send `textDocument/codeAction` through the `LanguageServer` trait
+/// method, the way an editor does.
+///
+/// [`get_code_actions_in_range`] calls the handler directly with the text
+/// as an argument, which skips everything the server does around it: the
+/// per-language gate, fetching the document's content (a template is
+/// analysed as the virtual PHP it lowers to), the panic guard, and the
+/// collapse of an empty list to no response.  A test of any of those has
+/// to come through here, with the document opened first.
+pub async fn code_actions_via_server(
+    backend: &Backend,
+    uri: &Url,
+    range: Range,
+) -> Option<CodeActionResponse> {
+    backend
+        .code_action(code_action_params(uri.as_str(), range, vec![]))
+        .await
+        .expect("code_action must not fail")
 }
 
 /// Send a code action request at a specific line and character (point range).

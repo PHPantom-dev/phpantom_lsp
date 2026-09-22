@@ -14,6 +14,7 @@ use std::borrow::Cow;
 use std::ops::Range;
 
 use crate::php_type::PhpType;
+use crate::text_scan::find_byte;
 
 use super::pairing::{self, Pair, Pairing, Stray, Token};
 use super::signature::mask_inert_regions;
@@ -280,7 +281,7 @@ pub(crate) fn scan_component_tag_calls(
         match bytes.get(i + 1) {
             Some(b'/') => {
                 // A closing tag has no attributes to scan.
-                i = find_byte(&masked, i, b'>').map_or(bytes.len(), |end| end + 1);
+                i = find_byte(bytes, i, b'>').map_or(bytes.len(), |end| end + 1);
                 continue;
             }
             Some(c) if c.is_ascii_alphabetic() => {}
@@ -303,13 +304,6 @@ pub(crate) fn scan_component_tag_calls(
         i = end;
     }
     results
-}
-
-fn find_byte(content: &str, from: usize, needle: u8) -> Option<usize> {
-    content.as_bytes()[from..]
-        .iter()
-        .position(|&b| b == needle)
-        .map(|pos| from + pos)
 }
 
 /// The characters a component tag name is spelled with. Dots separate

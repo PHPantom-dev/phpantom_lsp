@@ -66,6 +66,12 @@ pub(crate) struct WorkspaceEnv {
     /// reason `config` is, since a `didChangeConfiguration` handled on
     /// one clone has to be visible to every other.
     pub(crate) client_indexing: Arc<RwLock<config::ClientIndexingOptions>>,
+    /// Directory symlinks the workspace walks have indexed through.
+    ///
+    /// Shared by `Arc` because the walk that discovers a link runs on a
+    /// blocking clone while the watcher registration it feeds is built on
+    /// the clone that answers requests.
+    pub(crate) followed_links: crate::classmap_scanner::FollowedLinks,
     /// Counts the filter changes that asked for a workspace rediscovery.
     ///
     /// A debounced rediscovery task captures the count it was scheduled
@@ -100,6 +106,7 @@ impl WorkspaceEnv {
             global_config_path,
             index_filters: Arc::new(RwLock::new(None)),
             client_indexing: Arc::new(RwLock::new(config::ClientIndexingOptions::default())),
+            followed_links: crate::classmap_scanner::FollowedLinks::default(),
             filter_rediscovery_generation: Arc::new(AtomicU64::new(0)),
         }
     }
@@ -118,6 +125,7 @@ impl Clone for WorkspaceEnv {
             global_config_path: self.global_config_path.clone(),
             index_filters: Arc::clone(&self.index_filters),
             client_indexing: Arc::clone(&self.client_indexing),
+            followed_links: self.followed_links.clone(),
             filter_rediscovery_generation: Arc::clone(&self.filter_rediscovery_generation),
         }
     }

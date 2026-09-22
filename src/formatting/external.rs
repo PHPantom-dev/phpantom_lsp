@@ -70,12 +70,14 @@ impl Tool {
             //  32 = fixer configuration error
             //  64 = exception
             Tool::PhpCsFixer => code == 0,
-            // phpcbf exit codes:
-            //   0 = no fixes needed
-            //   1 = fixes applied (success)
-            //   2 = could not fix all errors
-            //   3+ = operational error
-            Tool::Phpcbf => matches!(code, 0 | 1),
+            // phpcbf exit codes (bitmask):
+            //   0 = no issues
+            //   1 = auto-fixable issues found (and fixed)
+            //   2 = non-fixable issues found
+            //   4 = fixer conflict (file failed to fix)
+            //  16 = processing error
+            //  64 = requirements not met
+            Tool::Phpcbf => code >= 0 && code & (16 | 64) == 0,
         }
     }
 }
@@ -146,7 +148,7 @@ pub(super) fn run_pint_on_blade(
     }
     let run = Run::new(workspace_root, config, cancelled);
     let output = execute(tool, &arguments, Some(content), &run)?;
-    Ok(output.stdout)
+    reject_empty_result(tool.tool, content, output.stdout)
 }
 
 fn run_tool(
@@ -158,7 +160,7 @@ fn run_tool(
     match tool.tool.invocation() {
         Invocation::Stdin => {
             let output = execute(tool, &tool.tool.arguments(file_path), Some(content), run)?;
-            Ok(output.stdout)
+            reject_empty_result(tool.tool, content, output.stdout)
         }
         Invocation::SiblingFile => {
             let temp = write_sibling_temp_file(file_path, content)?;
@@ -170,6 +172,20 @@ fn run_tool(
             result.map(|_| formatted)
         }
     }
+}
+
+/// Guard against a stdin-driven tool that reports success but produced no
+/// output: returning that empty string as the formatted content would
+/// delete the document. A tool given empty input is allowed to return
+/// empty output.
+fn reject_empty_result(tool: Tool, input: &str, output: String) -> Result<String, String> {
+    if output.is_empty() && !input.is_empty() {
+        return Err(format!(
+            "{} produced no output for non-empty input",
+            tool.name()
+        ));
+    }
+    Ok(output)
 }
 
 /// Run one tool and check its exit code.

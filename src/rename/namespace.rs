@@ -119,12 +119,11 @@ impl Backend {
             }
 
             if let Some(root) = workspace_root {
-                let follow_links = self.config().indexing.follow_links();
                 for path in crate::references::collect_php_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
-                    follow_links,
+                    Some(self.followed_links()),
                 ) {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());
@@ -271,7 +270,6 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) {
-        let old_prefix_lower = old_prefix.to_lowercase();
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim();
             let Some(rest) = trimmed.strip_prefix("namespace ") else {
@@ -284,32 +282,11 @@ impl Backend {
                 continue;
             }
 
-            let ns_lower = ns_name.to_lowercase();
-            // The namespace must equal old_prefix or start with old_prefix + `\`.
-            if ns_lower != old_prefix_lower
-                && !ns_lower.starts_with(&format!("{}\\", old_prefix_lower))
-            {
-                continue;
-            }
-
-            let new_ns = if ns_name.len() == old_prefix.len() {
-                new_prefix.to_string()
-            } else {
-                format!("{}{}", new_prefix, &ns_name[old_prefix.len()..])
-            };
-
-            let line_start_byte = line_start_byte_offset(content, line_idx);
-            let ns_offset_in_line = line.find(ns_name).unwrap_or(0);
-            let ns_start = line_start_byte + ns_offset_in_line;
-            let ns_end = ns_start + ns_name.len();
-
-            edits.push(TextEdit {
-                range: Range {
-                    start: offset_to_position(content, ns_start),
-                    end: offset_to_position(content, ns_end),
-                },
-                new_text: new_ns,
-            });
+            let ns_start =
+                line_start_byte_offset(content, line_idx) + line.find(ns_name).unwrap_or(0);
+            edits.extend(prefix_rename_edit(
+                content, ns_start, ns_name, old_prefix, new_prefix,
+            ));
         }
     }
 
@@ -331,7 +308,6 @@ impl Backend {
     ) {
         use crate::diagnostics::use_statements::{scan_use_statements, use_statement_body};
 
-        let old_prefix_lower = old_prefix.to_lowercase();
         for stmt in scan_use_statements(content) {
             let decl = &content[stmt.keyword_start..stmt.end];
             let Some(body) = use_statement_body(decl) else {
@@ -339,61 +315,21 @@ impl Backend {
             };
             let body_start = stmt.keyword_start + (decl.len() - body.len());
 
-            // Handle group use: `use App\Old\{Foo, Bar};`
-            if let Some(brace_pos) = body.find('{') {
-                let group_prefix = body[..brace_pos].trim_end_matches('\\').trim();
-                let group_lower = group_prefix.to_lowercase();
-
-                if group_lower == old_prefix_lower
-                    || group_lower.starts_with(&format!("{}\\", old_prefix_lower))
-                {
-                    let new_group_prefix = if group_prefix.len() == old_prefix.len() {
-                        new_prefix.to_string()
-                    } else {
-                        format!("{}{}", new_prefix, &group_prefix[old_prefix.len()..])
-                    };
-
-                    let prefix_start = body_start + body.find(group_prefix).unwrap_or(0);
-                    let prefix_end = prefix_start + group_prefix.len();
-
-                    edits.push(TextEdit {
-                        range: Range {
-                            start: offset_to_position(content, prefix_start),
-                            end: offset_to_position(content, prefix_end),
-                        },
-                        new_text: new_group_prefix,
-                    });
+            // A group use (`use App\Old\{Foo, Bar};`) moves by its shared
+            // prefix; a plain one (`use App\Old\Foo;`, `use App\Old\Foo as
+            // Bar;`) by the name it imports.
+            let name = match body.find('{') {
+                Some(brace_pos) => body[..brace_pos].trim_end_matches('\\').trim(),
+                None => {
+                    let rest = body.strip_suffix(';').unwrap_or(body).trim();
+                    rest.find(" as ")
+                        .map_or(rest, |as_pos| rest[..as_pos].trim())
                 }
-                continue;
-            }
-
-            // Simple use: `use App\Old\Foo;` or `use App\Old\Foo as Bar;`
-            let rest = body.strip_suffix(';').unwrap_or(body).trim();
-            let fqn_part = rest
-                .find(" as ")
-                .map_or(rest, |as_pos| rest[..as_pos].trim());
-
-            let fqn_lower = fqn_part.to_lowercase();
-            if fqn_lower == old_prefix_lower
-                || fqn_lower.starts_with(&format!("{}\\", old_prefix_lower))
-            {
-                let new_fqn = if fqn_part.len() == old_prefix.len() {
-                    new_prefix.to_string()
-                } else {
-                    format!("{}{}", new_prefix, &fqn_part[old_prefix.len()..])
-                };
-
-                let fqn_start = body_start + body.find(fqn_part).unwrap_or(0);
-                let fqn_end = fqn_start + fqn_part.len();
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: offset_to_position(content, fqn_start),
-                        end: offset_to_position(content, fqn_end),
-                    },
-                    new_text: new_fqn,
-                });
-            }
+            };
+            let start = body_start + body.find(name).unwrap_or(0);
+            edits.extend(prefix_rename_edit(
+                content, start, name, old_prefix, new_prefix,
+            ));
         }
     }
 
@@ -725,6 +661,26 @@ fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mu
             ops.push((old_url, new_url));
         }
     }
+}
+
+/// The edit that rewrites `name`, written at byte offset `start` of
+/// `content`, onto the moved namespace prefix, or `None` when the move
+/// does not carry it.
+fn prefix_rename_edit(
+    content: &str,
+    start: usize,
+    name: &str,
+    old_prefix: &str,
+    new_prefix: &str,
+) -> Option<TextEdit> {
+    let new_text = moved_name(name, old_prefix, new_prefix)?;
+    Some(TextEdit {
+        range: Range {
+            start: offset_to_position(content, start),
+            end: offset_to_position(content, start + name.len()),
+        },
+        new_text,
+    })
 }
 
 /// `name` with the moved namespace prefix substituted, or `None` when

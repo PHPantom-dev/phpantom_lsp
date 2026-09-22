@@ -1294,10 +1294,10 @@ fn narrow_to_numeric_inclusive(ty: &PhpType) -> PhpType {
                 .iter()
                 .filter_map(narrow_single_type_to_numeric)
                 .collect();
-            match narrowed.len() {
-                0 => PhpType::empty_sentinel(),
-                1 => narrowed.into_iter().next().unwrap(),
-                _ => PhpType::union(narrowed),
+            if narrowed.is_empty() {
+                PhpType::empty_sentinel()
+            } else {
+                PhpType::union(narrowed)
             }
         }
         // `null` never satisfies `is_numeric()`; narrow the inner type only.

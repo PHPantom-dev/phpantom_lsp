@@ -862,15 +862,16 @@ async fn laravel_string_key_references_gated_on_is_laravel() {
          references, got {plain_locs:?}"
     );
 }
-// ─── follow-links: collect_php_files_gitignore (issue #383) ────────
+
+// ─── Interior symlinks: collect_php_files_gitignore (issue #383) ──
 // The Find References / rename / preload walker is a *serial* `ignore`
-// walk (`.build()` + `flatten()`).  The same follow-links contract as
+// walk (`.build()` + `flatten()`).  The same symlink contract as
 // `walk_roots` applies, and a symlink cycle must terminate instead of
 // panicking: `flatten()` silently drops `Err` entries, which is where
 // the loop error lands.
 
 #[test]
-fn collect_php_files_gitignore_follows_interior_symlink_when_enabled() {
+fn collect_php_files_gitignore_follows_interior_symlink() {
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("ws");
     let real = dir.path().join("real");
@@ -884,7 +885,12 @@ fn collect_php_files_gitignore_follows_interior_symlink_when_enabled() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
-    let files = crate::references::collect_php_files_gitignore(&root, &[], &crate::classmap_scanner::IndexFilters::empty(), true);
+    let files = crate::references::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
     let linked = files
         .iter()
         .find(|p| p.ends_with("Hidden.php"))
@@ -896,24 +902,36 @@ fn collect_php_files_gitignore_follows_interior_symlink_when_enabled() {
 }
 
 #[test]
-fn collect_php_files_gitignore_does_not_follow_by_default() {
+fn collect_php_files_gitignore_walks_a_link_target_once() {
+    // The serial walk is a different `ignore` code path from the parallel
+    // one, and gets the same one-visit-per-target rule: two links to the
+    // same tree must not report its files twice, or find-references
+    // reports every hit once per spelling.
     let dir = tempfile::tempdir().unwrap();
     let root = dir.path().join("ws");
-    let real = dir.path().join("real");
+    let ext = dir.path().join("ext");
     std::fs::create_dir_all(&root).unwrap();
-    std::fs::create_dir_all(&real).unwrap();
-    std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+    std::fs::create_dir_all(&ext).unwrap();
+    std::fs::write(ext.join("Dup.php"), "<?php\n").unwrap();
 
-    let link = root.join("link");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(&real, &link).unwrap();
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+    for name in ["a", "b"] {
+        let link = root.join(name);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&ext, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&ext, &link).unwrap();
+    }
 
-    let files = crate::references::collect_php_files_gitignore(&root, &[], &crate::classmap_scanner::IndexFilters::empty(), false);
-    assert!(
-        !files.iter().any(|p| p.ends_with("Hidden.php")),
-        "interior symlink must not be followed by default: {files:?}"
+    let files = crate::references::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
+    assert_eq!(
+        files.len(),
+        1,
+        "the linked tree must be reported once, not once per link: {files:?}"
     );
 }
 
@@ -933,7 +951,12 @@ fn collect_php_files_gitignore_follows_symlink_cycle_safely() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&root, &link).unwrap();
 
-    let files = crate::references::collect_php_files_gitignore(&root, &[], &crate::classmap_scanner::IndexFilters::empty(), true);
+    let files = crate::references::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
     assert!(
         files.iter().any(|p| p.ends_with("App.php")),
         "workspace files must still be found next to a cycle: {files:?}"

@@ -41,7 +41,8 @@ use crate::types::ResolvedType;
 use crate::types::*;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
-    extends_eloquent_model, is_accessor_or_mutator_method, where_property_method_to_column,
+    custom_builder_fqn, extends_eloquent_model, is_accessor_or_mutator_method,
+    where_property_method_to_column,
 };
 
 /// Pre-extracted context for a member definition lookup.
@@ -205,7 +206,6 @@ impl Backend {
                         &target_class.used_traits,
                         &effective_name,
                         &class_loader,
-                        0,
                     )
                     .map(|(_, fqn)| fqn)
                 });
@@ -813,26 +813,8 @@ impl Backend {
             return None;
         }
 
-        // Walk the parent chain to find a custom builder definition.
-        // Laravel's #[UseEloquentBuilder] and HasBuilder are effectively inherited.
-        let mut builder_fqn = ELOQUENT_BUILDER_FQN.to_string();
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(curr) = current else { break };
-            if let Some(name) = curr
-                .laravel()
-                .and_then(|l| l.custom_builder.as_ref())
-                .and_then(|b| b.base_name())
-            {
-                builder_fqn = name.to_string();
-                break;
-            }
-            current = curr
-                .parent_class
-                .as_ref()
-                .and_then(|p| class_loader(p))
-                .map(Arc::unwrap_or_clone);
-        }
+        let builder_fqn = custom_builder_fqn(class, class_loader)
+            .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
         let builder = class_loader(&builder_fqn)?;
         let (declaring_class, fqn) =

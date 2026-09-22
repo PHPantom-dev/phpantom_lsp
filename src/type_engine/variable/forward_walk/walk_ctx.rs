@@ -3,7 +3,6 @@
 //! statement and expression handler reads.
 
 use super::*;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::AtomMap;
@@ -142,21 +141,21 @@ impl<'a> ForwardWalkCtx<'a> {
         'a: 'b,
     {
         VarResolutionCtx {
-            var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset,
-            class_loader: self.class_loader,
             backend: self.backend,
             loaders: self.loaders,
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
-            branch_aware: false,
-            match_arm_narrowing: HashMap::new(),
             scope_var_resolver: Some(scope_resolver),
             scope_proofs,
+            ..VarResolutionCtx::new(
+                var_name,
+                self.current_class,
+                self.all_classes,
+                self.content,
+                cursor_offset,
+                self.class_loader,
+            )
         }
     }
 }

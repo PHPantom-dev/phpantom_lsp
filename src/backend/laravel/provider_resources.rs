@@ -149,7 +149,7 @@ impl Backend {
         // The provider bindings overlay the core container alias table, which
         // an earlier resolution may already have built without them.
         if has_bindings {
-            *self.laravel_aliases.write() = None;
+            self.laravel_aliases.invalidate();
             self.clear_class_not_found_cache();
         }
 

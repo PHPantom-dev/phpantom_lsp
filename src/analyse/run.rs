@@ -25,10 +25,9 @@ pub async fn run(options: AnalyseOptions) -> i32 {
     let cfg = super::load_config_or_default(root, options.global_config.as_deref());
     let ignore_rules =
         crate::diagnostics::ignore_rules::compile_ignore_rules(&cfg.diagnostics.ignore);
-    let follow_links = cfg.indexing.follow_links();
 
     let Some(OpenedProject { backend, files }) =
-        open_project(root, cfg, &options.path_filters, follow_links).await
+        open_project(root, cfg, &options.path_filters).await
     else {
         return 0;
     };
@@ -116,7 +115,6 @@ pub(crate) fn discover_user_files(
     backend: &Backend,
     workspace_root: &Path,
     path_filters: &[PathBuf],
-    follow_links: bool,
 ) -> Vec<PathBuf> {
     // Resolve the path filters to absolute paths, and split them into the
     // directories that need walking and the files that are taken as given.
@@ -216,7 +214,7 @@ pub(crate) fn discover_user_files(
                 continue;
             }
 
-            collect_php_files(dir, &vendor_dirs, &psr4_filters, &filters, follow_links, &mut files);
+            collect_php_files(dir, &vendor_dirs, &psr4_filters, &filters, &mut files);
         }
     }
 
@@ -227,7 +225,7 @@ pub(crate) fn discover_user_files(
     // line too.  Naming a file outright bypasses it (those never reach this
     // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &[], &[], &filters, follow_links, &mut files);
+        collect_php_files(dir, &[], &[], &filters, &mut files);
     }
 
     files.sort();
@@ -246,13 +244,16 @@ fn collect_php_files(
     skip_vendor: &[PathBuf],
     crop: &[&Path],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    follow_links: bool,
     out: &mut Vec<PathBuf>,
 ) {
     use ignore::WalkBuilder;
 
     let skip_vendor = skip_vendor.to_vec();
     let filter_excludes = std::sync::Arc::clone(filters);
+    // Same one-visit-per-target rule the shared workspace walker applies,
+    // so `analyze` cannot report the same file once per spelling a chain
+    // of links gives it.
+    let claims = crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None);
     let walker = WalkBuilder::new(dir)
         .git_ignore(true)
         .git_global(true)
@@ -260,15 +261,19 @@ fn collect_php_files(
         .hidden(true)
         .parents(true)
         .ignore(true)
-        .follow_links(follow_links)
+        .follow_links(true)
         .filter_entry(move |entry| {
             let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir
-                && !skip_vendor.is_empty()
-                && let Ok(canonical) = entry.path().canonicalize()
-                && skip_vendor.iter().any(|v| canonical.starts_with(v))
-            {
-                return false;
+            if is_dir {
+                if !skip_vendor.is_empty()
+                    && let Ok(canonical) = entry.path().canonicalize()
+                    && skip_vendor.iter().any(|v| canonical.starts_with(v))
+                {
+                    return false;
+                }
+                if entry.depth() > 0 && entry.path_is_symlink() && !claims.claim(entry.path()) {
+                    return false;
+                }
             }
             !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
@@ -309,7 +314,7 @@ mod tests {
         let backend = Backend::new_headless();
         backend.add_vendor_dir(&root.join("vendor"));
 
-        let files = discover_user_files(&backend, root, &[], false);
+        let files = discover_user_files(&backend, root, &[]);
         let names: Vec<String> = files
             .iter()
             .map(|p| p.strip_prefix(root).unwrap().to_string_lossy().into_owned())
@@ -357,7 +362,7 @@ mod tests {
                 .collect()
         };
 
-        let scanned = names(&discover_user_files(&backend, root, &[], false));
+        let scanned = names(&discover_user_files(&backend, root, &[]));
         assert!(scanned.contains(&"index.php".to_string()), "{scanned:?}");
         assert!(
             scanned.contains(&"hooks.module".to_string()),
@@ -373,7 +378,6 @@ mod tests {
             &backend,
             root,
             &[root.join("generated")],
-            false,
         ));
         assert!(
             targeted.is_empty(),
@@ -385,7 +389,6 @@ mod tests {
             &backend,
             root,
             &[root.join("generated/Stub.php")],
-            false,
         ));
         assert_eq!(by_file, vec!["generated/Stub.php".to_string()]);
     }
@@ -411,7 +414,7 @@ mod tests {
             .lock()
             .push(linked_root.join("vendor"));
 
-        let files = discover_user_files(&backend, &real_root, &[], false);
+        let files = discover_user_files(&backend, &real_root, &[]);
         assert!(files.contains(&real_root.join("app/Main.php")), "{files:?}");
         assert!(
             !files
@@ -432,7 +435,7 @@ mod tests {
         std::fs::write(root.join("other.php"), "<?php\n").unwrap();
 
         let backend = Backend::new_headless();
-        let files = discover_user_files(&backend, root, &[PathBuf::from("includes/target.php")], false);
+        let files = discover_user_files(&backend, root, &[PathBuf::from("includes/target.php")]);
         assert_eq!(files, vec![root.join("includes/target.php")]);
     }
 
@@ -459,7 +462,6 @@ mod tests {
                 PathBuf::from("lib/Helper.php"),
                 PathBuf::from("tests"),
             ],
-            false,
         );
 
         assert_eq!(
@@ -491,7 +493,6 @@ mod tests {
                 PathBuf::from("src/A.php"),
                 PathBuf::from("src/A.php"),
             ],
-            false,
         );
 
         assert_eq!(files, vec![root.join("src/A.php"), root.join("src/B.php")]);
@@ -499,7 +500,7 @@ mod tests {
 
     #[test]
     fn discover_user_files_follows_interior_symlink_when_enabled() {
-        // CLI analyse's user-file walker keeps the same follow-links
+        // CLI analyse's user-file walker keeps the same symlink
         // contract as the workspace walkers (issue #383).
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("ws");
@@ -515,7 +516,7 @@ mod tests {
         std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
         let backend = Backend::new_headless();
-        let files = discover_user_files(&backend, &root, &[], true);
+        let files = discover_user_files(&backend, &root, &[]);
         let linked = files
             .iter()
             .find(|p| p.ends_with("Hidden.php"))
@@ -527,25 +528,30 @@ mod tests {
     }
 
     #[test]
-    fn discover_user_files_does_not_follow_by_default() {
+    fn discover_user_files_walks_a_link_target_once() {
+        // Two links to one tree must not make `analyze` report the same
+        // file, and so the same diagnostics, twice.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("ws");
         let real = dir.path().join("real");
         std::fs::create_dir_all(&root).unwrap();
         std::fs::create_dir_all(&real).unwrap();
-        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+        std::fs::write(real.join("Dup.php"), "<?php\n").unwrap();
 
-        let link = root.join("link");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
 
         let backend = Backend::new_headless();
-        let files = discover_user_files(&backend, &root, &[], false);
-        assert!(
-            !files.iter().any(|p| p.ends_with("Hidden.php")),
-            "interior symlink must not be followed by default: {files:?}"
+        let files = discover_user_files(&backend, &root, &[]);
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
         );
     }
 }

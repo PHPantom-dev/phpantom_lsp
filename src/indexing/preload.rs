@@ -267,13 +267,12 @@ impl Backend {
 
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
-            let follow_links = self.config().indexing.follow_links();
             let (php_files, resource_files) =
                 crate::references::collect_workspace_index_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
-                    follow_links,
+                    Some(self.followed_links()),
                 );
             tracing::info!(
                 "ensure_workspace_indexed: Phase 2 disk walk found {} PHP and {} resource files in {:?}",

@@ -334,7 +334,6 @@ pub(crate) fn collect_php_files(
     dir: &Path,
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    follow_links: bool,
 ) -> Vec<PathBuf> {
     let mut result = Vec::new();
     let walker = crate::classmap_scanner::workspace_walk_builder(
@@ -342,7 +341,7 @@ pub(crate) fn collect_php_files(
         std::sync::Arc::new(vendor_dir_paths.to_vec()),
         std::sync::Arc::clone(filters),
         false,
-        follow_links,
+        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
     )
     .build();
 
@@ -652,9 +651,9 @@ mod tests {
     }
 
     #[test]
-    fn collect_php_files_follows_interior_symlink_when_enabled() {
-        // Go-to-implementation's walker keeps the same follow-links
-        // contract as the other workspace walkers (issue #383).
+    fn collect_php_files_follows_interior_symlink() {
+        // Go-to-implementation's walker keeps the same symlink contract
+        // as the other workspace walkers (issue #383).
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("ws");
         let real = dir.path().join("real");
@@ -668,12 +667,7 @@ mod tests {
         #[cfg(windows)]
         std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
-        let files = collect_php_files(
-            &root,
-            &[],
-            &crate::classmap_scanner::IndexFilters::empty(),
-            true,
-        );
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
         let linked = files
             .iter()
             .find(|p| p.ends_with("Hidden.php"))
@@ -685,7 +679,9 @@ mod tests {
     }
 
     #[test]
-    fn collect_php_files_does_not_follow_by_default() {
+    fn collect_php_files_walks_a_link_target_once() {
+        // Two links to one tree must not make go-to-implementation offer
+        // the same class twice under two spellings.
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("ws");
         let real = dir.path().join("real");
@@ -693,21 +689,19 @@ mod tests {
         std::fs::create_dir_all(&real).unwrap();
         std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
 
-        let link = root.join("link");
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(&real, &link).unwrap();
-        #[cfg(windows)]
-        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
 
-        let files = collect_php_files(
-            &root,
-            &[],
-            &crate::classmap_scanner::IndexFilters::empty(),
-            false,
-        );
-        assert!(
-            !files.iter().any(|p| p.ends_with("Hidden.php")),
-            "interior symlink must not be followed by default: {files:?}"
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
         );
     }
 }

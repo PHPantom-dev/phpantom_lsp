@@ -11,7 +11,6 @@
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
@@ -348,21 +347,17 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let loaders = owned_loaders.loaders();
 
     let var_ctx = VarResolutionCtx {
-        var_name: "",
-        top_level_scope: None,
-        current_class: prop_class,
-        all_classes: &ctx.file_ctx.classes,
-        content: ctx.content,
-        cursor_offset: rhs_start as u32,
-        class_loader: ctx.class_loader,
         backend: Some(ctx.backend),
         loaders,
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
-        enclosing_return_type: None,
-        branch_aware: true,
-        match_arm_narrowing: HashMap::new(),
-        scope_var_resolver: None,
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            "",
+            prop_class,
+            &ctx.file_ctx.classes,
+            ctx.content,
+            rhs_start as u32,
+            ctx.class_loader,
+        )
     };
 
     let rhs_type = resolve_expression_type(assign.rhs, &var_ctx).unwrap_or_else(PhpType::untyped);

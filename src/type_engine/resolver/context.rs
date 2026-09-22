@@ -306,6 +306,10 @@ impl<'a> CtxLoaders<'a> {
 /// Introducing this struct avoids passing 7–10 individual arguments to
 /// every helper in the resolution chain, which keeps clippy happy and
 /// makes call-sites much easier to read.
+///
+/// Build one with [`VarResolutionCtx::new`] and name only the optional
+/// fields that differ, rather than restating all fifteen.
+#[derive(Clone)]
 pub(crate) struct VarResolutionCtx<'a> {
     pub var_name: &'a str,
     pub current_class: &'a ClassInfo,
@@ -329,12 +333,6 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
     pub top_level_scope: Option<AtomMap<Vec<crate::types::ResolvedType>>>,
-    /// Legacy flag: historically selected branch-aware resolution for
-    /// hover vs union-all resolution for completion.  The forward
-    /// walker now inherently produces position-accurate types, so both
-    /// paths behave identically.  Kept for API compatibility with
-    /// callers that set it to `true` (hover, diagnostics).
-    pub branch_aware: bool,
     /// Match-arm instanceof narrowings: var name → narrowed types.
     /// Empty outside of match(true) arm bodies.
     pub match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
@@ -361,6 +359,46 @@ pub(crate) struct VarResolutionCtx<'a> {
 }
 
 impl<'a> VarResolutionCtx<'a> {
+    /// A context over the fields no caller can do without, with every
+    /// optional one at its neutral value: no backend, no loaders, no
+    /// resolved-class cache, no enclosing return type, no top-level scope,
+    /// no match-arm narrowing and no forward-walk scope.
+    ///
+    /// Callers that do have one of those name it with struct-update
+    /// syntax:
+    ///
+    /// ```ignore
+    /// VarResolutionCtx {
+    ///     backend: Some(backend),
+    ///     ..VarResolutionCtx::new("", class, classes, content, offset, &loader)
+    /// }
+    /// ```
+    pub(crate) fn new(
+        var_name: &'a str,
+        current_class: &'a ClassInfo,
+        all_classes: &'a [Arc<ClassInfo>],
+        content: &'a str,
+        cursor_offset: u32,
+        class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Self {
+        Self {
+            var_name,
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader,
+            backend: None,
+            loaders: Loaders::default(),
+            resolved_class_cache: None,
+            enclosing_return_type: None,
+            top_level_scope: None,
+            match_arm_narrowing: HashMap::new(),
+            scope_var_resolver: None,
+            scope_proofs: None,
+        }
+    }
+
     /// Create a [`ResolutionCtx`] from this variable resolution context.
     ///
     /// The non-optional `current_class` is wrapped in `Some(…)`.
@@ -412,21 +450,8 @@ impl<'a> VarResolutionCtx<'a> {
     /// recursion on self-referential assignments.
     pub(crate) fn with_cursor_offset(&self, cursor_offset: u32) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
-            var_name: self.var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
             cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            branch_aware: self.branch_aware,
-            match_arm_narrowing: self.match_arm_narrowing.clone(),
-            scope_var_resolver: self.scope_var_resolver,
-            scope_proofs: self.scope_proofs,
+            ..self.clone()
         }
     }
 
@@ -459,21 +484,8 @@ impl<'a> VarResolutionCtx<'a> {
         match_arm_narrowing: HashMap<String, Vec<crate::types::ResolvedType>>,
     ) -> VarResolutionCtx<'a> {
         VarResolutionCtx {
-            var_name: self.var_name,
-            current_class: self.current_class,
-            all_classes: self.all_classes,
-            content: self.content,
-            cursor_offset: self.cursor_offset,
-            class_loader: self.class_loader,
-            backend: self.backend,
-            loaders: self.loaders,
-            resolved_class_cache: self.resolved_class_cache,
-            enclosing_return_type: self.enclosing_return_type.clone(),
-            top_level_scope: self.top_level_scope.clone(),
-            branch_aware: self.branch_aware,
             match_arm_narrowing,
-            scope_var_resolver: self.scope_var_resolver,
-            scope_proofs: self.scope_proofs,
+            ..self.clone()
         }
     }
 }
