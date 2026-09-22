@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790035931872,
+  "lastUpdate": 1790036422847,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -28559,6 +28559,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 70.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d20966efda8c7c6bc8b238f3b8b6b24436a4f31d",
+          "message": "A method that implements an interface or overrides a parent now keeps\nits reference-count lens",
+          "timestamp": "2026-09-22T02:02:47+02:00",
+          "tree_id": "94673b1b50b945c065730026799801ed1f8db944",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d20966efda8c7c6bc8b238f3b8b6b24436a4f31d"
+        },
+        "date": 1790036416005,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.3,
             "unit": "MiB"
           }
         ]
