@@ -1,5 +1,4 @@
 use super::*;
-use crate::type_engine::variable::forward_walk::scope_state::type_admits_null;
 
 /// Strip `null` from a subject that an identity comparison has matched
 /// against a value that cannot be `null`.
@@ -346,7 +345,7 @@ pub(super) fn strip_null_by_constant_identity(
     }
     if constant_types
         .iter()
-        .any(|rt| type_admits_null(&rt.type_string))
+        .any(|rt| rt.type_string.accepts_null())
     {
         return;
     }

@@ -364,7 +364,7 @@ impl Backend {
                 // instead of an empty one.
                 let macro_backend = self.clone_for_blocking();
                 run_blocking_cancel_safe("build_laravel_macro_index", move || {
-                    macro_backend.build_laravel_macro_index()
+                    macro_backend.build_laravel_macro_index(&macro_backend.laravel_providers())
                 })
                 .await;
 
@@ -551,11 +551,8 @@ impl Backend {
             // and tower-lsp cannot dispatch anything else while it runs.
             let index_backend = self.clone_for_blocking();
             let discovered = run_blocking_cancel_safe("build_laravel_indexes", move || {
-                index_backend.build_laravel_date_class();
-                index_backend.build_provider_resources();
+                index_backend.build_laravel_provider_indexes();
                 index_backend.build_laravel_command_index();
-                index_backend.build_laravel_morph_map_index();
-                index_backend.build_laravel_gate_index();
 
                 // Build the Blade index now that the view roots and component
                 // namespaces providers register are known, so the first

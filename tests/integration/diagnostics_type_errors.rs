@@ -12077,6 +12077,48 @@ class Caller
 }
 
 #[test]
+fn a_callee_in_a_later_namespace_block_reads_its_names_in_that_namespace() {
+    let php = r#"<?php
+namespace First {
+    class Widget {}
+}
+
+namespace Second {
+    class Widget {}
+
+    class Ops
+    {
+        public static function fill(&$out): void
+        {
+            $out = new Widget();
+        }
+    }
+
+    class Caller
+    {
+        public function run(): Widget
+        {
+            Ops::fill($widget);
+
+            return $this->takesWidget($widget);
+        }
+
+        private function takesWidget(Widget $w): Widget
+        {
+            return $w;
+        }
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "`fill` sits in the `Second` block, so the `Widget` it assigns is \
+         `Second\\Widget`, not the first block's: {:?}",
+        messages_with_code(&collect_with_body(php), "type_mismatch_argument")
+    );
+}
+
+#[test]
 fn a_body_that_contradicts_the_declared_out_type_does_not_replace_it() {
     let php = r#"<?php
 class Ops

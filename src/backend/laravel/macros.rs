@@ -24,7 +24,7 @@ impl Backend {
     /// `Storage::extend('driver', closure)` registrations are collected in the
     /// same pass: they live in exactly these files, and reading each one twice
     /// to build two indexes would double the scan for no gain.
-    pub(crate) fn build_laravel_macro_index(&self) {
+    pub(crate) fn build_laravel_macro_index(&self, providers: &super::LaravelProviders) {
         let php_version = Some(*self.workspace.php_version.lock());
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
@@ -47,7 +47,6 @@ impl Backend {
                 let uri = crate::util::path_to_uri(&path);
                 let refs = self
                     .get_file_content(&uri)
-                    .or_else(|| std::fs::read_to_string(&path).ok())
                     .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
                     .unwrap_or_default();
                 seeds.insert(uri, refs);
@@ -107,8 +106,8 @@ impl Backend {
             };
 
         // Vendor- and app-registered service providers seed macro discovery.
-        for fqn in self.laravel_provider_fqns() {
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
+        for fqn in providers.fqns() {
+            let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
             if candidate_uris.insert(uri.clone()) {
@@ -243,7 +242,7 @@ impl Backend {
         // to an unrelated file can neither override the configured class nor
         // leave a stale one behind.
         if self.laravel_date_seed_uris.read().contains(uri) {
-            self.build_laravel_date_class();
+            self.build_laravel_date_class(&self.laravel_providers());
         }
         // A `Macroable::mixin()` registration pulls its macros from another
         // file and records that file as a dependency.  Because those macros are
@@ -256,7 +255,7 @@ impl Backend {
         if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
             || self.laravel_macro_mixin_uris.read().contains(uri)
         {
-            self.build_laravel_macro_index();
+            self.build_laravel_macro_index(&self.laravel_providers());
             return;
         }
         // An edit to a seed file (a service provider or the app's provider
@@ -272,7 +271,7 @@ impl Backend {
                 crate::virtual_members::laravel::parse_provider_referenced_classes(content)
             };
             if refs != prev_refs {
-                self.build_laravel_macro_index();
+                self.build_laravel_macro_index(&self.laravel_providers());
                 return;
             }
         }

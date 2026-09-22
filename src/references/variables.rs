@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::LineIndex;
 use crate::types::ClassInfo;
 
 impl Backend {
@@ -91,6 +91,10 @@ impl Backend {
         // can see the variable (via explicit `use` or implicit arrow
         // capture) without being shadowed.
         let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        let lines = LineIndex::new(content);
+        // The start offset of every location pushed so far, so the
+        // declaration pass below skips a token the span pass already found.
+        let mut seen_offsets: HashSet<u32> = HashSet::new();
 
         for span in &symbol_map.spans {
             let name = match &span.kind {
@@ -109,8 +113,9 @@ impl Backend {
             if !include_declaration && symbol_map.var_def_kind_at(name, span.start).is_some() {
                 continue;
             }
-            let start = offset_to_position(content, span.start as usize);
-            let end = offset_to_position(content, span.end as usize);
+            seen_offsets.insert(span.start);
+            let start = lines.position(span.start as usize);
+            let end = lines.position(span.end as usize);
             locations.push(Location {
                 uri: parsed_uri.clone(),
                 range: Range { start, end },
@@ -122,20 +127,15 @@ impl Backend {
         // may not have a corresponding Variable span in the spans vec
         // with the exact same offset.
         if include_declaration {
-            let mut seen_offsets: HashSet<u32> = locations
-                .iter()
-                .map(|loc| position_to_offset(content, loc.range.start))
-                .collect();
-
             for def in &symbol_map.var_defs {
                 if def.name == var_name
                     && reachable_scopes.contains(&def.scope_start)
                     && seen_offsets.insert(def.offset)
                 {
-                    let start = offset_to_position(content, def.offset as usize);
+                    let start = lines.position(def.offset as usize);
                     // The token is `$` + name.
                     let end_offset = def.offset as usize + 1 + def.name.len();
-                    let end = offset_to_position(content, end_offset);
+                    let end = lines.position(end_offset);
                     locations.push(Location {
                         uri: parsed_uri.clone(),
                         range: Range { start, end },
@@ -377,6 +377,7 @@ impl Backend {
             }
         };
 
+        let lines = LineIndex::new(content);
         for span in &symbol_map.spans {
             // Only consider spans within the same class body.
             if span.start < class_start || span.start > class_end {
@@ -389,8 +390,8 @@ impl Backend {
             );
 
             if is_this {
-                let start = offset_to_position(content, span.start as usize);
-                let end = offset_to_position(content, span.end as usize);
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
                 locations.push(Location {
                     uri: parsed_uri.clone(),
                     range: Range { start, end },

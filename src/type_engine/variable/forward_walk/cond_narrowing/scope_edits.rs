@@ -95,12 +95,7 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
     // the opposite — `bool|string` came out of a falsy branch as `null`
     // while `non_null_type()` stood in for this check, because a union
     // with nothing to strip still has a non-null part.
-    narrow_to_in_scope(
-        var_name,
-        scope,
-        PhpType::null(),
-        scope_state::type_admits_null,
-    );
+    narrow_to_in_scope(var_name, scope, PhpType::null(), PhpType::accepts_null);
 }
 
 /// Narrow a variable in scope to `false` only.

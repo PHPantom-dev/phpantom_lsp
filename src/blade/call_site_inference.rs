@@ -953,7 +953,9 @@ impl Backend {
         // a symlink into a shared directory, since that resolves out of
         // the view root it sits under.
         let canonical = std::cell::OnceCell::new();
-        let mut match_root = |root: &std::path::Path, namespace: &str| {
+        let mut match_root = |root: &std::path::Path,
+                              canonical_root: &dyn Fn() -> Option<std::path::PathBuf>,
+                              namespace: &str| {
             if let Ok(rel) = path.strip_prefix(root) {
                 push_name(rel, namespace);
                 return;
@@ -962,7 +964,7 @@ impl Backend {
             // given relative (the analyse CLI passes `--project-root`
             // through as-is), while `path` came from a file URI and is
             // always absolute.
-            let Ok(root) = root.canonicalize() else {
+            let Some(root) = canonical_root() else {
                 return;
             };
             if let Ok(rel) = path.strip_prefix(&root) {
@@ -979,11 +981,13 @@ impl Backend {
             }
         };
 
-        for root in self.laravel_view_roots() {
-            match_root(&root, "");
+        // The configured roots come canonicalized already; a provider's
+        // directory is only resolved when its raw spelling misses.
+        for root in self.laravel_view_roots().iter() {
+            match_root(&root.path, &|| root.canonical.clone(), "");
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
-            match_root(&res.path, &res.namespace);
+            match_root(&res.path, &|| res.path.canonicalize().ok(), &res.namespace);
         }
         names
     }

@@ -7,11 +7,9 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Range};
+use tower_lsp::lsp_types::Location;
 
-use crate::references::push_unique_location;
 use crate::symbol_map::SymbolKind;
-use crate::text_position::offset_to_position;
 
 impl Backend {
     /// Find all references to a function across all files.
@@ -96,7 +94,7 @@ impl Backend {
                 Err(_) => continue,
             };
 
-            let mut file_content: Option<Arc<String>> = None;
+            let file = CandidateFile::new(self, file_uri);
 
             for span in &symbol_map.spans {
                 if let SymbolKind::FunctionCall {
@@ -109,18 +107,13 @@ impl Backend {
                         continue;
                     }
 
-                    if function_matches(name, span.start) {
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        if let Some(ref content) = file_content {
-                            let start = offset_to_position(content, span.start as usize);
-                            let end = offset_to_position(content, span.end as usize);
-                            locations.push(Location {
-                                uri: parsed_uri.clone(),
-                                range: Range { start, end },
-                            });
-                        }
+                    if function_matches(name, span.start)
+                        && let Some(range) = file.range(span.start, span.end)
+                    {
+                        locations.push(Location {
+                            uri: parsed_uri.clone(),
+                            range,
+                        });
                     }
                 }
             }
@@ -187,7 +180,7 @@ impl Backend {
                 Err(_) => continue,
             };
 
-            let mut file_content: Option<Arc<String>> = None;
+            let file = CandidateFile::new(self, file_uri);
 
             for span in &symbol_map.spans {
                 let matched = match &span.kind {
@@ -204,15 +197,11 @@ impl Backend {
                     _ => false,
                 };
 
-                if matched {
-                    if file_content.is_none() {
-                        file_content = self.reference_file_content_arc(file_uri);
-                    }
-                    if let Some(ref content) = file_content {
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        push_unique_location(&mut locations, &parsed_uri, start, end);
-                    }
+                if matched && let Some(range) = file.range(span.start, span.end) {
+                    locations.push(Location {
+                        uri: parsed_uri.clone(),
+                        range,
+                    });
                 }
             }
         }

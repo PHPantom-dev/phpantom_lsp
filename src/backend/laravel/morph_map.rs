@@ -15,10 +15,11 @@ impl Backend {
     /// `bootstrap/providers.php` / `config/app.php`), since a morph map is
     /// registered from a provider's `boot()`.  Files are byte-prefiltered for
     /// the `orphMap(` token so only candidates are parsed.
-    pub(crate) fn build_laravel_morph_map_index(&self) {
+    pub(crate) fn build_laravel_morph_map_index(&self, providers: &super::LaravelProviders) {
         let mut index = crate::virtual_members::laravel::LaravelMorphMapIndex::default();
-        let scanned =
-            self.scan_providers_into(&mut index.files, |content| self.scan_morph_map(content));
+        let scanned = self.scan_providers_into(providers, &mut index.files, |content| {
+            self.scan_morph_map(content)
+        });
 
         index.rebuild();
         let alias_count = index.all_aliases().len();

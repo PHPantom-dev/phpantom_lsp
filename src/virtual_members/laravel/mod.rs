@@ -151,8 +151,7 @@ pub(crate) use commands::{
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
     collect_laravel_config_declarations, find_all_config_references,
-    laravel_config_prefix_from_uri, resolve_config_key_declaration,
-    resolve_config_key_definition_fallback,
+    resolve_config_key_declaration, resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
 pub(crate) use env_vars::{enumerate_env_keys, env_declaration, env_name_is_sensitive};

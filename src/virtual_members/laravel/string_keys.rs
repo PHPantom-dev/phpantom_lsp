@@ -106,13 +106,12 @@ fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> 
     }
 
     for (policy, method) in super::gates::policy_methods_named(backend, ability) {
-        if let Some(location) = policy_method_location(backend, &policy, &method) {
-            crate::references::push_unique_location(
-                &mut locations,
-                &location.uri,
-                location.range.start,
-                location.range.end,
-            );
+        if let Some(location) = policy_method_location(backend, &policy, &method)
+            && !locations
+                .iter()
+                .any(|l| l.uri == location.uri && l.range.start == location.range.start)
+        {
+            locations.push(location);
         }
     }
 
@@ -243,7 +242,7 @@ pub(crate) fn find_laravel_string_key_references(
 
     if include_declaration && kind != &LaravelStringKind::Config {
         for decl in resolve_laravel_string_key(backend, kind, key, uri) {
-            crate::references::push_unique_location(
+            crate::references::push_location(
                 &mut locations,
                 &decl.uri,
                 decl.range.start,
@@ -263,9 +262,9 @@ fn find_string_key_usages(
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
 ) -> Vec<Location> {
-    use crate::references::push_unique_location;
+    use crate::references::push_location;
     use crate::symbol_map::SymbolKind;
-    use crate::text_position::offset_to_position;
+    use crate::text_position::LineIndex;
     use tower_lsp::lsp_types::Url;
 
     let mut locations = Vec::new();
@@ -309,6 +308,7 @@ fn find_string_key_usages(
         let Some(content) = backend.get_file_content_arc(file_uri) else {
             continue;
         };
+        let lines = LineIndex::new(&content);
         for span in symbol_map.spans.iter().chain(extra.iter()) {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
@@ -318,9 +318,9 @@ fn find_string_key_usages(
                 && span_kind == kind
                 && span_key == key
             {
-                let start = offset_to_position(&content, span.start as usize);
-                let end = offset_to_position(&content, span.end as usize);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
+                push_location(&mut locations, &parsed_uri, start, end);
             }
         }
     }

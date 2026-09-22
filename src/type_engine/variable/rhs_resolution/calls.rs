@@ -633,7 +633,7 @@ fn resolve_arg_dim_raw_type(
 ) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed.strip_suffix(']')?;
-    let open = matching_subscript_start(inner)?;
+    let open = crate::text_scan::find_matching_backward(trimmed, trimmed.len() - 1, b'[', b']')?;
     let base = inner[..open].trim();
     // An array literal (`[1, 2, 3]`) is all subscript and no base.
     if base.is_empty() {
@@ -652,21 +652,6 @@ fn resolve_arg_dim_raw_type(
         .shape_value_type(literal_key)
         .cloned()
         .or_else(|| base_type.extract_value_type(false).cloned())
-}
-
-/// The byte index of the `[` that opens the subscript closed by the `]`
-/// this text used to end with, or `None` when the brackets do not balance.
-fn matching_subscript_start(before_close: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    for (idx, ch) in before_close.char_indices().rev() {
-        match ch {
-            ']' => depth += 1,
-            '[' if depth == 0 => return Some(idx),
-            '[' => depth -= 1,
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Extract the concrete type at `position` from an array type string.

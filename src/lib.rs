@@ -368,6 +368,11 @@ pub(crate) struct LaravelStringKeyCache {
     pub routes: Option<std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery>>,
     pub config_keys: Option<Vec<String>>,
     pub view_names: Option<Vec<String>>,
+    /// The Blade view roots `config/view.php` configures, each with its
+    /// canonical spelling.  Every template's view name is worked out
+    /// against them, which would otherwise re-read and re-parse the config
+    /// file once per template.
+    pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
     pub trans_keys: Option<Vec<String>>,
     /// Every translation key mapped to whether it names a group (nested
     /// array) rather than a scalar entry.  Shared behind an `Arc` for the
@@ -419,6 +424,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub routes: parking_lot::Mutex<()>,
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
+    pub view_roots: parking_lot::Mutex<()>,
     pub trans_keys: parking_lot::Mutex<()>,
     pub trans_key_shapes: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
@@ -467,6 +473,9 @@ impl LaravelStringKeyCache {
             || uri.contains("/config/view.php")
         {
             self.view_names = None;
+        }
+        if uri.contains("/config/view.php") {
+            self.view_roots = None;
         }
         if uri.contains("/lang/") || uri.contains("/resources/lang/") {
             self.trans_keys = None;

@@ -494,98 +494,20 @@ impl Backend {
     }
 
     fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {
-        use crate::virtual_members::laravel::laravel_config_prefix_from_uri;
-
         // Lower-precedence sources only fill keys the higher-precedence tree
         // for the same prefix leaves unset, so a project `config/app.php` that
         // publishes just a handful of keys still inherits the framework
         // defaults for everything it does not override.
         let mut trees: Vec<(String, ConfigNode)> = Vec::new();
-        let mut merge =
-            |prefix: String, tree: ConfigNode| match trees.iter_mut().find(|(p, _)| *p == prefix) {
+        self.for_each_config_source(|prefix, content| {
+            let Some(tree) = parse_config_tree(content) else {
+                return;
+            };
+            match trees.iter_mut().find(|(p, _)| p == prefix) {
                 Some((_, existing)) => existing.merge_defaults(tree),
-                None => trees.push((prefix, tree)),
-            };
-
-        // 1. Project config files take highest precedence.
-        //
-        // Discovered with a direct disk walk rather than through
-        // `user_file_symbol_maps`, which forces the workspace index. This
-        // build runs *inside* class loading (`patch_storage_disk_type`) and
-        // inside the blade injected-vars refresh the index itself performs,
-        // so ensuring the index here re-enters the index lock and this
-        // cache's own build lock and deadlocks. Config trees only need file
-        // contents, not symbol maps. Files that are open in the editor but
-        // not yet parsed from disk are merged from the already-parsed
-        // snapshot, without blocking on the index.
-        let workspace_root = self.workspace.workspace_root.read().clone();
-        let mut config_uris: Vec<String> = Vec::new();
-        if let Some(root) = &workspace_root {
-            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-            let filters = self.index_filters();
-            for path in crate::references::collect_php_files_gitignore(
-                root,
-                &vendor_dir_paths,
-                &filters,
-                Some(self.followed_links()),
-            ) {
-                let uri = crate::util::path_to_uri(&path);
-                if laravel_config_prefix_from_uri(&uri).is_some() {
-                    config_uris.push(uri);
-                }
+                None => trees.push((prefix.to_string(), tree)),
             }
-        }
-        for (uri, _) in self.user_file_symbol_maps_nonblocking() {
-            if laravel_config_prefix_from_uri(&uri).is_some() && !config_uris.contains(&uri) {
-                config_uris.push(uri);
-            }
-        }
-        // Deterministic merge order regardless of walk or map order.
-        config_uris.sort();
-        for file_uri in &config_uris {
-            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
-                continue;
-            };
-            let Some(content) = self.get_file_content(file_uri) else {
-                continue;
-            };
-            if let Some(tree) = parse_config_tree(&content) {
-                merge(prefix, tree);
-            }
-        }
-
-        // 2. Package config files from service providers.
-        for res in &self.laravel_provider_resources.read().config_files {
-            if let Ok(content) = std::fs::read_to_string(&res.path)
-                && let Some(tree) = parse_config_tree(&content)
-            {
-                merge(res.namespace.clone(), tree);
-            }
-        }
-
-        // 3. Laravel framework default configs from vendor.
-        if let Some(root) = workspace_root {
-            let framework_config = root.join("vendor/laravel/framework/config");
-            if framework_config.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&framework_config)
-            {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.extension().is_some_and(|e| e == "php") {
-                        continue;
-                    }
-                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    if let Ok(content) = std::fs::read_to_string(&path)
-                        && let Some(tree) = parse_config_tree(&content)
-                    {
-                        merge(stem.to_string(), tree);
-                    }
-                }
-            }
-        }
-
+        });
         trees
     }
 }

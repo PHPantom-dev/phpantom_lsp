@@ -338,7 +338,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         &full_ctx,
     );
 
-    push_return_frame();
+    let return_frame = push_return_frame();
     walk_body_forward(
         closure.body.statements.iter(),
         &mut closure_scope,
@@ -348,7 +348,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     // falling off its end is, and a capture written on a returning path is
     // still written.  `walk_body_forward` leaves only the fall-through
     // state behind, so the returning paths are folded back in here.
-    if let Some(returned) = pop_return_frame() {
+    if let Some(returned) = return_frame.finish() {
         closure_scope.merge_branch(&returned);
     }
 

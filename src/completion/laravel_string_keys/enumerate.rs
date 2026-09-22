@@ -13,59 +13,16 @@ impl Backend {
     /// Enumerate all config keys by scanning `config/` files and
     /// package config files discovered from service providers.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
-        use crate::virtual_members::laravel::{
-            collect_laravel_config_declarations, laravel_config_prefix_from_uri,
-        };
+        use crate::virtual_members::laravel::collect_laravel_config_declarations;
 
-        let snapshot = self.user_file_symbol_maps();
         let mut keys = Vec::new();
-
-        for (file_uri, _) in &snapshot {
-            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
-                continue;
-            };
-            let Some(content) = self.get_file_content(file_uri) else {
-                continue;
-            };
-            let decls = collect_laravel_config_declarations(&content, &prefix);
-            for d in decls {
-                keys.push(d.key);
-            }
-        }
-
-        for res in &self.laravel_provider_resources.read().config_files {
-            if let Ok(content) = std::fs::read_to_string(&res.path) {
-                let decls = collect_laravel_config_declarations(&content, &res.namespace);
-                for d in decls {
-                    keys.push(d.key);
-                }
-            }
-        }
-
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            let framework_config = root.join("vendor/laravel/framework/config");
-            if framework_config.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&framework_config)
-            {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.extension().is_some_and(|e| e == "php") {
-                        continue;
-                    }
-                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    let prefix = stem.to_string();
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let decls = collect_laravel_config_declarations(&content, &prefix);
-                        for d in decls {
-                            keys.push(d.key);
-                        }
-                    }
-                }
-            }
-        }
-
+        self.for_each_config_source(|prefix, content| {
+            keys.extend(
+                collect_laravel_config_declarations(content, prefix)
+                    .into_iter()
+                    .map(|d| d.key),
+            );
+        });
         keys.sort();
         keys.dedup();
         keys

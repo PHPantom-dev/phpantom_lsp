@@ -92,8 +92,12 @@ pub(super) fn callable_before_scalar_argument(before_value: &str) -> Option<(&st
         return None;
     }
     let before_label = before_value[..colon].trim_end();
+    // Scanned by byte, the way PHP's lexer reads a label: every byte from
+    // 0x80 up is a label byte, so a non-ASCII name (`prénom:`) is read
+    // whole and the start always lands on a character boundary.
     let label_start = before_label
-        .rfind(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+        .bytes()
+        .rposition(|b| !(b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80))
         .map_or(0, |index| index + 1);
     if label_start == before_label.len() {
         return None;

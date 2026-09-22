@@ -641,7 +641,15 @@ fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mu
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // `file_type` describes the entry itself rather than what a link
+        // points at, so a link is moved as the link it is.  Following one
+        // back up the tree would re-enter it until the kernel's symlink
+        // limit stops the walk, emitting a move for the same file under
+        // every path it went round.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_merge_move_ops(&path, old_root, new_root, ops);
             continue;
         }

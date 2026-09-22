@@ -30,7 +30,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::text_position::{LineIndex, offset_to_position};
-use crate::types::{ClassInfo, ClassLikeKind, DefineInfo, FunctionInfo};
+use crate::types::{ClassLikeKind, DefineInfo, FunctionInfo};
 
 /// Maximum number of symbols returned for a single workspace/symbol request.
 ///
@@ -137,39 +137,6 @@ fn property_match_tier(name: &str, query_lower: &str) -> Option<MatchTier> {
     })
 }
 
-/// Whether `class` declares any symbol the query matches.
-///
-/// This mirrors the match tests of the emit loop in
-/// [`Backend::handle_workspace_symbol`]; it exists so that the file's
-/// content, which is read from disk when the file is not open in the
-/// editor, is only fetched for a file that contributes a result.
-fn class_matches_query(class: &ClassInfo, query_lower: &str) -> bool {
-    if class.name.is_empty() || class.name.starts_with("anonymous@") {
-        return false;
-    }
-
-    if class.keyword_offset != 0
-        && (match_tier(&class.fqn(), query_lower).is_some()
-            || match_tier(&class.name, query_lower).is_some())
-    {
-        return true;
-    }
-
-    class.methods.iter().any(|method| {
-        !method.is_virtual
-            && method.name_offset != 0
-            && match_tier(&method.name, query_lower).is_some()
-    }) || class.properties.iter().any(|prop| {
-        !prop.is_virtual
-            && prop.name_offset != 0
-            && property_match_tier(&prop.name, query_lower).is_some()
-    }) || class.constants.iter().any(|constant| {
-        !constant.is_virtual
-            && constant.name_offset != 0
-            && match_tier(&constant.name, query_lower).is_some()
-    })
-}
-
 /// Extract the short name from a symbol name for relevance ranking.
 ///
 /// For namespaced names like `"App\\Models\\User"`, returns `"User"`.
@@ -217,23 +184,23 @@ impl Backend {
             let uri_classes = self.symbols.uri_classes_index.read();
             for (file_uri, classes) in uri_classes.iter() {
                 // A file that is not open in the editor is read from disk, so
-                // the query decides whether the file is worth reading at all,
-                // and the content is fetched once per file rather than once
-                // per class the file declares.
-                if !classes
-                    .iter()
-                    .any(|class| class_matches_query(class, &query_lower))
-                {
-                    continue;
-                }
-
-                let Some(content) = self.get_file_content_arc(file_uri) else {
-                    continue;
+                // it is read only once a symbol in it matches, and then once
+                // for all of them.  One line table per file: every symbol
+                // below converts an offset, and a fresh `offset_to_position`
+                // scan each time is quadratic in the file size.
+                let content = std::cell::OnceCell::new();
+                let lines = std::cell::OnceCell::new();
+                let position = |offset: u32| {
+                    lines
+                        .get_or_init(|| {
+                            content
+                                .get_or_init(|| self.get_file_content_arc(file_uri))
+                                .as_deref()
+                                .map(|c: &String| LineIndex::new(c))
+                        })
+                        .as_ref()
+                        .map(|idx| idx.position(offset as usize))
                 };
-                // One line table per file: every symbol below converts an
-                // offset, and a fresh `offset_to_position` scan each time is
-                // quadratic in the file size.
-                let idx = LineIndex::new(&content);
 
                 for class in classes {
                     // Skip anonymous classes (empty name or name starting with
@@ -252,7 +219,9 @@ impl Backend {
                     if let Some(tier) = class_tier
                         && class.keyword_offset != 0
                     {
-                        let pos = idx.position(class.keyword_offset as usize);
+                        let Some(pos) = position(class.keyword_offset) else {
+                            continue;
+                        };
                         let kind = match class.kind {
                             ClassLikeKind::Class => SymbolKind::CLASS,
                             ClassLikeKind::Interface => SymbolKind::INTERFACE,
@@ -295,7 +264,9 @@ impl Backend {
                             None => continue,
                         };
 
-                        let pos = idx.position(method.name_offset as usize);
+                        let Some(pos) = position(method.name_offset) else {
+                            continue;
+                        };
 
                         let tags = method
                             .deprecation_message
@@ -329,7 +300,9 @@ impl Backend {
                             None => continue,
                         };
 
-                        let pos = idx.position(prop.name_offset as usize);
+                        let Some(pos) = position(prop.name_offset) else {
+                            continue;
+                        };
 
                         let tags = prop
                             .deprecation_message
@@ -363,7 +336,9 @@ impl Backend {
                             None => continue,
                         };
 
-                        let pos = idx.position(constant.name_offset as usize);
+                        let Some(pos) = position(constant.name_offset) else {
+                            continue;
+                        };
 
                         let tags = constant
                             .deprecation_message

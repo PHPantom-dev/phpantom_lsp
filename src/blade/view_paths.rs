@@ -12,12 +12,16 @@ use crate::text_scan::unquote_php_string;
 /// paths.  Falls back to `resources/views` if the config file is
 /// missing or unparseable.  Returns only directories that exist.
 pub fn discover_view_paths(workspace_root: &Path) -> Vec<PathBuf> {
-    let config_path = workspace_root.join("config/view.php");
-    let paths = if config_path.is_file() {
-        parse_view_config_paths(&config_path, workspace_root)
-    } else {
-        Vec::new()
-    };
+    let config = std::fs::read_to_string(workspace_root.join("config/view.php")).ok();
+    view_paths_from_config(config.as_deref(), workspace_root)
+}
+
+/// [`discover_view_paths`] for a `config/view.php` whose text the caller
+/// already has (`None` when there is no such file).
+fn view_paths_from_config(config: Option<&str>, workspace_root: &Path) -> Vec<PathBuf> {
+    let paths = config
+        .map(|content| parse_view_config_paths(content, workspace_root))
+        .unwrap_or_default();
 
     if paths.is_empty() {
         // Fallback: use the conventional Laravel view directory.
@@ -31,19 +35,46 @@ pub fn discover_view_paths(workspace_root: &Path) -> Vec<PathBuf> {
     paths
 }
 
+/// A Blade view root directory.
+#[derive(Debug)]
+pub(crate) struct ViewRoot {
+    /// The directory as configured.
+    pub path: PathBuf,
+    /// The same directory with symlinks resolved, for a template path that
+    /// reaches it under another spelling.  `None` when it cannot be
+    /// resolved.
+    pub canonical: Option<PathBuf>,
+}
+
 impl crate::Backend {
     /// The configured Blade view root directories.
     ///
     /// Reads the `paths` array from `config/view.php` (falling back to
     /// the conventional `resources/views`) so that projects with custom
     /// view directories resolve `view()` names correctly. Only existing
-    /// directories are returned. Read from disk, so unsaved edits to
-    /// `config/view.php` are not reflected until saved.
-    pub(crate) fn laravel_view_roots(&self) -> Vec<PathBuf> {
-        match self.workspace.workspace_root.read().clone() {
-            Some(root) => discover_view_paths(&root),
-            None => Vec::new(),
-        }
+    /// directories are returned. Cached until `config/view.php` changes,
+    /// and read through the editor's buffer when the file is open.
+    pub(crate) fn laravel_view_roots(&self) -> std::sync::Arc<Vec<ViewRoot>> {
+        self.cached_laravel_enumeration(
+            &self.laravel_string_key_build_locks.view_roots,
+            |cache| cache.view_roots.clone(),
+            |cache, roots| cache.view_roots = Some(roots),
+            || {
+                let Some(root) = self.workspace.workspace_root.read().clone() else {
+                    return std::sync::Arc::new(Vec::new());
+                };
+                let config_uri = crate::util::path_to_uri(&root.join("config/view.php"));
+                let config = self.get_file_content_arc(&config_uri);
+                let roots = view_paths_from_config(config.as_deref().map(String::as_str), &root)
+                    .into_iter()
+                    .map(|path| ViewRoot {
+                        canonical: path.canonicalize().ok(),
+                        path,
+                    })
+                    .collect();
+                std::sync::Arc::new(roots)
+            },
+        )
     }
 }
 
@@ -51,12 +82,7 @@ impl crate::Backend {
 ///
 /// Looks for string literals inside `'paths' => [...]` and resolves
 /// `base_path('...')` calls relative to the workspace root.
-fn parse_view_config_paths(config_path: &Path, workspace_root: &Path) -> Vec<PathBuf> {
-    let content = match std::fs::read_to_string(config_path) {
-        Ok(c) => c,
-        Err(_) => return Vec::new(),
-    };
-
+fn parse_view_config_paths(content: &str, workspace_root: &Path) -> Vec<PathBuf> {
     // Find the 'paths' => [...] section.
     let paths_idx = match content.find("'paths'") {
         Some(i) => i,

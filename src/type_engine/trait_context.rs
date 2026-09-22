@@ -147,8 +147,7 @@ fn shared_user_ancestors(
             // there is nothing the whole set is guaranteed to share.
             return Vec::new();
         };
-        let mut names = Vec::new();
-        collect_instance_of(&cls, class_loader, &mut names, 0);
+        let names = instance_of(&cls, class_loader);
         shared = Some(match shared {
             None => names,
             Some(prev) => prev
@@ -163,38 +162,22 @@ fn shared_user_ancestors(
     shared.unwrap_or_default()
 }
 
-/// Maximum ancestry depth walked while collecting what a class is an
-/// instance of.  Deeper than any real hierarchy; a backstop against a
-/// malformed `extends` cycle the loader hands back.
-const MAX_ANCESTRY_DEPTH: u8 = 15;
-
-/// Append every class and interface FQN that an instance of `cls` also is,
-/// `cls` itself included.
-fn collect_instance_of(
+/// Every class and interface FQN that an instance of `cls` also is, `cls`
+/// itself included.
+fn instance_of(
     cls: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    out: &mut Vec<String>,
-    depth: u8,
-) {
-    if depth > MAX_ANCESTRY_DEPTH || cls.kind == ClassLikeKind::Trait {
-        return;
+) -> Vec<String> {
+    if cls.kind == ClassLikeKind::Trait {
+        return Vec::new();
     }
-    let fqn = cls.fqn().to_string();
-    if out.iter().any(|n| n.eq_ignore_ascii_case(&fqn)) {
-        return;
-    }
-    out.push(fqn);
-
-    for ancestor in cls
-        .parent_class
-        .as_ref()
-        .into_iter()
-        .chain(cls.interfaces.iter())
-    {
-        if let Some(loaded) = class_loader(ancestor) {
-            collect_instance_of(&loaded, class_loader, out, depth + 1);
-        }
-    }
+    std::iter::once(cls.fqn().to_string())
+        .chain(
+            crate::inheritance::ancestry::supertypes(cls, class_loader)
+                .into_iter()
+                .map(|(_, supertype)| supertype.fqn().to_string()),
+        )
+        .collect()
 }
 
 /// The FQNs of the classes that `use` this trait, directly or through

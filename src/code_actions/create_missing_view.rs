@@ -133,8 +133,8 @@ impl Backend {
                 .map(|res| res.path.clone());
         }
 
-        if let Some(root) = self.laravel_view_roots().into_iter().next() {
-            return Some(root);
+        if let Some(root) = self.laravel_view_roots().first() {
+            return Some(root.path.clone());
         }
 
         self.workspace

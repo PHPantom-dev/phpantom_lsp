@@ -1058,7 +1058,13 @@ fn scan_directory_for_classes(dir: &Path, classmap: &mut HashMap<String, PathBuf
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Recurse only into real directories: following a link back up the
+        // tree would re-enter it until the kernel's symlink limit stops the
+        // walk.  A linked file is still read, through the link.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             scan_directory_for_classes(&path, classmap);
         } else if path.extension().is_some_and(|ext| ext == "php")
             && let Ok(content) = fs::read(&path)

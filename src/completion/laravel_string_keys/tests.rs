@@ -586,6 +586,11 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
     assert!(callable_before_scalar_argument("Storage::disk(:").is_none());
     assert!(callable_before_scalar_argument("Storage::disk(name: value").is_none());
     assert!(callable_before_scalar_argument("orphan name:").is_none());
+    assert_eq!(
+        callable_before_scalar_argument("foo(prénom:"),
+        Some(("foo", Some("prénom"))),
+        "a non-ASCII argument name is read whole, not sliced mid-character"
+    );
     assert!(enclosing_call_open_paren("completed(); orphan").is_none());
     assert!(enclosing_call_open_paren("orphan").is_none());
     assert!(callable_before_array_argument("factory('archive").is_none());

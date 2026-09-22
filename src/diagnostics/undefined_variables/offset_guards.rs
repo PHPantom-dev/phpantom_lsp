@@ -268,19 +268,6 @@ fn collect_chain_operands<'e>(
     out.push(expr);
 }
 
-/// Unwrap parentheses and a single `!` prefix from a condition,
-/// returning `(inner_expr, negated)`.
-fn unwrap_negation<'e>(expr: &'e Expression<'e>) -> (&'e Expression<'e>, bool) {
-    match expr {
-        Expression::Parenthesized(inner) => unwrap_negation(inner.expression),
-        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            let (inner, already_negated) = unwrap_negation(prefix.operand);
-            (inner, !already_negated)
-        }
-        _ => (expr, false),
-    }
-}
-
 // ─── isset()-guarded branch regions ────────────────────────────────────────
 
 /// A source region in which a positive `isset()` check has proven a set
@@ -388,7 +375,7 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<IssetGuardedRegion>> for IssetRegion
 /// negation matches `want_negated`, return the base variable names of
 /// its guard targets.
 fn isset_guard_names(expr: &Expression<'_>, want_negated: bool) -> Vec<String> {
-    let (inner, negated) = unwrap_negation(expr);
+    let (inner, negated) = crate::parser::unwrap_negation(expr);
     if negated != want_negated {
         return Vec::new();
     }

@@ -69,9 +69,10 @@
 
 use std::sync::Arc;
 
+use crate::atom::Atom;
 use crate::class_lookup::is_subtype_of;
 use crate::inheritance::ancestors;
-use crate::types::{ClassInfo, ClassLikeKind, MAX_TRAIT_DEPTH, Visibility};
+use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
 pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
@@ -431,7 +432,6 @@ fn declares_through_own_traits(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some()
     })
@@ -456,7 +456,6 @@ fn declares_non_privately(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some_and(|visibility| visibility != Visibility::Private)
     })
@@ -477,30 +476,22 @@ fn declares_non_privately(
 /// from, so such a member is simply not found here — which costs a
 /// report rather than inventing one.
 fn trait_declares(
-    trait_name: &str,
+    trait_name: &Atom,
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    depth: u32,
 ) -> Option<Visibility> {
-    if depth > MAX_TRAIT_DEPTH {
-        return None;
-    }
-    let used = class_loader(trait_name)?;
-    if let Some((visibility, _)) = declared_member(&used, member_name, is_static, is_method_call) {
-        return Some(visibility);
-    }
-    used.used_traits.iter().find_map(|nested| {
-        trait_declares(
-            nested,
-            member_name,
-            is_static,
-            is_method_call,
-            class_loader,
-            depth + 1,
-        )
-    })
+    let declares = |class: &ClassInfo| {
+        declared_member(class, member_name, is_static, is_method_call).is_some()
+    };
+    let (_, declaring) = crate::inheritance::ancestry::find_declaring_trait(
+        std::slice::from_ref(trait_name),
+        class_loader,
+        &declares,
+    )?;
+    declared_member(&declaring, member_name, is_static, is_method_call)
+        .map(|(visibility, _)| visibility)
 }
 
 /// Find a private member on an ancestor, which the inheritance merge

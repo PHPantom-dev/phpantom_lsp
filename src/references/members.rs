@@ -1,25 +1,25 @@
-//! Member (method / property / constant) reference finding, plus the
-//! class-hierarchy resolution helpers that scope member searches.
+//! Member (method / property / constant) reference finding.
 //!
 //! Member references are filtered by the class hierarchy of the target
 //! member so that an access on an unrelated class that merely shares a
-//! member name is excluded.  This module also handles Laravel macros
-//! (invoked both statically and on instances) and the Model/Builder
-//! bridging that Eloquent's magic requires.
+//! member name is excluded.  Working out that hierarchy lives in
+//! [`member_scope`](super::member_scope); this module runs the search,
+//! including Laravel macros, which are invoked both statically and on
+//! instances.
 
 use super::*;
 
 use std::cell::OnceCell;
-use std::collections::HashMap;
 
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
 use crate::class_lookup::find_class_at_offset;
-use crate::references::push_unique_location;
+use crate::references::member_scope::MemberScope;
+use crate::references::push_location;
+use crate::symbol_map::SymbolMap;
 use crate::symbol_map::{SelfStaticParentKind, SubjectText, SymbolKind};
 use crate::text_position::{LineIndex, offset_to_position};
-use crate::types::ClassInfo;
 
 /// Whether a receiver of this text resolves without the file's content.
 ///
@@ -121,76 +121,6 @@ pub(crate) struct MemberDeclarationReferenceQuery {
     pub(crate) is_static: bool,
 }
 
-/// The classes a member search counts as carrying the member it searches for.
-///
-/// A scope built from the classes that *declare* the member also has to cover
-/// everything that inherits the declaration, and the reverse-inheritance
-/// index answers that in one pass.  What the index cannot answer is a class
-/// nothing has parsed yet: a package class is parsed the first time something
-/// needs it, so an implementor sitting in a dependency has no edge in the
-/// index until then, and every access on it would be judged to be on an
-/// unrelated class.  A receiver the index did not account for is therefore
-/// settled by walking up from the receiver's own class instead, which loads
-/// what that walk needs.  Without it the same search answers differently
-/// depending on what the session parsed before it.
-#[derive(Clone)]
-pub(crate) struct MemberScope(Arc<MemberScopeInner>);
-
-struct MemberScopeInner {
-    /// The declaring classes plus every descendant the reverse-inheritance
-    /// index knew about when the scope was built.
-    indexed: HashSet<String>,
-    /// The declaring classes, empty for a scope that is exactly `indexed`.
-    roots: HashSet<String>,
-    /// What the upward walk has already settled, so a receiver that recurs
-    /// across the thousands of files a search scans is walked once.
-    walked: parking_lot::RwLock<HashMap<String, bool>>,
-}
-
-impl MemberScope {
-    /// A scope that is exactly `fqns`, with no walk behind it.
-    pub(super) fn exact(fqns: HashSet<String>) -> Self {
-        Self(Arc::new(MemberScopeInner {
-            indexed: fqns,
-            roots: HashSet::new(),
-            walked: parking_lot::RwLock::new(HashMap::new()),
-        }))
-    }
-
-    /// The classes that inherit the member from `roots`, with the walk that
-    /// reaches the ones the index has no edge for.
-    fn descendants_of(roots: HashSet<String>, indexed: HashSet<String>) -> Self {
-        Self(Arc::new(MemberScopeInner {
-            indexed,
-            roots,
-            walked: parking_lot::RwLock::new(HashMap::new()),
-        }))
-    }
-
-    /// The classes the scope holds without walking: what a caller that needs
-    /// to enumerate the scope rather than test one class against it gets.
-    pub(super) fn indexed(&self) -> &HashSet<String> {
-        &self.0.indexed
-    }
-
-    /// Whether a receiver resolved to `fqn` carries the searched member.
-    pub(super) fn contains(&self, backend: &Backend, fqn: &str) -> bool {
-        let fqn = strip_fqn_prefix(fqn);
-        if self.0.indexed.contains(fqn) {
-            return true;
-        }
-        if self.0.roots.is_empty() {
-            return false;
-        }
-        if let Some(&walked) = self.0.walked.read().get(fqn) {
-            return walked;
-        }
-        let inherits = backend.inherits_from_any(fqn, &self.0.roots);
-        self.0.walked.write().insert(fqn.to_string(), inherits);
-        inherits
-    }
-}
-
 impl Backend {
     pub(super) fn find_laravel_macro_references(
         &self,
@@ -238,10 +168,11 @@ impl Backend {
             // maps the results back; reading the template's own bytes here
             // would slice every span against text the map knows nothing
             // about.
-            let Some(content) = self.reference_file_content_arc(file_uri) else {
+            let file = CandidateFile::new(self, file_uri);
+            let Some(content) = file.content() else {
                 continue;
             };
-            let Some(source) = symbol_map.source(&content) else {
+            let Some(source) = symbol_map.source(content) else {
                 continue;
             };
             let file_ctx = self.file_context(file_uri);
@@ -272,7 +203,7 @@ impl Backend {
                         *is_static,
                         &file_ctx,
                         span.start,
-                        &content,
+                        content,
                     );
                     !subject_fqns.is_empty()
                         && subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn))
@@ -281,9 +212,12 @@ impl Backend {
                     continue;
                 }
 
-                let start = offset_to_position(&content, span.start as usize);
-                let end = offset_to_position(&content, span.end as usize);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                if let Some(range) = file.range(span.start, span.end) {
+                    locations.push(Location {
+                        uri: parsed_uri.clone(),
+                        range,
+                    });
+                }
             }
         }
 
@@ -324,7 +258,7 @@ impl Backend {
             };
             let start = offset_to_position(&content, offset as usize + 1);
             let end = offset_to_position(&content, offset as usize + 1 + name.len());
-            push_unique_location(locations, &parsed_uri, start, end);
+            push_location(locations, &parsed_uri, start, end);
         }
     }
 
@@ -345,7 +279,7 @@ impl Backend {
         };
         let start = offset_to_position(&content, offset as usize + 1);
         let end = offset_to_position(&content, offset as usize + 1 + name.len());
-        push_unique_location(locations, &parsed_uri, start, end);
+        push_location(locations, &parsed_uri, start, end);
     }
 
     /// Whether what is already in memory answers "no reference here" for
@@ -1078,79 +1012,23 @@ impl Backend {
                 Err(_) => continue,
             };
 
-            let mut file_content: Option<Arc<String>> = None;
+            let file = CandidateFile::new(self, file_uri);
 
             // Lazily resolved file context — only computed when we need
-            // to check a candidate's subject against the hierarchy.
+            // to find a declaration's enclosing class.
             let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
                 std::cell::OnceCell::new();
 
-            for &span_idx in symbol_map.member_access_indices(target_member) {
-                let span = &symbol_map.spans[span_idx];
-                match &span.kind {
-                    SymbolKind::MemberAccess {
-                        subject_text,
-                        member_name,
-                        is_static,
-                        ..
-                    } if member_name == target_member => {
-                        // For Laravel custom builders, we allow static-ness mismatch
-                        // (Model::active() is static, UserBuilder->active() is instance).
-                        if *is_static != target_is_static {
-                            // Only allow mismatch if we have a hierarchy to verify
-                            // that they are indeed related (one is Model, one is Builder).
-                            if hierarchy.is_none() {
-                                continue;
-                            }
-                        }
-
-                        // Check if the subject belongs to the target hierarchy.
-                        if let Some(hier) = hierarchy {
-                            if file_content.is_none() {
-                                file_content = self.reference_file_content_arc(file_uri);
-                            }
-                            let Some(ref content) = file_content else {
-                                break;
-                            };
-                            let Some(source) = symbol_map.source(content) else {
-                                break;
-                            };
-
-                            let ctx = file_ctx_cell.get_or_init(|| self.file_context(file_uri));
-                            let subject_fqns = self.resolve_subject_to_fqns(
-                                subject_text.as_str(source),
-                                *is_static,
-                                ctx,
-                                span.start,
-                                content,
-                            );
-                            if !subject_fqns.iter().any(|fqn| hier.contains(self, fqn)) {
-                                // The subject did not resolve to a class in
-                                // the target hierarchy — skip.  An
-                                // unresolved subject (empty `subject_fqns`)
-                                // is skipped too: accepting every unresolved
-                                // `$x->method()` makes common names such as
-                                // `find` unusably noisy in large projects.
-                                continue;
-                            }
-                        }
-
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        let Some(ref content) = file_content else {
-                            break;
-                        };
-
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
-                    }
-                    _ => {}
-                }
+            if has_member_access_match {
+                self.push_member_access_matches(
+                    &file,
+                    symbol_map,
+                    &parsed_uri,
+                    member,
+                    target_is_static,
+                    hierarchy,
+                    &mut locations,
+                );
             }
 
             if include_declaration {
@@ -1187,18 +1065,12 @@ impl Backend {
                                 }
                             }
 
-                            if file_content.is_none() {
-                                file_content = self.reference_file_content_arc(file_uri);
-                            }
-                            let Some(ref content) = file_content else {
+                            let Some(range) = file.range(span.start, span.end) else {
                                 break;
                             };
-
-                            let start = offset_to_position(content, span.start as usize);
-                            let end = offset_to_position(content, span.end as usize);
                             locations.push(Location {
                                 uri: parsed_uri.clone(),
-                                range: Range { start, end },
+                                range,
                             });
                         }
                         _ => {}
@@ -1225,21 +1097,19 @@ impl Backend {
                             && prop.is_static == target_is_static
                             && prop.name_offset != 0
                         {
-                            if file_content.is_none() {
-                                file_content = self.reference_file_content_arc(file_uri);
-                            }
-                            let Some(ref content) = file_content else {
-                                break;
-                            };
-
                             // `name_offset` points at the `$` sigil while
                             // `prop.name` excludes it, so the range must span
                             // the `$` plus the name (`$name`, not `$nam`).
                             let offset = prop.name_offset;
-                            let start = offset_to_position(content, offset as usize);
-                            let end =
-                                offset_to_position(content, offset as usize + 1 + prop.name.len());
-                            push_unique_location(&mut locations, &parsed_uri, start, end);
+                            let Some(range) =
+                                file.range(offset, offset + 1 + prop.name.len() as u32)
+                            else {
+                                break;
+                            };
+                            locations.push(Location {
+                                uri: parsed_uri.clone(),
+                                range,
+                            });
                         }
                     }
                 }
@@ -1251,660 +1121,99 @@ impl Backend {
         locations
     }
 
-    // ─── Class hierarchy resolution for member references ───────────────────
-
-    /// Resolve the class hierarchy for a `MemberAccess` subject.
+    /// What the accesses to `names` in one file resolve to, for a search
+    /// that has not necessarily opened the file.
     ///
-    /// Returns `(hierarchy, declaration_scope)`, both `None` when the
-    /// subject cannot be resolved to at least one class.  `hierarchy` scopes
-    /// member *access* sites (the seed FQNs' full ancestor/descendant/
-    /// Laravel-builder closure); `declaration_scope` additionally narrows
-    /// *declaration* sites to the classes that actually declare
-    /// `member_name`.  The two coincide except for Laravel macros, where the
-    /// macro's registered target is narrower than the full class hierarchy.
-    pub(super) fn resolve_member_access_scopes(
+    /// An entry an earlier search or the background warm-up left behind
+    /// answers without the file's text; otherwise the file is read and
+    /// walked through [`resolve_member_receivers`](Self::resolve_member_receivers),
+    /// which records the answer for the next search.  `None` only when the
+    /// file cannot be read.
+    pub(super) fn member_receivers_for(
         &self,
-        uri: &str,
-        subject_text: &str,
-        is_static: bool,
-        span_start: u32,
-        member_name: &str,
-        mode: ReferenceSearchMode,
-    ) -> (Option<MemberScope>, Option<MemberScope>) {
-        let ctx = self.file_context(uri);
-        let Some(content) = self.reference_file_content(uri) else {
-            return (None, None);
-        };
-        let fqns =
-            self.resolve_subject_to_fqns(subject_text, is_static, &ctx, span_start, &content);
-        if fqns.is_empty() {
-            return (None, None);
+        file: &CandidateFile<'_>,
+        symbol_map: &Arc<SymbolMap>,
+        names: &[Atom],
+    ) -> Option<Arc<crate::reference_index::ResolvedMemberFile>> {
+        if let Some(warm) = self
+            .resolved_member_file(file.uri, symbol_map)
+            .filter(|entry| entry.covers(names.iter().copied()))
+        {
+            return Some(warm);
         }
-        if let Some(macro_targets) = self.collect_macro_declaring_targets(&fqns, member_name) {
-            return (
-                Some(self.collect_hierarchy_for_fqns(&macro_targets)),
-                Some(self.collect_macro_declaring_scope(&macro_targets)),
-            );
-        }
-        let member_scope = self
-            .collect_member_receiver_scope(
-                &fqns,
-                member_name,
-                is_static,
-                mode.include_declaring_interfaces(),
-            )
-            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&fqns));
-        (Some(member_scope.clone()), Some(member_scope))
-    }
-
-    /// Resolve the class hierarchy for a `MemberDeclaration` at a given offset.
-    ///
-    /// Finds the enclosing class and builds the hierarchy set from it.
-    pub(super) fn resolve_member_declaration_hierarchy(
-        &self,
-        uri: &str,
-        offset: u32,
-        member_name: &str,
-        is_static: bool,
-        mode: ReferenceSearchMode,
-    ) -> Option<MemberScope> {
-        let classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
-            // Fallback: offset may be in a class docblock (before the opening
-            // brace).  Find the nearest class whose body starts past the
-            // offset, meaning its docblock region likely contains the offset.
-            classes
-                .iter()
-                .map(|c| c.as_ref())
-                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
-                .min_by_key(|c| c.start_offset)
-        })?;
-        let fqn = current_class.fqn().to_string();
-        Some(
-            self.collect_member_receiver_scope(
-                std::slice::from_ref(&fqn),
-                member_name,
-                is_static,
-                mode.include_declaring_interfaces(),
-            )
-            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn])),
-        )
-    }
-
-    pub(super) fn resolve_member_declaration_scope(
-        &self,
-        uri: &str,
-        offset: u32,
-        member_name: &str,
-        is_static: bool,
-        mode: ReferenceSearchMode,
-    ) -> Option<MemberScope> {
-        let classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
-            classes
-                .iter()
-                .map(|c| c.as_ref())
-                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
-                .min_by_key(|c| c.start_offset)
-        })?;
-        self.collect_member_receiver_scope(
-            &[current_class.fqn().to_string()],
-            member_name,
-            is_static,
-            mode.include_declaring_interfaces(),
-        )
-    }
-
-    /// Resolve a member-access subject to the FQN(s) of its type(s), using
-    /// the shared subject-resolution utility.  Falls back to a Laravel
-    /// static-builder-entrypoint heuristic (e.g. `Model::where(...)`) when
-    /// the general resolver returns nothing.
-    pub(super) fn resolve_subject_to_fqns(
-        &self,
-        subject_text: &str,
-        is_static: bool,
-        ctx: &crate::types::FileContext,
-        access_offset: u32,
-        content: &str,
-    ) -> Vec<String> {
-        let class_loader = self.class_loader(ctx);
-        let function_loader = self.function_loader(ctx);
-        let use_map = &ctx.use_map;
-        let namespace = &ctx.namespace;
-        let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
-            local_classes: &ctx.classes,
-            use_map,
-            namespace,
+        let content = file.content()?;
+        let source = symbol_map.source(content)?;
+        let position = |offset: u32| file.position(offset).unwrap_or_default();
+        Some(self.resolve_member_receivers(
+            file.uri,
+            symbol_map,
             content,
-            class_loader: &class_loader,
-            backend: Some(self),
-            function_loader: &function_loader,
-        };
-
-        match crate::type_engine::subject_resolution::resolve_subject_type(
-            subject_text,
-            is_static,
-            access_offset,
-            &resolution_ctx,
-        ) {
-            Some(php_type) => php_type
-                .top_level_class_names()
-                .into_iter()
-                .map(|n| {
-                    let normalized = normalize_fqn(&n);
-                    // top_level_class_names() may return short names
-                    // (e.g. "BlogAuthor" instead of
-                    // "App\Models\BlogAuthor").  Resolve them through
-                    // the file's use-map and namespace so they match
-                    // the FQNs used in the hierarchy set.
-                    if normalized.contains('\\') {
-                        normalized.to_string()
-                    } else {
-                        normalize_fqn(&Self::resolve_to_fqn(&normalized, use_map, namespace))
-                            .to_string()
-                    }
-                })
-                .collect(),
-            None => self.resolve_static_laravel_builder_subject_to_fqns(
-                subject_text,
-                use_map,
-                namespace,
-                &class_loader,
-            ),
-        }
+            source,
+            &position,
+            ReceiverWalk::Names(names),
+        ))
     }
 
-    fn resolve_static_laravel_builder_subject_to_fqns(
-        &self,
-        subject_text: &str,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Vec<String> {
-        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
-        let Some((class_name, method_name)) = static_call_root(&expr) else {
-            return Vec::new();
-        };
-        if !is_laravel_builder_static_entrypoint(method_name) {
-            return Vec::new();
-        }
-
-        let class_fqn = normalize_fqn(&Self::resolve_to_fqn(class_name, use_map, namespace));
-        let Some(class_info) = class_loader(&class_fqn) else {
-            return Vec::new();
-        };
-        let Some(laravel) = class_info.laravel() else {
-            return Vec::new();
-        };
-
-        let mut fqns = vec![class_fqn];
-        if let Some(builder_fqn) = laravel
-            .custom_builder
-            .as_ref()
-            .and_then(|builder| builder.base_name())
-            .map(normalize_fqn)
-        {
-            fqns.push(builder_fqn.to_string());
-        }
-        fqns.sort();
-        fqns.dedup();
-        fqns
-    }
-
-    /// Collect the full class hierarchy (ancestors and descendants) for
-    /// a set of starting FQNs.
+    /// The accesses to `member` in one file that Find References reports.
     ///
-    /// The result includes:
-    /// - The starting FQNs themselves
-    /// - All ancestor FQNs (parent chain, interfaces, traits)
-    /// - All descendant FQNs (classes that extend/implement any class in
-    ///   the hierarchy)
-    fn collect_hierarchy_for_fqns(&self, seed_fqns: &[String]) -> MemberScope {
-        let mut hierarchy = HashSet::new();
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-
-        for fqn in seed_fqns {
-            hierarchy.insert(normalize_fqn(fqn).to_string());
-        }
-
-        // Walk up: collect all ancestors for each seed.
-        let seeds: Vec<String> = hierarchy.iter().cloned().collect();
-        for fqn in seeds {
-            self.collect_ancestors(&fqn, &class_loader, &mut hierarchy);
-        }
-
-        // Bridge Laravel Models and their Custom Builders.
-        // If a class in the hierarchy is a Model with a custom builder,
-        // add that builder to the hierarchy.
-        let mut extensions = Vec::new();
-        for fqn in &hierarchy {
-            if let Some(cls) = class_loader(fqn)
-                && let Some(builder_fqn) = cls
-                    .laravel()
-                    .and_then(|l| l.custom_builder.as_ref())
-                    .and_then(|b| b.base_name())
-            {
-                extensions.push(normalize_fqn(builder_fqn).to_string());
-            }
-        }
-        for ext_fqn in &extensions {
-            if hierarchy.insert(ext_fqn.clone()) {
-                self.collect_ancestors(ext_fqn, &class_loader, &mut hierarchy);
-            }
-        }
-
-        // Bridge Laravel Builders back to their Models.
-        // Only builder roots that are actually part of the original lookup
-        // should contribute models. A custom builder's ancestors include the
-        // base Eloquent builder, but that must not fan out into every model.
-        let builder_roots: HashSet<String> = seed_fqns
-            .iter()
-            .map(|fqn| normalize_fqn(fqn).to_string())
-            .chain(extensions.iter().cloned())
-            .collect();
-        let mut model_seeds = Vec::new();
-        {
-            let class_index = self.symbols.fqn_class_index.read();
-            for (class_fqn, class_info) in class_index.iter() {
-                if let Some(laravel) = class_info.laravel() {
-                    if let Some(normalized) = laravel
-                        .custom_builder
-                        .as_ref()
-                        .and_then(|b| b.base_name())
-                        .map(normalize_fqn)
-                    {
-                        if builder_roots.contains(normalized.as_str()) {
-                            model_seeds.push(class_fqn.to_owned());
-                        }
-                    } else if builder_roots
-                        .contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
-                    {
-                        // All models use the base Eloquent Builder by default.
-                        model_seeds.push(class_fqn.to_owned());
-                    }
-                }
-            }
-        }
-        for model_fqn in &model_seeds {
-            if hierarchy.insert(normalize_fqn(model_fqn).to_string()) {
-                self.collect_ancestors(model_fqn, &class_loader, &mut hierarchy);
-            }
-        }
-
-        // Walk down: collect descendants from the original target classes,
-        // not every ancestor. This keeps a concrete class rename from
-        // fanning out through an implemented interface into sibling classes.
-        let descendant_roots: HashSet<String> = seed_fqns
-            .iter()
-            .map(|fqn| normalize_fqn(fqn).to_string())
-            .chain(extensions.iter().cloned())
-            .chain(model_seeds.iter().map(|fqn| normalize_fqn(fqn).to_string()))
-            .collect();
-        let mut queue: std::collections::VecDeque<String> =
-            descendant_roots.iter().cloned().collect();
-
-        {
-            let gti = self.symbols.gti_index.read();
-            while let Some(fqn) = queue.pop_front() {
-                if let Some(descendants) = gti.get(&fqn) {
-                    for desc in descendants {
-                        let normalized = normalize_fqn(desc).to_string();
-                        if hierarchy.insert(normalized.clone()) {
-                            queue.push_back(normalized);
-                        }
-                    }
-                }
-            }
-        }
-
-        MemberScope::descendants_of(descendant_roots, hierarchy)
-    }
-
-    fn collect_member_receiver_scope(
-        &self,
-        seed_fqns: &[String],
-        member_name: &str,
-        is_static: bool,
-        include_declaring_interfaces: bool,
-    ) -> Option<MemberScope> {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-        let mut roots = HashSet::new();
-        let mut seen = HashSet::new();
-
-        for fqn in seed_fqns {
-            let normalized = normalize_fqn(fqn).to_string();
-            if self.defines_member(&normalized, member_name, is_static, &class_loader) {
-                roots.insert(normalized.clone());
-                if include_declaring_interfaces {
-                    self.collect_declaring_member_interfaces(
-                        &normalized,
-                        member_name,
-                        is_static,
-                        &class_loader,
-                        &mut roots,
-                        &mut seen,
-                    );
-                }
-            } else {
-                self.collect_declaring_member_ancestors(
-                    &normalized,
-                    member_name,
-                    is_static,
-                    &class_loader,
-                    &mut roots,
-                    &mut seen,
-                );
-            }
-        }
-
-        if roots.is_empty() {
-            return None;
-        }
-
-        self.extend_laravel_member_roots(&mut roots);
-        Some(self.collect_descendants_for_roots(roots))
-    }
-
-    fn collect_declaring_member_interfaces(
-        &self,
-        fqn: &str,
-        member_name: &str,
-        is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        roots: &mut HashSet<String>,
-        seen: &mut HashSet<String>,
-    ) {
-        let normalized = normalize_fqn(fqn).to_string();
-        if !seen.insert(normalized.clone()) {
-            return;
-        }
-        let Some(cls) = class_loader(&normalized) else {
-            return;
-        };
-
-        for iface in &cls.interfaces {
-            let iface_fqn = normalize_fqn(iface).to_string();
-            if self.defines_member(&iface_fqn, member_name, is_static, class_loader) {
-                roots.insert(iface_fqn.clone());
-            }
-            self.collect_declaring_member_interfaces(
-                &iface_fqn,
-                member_name,
-                is_static,
-                class_loader,
-                roots,
-                seen,
-            );
-        }
-    }
-
-    fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-        let initial_roots: Vec<String> = roots.iter().cloned().collect();
-        let mut candidate_roots: HashSet<String> = initial_roots.iter().cloned().collect();
-        let mut builder_roots: HashSet<String> = HashSet::new();
-        if candidate_roots.contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN) {
-            builder_roots.insert(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN.to_string());
-        }
-
-        for fqn in &initial_roots {
-            if let Some(cls) = class_loader(fqn)
-                && let Some(builder_fqn) = cls
-                    .laravel()
-                    .and_then(|l| l.custom_builder.as_ref())
-                    .and_then(|b| b.base_name())
-                    .map(normalize_fqn)
-            {
-                let builder = builder_fqn.to_string();
-                roots.insert(builder.clone());
-                candidate_roots.insert(builder.clone());
-                builder_roots.insert(builder);
-            }
-        }
-
-        let mut model_roots = Vec::new();
-        {
-            let class_index = self.symbols.fqn_class_index.read();
-            for (class_fqn, class_info) in class_index.iter() {
-                if let Some(laravel) = class_info.laravel() {
-                    if let Some(builder_fqn) = laravel
-                        .custom_builder
-                        .as_ref()
-                        .and_then(|b| b.base_name())
-                        .map(normalize_fqn)
-                    {
-                        if candidate_roots.contains(&builder_fqn) {
-                            model_roots.push(normalize_fqn(class_fqn).to_string());
-                            builder_roots.insert(builder_fqn);
-                        }
-                    } else if candidate_roots
-                        .contains(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
-                    {
-                        model_roots.push(normalize_fqn(class_fqn).to_string());
-                        builder_roots.insert(
-                            crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN.to_string(),
-                        );
-                    }
-                }
-            }
-        }
-
-        roots.extend(model_roots);
-        for builder in builder_roots {
-            self.collect_ancestors(&builder, &class_loader, roots);
-        }
-    }
-
-    fn collect_declaring_member_ancestors(
-        &self,
-        fqn: &str,
-        member_name: &str,
-        is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        roots: &mut HashSet<String>,
-        seen: &mut HashSet<String>,
-    ) {
-        let normalized = normalize_fqn(fqn).to_string();
-        if !seen.insert(normalized.clone()) {
-            return;
-        }
-        let Some(cls) = class_loader(&normalized) else {
-            return;
-        };
-
-        let ancestors = cls
-            .parent_class
-            .iter()
-            .chain(cls.interfaces.iter())
-            .chain(cls.used_traits.iter())
-            .chain(cls.mixins.iter())
-            .map(|name| normalize_fqn(name).to_string())
-            .collect::<Vec<_>>();
-
-        for ancestor in ancestors {
-            if self.defines_member(&ancestor, member_name, is_static, class_loader) {
-                roots.insert(ancestor);
-            } else {
-                self.collect_declaring_member_ancestors(
-                    &ancestor,
-                    member_name,
-                    is_static,
-                    class_loader,
-                    roots,
-                    seen,
-                );
-            }
-        }
-    }
-
-    fn collect_descendants_for_roots(&self, roots: HashSet<String>) -> MemberScope {
-        let mut indexed = roots.clone();
-        let mut queue: std::collections::VecDeque<String> = roots.iter().cloned().collect();
-        {
-            let gti = self.symbols.gti_index.read();
-            while let Some(fqn) = queue.pop_front() {
-                if let Some(descendants) = gti.get(&fqn) {
-                    for desc in descendants {
-                        let normalized = normalize_fqn(desc).to_string();
-                        if indexed.insert(normalized.clone()) {
-                            queue.push_back(normalized);
-                        }
-                    }
-                }
-            }
-        }
-        MemberScope::descendants_of(roots, indexed)
-    }
-
-    /// Whether `fqn` inherits from any of `roots`, walking up from the class
-    /// itself.
+    /// With a hierarchy, each receiver is resolved through
+    /// [`resolve_member_receivers`](Self::resolve_member_receivers), the
+    /// same pass the reference-count lens runs: an earlier search's entry
+    /// answers without the file being opened, and this search's walk is
+    /// recorded for the next one.  An access whose receiver resolves to
+    /// nothing is skipped, since accepting every unresolved
+    /// `$x->method()` makes common names such as `find` unusably noisy in
+    /// large projects.
     ///
-    /// The walk loads the ancestors it needs, so it answers for a class the
-    /// reverse-inheritance index has no edge for — which is every class in a
-    /// package nothing has parsed yet.
-    fn inherits_from_any(&self, fqn: &str, roots: &HashSet<String>) -> bool {
-        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-        let mut ancestors = HashSet::new();
-        self.collect_ancestors(fqn, &class_loader, &mut ancestors);
-        ancestors.iter().any(|ancestor| roots.contains(ancestor))
-    }
-
-    fn collect_macro_declaring_targets(
+    /// Without one, every access of the right static-ness matches.
+    #[allow(clippy::too_many_arguments)]
+    fn push_member_access_matches(
         &self,
-        seed_fqns: &[String],
-        member_name: &str,
-    ) -> Option<Vec<String>> {
-        let index = self.laravel_macros.read();
-        let mut targets = Vec::new();
-        for seed in seed_fqns {
-            let mut ancestors = HashSet::new();
-            let normalized = normalize_fqn(seed).to_string();
-            ancestors.insert(normalized.clone());
-            let class_loader =
-                |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
-            self.collect_ancestors(&normalized, &class_loader, &mut ancestors);
-            for candidate in ancestors {
-                if index.has_macro(&candidate, member_name) && !targets.contains(&candidate) {
-                    targets.push(candidate);
-                }
-            }
-        }
-        (!targets.is_empty()).then_some(targets)
-    }
-
-    fn collect_macro_declaring_scope(&self, macro_targets: &[String]) -> MemberScope {
-        self.collect_descendants_for_roots(
-            macro_targets
-                .iter()
-                .map(|fqn| normalize_fqn(fqn).to_string())
-                .collect(),
-        )
-    }
-
-    fn defines_member(
-        &self,
-        fqn: &str,
-        name: &str,
-        is_static: bool,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> bool {
-        let Some(cls) = class_loader(fqn) else {
-            return false;
-        };
-
-        if cls
-            .methods
-            .iter()
-            .any(|m| m.name.eq_ignore_ascii_case(name) && m.is_static == is_static)
-        {
-            return true;
-        }
-
-        let property_name = name.strip_prefix('$').unwrap_or(name);
-        if cls.properties.iter().any(|p| {
-            p.name.as_str().strip_prefix('$').unwrap_or(p.name.as_str()) == property_name
-                && p.is_static == is_static
-        }) {
-            return true;
-        }
-
-        if let Some(laravel) = cls.laravel() {
-            if let Some(builder_cls) = laravel
-                .custom_builder
-                .as_ref()
-                .and_then(|b| b.base_name())
-                .and_then(class_loader)
-                && builder_cls
-                    .methods
-                    .iter()
-                    .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
-            {
-                return true;
-            }
-            if class_loader(crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN)
-                .filter(|bc| {
-                    bc.methods
-                        .iter()
-                        .any(|m| m.name.eq_ignore_ascii_case(name) && (!is_static || !m.is_static))
-                })
-                .is_some()
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    /// Walk up the inheritance chain and collect all ancestor FQNs.
-    fn collect_ancestors(
-        &self,
-        fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        hierarchy: &mut HashSet<String>,
+        file: &CandidateFile<'_>,
+        symbol_map: &Arc<SymbolMap>,
+        parsed_uri: &Url,
+        member: Atom,
+        target_is_static: bool,
+        hierarchy: Option<&MemberScope>,
+        locations: &mut Vec<Location>,
     ) {
-        let cls = match class_loader(fqn) {
-            Some(c) => c,
-            None => return,
+        let access_indices = symbol_map.member_access_indices(&member);
+
+        let Some(hierarchy) = hierarchy else {
+            for &span_index in access_indices {
+                let span = &symbol_map.spans[span_index];
+                let SymbolKind::MemberAccess { is_static, .. } = &span.kind else {
+                    continue;
+                };
+                if *is_static != target_is_static {
+                    continue;
+                }
+                let Some(range) = file.range(span.start, span.end) else {
+                    return;
+                };
+                locations.push(Location {
+                    uri: parsed_uri.clone(),
+                    range,
+                });
+            }
+            return;
         };
 
-        if let Some(ref parent) = cls.parent_class {
-            let parent_fqn = normalize_fqn(parent);
-            if hierarchy.insert(parent_fqn.clone()) {
-                self.collect_ancestors(&parent_fqn, class_loader, hierarchy);
-            }
-        }
-
-        for iface in &cls.interfaces {
-            let iface_fqn = normalize_fqn(iface);
-            if hierarchy.insert(iface_fqn.clone()) {
-                self.collect_ancestors(&iface_fqn, class_loader, hierarchy);
-            }
-        }
-
-        for trait_name in &cls.used_traits {
-            let trait_fqn = normalize_fqn(trait_name);
-            if hierarchy.insert(trait_fqn.clone()) {
-                self.collect_ancestors(&trait_fqn, class_loader, hierarchy);
-            }
-        }
-
-        for mixin in &cls.mixins {
-            let mixin_fqn = normalize_fqn(mixin);
-            if hierarchy.insert(mixin_fqn.clone()) {
-                self.collect_ancestors(&mixin_fqn, class_loader, hierarchy);
+        // A static-ness mismatch is allowed here: for Laravel custom
+        // builders `Model::active()` is static while `UserBuilder->active()`
+        // is not, and the hierarchy is what shows they are related.
+        let Some(resolved) = self.member_receivers_for(file, symbol_map, &[member]) else {
+            return;
+        };
+        for &span_index in access_indices {
+            let Some((range, targets)) = resolved.resolved_access(span_index) else {
+                continue;
+            };
+            if targets.iter().any(|fqn| hierarchy.contains(self, fqn)) {
+                locations.push(Location {
+                    uri: parsed_uri.clone(),
+                    range,
+                });
             }
         }
     }

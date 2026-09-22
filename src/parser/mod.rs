@@ -821,6 +821,27 @@ pub(crate) fn unwrap_parens<'a>(
     }
 }
 
+/// Unwrap parentheses and any number of `!` prefixes from a condition,
+/// returning the expression underneath and whether an odd number of `!`s
+/// wrapped it.
+pub(crate) fn unwrap_negation<'a>(
+    expr: &'a mago_syntax::cst::Expression<'a>,
+) -> (&'a mago_syntax::cst::Expression<'a>, bool) {
+    use mago_syntax::cst::Expression;
+    let mut negated = false;
+    let mut inner = expr;
+    loop {
+        match inner {
+            Expression::Parenthesized(p) => inner = p.expression,
+            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
+                negated = !negated;
+                inner = prefix.operand;
+            }
+            _ => return (inner, negated),
+        }
+    }
+}
+
 /// The elements of an array literal, in either spelling (`[…]` and the
 /// legacy `array(…)`).
 ///

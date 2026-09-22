@@ -125,13 +125,14 @@ pub(crate) fn discover_laravel_resources(backend: &Backend) {
     if !backend.resolved_class_cache.read().is_laravel() {
         return;
     }
-    backend.build_laravel_date_class();
-    backend.build_provider_resources();
-    backend.build_laravel_morph_map_index();
-    backend.build_laravel_gate_index();
+    let providers = backend.laravel_providers();
+    backend.build_laravel_date_class(&providers);
+    backend.build_provider_resources(&providers);
+    backend.build_laravel_morph_map_index(&providers);
+    backend.build_laravel_gate_index(&providers);
     // `update_ast` only refreshes these from the files it parses, which
     // here is the project's own source, so without a scan of the whole
     // FQN index the vendor entries are missing.
     backend.build_laravel_command_index();
-    backend.build_laravel_macro_index();
+    backend.build_laravel_macro_index(&providers);
 }

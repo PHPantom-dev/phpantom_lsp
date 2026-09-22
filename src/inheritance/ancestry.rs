@@ -7,10 +7,11 @@
 //! `Arc` the loader already holds, and apply the same depth cap so a
 //! mid-edit cycle cannot spin.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::atom::Atom;
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DEPTH};
+use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MAX_TRAIT_DEPTH};
 
 /// A class loader, as every hierarchy walk receives it.
 pub(crate) type ClassLoader<'a> = &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>;
@@ -139,4 +140,55 @@ fn find_declaring_interface(
     }
     let parent = iface.parent_class?;
     find_declaring_interface(parent, class_loader, declares, depth + 1)
+}
+
+/// Every class and interface an instance of `class` also is: its parent
+/// chain, every interface it or a parent implements, and every interface
+/// those extend. `class` itself is not included, and traits are not
+/// followed, since using a trait does not make a class an instance of it.
+///
+/// Each supertype comes once, with the name it was loaded by: a class's
+/// interfaces (each followed up its extends chain) before its parent, so a
+/// caller reading the result in order meets a class's own contracts before
+/// its parent's. A supertype the loader cannot produce is left out, along
+/// with whatever only it would have led to.
+pub(crate) fn supertypes(
+    class: &ClassInfo,
+    class_loader: ClassLoader<'_>,
+) -> Vec<(Atom, Arc<ClassInfo>)> {
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(class.fqn().to_ascii_lowercase());
+    let mut out = Vec::new();
+    collect_supertypes(class, class_loader, &mut visited, &mut out, 0);
+    out
+}
+
+fn collect_supertypes(
+    class: &ClassInfo,
+    class_loader: ClassLoader<'_>,
+    visited: &mut HashSet<String>,
+    out: &mut Vec<(Atom, Arc<ClassInfo>)>,
+    depth: u32,
+) {
+    if depth > MAX_INHERITANCE_DEPTH {
+        return;
+    }
+    // An interface's first `extends` is recorded as its `parent_class`, and
+    // it is one of its contracts like any other; a class's parent comes
+    // after the interfaces it implements.
+    let (first, then): (&[Atom], &[Atom]) = if class.kind == ClassLikeKind::Interface {
+        (class.parent_class.as_slice(), &class.interfaces)
+    } else {
+        (&class.interfaces, class.parent_class.as_slice())
+    };
+    for name in first.iter().chain(then) {
+        let Some(loaded) = class_loader(name) else {
+            continue;
+        };
+        if !visited.insert(loaded.fqn().to_ascii_lowercase()) {
+            continue;
+        }
+        out.push((*name, Arc::clone(&loaded)));
+        collect_supertypes(&loaded, class_loader, visited, out, depth + 1);
+    }
 }

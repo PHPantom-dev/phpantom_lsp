@@ -8,7 +8,7 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Position};
 
-use crate::references::push_unique_location;
+use crate::references::push_location;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
@@ -127,6 +127,7 @@ impl Backend {
                     !crate::resource_navigation::is_resource_document(location.uri.as_str())
                 });
             }
+            sort_locations_for_references(&mut locations);
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
                 sym.kind,
@@ -140,9 +141,10 @@ impl Backend {
         // Fallback for declaration sites in config/*.php
         let start_laravel = std::time::Instant::now();
         if self.resolved_class_cache.read().is_laravel()
-            && let Some(locations) =
+            && let Some(mut locations) =
                 laravel::find_config_references(self, uri, content, position, include_declaration)
         {
+            sort_locations_for_references(&mut locations);
             tracing::info!(
                 "Find References: found Laravel config references in {:?}",
                 start_laravel.elapsed()
@@ -297,7 +299,7 @@ impl Backend {
                                 end = offset_to_position(&def_content, def_span.end as usize);
                             }
                         }
-                        push_unique_location(&mut locations, &def.uri, start, end);
+                        push_location(&mut locations, &def.uri, start, end);
                     }
                     self.append_laravel_macro_registration_locations(
                         &mut locations,

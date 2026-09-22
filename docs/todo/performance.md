@@ -953,8 +953,8 @@ exit that would make the fold linear in the common case:
    drop the repeated hashing.
 
 **Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
-in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
-`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+in `php_type/mod.rs`, and the shape-folding branch of `merge_branch` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`. Hand-written code
 does not reach the sizes where this shows; generated code and long
 procedural report builders do.
 
@@ -1265,6 +1265,6 @@ wrote and merging only those entries, or sharing the untouched part
 rather than cloning it, would make a merge proportional to the branch
 instead of to the file.
 
-**Where to look:** `merge_branch`, `describes_same_state_as`, and
-`merge_scopes` in `type_engine/variable/forward_walk/scope_state.rs`, and
-the branch handling in `type_engine/variable/forward_walk/control_flow.rs`.
+**Where to look:** `merge_branch`, `describes_same_state_as`, and the join
+helpers under them in `type_engine/variable/forward_walk/scope_state/merge.rs`,
+and the branch handling in `type_engine/variable/forward_walk/control_flow.rs`.

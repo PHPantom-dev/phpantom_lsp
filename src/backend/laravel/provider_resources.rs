@@ -5,20 +5,20 @@
 use crate::Backend;
 
 impl Backend {
-    pub(crate) fn build_provider_resources(&self) {
+    pub(crate) fn build_provider_resources(&self, providers: &super::LaravelProviders) {
         let mut scans = crate::virtual_members::laravel::ProviderScans::default();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (fqn, origin) in self.laravel_providers_with_origin() {
-            scans.record_registered(&fqn);
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
+        for (fqn, origin) in providers.with_origin() {
+            scans.record_registered(fqn);
+            let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
             if !seen.insert(uri.clone()) {
                 continue;
             }
             let Some((identity, resources)) =
-                self.scan_provider_resources(&uri, None, &fqn, origin)
+                self.scan_provider_resources(&uri, None, fqn, *origin)
             else {
                 continue;
             };
@@ -205,7 +205,7 @@ impl Backend {
         // in what order, both of which the merge depends on, so a change to it
         // rebuilds from scratch.
         if self.is_laravel_provider_list_uri(uri) {
-            self.build_provider_resources();
+            self.build_provider_resources(&self.laravel_providers());
             return;
         }
 
@@ -220,7 +220,7 @@ impl Backend {
             // full scan ran, because the file is written after the list that
             // names it.  It joins the table the moment it parses.
             if self.declares_registered_provider(uri) {
-                self.build_provider_resources();
+                self.build_provider_resources(&self.laravel_providers());
             }
             return;
         };

@@ -348,22 +348,17 @@ pub(crate) fn resolve_variable_types(
     };
 
     let resolved = with_parsed_program(content, "resolve_variable_types", |program, _content| {
-        let active_cache = crate::virtual_members::active_resolved_class_cache();
-        let ctx = VarResolutionCtx {
+        resolve_variable_types_in_program(
+            program,
+            var_name,
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader,
             backend,
             loaders,
-            resolved_class_cache: active_cache,
-            ..VarResolutionCtx::new(
-                var_name,
-                current_class,
-                all_classes,
-                content,
-                cursor_offset,
-                class_loader,
-            )
-        };
-
-        resolve_variable_in_statements(program.statements.iter(), &ctx)
+        )
     });
 
     if memoisable {
@@ -375,6 +370,43 @@ pub(crate) fn resolve_variable_types(
     }
 
     resolved
+}
+
+/// The forward walk behind [`resolve_variable_types`], over a program the
+/// caller has already parsed.
+///
+/// For a caller that needs the parse for something else first (finding
+/// the offset to resolve at, say) and would otherwise parse the file
+/// twice. It bypasses the per-pass memo and the diagnostic scope cache,
+/// both of which key on offsets into the request's own file.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_variable_types_in_program(
+    program: &Program<'_>,
+    var_name: &str,
+    current_class: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    content: &str,
+    cursor_offset: u32,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&Backend>,
+    loaders: Loaders<'_>,
+) -> Vec<ResolvedType> {
+    let active_cache = crate::virtual_members::active_resolved_class_cache();
+    let ctx = VarResolutionCtx {
+        backend,
+        loaders,
+        resolved_class_cache: active_cache,
+        ..VarResolutionCtx::new(
+            var_name,
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader,
+        )
+    };
+
+    resolve_variable_in_statements(program.statements.iter(), &ctx)
 }
 
 /// Resolve the type of a variable at `cursor_offset` as a [`PhpType`].

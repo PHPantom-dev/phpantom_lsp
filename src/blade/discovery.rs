@@ -322,8 +322,8 @@ impl Backend {
     /// scanned into dot-notation names.
     fn scan_view_names(&self) -> HashMap<String, PathBuf> {
         let mut views = HashMap::new();
-        for root in self.laravel_view_roots() {
-            merge_view_root(&root, "", &mut views);
+        for root in self.laravel_view_roots().iter() {
+            merge_view_root(&root.path, "", &mut views);
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
             merge_view_root(&res.path, &res.namespace, &mut views);

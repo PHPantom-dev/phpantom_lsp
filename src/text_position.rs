@@ -71,16 +71,9 @@ pub(crate) struct LineIndex<'a> {
 impl<'a> LineIndex<'a> {
     /// Build the line table for `content` in a single pass.
     pub(crate) fn new(content: &'a str) -> Self {
-        let mut line_starts = Vec::with_capacity(content.len() / 24 + 1);
-        line_starts.push(0usize);
-        for (i, b) in content.bytes().enumerate() {
-            if b == b'\n' {
-                line_starts.push(i + 1);
-            }
-        }
         Self {
             content,
-            line_starts,
+            line_starts: line_starts(content),
         }
     }
 
@@ -118,20 +111,45 @@ impl<'a> LineIndex<'a> {
     /// boundary, also matching [`offset_to_position`], rather than slicing
     /// mid-character and panicking.
     pub(crate) fn position(&self, offset: usize) -> Position {
-        let mut offset = offset.min(self.content.len());
-        while !self.content.is_char_boundary(offset) {
-            offset += 1;
+        position_in(self.content, &self.line_starts, offset)
+    }
+}
+
+/// The line table a [`LineIndex`] is built on: the byte offset of the first
+/// character of each line, starting with `0`.
+///
+/// For a caller that has to store the table next to content it owns, where
+/// a [`LineIndex`] borrowing that content cannot live.
+pub(crate) fn line_starts(content: &str) -> Vec<usize> {
+    let mut line_starts = Vec::with_capacity(content.len() / 24 + 1);
+    line_starts.push(0usize);
+    for (i, b) in content.bytes().enumerate() {
+        if b == b'\n' {
+            line_starts.push(i + 1);
         }
-        let line = self.line_of(offset);
-        let line_start = self.line_starts[line];
-        let character = self.content[line_start..offset]
-            .chars()
-            .map(|c| c.len_utf16() as u32)
-            .sum();
-        Position {
-            line: line as u32,
-            character,
-        }
+    }
+    line_starts
+}
+
+/// [`LineIndex::position`] over a table built by [`line_starts`] for the
+/// same `content`.
+pub(crate) fn position_in(content: &str, line_starts: &[usize], offset: usize) -> Position {
+    let mut offset = offset.min(content.len());
+    while !content.is_char_boundary(offset) {
+        offset += 1;
+    }
+    let line = match line_starts.binary_search(&offset) {
+        Ok(idx) => idx,
+        Err(idx) => idx - 1,
+    };
+    let line_start = line_starts[line];
+    let character = content[line_start..offset]
+        .chars()
+        .map(|c| c.len_utf16() as u32)
+        .sum();
+    Position {
+        line: line as u32,
+        character,
     }
 }
 

@@ -7,9 +7,9 @@ use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::references::push_unique_location;
+use crate::references::push_location;
 use crate::symbol_map::{SymbolKind, SymbolMap};
-use crate::text_position::offset_to_position;
+use crate::text_position::LineIndex;
 
 #[derive(Debug)]
 pub(crate) struct ConfigKeyMatch {
@@ -246,6 +246,83 @@ impl Backend {
             .collect()
     }
 
+    /// Visit every config file a Laravel project reads, highest precedence
+    /// first, with the key prefix its entries live under: the project's
+    /// own `config/` files, then the files service providers register, then
+    /// the framework's defaults.
+    ///
+    /// Config-key completion and config-type resolution both read the
+    /// config through here, so they cannot see different files.
+    ///
+    /// The project's files are discovered with a direct disk walk rather
+    /// than through `user_file_symbol_maps`, which forces the workspace
+    /// index. Config-type resolution runs *inside* class loading
+    /// (`patch_storage_disk_type`) and inside the blade injected-vars
+    /// refresh the index itself performs, so ensuring the index there
+    /// re-enters the index lock and the enumeration cache's own build lock
+    /// and deadlocks. Only the files' contents are needed, not their symbol
+    /// maps. Files that are open in the editor but not yet on disk are taken
+    /// from the already-parsed snapshot, without blocking on the index.
+    pub(crate) fn for_each_config_source(&self, mut visit: impl FnMut(&str, &str)) {
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        let mut config_uris: Vec<String> = Vec::new();
+        if let Some(root) = &workspace_root {
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
+            let filters = self.index_filters();
+            for path in crate::references::collect_php_files_gitignore(
+                root,
+                &vendor_dir_paths,
+                &filters,
+                Some(self.followed_links()),
+            ) {
+                let uri = crate::util::path_to_uri(&path);
+                if laravel_config_prefix_from_uri(&uri).is_some() {
+                    config_uris.push(uri);
+                }
+            }
+        }
+        for (uri, _) in self.user_file_symbol_maps_nonblocking() {
+            if laravel_config_prefix_from_uri(&uri).is_some() && !config_uris.contains(&uri) {
+                config_uris.push(uri);
+            }
+        }
+        // Deterministic order regardless of walk or map order.
+        config_uris.sort();
+        for file_uri in &config_uris {
+            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
+                continue;
+            };
+            if let Some(content) = self.get_file_content_arc(file_uri) {
+                visit(&prefix, &content);
+            }
+        }
+
+        for res in &self.laravel_provider_resources.read().config_files {
+            if let Ok(content) = std::fs::read_to_string(&res.path) {
+                visit(&res.namespace, &content);
+            }
+        }
+
+        let Some(root) = workspace_root else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(root.join("vendor/laravel/framework/config")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|e| e == "php") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                visit(stem, &content);
+            }
+        }
+    }
+
     /// Whether the workspace is an application rather than a library; see
     /// [`Backend::is_application`](crate::Backend::is_application).
     pub(crate) fn is_application_project(&self) -> bool {
@@ -376,10 +453,10 @@ pub(crate) fn find_all_config_references(
             Ok(u) => u,
             Err(_) => continue,
         };
-        let file_content = match backend.get_file_content_arc(file_uri) {
-            Some(c) => c,
-            None => continue,
-        };
+        // Read only once a span matches, and convert every match through
+        // one line table rather than rescanning the file per hit.
+        let file_content = std::cell::OnceCell::new();
+        let lines = std::cell::OnceCell::new();
         for span in &symbol_map.spans {
             if let SymbolKind::LaravelStringKey {
                 kind: crate::symbol_map::LaravelStringKind::Config,
@@ -388,9 +465,16 @@ pub(crate) fn find_all_config_references(
             } = &span.kind
                 && key == target_key
             {
-                let start = offset_to_position(&file_content, span.start as usize);
-                let end = offset_to_position(&file_content, span.end as usize);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                let Some(content) = file_content
+                    .get_or_init(|| backend.get_file_content_arc(file_uri))
+                    .as_ref()
+                else {
+                    break;
+                };
+                let lines = lines.get_or_init(|| LineIndex::new(content));
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
+                push_location(&mut locations, &parsed_uri, start, end);
             }
         }
     }
@@ -410,13 +494,15 @@ pub(crate) fn find_all_config_references(
                 Some(c) => c,
                 None => continue,
             };
+            let lines = std::cell::OnceCell::new();
             for decl in collect_laravel_config_declarations(&file_content, &prefix) {
                 if decl.key != target_key {
                     continue;
                 }
-                let start = offset_to_position(&file_content, decl.start);
-                let end = offset_to_position(&file_content, decl.end);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                let lines = lines.get_or_init(|| LineIndex::new(&file_content));
+                let start = lines.position(decl.start);
+                let end = lines.position(decl.end);
+                push_location(&mut locations, &parsed_uri, start, end);
             }
         }
     }

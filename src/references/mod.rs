@@ -33,6 +33,7 @@ mod classes;
 mod covers;
 mod dispatch;
 mod functions;
+mod member_scope;
 mod members;
 mod variables;
 
@@ -213,8 +214,12 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
 }
 
 /// Put the locations a Find References answer carries into the order an
-/// editor lists them: by file, then by position within it, with exact
-/// duplicates collapsed.
+/// editor lists them: by file, then by position within it, with the
+/// locations that start at the same place collapsed to the first one found.
+///
+/// This is the one place a search de-duplicates. Checking every hit
+/// against every location found so far is quadratic in the hit count, and
+/// a widely used name has thousands of them.
 pub(crate) fn sort_locations_for_references(locations: &mut Vec<Location>) {
     locations.sort_by(|a, b| {
         a.uri
@@ -223,7 +228,9 @@ pub(crate) fn sort_locations_for_references(locations: &mut Vec<Location>) {
             .then(a.range.start.line.cmp(&b.range.start.line))
             .then(a.range.start.character.cmp(&b.range.start.character))
     });
-    locations.dedup();
+    locations.dedup_by(|later, earlier| {
+        later.uri == earlier.uri && later.range.start == earlier.range.start
+    });
 }
 
 /// Check whether a resolved class name matches the target FQN.
@@ -290,7 +297,7 @@ fn symbol_candidate_names(target: &str, target_short: &str) -> Vec<String> {
 pub(super) fn member_candidate_keys(
     target_member: &str,
     target_is_static: bool,
-    hierarchy: Option<&members::MemberScope>,
+    hierarchy: Option<&member_scope::MemberScope>,
 ) -> Vec<ReferenceIndexKey> {
     let mut keys = vec![ReferenceIndexKey::Member {
         name: target_member.to_string(),
@@ -381,24 +388,71 @@ fn visit_workspace_files_gitignore(
     }
 }
 
-/// Push a location only if it is not already present (deduplication).
-pub(crate) fn push_unique_location(
+/// A candidate file of a reference search, read only once a hit in it
+/// needs the text.
+///
+/// Most candidate files turn out to hold nothing, so reading one up front
+/// is wasted. Once one is read, every hit in it shares one line table:
+/// converting each hit with [`offset_to_position`] rescans the file from
+/// the top, which makes a busy file quadratic in its own size.
+///
+/// [`offset_to_position`]: crate::text_position::offset_to_position
+pub(super) struct CandidateFile<'a> {
+    backend: &'a Backend,
+    uri: &'a str,
+    content: std::cell::OnceCell<Option<Arc<String>>>,
+    line_starts: std::cell::OnceCell<Vec<usize>>,
+}
+
+impl<'a> CandidateFile<'a> {
+    pub(super) fn new(backend: &'a Backend, uri: &'a str) -> Self {
+        Self {
+            backend,
+            uri,
+            content: std::cell::OnceCell::new(),
+            line_starts: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The text Find References reads the file as (the virtual PHP of a
+    /// Blade template), or `None` when it cannot be read.
+    pub(super) fn content(&self) -> Option<&Arc<String>> {
+        self.content
+            .get_or_init(|| self.backend.reference_file_content_arc(self.uri))
+            .as_ref()
+    }
+
+    /// The position of a byte offset in [`Self::content`].
+    pub(super) fn position(&self, offset: u32) -> Option<Position> {
+        let content = self.content()?;
+        let line_starts = self
+            .line_starts
+            .get_or_init(|| crate::text_position::line_starts(content));
+        Some(crate::text_position::position_in(
+            content,
+            line_starts,
+            offset as usize,
+        ))
+    }
+
+    /// The range between two byte offsets in [`Self::content`].
+    pub(super) fn range(&self, start: u32, end: u32) -> Option<Range> {
+        Some(Range::new(self.position(start)?, self.position(end)?))
+    }
+}
+
+/// Record a location. Duplicates are collapsed once, by
+/// [`sort_locations_for_references`], when the search is done.
+pub(crate) fn push_location(
     locations: &mut Vec<Location>,
     uri: &Url,
     start: Position,
     end: Position,
 ) {
-    let already_present = locations.iter().any(|l| {
-        l.uri == *uri
-            && l.range.start.line == start.line
-            && l.range.start.character == start.character
+    locations.push(Location {
+        uri: uri.clone(),
+        range: Range { start, end },
     });
-    if !already_present {
-        locations.push(Location {
-            uri: uri.clone(),
-            range: Range { start, end },
-        });
-    }
 }
 
 #[cfg(test)]

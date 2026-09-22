@@ -17,13 +17,14 @@ impl Backend {
     /// byte-prefiltered inside
     /// [`scan_gate_registrations`](crate::virtual_members::laravel::scan_gate_registrations)
     /// so only candidates are parsed.
-    pub(crate) fn build_laravel_gate_index(&self) {
+    pub(crate) fn build_laravel_gate_index(&self, providers: &super::LaravelProviders) {
         let mut index = crate::virtual_members::laravel::LaravelGateIndex::default();
         // Read from `composer.json` during init and not recoverable from the
         // provider scan below, so it has to survive the fresh index.
         index
             .set_runtime_permission_package(self.laravel_gates.read().runtime_permission_package());
-        let scanned = self.scan_providers_into(&mut index.files, scan_gate_registrations);
+        let scanned =
+            self.scan_providers_into(providers, &mut index.files, scan_gate_registrations);
 
         index.rebuild();
         let ability_count = index.definition_names().len();

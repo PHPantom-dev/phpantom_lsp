@@ -8,11 +8,12 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Range};
+use std::cell::OnceCell;
 
-use crate::references::push_unique_location;
+use tower_lsp::lsp_types::Location;
+
+use crate::atom::Atom;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind};
-use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
 use crate::util::build_fqn;
 
@@ -120,8 +121,8 @@ impl Backend {
                 Err(_) => continue,
             };
 
-            // Lazily load file content only if we find a true FQN match.
-            let mut file_content: Option<Arc<String>> = None;
+            // Content is loaded only once a true FQN match needs a position.
+            let file = CandidateFile::new(self, file_uri);
 
             for span in &symbol_map.spans {
                 let matched = match &span.kind {
@@ -154,18 +155,11 @@ impl Backend {
                     _ => false,
                 };
 
-                if matched {
-                    if file_content.is_none() {
-                        file_content = self.reference_file_content_arc(file_uri);
-                    }
-                    if let Some(ref content) = file_content {
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
-                    }
+                if matched && let Some(range) = file.range(span.start, span.end) {
+                    locations.push(Location {
+                        uri: parsed_uri.clone(),
+                        range,
+                    });
                 }
             }
         }
@@ -233,15 +227,30 @@ impl Backend {
                 resolved_names: resolved_names.as_deref(),
                 use_map: std::cell::OnceCell::new(),
             };
-            let file_ctx = std::cell::OnceCell::new();
-
             let Some(parsed_uri) = Url::parse(file_uri).ok() else {
                 continue;
             };
 
-            let mut file_content: Option<Arc<String>> = None;
+            let file = CandidateFile::new(self, file_uri);
+            // `parent::__construct()` and its siblings are member accesses,
+            // so their receivers go through the same pass (and the same
+            // recorded answers) as every other member search.
+            let receivers = OnceCell::new();
+            let constructor_receivers = || {
+                receivers
+                    .get_or_init(|| {
+                        let names: Vec<Atom> = symbol_map
+                            .member_access_indices
+                            .keys()
+                            .filter(|name| is_constructor_name(name))
+                            .copied()
+                            .collect();
+                        self.member_receivers_for(&file, symbol_map, &names)
+                    })
+                    .clone()
+            };
 
-            for span in &symbol_map.spans {
+            for (span_index, span) in symbol_map.spans.iter().enumerate() {
                 let matched = match &span.kind {
                     // `new ClassName(...)` carries `ClassRefContext::New`;
                     // `#[ClassName(...)]` attribute usages carry
@@ -266,10 +275,7 @@ impl Backend {
                     SymbolKind::SelfStaticParent(ssp_kind)
                         if *ssp_kind != SelfStaticParentKind::This =>
                     {
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        match &file_content {
+                        match file.content() {
                             Some(content) if is_new_operand(content, span.start) => {
                                 match self.resolve_keyword_to_fqn(
                                     ssp_kind,
@@ -289,46 +295,27 @@ impl Backend {
                     // `Foo::__construct()` lands here.  Resolve the subject
                     // class and keep the call when it falls within the
                     // constructor's owning hierarchy.
-                    SymbolKind::MemberAccess {
-                        subject_text,
-                        member_name,
-                        is_static,
-                        ..
-                    } if is_constructor_name(member_name) => {
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        match file_content
-                            .as_ref()
-                            .and_then(|c| Some((c, symbol_map.source(c)?)))
-                        {
-                            Some((content, source)) => {
-                                let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
-                                self.resolve_subject_to_fqns(
-                                    subject_text.as_str(source),
-                                    *is_static,
-                                    ctx,
-                                    span.start,
-                                    content,
-                                )
-                                .iter()
-                                .any(|fqn| scoped.contains(&fold_class_fqn(fqn)))
-                            }
-                            None => false,
-                        }
+                    SymbolKind::MemberAccess { member_name, .. }
+                        if is_constructor_name(member_name) =>
+                    {
+                        constructor_receivers()
+                            .and_then(|file| {
+                                file.resolved_access(span_index).map(|(_, targets)| {
+                                    targets
+                                        .iter()
+                                        .any(|fqn| scoped.contains(&fold_class_fqn(fqn)))
+                                })
+                            })
+                            .unwrap_or(false)
                     }
                     _ => false,
                 };
 
-                if matched {
-                    if file_content.is_none() {
-                        file_content = self.reference_file_content_arc(file_uri);
-                    }
-                    if let Some(content) = &file_content {
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        push_unique_location(&mut locations, &parsed_uri, start, end);
-                    }
+                if matched && let Some(range) = file.range(span.start, span.end) {
+                    locations.push(Location {
+                        uri: parsed_uri.clone(),
+                        range,
+                    });
                 }
             }
 
@@ -341,16 +328,15 @@ impl Backend {
 
                     for method in class.methods.iter() {
                         if is_constructor_name(&method.name) && method.name_offset != 0 {
-                            if file_content.is_none() {
-                                file_content = self.reference_file_content_arc(file_uri);
-                            }
-                            let Some(content) = &file_content else {
+                            let offset = method.name_offset;
+                            let Some(range) = file.range(offset, offset + method.name.len() as u32)
+                            else {
                                 break;
                             };
-                            let offset = method.name_offset as usize;
-                            let start = offset_to_position(content, offset);
-                            let end = offset_to_position(content, offset + method.name.len());
-                            push_unique_location(&mut locations, &parsed_uri, start, end);
+                            locations.push(Location {
+                                uri: parsed_uri.clone(),
+                                range,
+                            });
                         }
                     }
                 }
