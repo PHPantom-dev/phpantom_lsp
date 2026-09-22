@@ -250,6 +250,10 @@ fn collect_php_files(
 
     let skip_vendor = skip_vendor.to_vec();
     let filter_excludes = std::sync::Arc::clone(filters);
+    // Same one-visit-per-target rule the shared workspace walker applies,
+    // so `analyze` cannot report the same file once per spelling a chain
+    // of links gives it.
+    let claims = crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None);
     let walker = WalkBuilder::new(dir)
         .git_ignore(true)
         .git_global(true)
@@ -257,14 +261,19 @@ fn collect_php_files(
         .hidden(true)
         .parents(true)
         .ignore(true)
+        .follow_links(true)
         .filter_entry(move |entry| {
             let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir
-                && !skip_vendor.is_empty()
-                && let Ok(canonical) = entry.path().canonicalize()
-                && skip_vendor.iter().any(|v| canonical.starts_with(v))
-            {
-                return false;
+            if is_dir {
+                if !skip_vendor.is_empty()
+                    && let Ok(canonical) = entry.path().canonicalize()
+                    && skip_vendor.iter().any(|v| canonical.starts_with(v))
+                {
+                    return false;
+                }
+                if entry.depth() > 0 && entry.path_is_symlink() && !claims.claim(entry.path()) {
+                    return false;
+                }
             }
             !filter_excludes.is_excluded_entry(entry.path(), is_dir)
         })
@@ -487,5 +496,62 @@ mod tests {
         );
 
         assert_eq!(files, vec![root.join("src/A.php"), root.join("src/B.php")]);
+    }
+
+    #[test]
+    fn discover_user_files_follows_interior_symlink_when_enabled() {
+        // CLI analyse's user-file walker keeps the same symlink
+        // contract as the workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, &[]);
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn discover_user_files_walks_a_link_target_once() {
+        // Two links to one tree must not make `analyze` report the same
+        // file, and so the same diagnostics, twice.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Dup.php"), "<?php\n").unwrap();
+
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, &[]);
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
+        );
     }
 }

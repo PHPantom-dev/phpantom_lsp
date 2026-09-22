@@ -326,9 +326,10 @@ pub(crate) fn collect_php_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    followed: Option<&crate::classmap_scanner::FollowedLinks>,
 ) -> Vec<PathBuf> {
     let mut result = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, followed, |path| {
         if filters.is_php_file(path) {
             result.push(path.to_path_buf());
         }
@@ -342,10 +343,11 @@ pub(crate) fn collect_workspace_index_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    followed: Option<&crate::classmap_scanner::FollowedLinks>,
 ) -> (Vec<PathBuf>, Vec<PathBuf>) {
     let mut php_files = Vec::new();
     let mut resource_files = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
+    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, followed, |path| {
         if filters.is_php_file(path) {
             php_files.push(path.to_path_buf());
         } else if crate::resource_navigation::is_resource_path(path) {
@@ -359,6 +361,7 @@ fn visit_workspace_files_gitignore(
     root: &Path,
     vendor_dir_paths: &[PathBuf],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
+    followed: Option<&crate::classmap_scanner::FollowedLinks>,
     mut visit: impl FnMut(&Path),
 ) {
     let walker = crate::classmap_scanner::workspace_walk_builder(
@@ -366,6 +369,7 @@ fn visit_workspace_files_gitignore(
         std::sync::Arc::new(vendor_dir_paths.to_vec()),
         std::sync::Arc::clone(filters),
         false,
+        crate::classmap_scanner::LinkClaims::new([root.to_path_buf()], followed),
     )
     .build();
 

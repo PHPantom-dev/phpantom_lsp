@@ -177,7 +177,11 @@ impl Backend {
                 }
                 let filters = self.index_filters();
                 let mut scan = classmap_scanner::scan_workspace_fallback_full(
-                    root, &skip_dirs, &filters, progress,
+                    root,
+                    &skip_dirs,
+                    &filters,
+                    progress,
+                    Some(self.followed_links()),
                 );
 
                 // Merge vendor packages (excluded from the workspace
@@ -192,6 +196,7 @@ impl Backend {
                     &explicit_deps,
                     &filters,
                     progress,
+                    Some(self.followed_links()),
                 );
                 let package_roots = std::mem::take(&mut vendor_scan.package_roots);
 
@@ -568,6 +573,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
         {
@@ -623,6 +629,7 @@ impl Backend {
             &skip_dirs,
             &self.index_filters(),
             progress,
+            Some(self.followed_links()),
         );
         self.populate_autoload_indices(&scan);
 

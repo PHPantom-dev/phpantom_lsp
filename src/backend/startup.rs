@@ -133,6 +133,20 @@ impl Backend {
         self.supports_inlay_hint_refresh
             .store(client_supports_inlay_hint_refresh, Ordering::Release);
 
+        // A tree indexed through a symlink is not inside any workspace
+        // folder, so being told about a change in it takes a watcher that
+        // names the link.  Clients that predate LSP 3.17 get none, and a
+        // `git pull` into a linked framework needs a reload there.
+        let client_supports_relative_pattern_watchers = params
+            .capabilities
+            .workspace
+            .as_ref()
+            .and_then(|ws| ws.did_change_watched_files.as_ref())
+            .and_then(|w| w.relative_pattern_support)
+            .unwrap_or(false);
+        self.supports_relative_pattern_watchers
+            .store(client_supports_relative_pattern_watchers, Ordering::Release);
+
         let client_supports_type_hierarchy_dynamic_registration = params
             .capabilities
             .text_document
@@ -492,10 +506,10 @@ impl Backend {
         // Built by the same helper `reload_config` uses to keep this
         // registration current when the extension list changes mid-session
         // (see `indexing::watch::reregister_watched_files_if_changed`).
-        let (watched_files_registration, extra_extensions, is_laravel) =
+        let (watched_files_registration, watched_file_inputs) =
             self.build_watched_file_registration();
         registrations.push(watched_files_registration);
-        *self.registered_watcher_state.write() = Some((extra_extensions, is_laravel));
+        *self.registered_watcher_state.write() = Some(watched_file_inputs);
 
         if let Some(client) = &self.client {
             let _ = client.register_capability(registrations).await;
@@ -647,6 +661,13 @@ impl Backend {
             progress_backend
                 .full_index_in_progress
                 .store(false, Ordering::Release);
+
+            // The walk above covers the whole workspace root, so it is
+            // where a symlink nested below the roots the Composer pipeline
+            // walked first turns up.  Each one needs its own watcher, and
+            // the registration built during `initialized` could only carry
+            // the links known by then.
+            progress_backend.reregister_watched_files_if_changed();
 
             if let Some(tok) = progress_token {
                 progress_backend

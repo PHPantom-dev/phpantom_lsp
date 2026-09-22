@@ -341,6 +341,7 @@ pub(crate) fn collect_php_files(
         std::sync::Arc::new(vendor_dir_paths.to_vec()),
         std::sync::Arc::clone(filters),
         false,
+        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
     )
     .build();
 
@@ -647,5 +648,60 @@ mod tests {
     fn unescape_string_literal_rejects_unquoted_input() {
         assert_eq!(unescape_php_string_literal("bare"), None);
         assert_eq!(unescape_php_string_literal("'unterminated"), None);
+    }
+
+    #[test]
+    fn collect_php_files_follows_interior_symlink() {
+        // Go-to-implementation's walker keeps the same symlink contract
+        // as the other workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn collect_php_files_walks_a_link_target_once() {
+        // Two links to one tree must not make go-to-implementation offer
+        // the same class twice under two spellings.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
+
+        let files = collect_php_files(&root, &[], &crate::classmap_scanner::IndexFilters::empty());
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
+        );
     }
 }

@@ -272,6 +272,7 @@ impl Backend {
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
+                    Some(self.followed_links()),
                 );
             tracing::info!(
                 "ensure_workspace_indexed: Phase 2 disk walk found {} PHP and {} resource files in {:?}",

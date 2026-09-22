@@ -123,6 +123,7 @@ impl Backend {
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
+                    Some(self.followed_links()),
                 ) {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());

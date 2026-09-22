@@ -131,11 +131,24 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
 pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
 
-/// The `[indexing] extensions` set and Laravel classification last pushed
-/// to the client as a `workspace/didChangeWatchedFiles` registration:
-/// `(extra_extensions, is_laravel)`. `None` until the first registration.
-/// See [`Backend::registered_watcher_state`].
-pub(crate) type WatchedFileRegistrationState = Option<(Vec<String>, bool)>;
+/// What the last `workspace/didChangeWatchedFiles` registration pushed to
+/// the client was built from, so the next one can tell whether anything
+/// it watches has moved. See [`Backend::registered_watcher_state`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WatchedFileInputs {
+    /// The `[indexing] extensions` set, one watcher each.
+    pub(crate) extra_extensions: Vec<String>,
+    /// Whether the project was classified as Laravel, which adds the
+    /// schema watchers.
+    pub(crate) is_laravel: bool,
+    /// Directory symlinks the index reached through, one relative-pattern
+    /// watcher each. Empty when the client cannot match a relative
+    /// pattern, since then there is nothing to ask it for.
+    pub(crate) followed_links: Vec<std::path::PathBuf>,
+}
+
+/// `None` until the first registration.
+pub(crate) type WatchedFileRegistrationState = Option<WatchedFileInputs>;
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
@@ -903,6 +916,17 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client can match a watcher pattern against a base URI
+    /// (`workspace.didChangeWatchedFiles.relativePatternSupport`).
+    ///
+    /// A plain `**/*.php` pattern is matched against the files of the
+    /// workspace folders, which gives a client no reason to watch a
+    /// directory living outside them, and nothing obliges it to traverse a
+    /// symlink to find one. A relative pattern names the link outright,
+    /// which is the only way in the protocol to ask for those events;
+    /// without the capability, a tree reached through a link is indexed but
+    /// not watched.
+    pub(crate) supports_relative_pattern_watchers: Arc<std::sync::atomic::AtomicBool>,
     /// The `[indexing] extensions` set and Laravel classification last
     /// pushed to the client as a `workspace/didChangeWatchedFiles`
     /// registration. `None` until `initialized` performs the first
@@ -1241,6 +1265,7 @@ impl Backend {
                 std::sync::atomic::AtomicBool::new(false),
             ),
             registered_watcher_state: Arc::new(RwLock::new(None)),
+            supports_relative_pattern_watchers: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1992,6 +2017,9 @@ impl Backend {
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_relative_pattern_watchers: Arc::clone(
+                &self.supports_relative_pattern_watchers,
+            ),
             registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
@@ -2031,6 +2059,14 @@ impl Backend {
     /// `.phpantom.toml` (or the default config when the file is missing).
     pub fn config(&self) -> config::Config {
         self.workspace.config.lock().clone()
+    }
+
+    /// The directory symlinks the workspace walks have indexed through.
+    ///
+    /// Walks report into it as they discover links; the watcher
+    /// registration and the watched-file handler read it back.
+    pub(crate) fn followed_links(&self) -> &crate::classmap_scanner::FollowedLinks {
+        &self.workspace.followed_links
     }
 
     /// Replace the current configuration.

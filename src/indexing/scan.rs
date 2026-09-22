@@ -108,6 +108,7 @@ impl Backend {
                 &explicit_deps,
                 &self.index_filters(),
                 None,
+                Some(self.followed_links()),
             );
             // Package roots came out of the same `installed.json` parse
             // `scan_vendor_packages_with_skip` already did; no need to
@@ -527,6 +528,7 @@ impl Backend {
                             &skip_dirs,
                             &self.index_filters(),
                             progress,
+                            Some(self.followed_links()),
                         );
                     }
                 }
@@ -562,6 +564,7 @@ impl Backend {
             skip_paths,
             &filters,
             progress,
+            Some(self.followed_links()),
         );
 
         // Scan vendor packages from installed.json.
@@ -576,6 +579,7 @@ impl Backend {
             &explicit_deps,
             &filters,
             progress,
+            Some(self.followed_links()),
         );
 
         let mut result = WorkspaceScanResult {
