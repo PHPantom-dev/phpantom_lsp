@@ -565,6 +565,14 @@ impl Backend {
                 // scanning runs one file per worker thread.
                 let recording = crate::resolution_deps::record_consulted_names();
 
+                // A scan worker is a thread of its own, so the request's
+                // resolved-class cache is not active on it and every model
+                // this file's receivers reach would be merged and synthesized
+                // from scratch, once per candidate file.
+                let _resolved_classes_guard =
+                    crate::virtual_members::with_active_resolved_class_cache(
+                        &self.resolved_class_cache,
+                    );
                 let _parse_cache_guard = crate::parser::with_parse_cache(&content);
                 let file_ctx = self.file_context(file_uri);
 

@@ -1132,28 +1132,36 @@ path) and `narrowed_by_rewalk` in
 
 ## P59. A candidate file with a variable receiver is still walked in full
 
-**Impact: Medium-High · Complexity: High**
+**Impact: Medium · Complexity: High**
 
 A member-reference candidate is now dropped before it is opened when
 every access to the searched name has a receiver the file's own text
 settles: `$this`, `self`, `static`, `parent`, and a static access on a
 class name written at the access site all resolve from the enclosing
 class and the import table, both of which are already in memory.
-Measured on a 6,700-file Laravel application, the eight declarations of
-one controller selected 1,225 files, and the hierarchy each was filtered
-against held exactly one class. 683 of those files have nothing but
-`$this`, `self`, or `static` receivers and go that way, along with
-whatever share of the rest names its class at the access.
 
-What remains is the other 542, and they are the expensive half: a
-receiver written as `$order` or `$repo->find()` needs the type engine,
-so the file is read and walked to find out it belongs to an unrelated
-class. On a large application a common name (`handle`, `get`, `name`)
-puts hundreds of those in every candidate set.
+What remains is the files whose receivers need the type engine, written
+as `$order` or `$repo->find()`: each is read and walked to find out it
+belongs to an unrelated class. How many those are depends entirely on
+the names being searched. Measured on a 1,400-file Laravel application,
+a controller's seven method names selected 60 candidates and kept 19,
+while a data object's 26 property and method names (`id`, `name`,
+`title`, and the rest of that family) selected 673 and kept 404 to find
+29 references. A common name is what fills a candidate set, and a class
+that declares several of them fills it several times over.
 
-The narrowing that suggests itself for them, intersecting with the files
-that mention a class in the hierarchy, is not sound: a receiver reaches
-its type through return types declared elsewhere, so
+The filter itself costs half a millisecond over the whole workspace, and
+a second search of the same declarations is answered from the
+resolved-member layer in around 4 ms. So the whole of the remaining cost
+is the first walk of each kept file, which the shared resolved-class
+store brought down from around 77 ms to around 18 ms of CPU per file
+(0.43 s wall for those 404, against 1.19 s before). Narrowing the kept
+set is worth roughly that 0.4 s on a first search and nothing on a
+repeat, which is why this is no longer Medium-High.
+
+The narrowing that suggests itself, intersecting with the files that
+mention a class in the hierarchy, is not sound: a receiver reaches its
+type through return types declared elsewhere, so
 `$repo->find()->publish()` names neither `Article` nor the controller.
 It is precisely the models, the classes most often returned from another
 file, that it would break.

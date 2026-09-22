@@ -234,6 +234,11 @@ impl Backend {
 
         let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        // This runs on its own blocking thread rather than under an LSP
+        // request, so it has to hand the workspace's resolved classes to the
+        // search itself; see `Backend::with_file_content`.
+        let _resolved_classes_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
 
         // A declaration may have moved or gone since the lens was requested.
         // Exclude stale offsets before preparing the shared semantic scan so

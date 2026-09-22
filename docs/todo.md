@@ -36,7 +36,7 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| P59  | [A candidate file with a variable receiver is still walked in full](todo/performance.md#p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full) | Medium-High | High        |
+| P59  | [A candidate file with a variable receiver is still walked in full](todo/performance.md#p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full) | Medium      | High        |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
@@ -94,6 +94,7 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B324 | [Two anonymous classes at the same offset share one resolution](todo/bugs.md#b324-two-anonymous-classes-at-the-same-offset-share-one-resolution)                           | Medium      | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
