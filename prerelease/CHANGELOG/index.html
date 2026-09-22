@@ -1272,6 +1272,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Changed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-and-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Performance and memory
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -1420,7 +1437,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#performance-and-memory" class="md-nav__link">
+  <a href="#performance-and-memory_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Performance and memory
@@ -1954,6 +1971,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Changed">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#performance-and-memory" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Performance and memory
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
         
           <li class="md-nav__item">
@@ -2102,7 +2136,7 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#performance-and-memory" class="md-nav__link">
+  <a href="#performance-and-memory_1" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         Performance and memory
@@ -2612,6 +2646,11 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Extract interface is offered only to editors that can create files.</strong> The action writes the new interface to a file of its own, which an editor has to say it accepts (the <code>create</code> resource operation) before a server may send it. Editors that do not are no longer shown an action they cannot apply.</li>
 <li><strong>Updated the bundled mago toolchain to 1.47.5.</strong> The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.</li>
 </ul>
+<h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
+<ul>
+<li><strong>The workspace symbol picker no longer reads the whole project on every keystroke.</strong> Searching for a symbol used to fetch the contents of every indexed file, once for each class the file declares, before it had looked at what you typed, so a file that is not open in the editor was read from disk again on each letter. A file is now read only when it declares something the search actually matches, once rather than once per class, and the positions of the symbols it contributes are worked out from a single pass over it instead of a fresh scan from the start of the file for each one.</li>
+<li><strong>Editing a file no longer walks the inheritance of the entire workspace.</strong> Every committed edit re-registers the edited file's classes with the index that answers "what extends this", and refreshing it meant scanning every parent in the project and testing each of their implementor lists. The edges a file contributes are now tracked per class, so an edit touches only those, and registering a class that implements a widely used interface no longer scans the list of everything else that implements it.</li>
+</ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>A method that implements an interface or overrides a parent now keeps its reference-count lens.</strong> The lens was built only when the method had no prototype, so implementing a contract traded the usage count for the <code>◆ Interface::method</code> navigation lens instead of showing both, and the very methods a project most wants a count for, the ones behind a contract, never showed one. Closes #412.</li>
@@ -2863,7 +2902,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Updated the bundled mago toolchain to 1.46.0.</strong> The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @enwi in https://github.com/PHPantom-dev/phpantom_lsp/pull/234.</li>
 <li><strong>Updated embedded phpstorm-stubs.</strong> Brings PHP 8.6 stub coverage, corrected Redis, FFI, enchant, and xmlreader signatures, an <code>openssl_x509_parse()</code> return type fix, and updated default flags for <code>htmlspecialchars()</code>/<code>htmlspecialchars_decode()</code>.</li>
 </ul>
-<h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
+<h4 id="performance-and-memory_1">Performance and memory<a class="headerlink" href="#performance-and-memory_1" title="Permanent link">&para;</a></h4>
 <ul>
 <li><strong>Saving a file no longer re-analyses every other open tab.</strong> A save used to re-run the full diagnostic pass, the most expensive thing PHPantom does, on all open files in case any of them depended on the saved one. It now works out what the save actually changed and re-analyses only the open files that mention one of those names, so unrelated tabs are left alone and completion and hover stay responsive right after a save. Cases the comparison cannot narrow, such as saving a Laravel config, translation, or route file, still refresh every open file as before.</li>
 <li><strong>Classes are pre-resolved for the whole workspace after startup.</strong> Once the background index completes, every known class is resolved in dependency order even when workspace diagnostics are disabled, so the first completion, hover, or go-to-definition against any class reads a warm cache instead of resolving on demand. That pass now spreads across multiple workers rather than running on a single one, substantially cutting the pause between indexing and diagnostics on large Laravel projects. Edits still re-resolve only the affected classes.</li>
