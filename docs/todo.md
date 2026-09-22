@@ -36,7 +36,6 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-| P59  | [A candidate file with a variable receiver is still walked in full](todo/performance.md#p59-a-candidate-file-with-a-variable-receiver-is-still-walked-in-full) | Medium      | High        |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
@@ -197,6 +196,7 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
 | P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
+| P60 | [The first member-reference search of a session still walks its candidates](todo/performance.md#p60-the-first-member-reference-search-of-a-session-still-walks-its-candidates) | Low-Medium  | Very High   |
 | P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |

@@ -1186,3 +1186,103 @@ class Unrelated {
         "the docblock names the class it refers to, so the file is ruled out unread"
     );
 }
+
+/// Walking a body is the expensive half of resolving a receiver, and the body
+/// answers for every access inside it.  A search records those too, so the
+/// file's entry grows past the name that pulled the walk in.
+#[test]
+fn a_walked_body_records_the_other_member_names_it_answers_for() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+    public function cancel(): void {}
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+    $service->cancel();
+}
+function elsewhere(Service $service): void {
+    $service->purge();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    let entry = backend
+        .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
+        .expect("the candidate file was walked for `save`");
+    assert!(
+        entry.covers([crate::atom::atom("cancel")]),
+        "`cancel` sits in the body the walk already entered"
+    );
+    assert!(
+        !entry.covers([crate::atom::atom("purge")]),
+        "`purge` sits in a body the walk never entered, so nothing resolved it"
+    );
+}
+
+/// What a walk recorded is what the next search filters on: a file whose
+/// accesses the layer already resolved to another class is dropped before
+/// anything opens it, even though its receivers are variables the file's own
+/// text cannot settle.
+#[test]
+fn a_file_the_layer_has_already_resolved_is_ruled_out_unread() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const OTHER_URI: &str = "file:///Other.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const OTHER: &str = "<?php\nclass Other {\n    public function save(): void {}\n}\n";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, OTHER_URI, OTHER);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let consumer_map = symbol_map_of(&backend, CONSUMER_URI);
+    let save = crate::atom::atom("save");
+    let other_hierarchy: std::collections::HashSet<String> =
+        std::iter::once("Other".to_string()).collect();
+
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(save, &other_hierarchy)]
+        ),
+        "with nothing resolved yet the variable receiver keeps the file"
+    );
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    assert_eq!(locations.len(), 1, "the consumer calls Service::save");
+
+    assert!(
+        backend.member_accesses_ruled_out(CONSUMER_URI, &consumer_map, &[(save, &other_hierarchy)]),
+        "the entry says the only `save` here is on Service, so a search for \
+         Other::save can drop the file without reading it"
+    );
+    let service_hierarchy: std::collections::HashSet<String> =
+        std::iter::once("Service".to_string()).collect();
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(save, &service_hierarchy)]
+        ),
+        "the same entry keeps the file for the class it did resolve to"
+    );
+}

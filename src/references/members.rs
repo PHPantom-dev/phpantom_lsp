@@ -279,18 +279,45 @@ impl Backend {
     /// being searched, cannot hold a reference and is dropped before
     /// anything opens it.
     ///
-    /// Conservative wherever it cannot be sure: one receiver the symbol map
-    /// cannot settle keeps the whole file.  Every query has to carry a
-    /// hierarchy, since the name-only fallback the search drops to without
-    /// one accepts any receiver and so rules nothing out.
-    fn member_accesses_ruled_out(
+    /// For the receivers it does not settle, the answer comes from the
+    /// resolved-member layer when an earlier search already walked this file
+    /// for the same member name: that entry records what each access resolved
+    /// to, which is exactly what the scan would recompute.  Every walk widens
+    /// its entry to every name the bodies it entered answer for, so a file
+    /// walked for one class rules itself out for the next without being
+    /// opened.
+    ///
+    /// Conservative wherever it cannot be sure: one receiver that is neither
+    /// settled by the text nor recorded keeps the whole file.  Every query has
+    /// to carry a hierarchy, since the name-only fallback the search drops to
+    /// without one accepts any receiver and so rules nothing out.
+    pub(super) fn member_accesses_ruled_out(
         &self,
         uri: &str,
-        symbol_map: &SymbolMap,
+        symbol_map: &Arc<SymbolMap>,
         queries: &[(Atom, &HashSet<String>)],
     ) -> bool {
         let file_ctx = OnceCell::new();
+        let resolved = self.resolved_member_file(uri, symbol_map);
         for (member, hierarchy) in queries {
+            // A recorded entry answers for every access of a name it covers,
+            // settled or not, so it replaces the test below rather than
+            // supplementing it.  An access it holds nothing for resolved to
+            // nothing and cannot be a reference.
+            if let Some(recorded) = resolved
+                .as_ref()
+                .filter(|file| file.covers(std::iter::once(*member)))
+            {
+                for &span_index in symbol_map.member_access_indices(member) {
+                    if let Some((_, targets)) = recorded.resolved_access(span_index)
+                        && targets.iter().any(|fqn| hierarchy.contains(fqn.as_str()))
+                    {
+                        return false;
+                    }
+                }
+                continue;
+            }
+
             for &span_index in symbol_map.member_access_indices(member) {
                 let Some(subject_text) = settled_receiver_text(symbol_map, span_index) else {
                     return false;
@@ -622,6 +649,47 @@ impl Backend {
                         &scope_offsets,
                     );
                 }
+                // Whether the snapshots now in the cache are this file's own
+                // targeted walk.  A targeted walk always leaves the coverage
+                // region-based, so coverage still reading as whole-file means
+                // an outer walk owns the cache and its regions say nothing
+                // about which of this file's offsets were walked.
+                let walked_regions_are_ours = needs_variable_scopes
+                    && !crate::type_engine::variable::forward_walk::scope_coverage_is_whole();
+
+                // The walk above is what costs: a body it entered answers for
+                // every access inside it, not just the one that pulled it in.
+                // Resolving those too turns this file's entry from an answer
+                // to *this* search into an answer the next search for an
+                // unrelated member name can be ruled out by without the file
+                // being opened at all, and costs only the resolutions
+                // themselves — a fraction of the walk that already ran.
+                //
+                // A name is only added when *every* one of its accesses is
+                // answerable here, since a name in `covered` promises the
+                // entry holds each of them: a name half-resolved would read
+                // back as "no receiver" for the rest and silently drop their
+                // references.
+                let mut widened: Vec<Atom> = Vec::new();
+                for (member, indices) in &symbol_map.member_access_indices {
+                    if covered.contains(member) {
+                        continue;
+                    }
+                    let answerable = indices.iter().all(|&span_index| {
+                        settled_receiver_text(symbol_map, span_index).is_some()
+                            || (walked_regions_are_ours
+                                && crate::type_engine::variable::forward_walk::scope_snapshots_cover(
+                                    symbol_map.spans[span_index].start,
+                                ))
+                    });
+                    if answerable {
+                        widened.push(*member);
+                        access_indices.extend_from_slice(indices);
+                    }
+                }
+                let covered: Vec<Atom> = covered.into_iter().chain(widened).collect();
+                access_indices.sort_unstable();
+                access_indices.dedup();
 
                 let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
                 let _resolver_guard =

@@ -118,9 +118,10 @@ function persist(Order $order): void {
     );
 }
 
-/// A receiver walk is the type engine over a whole file, so a query pays for
-/// the member names it asked about and no others.  A later name adds its own
-/// accesses to the same entry rather than re-resolving the ones already there.
+/// A receiver walk is the type engine over a body, so a query pays for the
+/// bodies holding the accesses it asked about and no others.  A name whose
+/// accesses sit elsewhere in the file is left for a later query, which adds
+/// them to the same entry rather than re-resolving what is already there.
 #[test]
 fn later_member_batches_extend_the_semantic_file_index() {
     const SERVICE_URI: &str = "file:///Service.php";
@@ -134,6 +135,8 @@ class Service {
     const CONSUMER: &str = r#"<?php
 function run(Service $service): void {
     $service->save();
+}
+function later(Service $service): void {
     $service->cancel();
 }
 "#;
@@ -178,7 +181,8 @@ function run(Service $service): void {
     );
     assert!(
         !indexed.covers([crate::atom::atom("cancel")]),
-        "a name nothing asked about must not be walked for"
+        "a name whose only access sits in a body the walk never entered must \
+         not be walked for"
     );
     assert!(
         !indexed.targets_for_span(save_span).is_empty(),

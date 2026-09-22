@@ -1130,58 +1130,52 @@ path) and `narrowed_by_rewalk` in
 
 ---
 
-## P59. A candidate file with a variable receiver is still walked in full
+## P60. The first member-reference search of a session still walks its candidates
 
-**Impact: Medium · Complexity: High**
+**Impact: Low-Medium · Complexity: Very High**
 
-A member-reference candidate is now dropped before it is opened when
-every access to the searched name has a receiver the file's own text
-settles: `$this`, `self`, `static`, `parent`, and a static access on a
-class name written at the access site all resolve from the enclosing
-class and the import table, both of which are already in memory.
+A candidate file is now walked at most once for the whole workspace: the
+walk records what every access in the bodies it entered resolves to, and
+the pre-open filter reads those recordings, so the second search for any
+other class drops the file without opening it. Over a sweep of 250
+classes that is 2.95 s → 1.72 s on a 1,400-file Laravel application and
+0.42 s → 0.23 s on PHPMD, with identical results.
 
-What remains is the files whose receivers need the type engine, written
-as `$order` or `$repo->find()`: each is read and walked to find out it
-belongs to an unrelated class. How many those are depends entirely on
-the names being searched. Measured on a 1,400-file Laravel application,
-a controller's seven method names selected 60 candidates and kept 19,
-while a data object's 26 property and method names (`id`, `name`,
-`title`, and the rest of that family) selected 673 and kept 404 to find
-29 references. A common name is what fills a candidate set, and a class
-that declares several of them fills it several times over.
+What is left is the first search over a cold layer. On the same Laravel
+application a data object's 25 property and method names (`id`, `name`,
+`title`, and the rest of that family) select 463 candidates and keep 404
+to find 29 references, and walking those costs around 0.49 s wall
+(8.3 s CPU across the pool). Of that CPU, 99 % is
+`build_diagnostic_scopes_for_offsets`: resolving a receiver means
+forward-walking the body it sits in from the first statement, which for a
+Laravel feature test is 30 ms for a single access. The resolutions
+themselves are 0.09 s. Profiling the walk is flat across the type engine,
+the parser and the interner, so there is no hot spot to remove; only the
+walk count is worth attacking.
 
-The filter itself costs half a millisecond over the whole workspace, and
-a second search of the same declarations is answered from the
-resolved-member layer in around 4 ms. So the whole of the remaining cost
-is the first walk of each kept file, which the shared resolved-class
-store brought down from around 77 ms to around 18 ms of CPU per file
-(0.43 s wall for those 404, against 1.19 s before). Narrowing the kept
-set is worth roughly that 0.4 s on a first search and nothing on a
-repeat, which is why this is no longer Medium-High.
+Two narrowings do not work. Intersecting with the files that mention a
+class in the hierarchy is not sound: a receiver reaches its type through
+return types declared elsewhere, so `$repo->find()->publish()` names
+neither `Article` nor the controller. Closing that over the declared-type
+graph (the classes from which the hierarchy is reachable by chaining
+calls) is sound but degenerates on Laravel, where `app()`,
+`Container::make()` and `Collection::first()` have template return types
+that make every class reachable from every other one.
 
-The narrowing that suggests itself, intersecting with the files that
-mention a class in the hierarchy, is not sound: a receiver reaches its
-type through return types declared elsewhere, so
-`$repo->find()->publish()` names neither `Article` nor the controller.
-It is precisely the models, the classes most often returned from another
-file, that it would break.
+That leaves earning the layer ahead of the search rather than narrowing
+what it looks at: populating it in the background once the workspace is
+indexed, maintained by the dependency-keyed invalidation
+`ResolvedMemberFile` already carries (`resolution_deps`) rather than
+rebuilt on every edit. The cost is a receiver walk of every user file,
+which is a diagnostic pass over the workspace. That is seconds of
+background CPU on this application and scales with the workspace, so it
+needs a budget and a cancellation story before it is worth the memory it
+would hold, for a saving that is under half a second once per class per
+session.
 
-A sound narrowing needs the index to record what those accesses resolve
-*to*, not just what they are named, which is the same information
-`ResolvedMemberFile` holds lazily. Making it a product of the workspace
-index rather than of the first search that needs it is the substantial
-part: resolving every receiver in the workspace eagerly is the cost of a
-diagnostic pass over it, which no startup budget has room for, so it has
-to be earned incrementally and kept. The dependency-keyed invalidation
-`ResolvedMemberFile` already carries (`resolution_deps`) is what a
-durable index would be maintained by, rather than by rebuilding it on
-every edit.
-
-**Where to look:** `settled_receiver_text` and
-`member_accesses_ruled_out` in `references/members.rs` for the receivers
-already handled, `member_declaration_references_batch_in` in the same
-file, and `ReferenceIndexKey` and `ResolvedMemberFile` in
-`reference_index.rs`.
+**Where to look:** `member_accesses_ruled_out` and the widening block in
+`member_declaration_references_batch_in`, both in `references/members.rs`,
+and `ResolvedMemberFile` in `reference_index.rs`.
 
 ---
 
