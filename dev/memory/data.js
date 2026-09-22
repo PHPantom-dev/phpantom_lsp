@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790094478927,
+  "lastUpdate": 1790094515770,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29137,6 +29137,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 73.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "6167f15083ccbf56fc91219d29a488fdf655d908",
+          "message": "Looking for a `/** @var */` annotation no longer reads a file from the\ntop every time",
+          "timestamp": "2026-09-22T18:10:34+02:00",
+          "tree_id": "4ef504791c54b21690dd4ca9a62685080cfb00ee",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/6167f15083ccbf56fc91219d29a488fdf655d908"
+        },
+        "date": 1790094508108,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 36.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76,
             "unit": "MiB"
           }
         ]
