@@ -1245,3 +1245,75 @@ cloning only the items that survive.
 **Where to look:** `member_completion_cache` and
 `filter_member_completion_items` in
 `completion/handler/member_access.rs`.
+
+## P63. Every diagnostic converts its offsets by counting from the top of the file
+
+**Impact: High · Complexity: Low**
+
+`offset_range_to_lsp_range` (`diagnostics/mod.rs`) turns a diagnostic's
+byte span into an LSP range through `byte_range_to_lsp_range`, which
+calls `offset_to_position` twice, and that walks `content.char_indices()`
+from byte 0 every time. There are around fifty call sites building
+diagnostic ranges this way, so a file reports each of its diagnostics at
+a cost proportional to how far down the file it sits, and a pass over one
+file costs O(size × diagnostics).
+
+`vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php` (2,927 lines,
+150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
+there puts 69% of the stacks in `byte_range_to_lsp_range` alone, ahead of
+the whole type engine.
+
+`text_position::LineIndex` already exists for exactly this and documents
+the quadratic it avoids; semantic tokens, code lenses, and inlay hints
+were moved onto it. The diagnostic collectors were not, and they produce
+far more positions per file than any of those. Build one index per file
+per pass and answer every collector's range from it.
+
+**Where to look:** the free `offset_range_to_lsp_range` and
+`Backend::offset_range_to_lsp_range` in `diagnostics/mod.rs`,
+`offset_to_position`/`LineIndex` in `text_position.rs`, and the
+collectors under `diagnostics/` that call them.
+
+## P64. A file with one very large scope copies it at every branch
+
+**Impact: Medium · Complexity: Medium-High**
+
+`ScopeState::merge_branch` joins two paths by comparing and then unioning
+their whole locals map, and a branch entered from a scope keeps a copy of
+it to merge back. That is proportional to how many variables the enclosing
+scope holds, which is fine inside a method and not fine at the top level of
+a long procedural file, where every statement so far has left its variable
+behind and each `if`/`foreach`/`switch` therefore copies and compares all
+of them. The cost of walking the file grows with the square of its length.
+
+A generated model, N repetitions of `/** @var … */ $vN = []; foreach ($vN
+as $eN) { $zN = $eN->prop; }` at the top level of one file, measured on a
+release build:
+
+| lines | analyse wall clock |
+| ----- | ------------------ |
+| 2,000 | 0.45s              |
+| 4,000 | 1.5s               |
+| 8,000 | 5.8s               |
+| 16,000| 24.8s              |
+
+Each doubling costs roughly four times as much. Sampling the 8,000-line
+run puts about 38% of the diagnostic worker's stacks in
+`merge_branch` and in cloning and dropping the `Ustr → Vec<ResolvedType>`
+map underneath it, ahead of any single resolution step. The same shape
+inside a method body does not show it, because a method's scope is
+bounded by its own body.
+
+The generated model is not far-fetched: a legacy procedural script, a
+generated routing or configuration file, and a long report builder all
+have the same shape, one scope holding thousands of live variables.
+
+A branch reads far fewer variables than the scope holds, so the copy is
+mostly of entries neither path touches. Recording what a branch actually
+wrote and merging only those entries, or sharing the untouched part
+rather than cloning it, would make a merge proportional to the branch
+instead of to the file.
+
+**Where to look:** `merge_branch`, `describes_same_state_as`, and
+`merge_scopes` in `type_engine/variable/forward_walk/scope_state.rs`, and
+the branch handling in `type_engine/variable/forward_walk/control_flow.rs`.
