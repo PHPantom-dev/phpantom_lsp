@@ -6,7 +6,8 @@
 //! name, and verify the offered import and its edit.
 
 use crate::common::{
-    create_test_backend, extract_edits, find_action, get_code_actions_at, get_code_actions_in_range,
+    code_actions_via_server, create_test_backend, extract_edits, find_action, get_code_actions_at,
+    get_code_actions_in_range, open_php,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -254,5 +255,43 @@ fn import_action_offered_when_namespaced_class_in_uri_classes_index() {
         find_action(&actions, "Import `Carbon\\Carbon`").is_some(),
         "expected an import action for Carbon\\Carbon, got: {:?}",
         titles(&actions)
+    );
+}
+
+// ── Through the server request ──────────────────────────────────────────────
+
+/// The same import action, asked for the way an editor asks: a
+/// `textDocument/codeAction` request against an open document, so the
+/// server fetches the content itself instead of the test handing it over.
+#[tokio::test]
+async fn import_action_offered_through_a_code_action_request() {
+    let backend = create_test_backend();
+    declare_request(&backend);
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, "<?php\nnamespace App;\n\nnew Request();\n").await;
+
+    let actions = code_actions_via_server(&backend, &uri, range(3, 4, 11))
+        .await
+        .expect("the request must be answered with actions");
+    assert!(
+        find_action(&actions, "Import `Illuminate\\Http\\Request`").is_some(),
+        "expected an import action for Illuminate\\Http\\Request, got: {:?}",
+        titles(&actions)
+    );
+}
+
+/// A request that no collector has anything to say about is answered with
+/// no response at all, not an empty list.
+#[tokio::test]
+async fn a_request_with_nothing_to_offer_is_answered_with_nothing() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///nothing.php").unwrap();
+    open_php(&backend, &uri, "<?php\n\necho 'hello';\n").await;
+
+    let actions = code_actions_via_server(&backend, &uri, range(2, 0, 13)).await;
+    assert!(
+        actions.is_none(),
+        "expected no response, got: {:?}",
+        actions.map(|a| titles(&a))
     );
 }
