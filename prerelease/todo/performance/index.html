@@ -3289,7 +3289,7 @@ in <code>reference_counts.rs</code>, <code>ResolvedMemberFile</code> in <code>re
 <code>clear_resolved_member_files</code> in <code>parser/ast_update.rs</code>, and
 <code>get_file_content_arc</code> in <code>backend/file_access.rs</code>.</p>
 <hr />
-<h2 id="p58-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access">P58. A receiver walk builds variable scopes for a whole file to type one access<a class="headerlink" href="#p58-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access" title="Permanent link">&para;</a></h2>
+<h2 id="p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access">P60. A receiver walk builds variable scopes for a whole file to type one access<a class="headerlink" href="#p60-a-receiver-walk-builds-variable-scopes-for-a-whole-file-to-type-one-access" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: High · Complexity: Medium-High</strong></p>
 <p>Resolving the receiver of a member access needs the enclosing function's
 variable scopes, and <code>member_declaration_references_batch_in</code> gets them
@@ -3318,7 +3318,7 @@ disagree about a type.</p>
 <code>resolved_file</code> closure in <code>member_declaration_references_batch_in</code>
 (<code>references/members.rs</code>).</p>
 <hr />
-<h2 id="p59-member-reference-candidates-are-selected-by-member-name-alone">P59. Member-reference candidates are selected by member name alone<a class="headerlink" href="#p59-member-reference-candidates-are-selected-by-member-name-alone" title="Permanent link">&para;</a></h2>
+<h2 id="p61-member-reference-candidates-are-selected-by-member-name-alone">P61. Member-reference candidates are selected by member name alone<a class="headerlink" href="#p61-member-reference-candidates-are-selected-by-member-name-alone" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: High</strong></p>
 <p><code>member_candidate_keys</code> keys the reference index by member name and
 static-ness only, so the candidate set for a declaration is every file
