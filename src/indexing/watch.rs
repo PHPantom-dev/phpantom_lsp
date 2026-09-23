@@ -1139,7 +1139,7 @@ mod tests {
 
         // The walk is what discovers the link, exactly as it does at
         // startup.
-        let files = crate::references::collect_php_files_gitignore(
+        let files = crate::classmap_scanner::collect_php_files_gitignore(
             &root,
             &[],
             &backend.index_filters(),
@@ -1179,7 +1179,7 @@ mod tests {
 
         let backend = Backend::new_test();
         *backend.workspace.workspace_root.write() = Some(root.clone());
-        crate::references::collect_php_files_gitignore(
+        crate::classmap_scanner::collect_php_files_gitignore(
             &root,
             &[],
             &backend.index_filters(),
@@ -1214,7 +1214,7 @@ mod tests {
 
         let backend = Backend::new_test();
         *backend.workspace.workspace_root.write() = Some(root.clone());
-        crate::references::collect_php_files_gitignore(
+        crate::classmap_scanner::collect_php_files_gitignore(
             &root,
             &[],
             &backend.index_filters(),

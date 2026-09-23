@@ -94,32 +94,20 @@ impl Backend {
         // Include those URIs too so namespace rename updates references in
         // unopened workspace files.
         let all_uris: Vec<String> = {
-            let nmap = self.file_namespaces.read();
-            let umap = self.file_imports.read();
-            let smap = self.symbol_maps.read();
-            let cmap = self.symbols.uri_classes_index.read();
-            let ofiles = self.open_files.read();
+            // The maps are read and released before the disk walk below:
+            // holding them for the walk would block every parse of an edit
+            // for as long as the workspace takes to list.
+            let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
+            uris.extend(self.file_namespaces.read().keys().cloned());
+            uris.extend(self.file_imports.read().keys().cloned());
+            uris.extend(self.symbol_maps.read().keys().cloned());
+            uris.extend(self.symbols.uri_classes_index.read().keys().cloned());
+            uris.extend(self.open_files.read().keys().cloned());
             let workspace_root = self.workspace.workspace_root.read().clone();
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-            let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for uri in nmap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in umap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in smap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in cmap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in ofiles.keys() {
-                uris.insert(uri.clone());
-            }
 
             if let Some(root) = workspace_root {
-                for path in crate::references::collect_php_files_gitignore(
+                for path in crate::classmap_scanner::collect_php_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),

@@ -240,14 +240,37 @@ impl Backend {
             } else {
                 self.clear_file_maps(&uri);
             }
-        } else if let Some(content) = self
-            .workspace_index_path(&uri)
-            .and_then(|path| std::fs::read_to_string(path).ok())
-        {
+        } else if let Some(path) = self.workspace_index_path(&uri) {
             // A workspace file stays in the index once closed, as the file
             // on disk rather than the buffer: unsaved edits are discarded
             // with the buffer, and the references it made keep counting.
-            self.update_ast(&uri, &content);
+            // The re-parse (and the Laravel refreshes `update_ast` runs
+            // for a provider or config file) goes to a blocking task, as
+            // `did_change` does, so closing a file does not stall the
+            // service loop.
+            let reparse = move |backend: &Backend, uri: &str| match std::fs::read_to_string(&path) {
+                Ok(content) => {
+                    backend.update_ast(uri, &content);
+                }
+                Err(_) => backend.clear_file_maps(uri),
+            };
+            if self.sync_ast_updates {
+                reparse(self, &uri);
+            } else {
+                let backend = self.clone_for_blocking();
+                let uri = uri.clone();
+                tokio::spawn(async move {
+                    run_blocking_cancel_safe("did_close parse", move || {
+                        // The file was reopened before this ran; its buffer is
+                        // the truth now and `did_change` owns the parse.
+                        if backend.open_files.read().contains_key(&uri) {
+                            return;
+                        }
+                        reparse(&backend, &uri);
+                    })
+                    .await;
+                });
+            }
         } else {
             self.clear_file_maps(&uri);
         }

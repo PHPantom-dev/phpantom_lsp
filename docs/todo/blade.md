@@ -100,9 +100,10 @@ template and can simply be filtered out. What remains is the server-side gate in
 `code_action` (`src/server.rs`), which still answers nothing for a
 template; translating the request range and its diagnostics into the
 virtual PHP before the collectors run; and discarding an action whose
-edits were all dropped rather than offering a no-op. No test drives
-`LanguageServer::code_action` today (the code-action suites all call
-`handle_code_action` directly), so the gate's tests have to go through
-the trait method.
+edits were all dropped rather than offering a no-op. The code-action
+suites call `handle_code_action` directly, which skips the gate; the
+gate's tests have to go through the trait method, which
+`code_actions_via_server` in `tests/integration/common/mod.rs` already
+wraps.
 
 **Deliverable:** Code actions are re-enabled for `.blade.php` files.

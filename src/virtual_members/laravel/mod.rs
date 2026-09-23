@@ -101,6 +101,7 @@
 
 mod accessors;
 mod aliases;
+pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
@@ -185,7 +186,9 @@ pub(crate) use storage::{
     extract_storage_driver_registrations, is_storage_facade_name, patch_storage_disk_type,
     storage_facade_local_names,
 };
-pub(crate) use trans_keys::{collect_trans_declarations, trans_line, unresolved_trans_type};
+pub(crate) use trans_keys::{
+    collect_trans_declarations, for_each_json_lang_file, trans_line, unresolved_trans_type,
+};
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;

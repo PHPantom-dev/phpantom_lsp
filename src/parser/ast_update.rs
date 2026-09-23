@@ -259,9 +259,13 @@ impl Backend {
             self.update_ast_inner(&uri_owned, &content_owned, blade)
         });
 
+        // The refreshes below that rebuild from the registered provider list
+        // share one read of it.
+        let providers = crate::backend::laravel::ProvidersOnce::new(self);
+
         // Keep the Laravel macro index coherent with edits to files that
         // register macros.  Cheap no-op for files without a `macro(` call.
-        self.refresh_laravel_macros(uri, content);
+        self.refresh_laravel_macros(uri, content, &providers);
 
         // Keep the filesystem disk type coherent with edits to `config/` and
         // to files that register a `Storage::extend()` driver.
@@ -294,7 +298,7 @@ impl Backend {
         // translation directories, route files, and component namespaces
         // coherent with edits to the providers that register them.  Cheap
         // no-op for every file that is not a registered service provider.
-        self.refresh_laravel_provider_resources(uri, content);
+        self.refresh_laravel_provider_resources(uri, content, &providers);
 
         match result {
             Some(changed) => changed,

@@ -318,7 +318,7 @@ pub(crate) fn path_to_uri(path: &Path) -> String {
 ///
 /// Uses the `ignore` crate's `WalkBuilder` for gitignore-aware
 /// traversal.  This is consistent with the other workspace walkers
-/// (`scan_workspace_fallback_full`, `crate::references::collect_php_files_gitignore`).
+/// (`scan_workspace_fallback_full`, `crate::classmap_scanner::collect_php_files_gitignore`).
 ///
 /// Used by Go-to-implementation (Phase 5) which walks PSR-4 source
 /// directories.

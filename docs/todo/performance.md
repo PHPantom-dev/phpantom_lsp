@@ -1268,5 +1268,42 @@ instead of to the file.
 **Where to look:** `merge_branch`, `merge_local` and
 `describes_same_state_as` in
 `type_engine/variable/forward_walk/scope_state/merge.rs`, the proof joins in
-`scope_state/proofs.rs`, and the branch handling in
-`type_engine/variable/forward_walk/control_flow.rs`.
+`scope_state/proofs.rs`, and the branch forks: `fork_if_branches` and
+`merge_if_branches` in `forward_walk/if_else.rs` (both `if` spellings go
+through them), the loop bodies in `forward_walk/while_for.rs` and
+`forward_walk/foreach.rs`, and `process_try` / `process_switch` in
+`forward_walk/control_flow.rs`. `scope_state/tests.rs` pins what the join
+does to one variable at a time.
+
+The branch clones are not the only place the walk pays for the size of
+the scope. Measure these too before deciding what the join has to fix:
+
+- `record_scope_snapshot` (`forward_walk/diagnostic_cache.rs`) copies the
+  whole locals map at the start and again at the end of every statement
+  in a diagnostic pass (`walk_body_forward` in `forward_walk/mod.rs`, which
+  also clones a `pre_stmt_scope` per statement). That is
+  O(statements × locals) on its own, the same shape as the branch clones.
+- `ScopeState::snapshot_resolver` clones the map once per call and is
+  called once per condition narrowing (`cond_narrowing/apply.rs`,
+  `cond_narrowing/instanceof.rs`).
+- Condition narrowing turns every local into a `String` per condition
+  (the `var_names` lists in `cond_narrowing/apply.rs`) and runs its
+  extractors per local.
+- `forward_walk/by_ref.rs` re-resolves every local in scope on every call
+  statement to see whether the call rebinds it by reference.
+- The proof joins in `scope_state/proofs.rs` walk every key of one side,
+  `simplify_class_hierarchy_unions` runs after every multi-way join, and
+  `invalidate_dependent_keys` / `invalidate_receiver_state` in
+  `scope_state/mod.rs` `retain` over the whole map on every reassignment
+  or impure call.
+
+Full-scope clones at fork points, for the join rewrite: the then, per
+`elseif`, and `else` copies in `fork_if_branches` plus the implicit-else
+copy in `merge_if_branches`; `pre_loop_scope` and the post-loop join in
+each loop of `while_for.rs` and `foreach.rs`; `loops.rs` once per
+re-walk; `process_try` per `catch` and `process_switch` per arm and at
+the join; `closures.rs` on the first return; `loop_control.rs` per
+`break`/`continue`; `cond_narrowing/apply.rs` per `&&` operand. Narrowing
+writes into branch scopes too, and exit and return edges are recorded at
+arbitrary nesting depth and merged at an outer fork, so a "keys the branch
+wrote" set has to be carried through nested forks.

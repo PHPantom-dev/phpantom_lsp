@@ -266,38 +266,27 @@ impl Backend {
 
         // Check parent abstract classes for an abstract method with the
         // same name.
-        let mut current = current_class.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
+        for (parent_name, parent_cls) in crate::inheritance::ancestors(current_class, class_loader)
+        {
+            // Only consider abstract methods on abstract parents.
+            if !(parent_cls.is_abstract || parent_cls.kind == ClassLikeKind::Interface) {
+                continue;
             }
-            depth += 1;
-
-            if let Some(parent_cls) = class_loader(&parent_name) {
-                // Only consider abstract methods on abstract parents.
-                if parent_cls.is_abstract || parent_cls.kind == ClassLikeKind::Interface {
-                    let has_method = parent_cls.has_method(member_name);
-                    if has_method
-                        && let Some((class_uri, class_content)) =
-                            self.find_class_file_content(&parent_name, uri, content)
-                        && let Some(member_pos) = Self::find_member_position_in_class(
-                            &class_content,
-                            member_name,
-                            MemberKind::Method,
-                            &parent_cls,
-                        )
-                        && let Ok(parsed_uri) = Url::parse(&class_uri)
-                    {
-                        let loc = point_location(parsed_uri, member_pos);
-                        if !locations.contains(&loc) {
-                            locations.push(loc);
-                        }
-                    }
+            if parent_cls.has_method(member_name)
+                && let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&parent_name, uri, content)
+                && let Some(member_pos) = Self::find_member_position_in_class(
+                    &class_content,
+                    member_name,
+                    MemberKind::Method,
+                    &parent_cls,
+                )
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                let loc = point_location(parsed_uri, member_pos);
+                if !locations.contains(&loc) {
+                    locations.push(loc);
                 }
-                current = parent_cls.parent_class;
-            } else {
-                break;
             }
         }
 
@@ -404,23 +393,9 @@ impl Backend {
             return locate(imp);
         }
 
-        let mut current = imp.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-            let Some(parent_cls) = class_loader(&parent_name) else {
-                break;
-            };
-            if declares(&parent_cls) {
-                return locate(&parent_cls);
-            }
-            current = parent_cls.parent_class;
-        }
-
-        None
+        crate::inheritance::ancestors(imp, class_loader)
+            .find(|(_, parent_cls)| declares(parent_cls))
+            .and_then(|(_, parent_cls)| locate(&parent_cls))
     }
 
     /// The FQN to search implementors of `cls` by: the namespace the class
@@ -1062,44 +1037,30 @@ impl Backend {
         // ── Transitive check: walk the parent class chain ───────────────
         // A class might extend another class that implements the target
         // interface.  Walk up to a bounded depth to find it.
-        let mut current = cls.parent_class;
-        let mut depth = 0u32;
-
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-
-            if let Some(parent_cls) = class_loader(&parent_name) {
-                // Check if the parent implements the target interface.
-                for iface in &parent_cls.interfaces {
-                    if *iface == target_fqn || (!has_fqn && short_name(iface) == target_short) {
-                        return true;
-                    }
-                    // Also walk the interface's own extends chain.
-                    if Self::interface_extends_target(
-                        iface,
-                        target_short,
-                        target_fqn,
-                        has_fqn,
-                        class_loader,
-                        0,
-                    ) {
-                        return true;
-                    }
-                }
-
-                // Check if the parent IS the target (for abstract class chains).
-                let parent_fqn =
-                    crate::util::build_fqn(&parent_cls.name, parent_cls.file_namespace.as_deref());
-                if parent_fqn == target_fqn {
+        for (_, parent_cls) in crate::inheritance::ancestors(cls, class_loader) {
+            // Check if the parent implements the target interface.
+            for iface in &parent_cls.interfaces {
+                if *iface == target_fqn || (!has_fqn && short_name(iface) == target_short) {
                     return true;
                 }
+                // Also walk the interface's own extends chain.
+                if Self::interface_extends_target(
+                    iface,
+                    target_short,
+                    target_fqn,
+                    has_fqn,
+                    class_loader,
+                    0,
+                ) {
+                    return true;
+                }
+            }
 
-                current = parent_cls.parent_class;
-            } else {
-                break;
+            // Check if the parent IS the target (for abstract class chains).
+            let parent_fqn =
+                crate::util::build_fqn(&parent_cls.name, parent_cls.file_namespace.as_deref());
+            if parent_fqn == target_fqn {
+                return true;
             }
         }
 

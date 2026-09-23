@@ -1,10 +1,8 @@
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
 use crate::php_type::PhpType;
 
 impl Backend {
@@ -124,24 +122,13 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
     }
 
     if let Some(root) = backend.workspace.workspace_root.read().clone() {
-        for sub in &["lang", "resources/lang"] {
-            let dir = root.join(sub);
-            let Ok(entries) = std::fs::read_dir(&dir) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.extension().is_some_and(|e| e == "json")
-                    && let Ok(content) = std::fs::read_to_string(&path)
-                    && let Ok(map) =
-                        serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-                    && map.contains_key(key)
-                    && let Ok(uri) = Url::from_file_path(&path)
-                {
-                    results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-                }
+        for_each_json_lang_file(&root, |path, map| {
+            if map.contains_key(key)
+                && let Ok(uri) = Url::from_file_path(path)
+            {
+                results.push(crate::definition::point_location(uri, Position::new(0, 0)));
             }
-        }
+        });
     }
 
     results
@@ -160,9 +147,7 @@ pub(crate) fn trans_line(backend: &Backend, key: &str, file_uri: &Url) -> Option
             serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content).ok()?;
         return map.get(key)?.as_str().map(str::to_string);
     }
-    let content = backend
-        .get_file_content(file_uri.as_str())
-        .or_else(|| std::fs::read_to_string(file_uri.to_file_path().ok()?).ok())?;
+    let content = backend.get_file_content(file_uri.as_str())?;
     collect_trans_declarations(&content, &trans_file_prefix(key))
         .into_iter()
         .find(|decl| decl.key == key)?
@@ -199,121 +184,46 @@ pub(crate) fn collect_trans_declarations(content: &str, file_stem: &str) -> Vec<
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
-
-    let mut returned_var_name: Option<String> = None;
-    let mut return_expr: Option<&Expression<'_>> = None;
-
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt {
-            if let Some(val) = ret.value {
-                match val {
-                    Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(bytes_to_str(dv.name).to_string());
-                    }
-                    _ => {
-                        return_expr = Some(val);
-                    }
-                }
-            }
-            break;
-        }
+    for expr in super::array_file::returned_exprs(program) {
+        super::array_file::for_each_entry(expr, content, &mut |path, start, _end, value| {
+            out.push(TransKeyMatch {
+                key: super::array_file::dotted_key(file_stem, path),
+                start,
+                // A group is recognized exactly when there is more beneath
+                // it to flatten.
+                is_group: super::array_file::is_array_expr(value),
+                value: super::helpers::extract_string_literal(value, content)
+                    .map(|(text, _, _)| text.to_string()),
+            });
+        });
     }
-
-    if let Some(expr) = return_expr {
-        collect_expr(expr, content, file_stem, &[], &mut out);
-    } else if let Some(var_name) = returned_var_name {
-        for stmt in program.statements.iter() {
-            if let Statement::Expression(expr_stmt) = stmt
-                && let Expression::Assignment(assign) = expr_stmt.expression
-                && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-                && dv.name == var_name.as_bytes()
-            {
-                collect_expr(assign.rhs, content, file_stem, &[], &mut out);
-            }
-        }
-    }
-
     out
 }
 
-fn collect_expr<'a>(
-    expr: &'a Expression<'a>,
-    content: &str,
-    prefix: &str,
-    path: &[String],
-    out: &mut Vec<TransKeyMatch>,
+/// Call `visit` with each `lang/*.json` and `resources/lang/*.json` file
+/// under `root` and its top-level map.
+///
+/// Laravel's JSON translations are flat `{ "Some phrase": "Translated" }`
+/// objects whose keys are used directly in `__('Some phrase')`.  They are
+/// not PHP, so they never appear in the symbol maps and are read from disk.
+pub(crate) fn for_each_json_lang_file(
+    root: &std::path::Path,
+    mut visit: impl FnMut(&std::path::Path, &serde_json::Map<String, serde_json::Value>),
 ) {
-    match expr {
-        Expression::Array(arr) => {
-            collect_array(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::LegacyArray(arr) => {
-            collect_array(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::Parenthesized(p) => {
-            collect_expr(p.expression, content, prefix, path, out);
-        }
-        Expression::Call(Call::Function(fc)) => {
-            if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case(b"array_merge")
+    for sub in ["lang", "resources/lang"] {
+        let Ok(entries) = std::fs::read_dir(root.join(sub)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|e| e == "json")
+                && let Ok(content) = std::fs::read_to_string(&path)
+                && let Ok(map) =
+                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
             {
-                for arg in fc.argument_list.arguments.iter() {
-                    let arg_expr = match arg {
-                        Argument::Positional(pos) => pos.value,
-                        Argument::Named(named) => named.value,
-                    };
-                    collect_expr(arg_expr, content, prefix, path, out);
-                }
+                visit(&path, &map);
             }
         }
-        _ => {}
-    }
-}
-
-fn collect_array<'a>(
-    elements: impl Iterator<Item = &'a ArrayElement<'a>>,
-    content: &str,
-    prefix: &str,
-    path: &[String],
-    out: &mut Vec<TransKeyMatch>,
-) {
-    for element in elements {
-        let ArrayElement::KeyValue(kv) = element else {
-            continue;
-        };
-        let Some((key_text, key_start, _)) =
-            super::helpers::extract_string_literal(kv.key, content)
-        else {
-            continue;
-        };
-
-        let mut full_path = path.to_vec();
-        full_path.push(key_text.to_string());
-        let dot_key = format!("{prefix}.{}", full_path.join("."));
-        out.push(TransKeyMatch {
-            key: dot_key,
-            start: key_start,
-            is_group: value_is_group(kv.value),
-            value: super::helpers::extract_string_literal(kv.value, content)
-                .map(|(text, _, _)| text.to_string()),
-        });
-
-        collect_expr(kv.value, content, prefix, &full_path, out);
-    }
-}
-
-/// Whether a translation entry's value expression is a nested array
-/// (a translation group) rather than a scalar string entry.  Mirrors the
-/// shapes [`collect_expr`] recurses into, so a group is recognized exactly
-/// when there is more beneath it to flatten.
-fn value_is_group(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Array(_) | Expression::LegacyArray(_) => true,
-        Expression::Parenthesized(p) => value_is_group(p.expression),
-        Expression::Call(Call::Function(fc)) => {
-            matches!(fc.function, Expression::Identifier(ident) if ident.value().eq_ignore_ascii_case(b"array_merge"))
-        }
-        _ => false,
     }
 }
 

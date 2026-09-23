@@ -86,12 +86,9 @@ impl Backend {
                         SymbolKind::SelfStaticParent(ssp_kind)
                             if *ssp_kind != SelfStaticParentKind::This =>
                         {
-                            if let Some(fqn) = self.resolve_keyword_to_fqn(
-                                ssp_kind,
-                                file.uri(),
-                                &fqn_resolver.namespace,
-                                span.start,
-                            ) {
+                            if let Some(fqn) =
+                                self.resolve_keyword_to_fqn(ssp_kind, file.uri(), span.start)
+                            {
                                 class_names_match(&fqn, target, target_short)
                             } else {
                                 false
@@ -204,12 +201,9 @@ impl Backend {
                         {
                             match file.content() {
                                 Some(content) if is_new_operand(content, span.start) => {
-                                    match self.resolve_keyword_to_fqn(
-                                        ssp_kind,
-                                        file_uri,
-                                        &fqn_resolver.namespace,
-                                        span.start,
-                                    ) {
+                                    match self
+                                        .resolve_keyword_to_fqn(ssp_kind, file_uri, span.start)
+                                    {
                                         Some(fqn) => scoped.contains(&fold_class_fqn(&fqn)),
                                         None => false,
                                     }
@@ -319,11 +313,12 @@ impl Backend {
         result
     }
 
+    /// The class a `self`/`static`/`parent` keyword at `offset` names, by
+    /// the enclosing class's own FQN.
     fn resolve_keyword_to_fqn(
         &self,
         ssp_kind: &SelfStaticParentKind,
         uri: &str,
-        namespace: &Option<String>,
         offset: u32,
     ) -> Option<String> {
         let classes: Vec<Arc<ClassInfo>> = self
@@ -333,16 +328,12 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-
-        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset)?;
-
-        match ssp_kind {
-            SelfStaticParentKind::Parent => current_class.parent_class.map(|a| a.to_string()),
-            _ => {
-                // self / static → current class FQN
-                Some(build_fqn(&current_class.name, namespace.as_deref()))
-            }
-        }
+        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset);
+        let keyword = match ssp_kind {
+            SelfStaticParentKind::Parent => "parent",
+            _ => "self",
+        };
+        crate::class_lookup::resolve_class_keyword(keyword, current_class)
     }
 }
 
@@ -351,8 +342,13 @@ impl Backend {
 /// (`self::__construct()`), which the same `SelfStaticParent` span kind is
 /// also used for.
 fn is_new_operand(content: &str, start: u32) -> bool {
-    let bytes = content.as_bytes();
-    let mut i = start as usize;
+    // The content is read after the symbol map was snapshotted, so a file
+    // that shrank on disk in between can place `start` past its end.
+    let Some(before) = content.get(..start as usize) else {
+        return false;
+    };
+    let bytes = before.as_bytes();
+    let mut i = bytes.len();
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }

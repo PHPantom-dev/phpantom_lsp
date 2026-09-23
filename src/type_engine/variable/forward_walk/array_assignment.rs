@@ -144,18 +144,7 @@ pub(crate) fn bind_destructured_pattern<'b>(
             // Direct variable: bind the type.
             Expression::Variable(Variable::Direct(dv)) => {
                 if let Some(ref vt) = elem_type {
-                    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        vt,
-                        &ctx.current_class.name,
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                    let resolved_types = if !resolved.is_empty() {
-                        ResolvedType::from_classes_with_hint(resolved, vt.clone())
-                    } else {
-                        vec![ResolvedType::from_type_string(vt.clone())]
-                    };
-                    scope.set(bytes_to_str(dv.name), resolved_types);
+                    scope.set(bytes_to_str(dv.name), ctx.resolved_types_for(vt.clone()));
                 }
             }
             // Nested pattern: recurse with the extracted element type.

@@ -78,6 +78,7 @@ use memmap2::Mmap;
 mod discovery;
 mod filters;
 mod lexer;
+mod walk;
 
 pub(crate) use discovery::vendor_package_roots;
 pub use discovery::{
@@ -87,6 +88,7 @@ pub use discovery::{
 };
 pub use filters::{FollowedLinks, IndexFilters, LinkClaims, workspace_walk_builder};
 pub use lexer::{find_classes, find_symbols};
+pub(crate) use walk::{collect_php_files_gitignore, collect_workspace_index_files_gitignore};
 
 // ─── File reading ────────────────────────────────────────────────────────────
 

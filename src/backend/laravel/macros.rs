@@ -205,13 +205,7 @@ impl Backend {
             let Some(uri) = self.resolve_class_uri(&mixin.mixin_fqn) else {
                 continue;
             };
-            let Some(mixin_source) = self.get_file_content(&uri).or_else(|| {
-                let path = tower_lsp::lsp_types::Url::parse(&uri)
-                    .ok()?
-                    .to_file_path()
-                    .ok()?;
-                std::fs::read_to_string(path).ok()
-            }) else {
+            let Some(mixin_source) = self.get_file_content(&uri) else {
                 continue;
             };
             out.extend(crate::virtual_members::laravel::synthesize_mixin_macros(
@@ -230,7 +224,12 @@ impl Backend {
     ///
     /// A cheap no-op unless the file currently contributes macros or its new
     /// content contains a `macro(` call.  Only runs for Laravel projects.
-    pub(crate) fn refresh_laravel_macros(&self, uri: &str, content: &str) {
+    pub(crate) fn refresh_laravel_macros(
+        &self,
+        uri: &str,
+        content: &str,
+        providers: &super::ProvidersOnce<'_>,
+    ) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
@@ -242,7 +241,7 @@ impl Backend {
         // to an unrelated file can neither override the configured class nor
         // leave a stale one behind.
         if self.laravel_date_seed_uris.read().contains(uri) {
-            self.build_laravel_date_class(&self.laravel_providers());
+            self.build_laravel_date_class(providers.get());
         }
         // A `Macroable::mixin()` registration pulls its macros from another
         // file and records that file as a dependency.  Because those macros are
@@ -255,7 +254,7 @@ impl Backend {
         if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
             || self.laravel_macro_mixin_uris.read().contains(uri)
         {
-            self.build_laravel_macro_index(&self.laravel_providers());
+            self.build_laravel_macro_index(providers.get());
             return;
         }
         // An edit to a seed file (a service provider or the app's provider
@@ -271,7 +270,7 @@ impl Backend {
                 crate::virtual_members::laravel::parse_provider_referenced_classes(content)
             };
             if refs != prev_refs {
-                self.build_laravel_macro_index(&self.laravel_providers());
+                self.build_laravel_macro_index(providers.get());
                 return;
             }
         }
@@ -366,13 +365,7 @@ impl Backend {
         reg: &mut crate::virtual_members::laravel::MacroRegistration,
         def_uri: &str,
     ) {
-        let Some(content) = self.get_file_content(def_uri).or_else(|| {
-            let path = tower_lsp::lsp_types::Url::parse(def_uri)
-                .ok()?
-                .to_file_path()
-                .ok()?;
-            std::fs::read_to_string(path).ok()
-        }) else {
+        let Some(content) = self.get_file_content(def_uri) else {
             return;
         };
         let file_ctx = self.file_context(def_uri);

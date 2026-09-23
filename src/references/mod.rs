@@ -35,11 +35,11 @@ mod dispatch;
 mod functions;
 mod member_scope;
 mod members;
+mod receivers;
 mod variables;
 
 pub(crate) use members::MemberDeclarationReferenceQuery;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
@@ -173,33 +173,53 @@ impl Backend {
         scan: impl Fn(&CandidateFile<'_>, &Arc<SymbolMap>, &mut Vec<Location>) + Sync,
     ) -> Vec<Location> {
         let snapshot = self.user_file_symbol_maps_for_reference_keys(candidate_keys);
+        let mut locations =
+            self.scan_candidate_snapshot(snapshot, progress_label, |file, symbol_map| {
+                let mut found = Vec::new();
+                scan(file, symbol_map, &mut found);
+                found
+            });
+        sort_locations_for_references(&mut locations);
+        locations
+    }
+
+    /// Run `scan` over every file of a candidate snapshot and concatenate
+    /// what it reports.
+    ///
+    /// The loop under every search: one progress window, one
+    /// [`CandidateFile`] per file, serial for two files or fewer and a
+    /// worker pool beyond that.  A search that needs more than a flat
+    /// location list (the lens batch attributes each hit to one of several
+    /// queries) builds its own snapshot and folds the results itself.
+    pub(super) fn scan_candidate_snapshot<T: Send>(
+        &self,
+        snapshot: Vec<(String, Arc<SymbolMap>)>,
+        progress_label: &str,
+        scan: impl Fn(&CandidateFile<'_>, &Arc<SymbolMap>) -> Vec<T> + Sync,
+    ) -> Vec<T> {
         self.begin_request_scan_window(snapshot.len(), progress_label);
 
         let scan_file = |(uri, symbol_map): &(String, Arc<SymbolMap>)| {
             self.request_scan_file_done();
             let file = CandidateFile::new(self, uri);
-            let mut found = Vec::new();
-            scan(&file, symbol_map, &mut found);
-            found
+            scan(&file, symbol_map)
         };
-        let mut locations = Vec::new();
+        let mut results = Vec::new();
         if snapshot.len() <= 2 {
             for entry in &snapshot {
-                locations.extend(scan_file(entry));
+                results.extend(scan_file(entry));
             }
         } else {
-            let results =
+            let found =
                 crate::parallel::map_indexed("reference-scan", snapshot.len(), |_, index| {
                     let found = scan_file(&snapshot[index]);
                     (!found.is_empty()).then_some(found)
                 });
-            for (_, found) in results {
-                locations.extend(found);
+            for (_, found) in found {
+                results.extend(found);
             }
         }
-
-        sort_locations_for_references(&mut locations);
-        locations
+        results
     }
 }
 
@@ -412,82 +432,6 @@ pub(super) fn member_candidate_keys(
         });
     }
     keys
-}
-
-/// Recursively collect all `.php` files under a workspace root,
-/// respecting `.gitignore` rules (including nested and global
-/// gitignore files).
-///
-/// Used by Find References which walks the entire workspace root.
-/// Unlike `classmap_scanner`'s PSR-4 walkers, this uses the `ignore`
-/// crate's [`ignore::WalkBuilder`] so that generated/cached directories
-/// listed in `.gitignore` (e.g. `storage/framework/views/`,
-/// `var/cache/`, `node_modules/`) are automatically skipped.
-///
-/// All known vendor directories are always skipped regardless of
-/// `.gitignore` content, since some projects commit their vendor
-/// directory.  `vendor_dir_paths` contains absolute paths of all
-/// known vendor directories (one per subproject in monorepo mode).
-///
-/// Hidden files and directories are skipped by default (handled by
-/// the `ignore` crate).
-pub(crate) fn collect_php_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    followed: Option<&crate::classmap_scanner::FollowedLinks>,
-) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, followed, |path| {
-        if filters.is_php_file(path) {
-            result.push(path.to_path_buf());
-        }
-    });
-    result
-}
-
-/// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
-/// index in one `.gitignore`-aware walk.
-pub(crate) fn collect_workspace_index_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    followed: Option<&crate::classmap_scanner::FollowedLinks>,
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let mut php_files = Vec::new();
-    let mut resource_files = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, followed, |path| {
-        if filters.is_php_file(path) {
-            php_files.push(path.to_path_buf());
-        } else if crate::resource_navigation::is_resource_path(path) {
-            resource_files.push(path.to_path_buf());
-        }
-    });
-    (php_files, resource_files)
-}
-
-fn visit_workspace_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    followed: Option<&crate::classmap_scanner::FollowedLinks>,
-    mut visit: impl FnMut(&Path),
-) {
-    let walker = crate::classmap_scanner::workspace_walk_builder(
-        root,
-        std::sync::Arc::new(vendor_dir_paths.to_vec()),
-        std::sync::Arc::clone(filters),
-        false,
-        crate::classmap_scanner::LinkClaims::new([root.to_path_buf()], followed),
-    )
-    .build();
-
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            visit(path);
-        }
-    }
 }
 
 /// A candidate file of a reference search, read only once a hit in it

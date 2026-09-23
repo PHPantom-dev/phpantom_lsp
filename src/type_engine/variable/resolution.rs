@@ -1724,8 +1724,8 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                         .all_classes
                         .iter()
                         .find(|c| c.name == cls_name)
-                        .map(|c| ClassInfo::clone(c))
-                        .or_else(|| (ctx.class_loader)(&cls_name).map(Arc::unwrap_or_clone));
+                        .cloned()
+                        .or_else(|| (ctx.class_loader)(&cls_name));
                     owner.and_then(|o| {
                         o.get_method(&method_name)
                             .and_then(|m| m.return_type.clone())
@@ -2022,9 +2022,21 @@ fn try_resolve_method_params(
     }
 
     let method_info = ctx.current_class.get_method(method_name)?;
+    // The callee wants the class shared, and the file's own classes and
+    // the resolved-class cache already hold it that way; copying the whole
+    // `ClassInfo` here would repeat for every local in scope on every call
+    // statement (see `forward_walk/by_ref.rs`).
+    let current_fqn = ctx.current_class.fqn();
+    let owner = ctx
+        .all_classes
+        .iter()
+        .find(|c| c.fqn() == current_fqn)
+        .cloned()
+        .or_else(|| (ctx.class_loader)(&current_fqn))
+        .unwrap_or_else(|| Arc::new(ctx.current_class.clone()));
     Some((
         method_info.parameters.clone(),
-        OutParamCallee::Method(Arc::new(ctx.current_class.clone()), atom(method_name)),
+        OutParamCallee::Method(owner, atom(method_name)),
     ))
 }
 

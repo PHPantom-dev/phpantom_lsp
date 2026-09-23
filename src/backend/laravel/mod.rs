@@ -47,6 +47,33 @@ impl LaravelProviders {
     }
 }
 
+/// The provider list for one refresh, read the first time a pass in that
+/// refresh asks for it and shared by every pass after.
+///
+/// An `update_ast` runs several refreshes, and an edit to a seed file (a
+/// service provider, or the app's provider-registration files) can make
+/// two or three of them rebuild from the list; without this each rebuild
+/// would parse every `installed.json` again.
+pub(crate) struct ProvidersOnce<'a> {
+    backend: &'a Backend,
+    providers: std::cell::OnceCell<LaravelProviders>,
+}
+
+impl<'a> ProvidersOnce<'a> {
+    pub(crate) fn new(backend: &'a Backend) -> Self {
+        Self {
+            backend,
+            providers: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The provider list, read on first use.
+    pub(crate) fn get(&self) -> &LaravelProviders {
+        self.providers
+            .get_or_init(|| self.backend.laravel_providers())
+    }
+}
+
 impl Backend {
     /// Collect every Laravel service provider that could register a macro, a
     /// resource, or a binding: those installed vendor packages auto-discover
@@ -177,7 +204,8 @@ impl Backend {
     /// invalidation (evicting the classes a macro attached to, dropping the
     /// storage disk type, marking the pivot index dirty).
     pub(crate) fn forget_laravel_file_contributions(&self, uri: &str) {
-        self.refresh_laravel_macros(uri, "");
+        let providers = ProvidersOnce::new(self);
+        self.refresh_laravel_macros(uri, "", &providers);
         self.refresh_laravel_storage_drivers(uri, "");
         self.refresh_laravel_pivots(uri, "");
         self.refresh_laravel_command_index(uri);

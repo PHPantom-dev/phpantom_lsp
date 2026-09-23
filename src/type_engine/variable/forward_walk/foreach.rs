@@ -289,11 +289,11 @@ pub(crate) fn process_foreach<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let loop_depth = enter_loop();
+    let depth_guard = LoopDepthGuard::enter();
+    let loop_depth = depth_guard.depth();
 
     // Hard limit: skip the body entirely at excessive nesting depth.
     if loop_depth > MAX_LOOP_DEPTH {
-        leave_loop(loop_depth);
         return;
     }
 
@@ -508,16 +508,14 @@ pub(crate) fn process_foreach<'b>(
         .as_ref()
         .is_some_and(|it| it.is_empty_array_shape())
     {
-        let restored = pre_loop_scope.clone();
-        push_exit_frame();
+        let exit_frame = ExitFrameGuard::push();
         walk_body_forward(body_stmts.iter().copied(), scope, ctx);
-        pop_exit_frame();
-        *scope = restored;
-        leave_loop(loop_depth);
+        exit_frame.pop();
+        *scope = pre_loop_scope;
         return;
     }
 
-    push_exit_frame();
+    let exit_frame = ExitFrameGuard::push();
     walk_loop_body_to_fixed_point(
         &body_stmts,
         scope,
@@ -560,7 +558,7 @@ pub(crate) fn process_foreach<'b>(
         },
     );
 
-    let exits = pop_exit_frame();
+    let exits = exit_frame.pop();
 
     // An iterable that proves it has entries — a non-empty array literal,
     // or a type refined to `non-empty-array`/`non-empty-list`/a required
@@ -597,8 +595,6 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
-
-    leave_loop(loop_depth);
 }
 
 /// Resolve the iterable expression's type for a foreach.
@@ -750,21 +746,7 @@ pub(crate) fn bind_foreach_value<'b>(
                 for member in members {
                     // Try extract_value_type on each member (handles generic collections).
                     if let Some(vt) = member.extract_value_type(false) {
-                        let resolved =
-                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                vt,
-                                &ctx.current_class.name,
-                                ctx.all_classes,
-                                ctx.class_loader,
-                            );
-                        if !resolved.is_empty() {
-                            scope.set(
-                                &var_name,
-                                ResolvedType::from_classes_with_hint(resolved, vt.clone()),
-                            );
-                        } else {
-                            scope.set(&var_name, vec![ResolvedType::from_type_string(vt.clone())]);
-                        }
+                        scope.set(&var_name, ctx.resolved_types_for(vt.clone()));
                         return;
                     }
                     // Try class-based element extraction on each member.
@@ -772,24 +754,7 @@ pub(crate) fn bind_foreach_value<'b>(
                         resolve_iterable_element_via_class(member, &iterable_ctx(ctx))
                         && !is_unsubstituted_template_param(&element_type)
                     {
-                        let resolved =
-                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                &element_type,
-                                &ctx.current_class.name,
-                                ctx.all_classes,
-                                ctx.class_loader,
-                            );
-                        if !resolved.is_empty() {
-                            scope.set(
-                                &var_name,
-                                ResolvedType::from_classes_with_hint(resolved, element_type),
-                            );
-                        } else {
-                            scope.set(
-                                &var_name,
-                                vec![ResolvedType::from_type_string(element_type)],
-                            );
-                        }
+                        scope.set(&var_name, ctx.resolved_types_for(element_type));
                         return;
                     }
                 }
@@ -863,21 +828,8 @@ pub(crate) fn bind_foreach_value<'b>(
                     .and_then(|k| elem_type.shape_value_type(k).cloned())
                     .or_else(|| elem_type.extract_value_type(true).cloned());
 
-                if let Some(ref vt) = resolved_type {
-                    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        vt,
-                        &ctx.current_class.name,
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                    if !resolved.is_empty() {
-                        scope.set(
-                            &var_name,
-                            ResolvedType::from_classes_with_hint(resolved, vt.clone()),
-                        );
-                    } else {
-                        scope.set(&var_name, vec![ResolvedType::from_type_string(vt.clone())]);
-                    }
+                if let Some(vt) = resolved_type {
+                    scope.set(&var_name, ctx.resolved_types_for(vt));
                 }
             }
         }

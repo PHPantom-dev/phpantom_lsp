@@ -592,7 +592,13 @@ fn walk_files(base: &Path, dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Recurse only into real directories: following a link back up the
+        // tree would re-enter it until the kernel's symlink limit stops the
+        // walk.  A linked file is still visited, through the link.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             walk_files(base, &path, visit);
             continue;
         }

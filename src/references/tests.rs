@@ -885,7 +885,7 @@ fn collect_php_files_gitignore_follows_interior_symlink() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&real, &link).unwrap();
 
-    let files = crate::references::collect_php_files_gitignore(
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
         &root,
         &[],
         &crate::classmap_scanner::IndexFilters::empty(),
@@ -922,7 +922,7 @@ fn collect_php_files_gitignore_walks_a_link_target_once() {
         std::os::windows::fs::symlink_dir(&ext, &link).unwrap();
     }
 
-    let files = crate::references::collect_php_files_gitignore(
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
         &root,
         &[],
         &crate::classmap_scanner::IndexFilters::empty(),
@@ -951,7 +951,7 @@ fn collect_php_files_gitignore_follows_symlink_cycle_safely() {
     #[cfg(windows)]
     std::os::windows::fs::symlink_dir(&root, &link).unwrap();
 
-    let files = crate::references::collect_php_files_gitignore(
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
         &root,
         &[],
         &crate::classmap_scanner::IndexFilters::empty(),

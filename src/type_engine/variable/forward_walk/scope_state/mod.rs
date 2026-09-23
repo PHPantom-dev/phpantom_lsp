@@ -1,6 +1,9 @@
 mod class_unions;
 mod merge;
 mod proofs;
+#[cfg(test)]
+#[path = "tests.rs"]
+mod tests;
 
 pub(crate) use class_unions::*;
 pub(crate) use proofs::*;

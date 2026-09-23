@@ -13,6 +13,25 @@ use std::collections::HashMap;
 use crate::class_lookup::find_class_at_offset;
 use crate::types::ClassInfo;
 
+/// The class a member declared at `offset` belongs to.
+///
+/// The offset of a declaration in a class body is inside the class; the
+/// offset of one a class docblock documents (`@method`, `@property`) is
+/// before the class's opening brace, so the nearest class whose body
+/// starts past the offset is the one whose docblock holds it.
+pub(super) fn enclosing_class_for_member(
+    classes: &[Arc<ClassInfo>],
+    offset: u32,
+) -> Option<&ClassInfo> {
+    find_class_at_offset(classes, offset).or_else(|| {
+        classes
+            .iter()
+            .map(|c| c.as_ref())
+            .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
+            .min_by_key(|c| c.start_offset)
+    })
+}
+
 /// The classes a member search counts as carrying the member it searches for.
 ///
 /// A scope built from the classes that *declare* the member also has to cover
@@ -130,17 +149,25 @@ impl Backend {
         (Some(member_scope.clone()), Some(member_scope))
     }
 
-    /// Resolve the class hierarchy for a `MemberDeclaration` at a given offset.
+    /// Resolve the class hierarchies for a `MemberDeclaration` at a given
+    /// offset.
     ///
-    /// Finds the enclosing class and builds the hierarchy set from it.
-    pub(super) fn resolve_member_declaration_hierarchy(
+    /// Finds the enclosing class and builds the scopes from it.  Returns
+    /// `(hierarchy, declaration_scope)` as
+    /// [`resolve_member_access_scopes`](Self::resolve_member_access_scopes)
+    /// does: the hierarchy scopes access sites, and is the class's whole
+    /// hierarchy when nothing in it is found to declare the member; the
+    /// declaration scope is only the classes that do declare it, so it is
+    /// `None` in that case.  `None` altogether when no class encloses the
+    /// offset.
+    pub(super) fn resolve_member_declaration_scopes(
         &self,
         uri: &str,
         offset: u32,
         member_name: &str,
         is_static: bool,
         mode: ReferenceSearchMode,
-    ) -> Option<MemberScope> {
+    ) -> Option<(MemberScope, Option<MemberScope>)> {
         let classes: Vec<Arc<ClassInfo>> = self
             .symbols
             .uri_classes_index
@@ -148,56 +175,19 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
-            // Fallback: offset may be in a class docblock (before the opening
-            // brace).  Find the nearest class whose body starts past the
-            // offset, meaning its docblock region likely contains the offset.
-            classes
-                .iter()
-                .map(|c| c.as_ref())
-                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
-                .min_by_key(|c| c.start_offset)
-        })?;
-        let fqn = current_class.fqn().to_string();
-        Some(
-            self.collect_member_receiver_scope(
-                std::slice::from_ref(&fqn),
-                member_name,
-                is_static,
-                mode.include_declaring_interfaces(),
-            )
-            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn])),
-        )
-    }
-
-    pub(super) fn resolve_member_declaration_scope(
-        &self,
-        uri: &str,
-        offset: u32,
-        member_name: &str,
-        is_static: bool,
-        mode: ReferenceSearchMode,
-    ) -> Option<MemberScope> {
-        let classes: Vec<Arc<ClassInfo>> = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let current_class = find_class_at_offset(&classes, offset).or_else(|| {
-            classes
-                .iter()
-                .map(|c| c.as_ref())
-                .filter(|c| c.keyword_offset > 0 && offset < c.start_offset)
-                .min_by_key(|c| c.start_offset)
-        })?;
-        self.collect_member_receiver_scope(
-            &[current_class.fqn().to_string()],
+        let fqn = enclosing_class_for_member(&classes, offset)?
+            .fqn()
+            .to_string();
+        let declaration_scope = self.collect_member_receiver_scope(
+            std::slice::from_ref(&fqn),
             member_name,
             is_static,
             mode.include_declaring_interfaces(),
-        )
+        );
+        let hierarchy = declaration_scope
+            .clone()
+            .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[fqn]));
+        Some((hierarchy, declaration_scope))
     }
 
     /// Resolve a member-access subject to the FQN(s) of its type(s), using
@@ -516,6 +506,9 @@ impl Backend {
     }
 
     fn extend_laravel_member_roots(&self, roots: &mut HashSet<String>) {
+        if !self.resolved_class_cache.read().is_laravel() {
+            return;
+        }
         let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
         let initial_roots: Vec<String> = roots.iter().cloned().collect();
         let mut candidate_roots: HashSet<String> = initial_roots.iter().cloned().collect();
@@ -539,9 +532,20 @@ impl Backend {
             }
         }
 
-        for (model, builder) in self.models_built_by(&candidate_roots) {
-            roots.insert(model);
-            builder_roots.insert(builder);
+        // Only a query builder has models built by it, and finding them
+        // means a pass over every class the project knows, so the pass is
+        // skipped unless one of the roots is the Eloquent builder or one of
+        // its subclasses.
+        let eloquent_builder: HashSet<String> =
+            HashSet::from([crate::virtual_members::laravel::ELOQUENT_BUILDER_FQN.to_string()]);
+        let any_root_is_builder = candidate_roots.iter().any(|root| {
+            eloquent_builder.contains(root) || self.inherits_from_any(root, &eloquent_builder)
+        });
+        if any_root_is_builder {
+            for (model, builder) in self.models_built_by(&candidate_roots) {
+                roots.insert(model);
+                builder_roots.insert(builder);
+            }
         }
 
         for builder in builder_roots {

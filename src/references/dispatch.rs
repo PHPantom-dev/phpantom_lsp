@@ -189,17 +189,15 @@ impl Backend {
                         });
 
                     // Resolve the enclosing class to scope the search.
-                    let hierarchy = self.resolve_member_declaration_hierarchy(
-                        uri, span_start, name, is_static, mode,
-                    );
-                    let declaration_scope = self
-                        .resolve_member_declaration_scope(uri, span_start, name, is_static, mode);
+                    let (hierarchy, declaration_scope) = self
+                        .resolve_member_declaration_scopes(uri, span_start, name, is_static, mode)
+                        .unzip();
                     return self.find_member_references(
                         name,
                         is_static,
                         include_declaration,
                         hierarchy.as_ref(),
-                        declaration_scope.as_ref(),
+                        declaration_scope.flatten().as_ref(),
                     );
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
@@ -331,22 +329,21 @@ impl Backend {
                     let ctx = self.file_context(uri);
                     let seeds: Vec<String> =
                         crate::class_lookup::find_class_at_offset(&ctx.classes, span_start)
-                            .map(|cc| vec![build_fqn(&cc.name, ctx.namespace.as_deref())])
+                            .map(|cc| vec![cc.fqn().to_string()])
                             .unwrap_or_default();
                     return self.find_constructor_references(&seeds, include_declaration);
                 }
 
                 // Resolve the enclosing class to scope the search.
-                let hierarchy = self
-                    .resolve_member_declaration_hierarchy(uri, span_start, name, *is_static, mode);
-                let declaration_scope =
-                    self.resolve_member_declaration_scope(uri, span_start, name, *is_static, mode);
+                let (hierarchy, declaration_scope) = self
+                    .resolve_member_declaration_scopes(uri, span_start, name, *is_static, mode)
+                    .unzip();
                 self.find_member_references(
                     name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
-                    declaration_scope.as_ref(),
+                    declaration_scope.flatten().as_ref(),
                 )
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
@@ -364,13 +361,13 @@ impl Backend {
                 let ctx = self.file_context(uri);
                 let current_class =
                     crate::class_lookup::find_class_at_offset(&ctx.classes, span_start);
-                let fqn = match ssp_kind {
-                    SelfStaticParentKind::Parent => {
-                        current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
-                    }
-                    _ => current_class.map(|cc| build_fqn(&cc.name, ctx.namespace.as_deref())),
+                let keyword = match ssp_kind {
+                    SelfStaticParentKind::Parent => "parent",
+                    _ => "self",
                 };
-                if let Some(fqn) = fqn {
+                if let Some(fqn) =
+                    crate::class_lookup::resolve_class_keyword(keyword, current_class)
+                {
                     self.find_class_references(&fqn, include_declaration)
                 } else {
                     Vec::new()

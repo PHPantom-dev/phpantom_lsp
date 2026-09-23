@@ -162,6 +162,11 @@ impl LaravelCommandIndex {
         self.by_name.get(name)
     }
 
+    /// Whether a command answers to `name`, as its own name or an alias.
+    pub(crate) fn contains_name(&self, name: &str) -> bool {
+        self.by_name.contains_key(name)
+    }
+
     /// Look up a command by the class that declares it.
     ///
     /// The by-name lookup cannot answer this: a command reached through its

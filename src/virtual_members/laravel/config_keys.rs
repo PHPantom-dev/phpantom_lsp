@@ -2,11 +2,9 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
 use crate::references::push_location;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::LineIndex;
@@ -62,107 +60,16 @@ pub(crate) fn collect_laravel_config_declarations(
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
-
-    let mut returned_var_name: Option<String> = None;
-    let mut return_expr: Option<&Expression<'_>> = None;
-
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt {
-            if let Some(val) = ret.value {
-                match val {
-                    Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(bytes_to_str(dv.name).to_string());
-                    }
-                    _ => {
-                        return_expr = Some(val);
-                    }
-                }
-            }
-            break;
-        }
-    }
-
-    if let Some(expr) = return_expr {
-        collect_expr_declarations(expr, content, prefix, &[], &mut out);
-    } else if let Some(var_name) = returned_var_name {
-        for stmt in program.statements.iter() {
-            if let Statement::Expression(expr_stmt) = stmt
-                && let Expression::Assignment(assign) = expr_stmt.expression
-                && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-                && dv.name == var_name.as_bytes()
-            {
-                collect_expr_declarations(assign.rhs, content, prefix, &[], &mut out);
-            }
-        }
-    }
-
-    out
-}
-
-// ─── Declaration walker ───────────────────────────────────────────────────────
-
-fn collect_expr_declarations(
-    expr: &Expression<'_>,
-    content: &str,
-    prefix: &str,
-    path: &[String],
-    out: &mut Vec<ConfigKeyMatch>,
-) {
-    match expr {
-        Expression::Array(arr) => {
-            collect_array_declarations(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::LegacyArray(arr) => {
-            collect_array_declarations(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::Parenthesized(p) => {
-            collect_expr_declarations(p.expression, content, prefix, path, out);
-        }
-        Expression::Call(Call::Function(fc)) => {
-            if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case(b"array_merge")
-            {
-                for arg in fc.argument_list.arguments.iter() {
-                    let arg_expr = match arg {
-                        Argument::Positional(pos) => pos.value,
-                        Argument::Named(named) => named.value,
-                    };
-                    collect_expr_declarations(arg_expr, content, prefix, path, out);
-                }
-            }
-        }
-        _ => {}
-    }
-}
-
-fn collect_array_declarations<'a>(
-    elements: impl Iterator<Item = &'a ArrayElement<'a>>,
-    content: &str,
-    prefix: &str,
-    path: &[String],
-    out: &mut Vec<ConfigKeyMatch>,
-) {
-    for element in elements {
-        let ArrayElement::KeyValue(kv) = element else {
-            continue;
-        };
-        let (key_text, key_start, key_end) =
-            match super::helpers::extract_string_literal(kv.key, content) {
-                Some(k) => k,
-                None => continue,
-            };
-
-        let mut full_path = path.to_vec();
-        full_path.push(key_text.to_string());
-        let dot_key = format!("{prefix}.{}", full_path.join("."));
-        out.push(ConfigKeyMatch {
-            key: dot_key,
-            start: key_start,
-            end: key_end,
+    for expr in super::array_file::returned_exprs(program) {
+        super::array_file::for_each_entry(expr, content, &mut |path, start, end, _value| {
+            out.push(ConfigKeyMatch {
+                key: super::array_file::dotted_key(prefix, path),
+                start,
+                end,
+            });
         });
-
-        collect_expr_declarations(kv.value, content, prefix, &full_path, out);
     }
+    out
 }
 
 // ─── Keys declared at runtime ─────────────────────────────────────────────────
@@ -232,18 +139,28 @@ impl Backend {
         }
     }
 
-    /// Every config key the project declares at runtime.
+    /// Whether a config key the project declares at runtime covers `key`.
     ///
     /// `Config::set('filesystems.disks.ondemand', […])` in a test's `setUp()`
     /// establishes a key no `config/` file declares, and a read of it
-    /// afterwards is as valid as a read of one that ships on disk.
-    pub(crate) fn runtime_config_keys(&self) -> std::collections::HashSet<String> {
+    /// afterwards is as valid as a read of one that ships on disk.  The
+    /// value a write stored is opaque, so every path under a written key
+    /// is beyond judging as well, and a read of a group above one is as
+    /// real as the write.
+    pub(crate) fn runtime_config_key_covers(&self, key: &str) -> bool {
         self.laravel_runtime_config_keys
             .read()
             .values()
             .flatten()
-            .cloned()
-            .collect()
+            .any(|written| {
+                written == key
+                    || written
+                        .strip_prefix(key)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                    || key
+                        .strip_prefix(written.as_str())
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
     }
 
     /// Visit every config file a Laravel project reads, highest precedence
@@ -269,7 +186,7 @@ impl Backend {
         if let Some(root) = &workspace_root {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
             let filters = self.index_filters();
-            for path in crate::references::collect_php_files_gitignore(
+            for path in crate::classmap_scanner::collect_php_files_gitignore(
                 root,
                 &vendor_dir_paths,
                 &filters,
@@ -395,9 +312,7 @@ pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Op
         if config_path.is_file() {
             let target_uri = Url::from_file_path(&config_path).ok()?;
             let target_uri_string = target_uri.to_string();
-            let target_content = backend
-                .get_file_content(&target_uri_string)
-                .or_else(|| std::fs::read_to_string(&config_path).ok())?;
+            let target_content = backend.get_file_content(&target_uri_string)?;
 
             let stem = file_parts.join(".");
             let declarations = collect_laravel_config_declarations(&target_content, &stem);
@@ -552,15 +467,13 @@ mod tests {
             &Arc::new("<?php\nConfig::set('filesystems.disks.ondemand', []);\n".to_string()),
         );
         assert!(
-            backend
-                .runtime_config_keys()
-                .contains("filesystems.disks.ondemand"),
+            backend.runtime_config_key_covers("filesystems.disks.ondemand"),
             "the write should declare the disk it configures"
         );
 
         backend.update_ast(uri, &Arc::new("<?php\nclass FixtureTest {}\n".to_string()));
         assert!(
-            backend.runtime_config_keys().is_empty(),
+            !backend.runtime_config_key_covers("filesystems.disks.ondemand"),
             "removing the write should remove the key it declared"
         );
     }
@@ -577,15 +490,11 @@ mod tests {
             uri,
             &Arc::new("<?php\nConfig::set('filesystems.disks.ondemand', []);\n".to_string()),
         );
-        assert!(
-            backend
-                .runtime_config_keys()
-                .contains("filesystems.disks.ondemand")
-        );
+        assert!(backend.runtime_config_key_covers("filesystems.disks.ondemand"));
 
         backend.clear_file_maps(uri);
         assert!(
-            backend.runtime_config_keys().is_empty(),
+            !backend.runtime_config_key_covers("filesystems.disks.ondemand"),
             "clearing the file's maps should drop the keys it declared"
         );
     }

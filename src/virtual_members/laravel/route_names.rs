@@ -830,6 +830,10 @@ pub(crate) struct RouteEntry {
 pub(crate) struct RouteDiscovery {
     /// Every named route that was statically resolved.
     pub routes: Vec<RouteEntry>,
+    /// The name of every route in `routes`, sorted, shared so that a
+    /// diagnostic pass or a completion reads the list rather than copying
+    /// it.
+    pub names: std::sync::Arc<[String]>,
     /// Name prefixes of groups whose `->name()` argument was not a string
     /// literal (e.g. `Route::name($panelId . '.')` inside Filament).  Routes
     /// starting with one of these prefixes cannot be judged: the full set of
@@ -1135,8 +1139,12 @@ pub(crate) fn enumerate_all_routes(backend: &Backend) -> RouteDiscovery {
     open_prefixes.dedup();
     open_suffixes.sort();
     open_suffixes.dedup();
+    // `routes` is sorted by name and deduplicated, so the names come out
+    // sorted too.
+    let names: std::sync::Arc<[String]> = routes.iter().map(|route| route.name.clone()).collect();
     RouteDiscovery {
         routes,
+        names,
         open_prefixes,
         open_suffixes,
     }

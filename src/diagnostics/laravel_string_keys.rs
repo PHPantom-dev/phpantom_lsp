@@ -119,7 +119,6 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         use crate::symbol_map::{LaravelStringKind, SymbolKind};
-        use std::collections::HashSet;
 
         // Extract the LaravelStringKey spans we need and determine which
         // kinds are present, then DROP the read lock before calling
@@ -223,27 +222,18 @@ impl Backend {
 
         // Enumerate valid keys once per kind (lazy), using the cached
         // enumerations.  Safe to call now that the `symbol_maps` read
-        // lock has been released.
-        let mut project_registers_routes = false;
-        let (route_keys, route_open_prefixes, route_open_suffixes): (
-            HashSet<String>,
-            Vec<String>,
-            Vec<String>,
-        ) = if has_route {
-            let discovery = self.cached_routes();
-            project_registers_routes = discovery.routes.iter().any(|route| !route.from_vendor);
-            (
-                discovery
-                    .routes
-                    .iter()
-                    .map(|route| route.name.clone())
-                    .collect(),
-                discovery.open_prefixes.clone(),
-                discovery.open_suffixes.clone(),
-            )
-        } else {
-            (HashSet::new(), Vec::new(), Vec::new())
-        };
+        // lock has been released.  The enumerations are shared with every
+        // other consumer, so they are read in place rather than copied
+        // into a set per pass.
+        let routes = has_route.then(|| self.cached_routes());
+        // A package with no routes of its own, whose names are registered
+        // by the host application, cannot be judged: the valid set is
+        // unknown, not empty.  Installed packages register routes of their
+        // own, so the question is whether *this project* contributed any,
+        // not whether the set is empty.
+        let project_registers_routes = routes
+            .as_ref()
+            .is_some_and(|discovery| discovery.routes.iter().any(|route| !route.from_vendor));
         // A library is installed into an application that declares the
         // configuration it reads, and that application is a file we never
         // see, so none of its keys can be judged.  Only an application owns
@@ -253,15 +243,6 @@ impl Backend {
             self.cached_config_keys()
         } else {
             Arc::default()
-        };
-        // A key that `Config::set()` or the array form of the `config()`
-        // helper establishes is as real as one a `config/` file declares; a
-        // test that configures a disk in `setUp()` before exercising it is
-        // the common shape.
-        let written_config_keys = if has_config {
-            self.runtime_config_keys()
-        } else {
-            HashSet::new()
         };
         let view_keys: Arc<[String]> = if has_view {
             self.cached_view_names()
@@ -283,27 +264,16 @@ impl Backend {
                 .laravel_provider_resources
                 .read()
                 .custom_translation_loader;
-        let command_names: HashSet<String> = if has_command {
-            self.laravel_commands
-                .read()
-                .all_names()
-                .into_iter()
-                .collect()
-        } else {
-            HashSet::new()
-        };
+        // When no commands were indexed at all, skip command diagnostics
+        // entirely.  The scan is heuristic (it relies on the `*Command`
+        // naming convention), so an empty index likely means discovery
+        // failed rather than that every referenced command is invalid.
+        let commands_indexed = has_command && !self.laravel_commands.read().is_empty();
         // A morph alias is only checkable when the project calls
         // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
         // an unmapped model still morphs under its class name, so the set of
         // valid `*_type` values is open and an unknown alias proves nothing.
-        let morph_aliases: Option<HashSet<String>> = if has_morph_alias {
-            let index = self.laravel_morph_map.read();
-            index
-                .is_enforced()
-                .then(|| index.all_aliases().into_iter().collect())
-        } else {
-            None
-        };
+        let morph_map_enforced = has_morph_alias && self.laravel_morph_map.read().is_enforced();
 
         // Abilities are only checkable when the project defines some: an
         // empty set means gate discovery found nothing (a project that
@@ -319,10 +289,10 @@ impl Backend {
         // including the walk of every policy class that would enumerate it.
         let gate_ability_space_is_open =
             has_gate_ability && self.laravel_gates.read().ability_space_is_open();
-        let gate_abilities: HashSet<String> = if has_gate_ability && !gate_ability_space_is_open {
-            self.cached_gate_abilities().into_iter().collect()
+        let gate_abilities: Arc<[String]> = if has_gate_ability && !gate_ability_space_is_open {
+            self.cached_gate_abilities()
         } else {
-            HashSet::new()
+            Arc::default()
         };
 
         for (kind, key, start, end) in &key_spans {
@@ -352,12 +322,9 @@ impl Backend {
                     continue;
                 }
                 CheckedStringKind::Route => {
-                    // A package with no routes of its own, whose names are
-                    // registered by the host application, cannot be judged:
-                    // the valid set is unknown, not empty.  Installed
-                    // packages register routes of their own, so the question
-                    // is whether *this project* contributed any, not whether
-                    // the set is empty.
+                    let Some(discovery) = &routes else {
+                        continue;
+                    };
                     if !project_registers_routes {
                         continue;
                     }
@@ -369,10 +336,12 @@ impl Backend {
                     // registers, even when it recorded no known prefix at all
                     // (e.g. a group with no enclosing literal group whose own
                     // name is entirely a variable).
-                    if route_open_prefixes
+                    if discovery
+                        .open_prefixes
                         .iter()
                         .any(|prefix| key.starts_with(prefix))
-                        || route_open_suffixes
+                        || discovery
+                            .open_suffixes
                             .iter()
                             .any(|suffix| key.ends_with(suffix))
                     {
@@ -382,11 +351,11 @@ impl Backend {
                     // than one route, and matches whatever the project has
                     // under it.
                     let valid = if key.contains('*') {
-                        route_keys.iter().any(|name| {
+                        discovery.names.iter().any(|name| {
                             crate::virtual_members::laravel::route_name_matches(key, name)
                         })
                     } else {
-                        route_keys.contains(key)
+                        discovery.names.binary_search(key).is_ok()
                     };
                     (valid, "route", "invalid_laravel_route")
                 }
@@ -404,20 +373,13 @@ impl Backend {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.  The other
-                    // direction holds for a key written at runtime: the value
-                    // it stored is opaque to us, so every path under it is
-                    // beyond judging as well.
+                    // which are valid even without a direct match.  A key that
+                    // `Config::set()` or the array form of the `config()`
+                    // helper establishes is as real as one a `config/` file
+                    // declares; a test that configures a disk in `setUp()`
+                    // before exercising it is the common shape.
                     let valid = names_key_or_group(&declared_config_keys, key)
-                        || written_config_keys.iter().any(|written| {
-                            written == key
-                                || written
-                                    .strip_prefix(key.as_str())
-                                    .is_some_and(|rest| rest.starts_with('.'))
-                                || key
-                                    .strip_prefix(written.as_str())
-                                    .is_some_and(|rest| rest.starts_with('.'))
-                        });
+                        || self.runtime_config_key_covers(key);
                     (valid, "config key", "invalid_laravel_config")
                 }
                 CheckedStringKind::View => (
@@ -437,26 +399,21 @@ impl Backend {
                     (valid, "translation key", "invalid_laravel_trans")
                 }
                 CheckedStringKind::Command => {
-                    // When no commands were indexed at all, skip command
-                    // diagnostics entirely.  The scan is heuristic (it relies
-                    // on the `*Command` naming convention), so an empty index
-                    // likely means discovery failed rather than that every
-                    // referenced command is invalid.
-                    if command_names.is_empty() {
+                    if !commands_indexed {
                         continue;
                     }
                     (
-                        command_names.contains(key),
+                        self.laravel_commands.read().contains_name(key),
                         "command",
                         "invalid_laravel_command",
                     )
                 }
                 CheckedStringKind::MorphAlias => {
-                    let Some(aliases) = &morph_aliases else {
+                    if !morph_map_enforced {
                         continue;
-                    };
+                    }
                     (
-                        aliases.contains(key),
+                        self.laravel_morph_map.read().has_alias(key),
                         "morph type",
                         "invalid_laravel_morph_alias",
                     )
@@ -491,7 +448,7 @@ impl Backend {
         content: &str,
         ability: &str,
         span_start: u32,
-        known_abilities: &std::collections::HashSet<String>,
+        known_abilities: &[String],
     ) -> Option<String> {
         let is_defined = self.laravel_gates.read().definition(ability).is_some();
         if is_defined {
@@ -516,7 +473,10 @@ impl Backend {
             ));
         }
 
-        if known_abilities.contains(ability) {
+        if known_abilities
+            .binary_search_by(|known| known.as_str().cmp(ability))
+            .is_ok()
+        {
             return None;
         }
         Some(format!("Unknown ability: '{}'", ability))
@@ -606,8 +566,8 @@ mod tests {
         // Set up a temp workspace with an unindexed PHP file so that
         // ensure_workspace_indexed() will call parse_files_parallel()
         // which needs a write lock on symbol_maps.
-        let tmp = std::env::temp_dir().join("phpantom_deadlock_test");
-        let _ = std::fs::create_dir_all(&tmp);
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let tmp = dir.path().to_path_buf();
         let unindexed_file = tmp.join("Unindexed.php");
         std::fs::write(&unindexed_file, "<?php\nclass Unindexed {}\n").unwrap();
 
@@ -648,8 +608,5 @@ mod tests {
             }
             Err(e) => panic!("collect_slow_diagnostics failed: {:?}", e),
         }
-
-        // Clean up.
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

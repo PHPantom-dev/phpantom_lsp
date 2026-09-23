@@ -194,7 +194,12 @@ impl Backend {
     /// them the container would let win, and only the merge knows that.  A
     /// cheap no-op for every file that is not a registered provider, and until
     /// the full scan has run.
-    pub(crate) fn refresh_laravel_provider_resources(&self, uri: &str, content: &str) {
+    pub(crate) fn refresh_laravel_provider_resources(
+        &self,
+        uri: &str,
+        content: &str,
+        providers: &super::ProvidersOnce<'_>,
+    ) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
@@ -206,7 +211,7 @@ impl Backend {
         // in what order, both of which the merge depends on, so a change to it
         // rebuilds from scratch.
         if self.is_laravel_provider_list_uri(uri) {
-            self.build_provider_resources(&self.laravel_providers());
+            self.build_provider_resources(providers.get());
             return;
         }
 
@@ -221,7 +226,7 @@ impl Backend {
             // full scan ran, because the file is written after the list that
             // names it.  It joins the table the moment it parses.
             if self.declares_registered_provider(uri) {
-                self.build_provider_resources(&self.laravel_providers());
+                self.build_provider_resources(providers.get());
             }
             return;
         };

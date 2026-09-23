@@ -412,8 +412,8 @@ pub(crate) struct LaravelStringKeyCache {
     /// that reach it.
     pub shared_view_vars: Option<std::sync::Arc<Vec<crate::blade::shared_vars::SharedVarGroup>>>,
     /// Every authorization ability the project knows: `Gate::define()`
-    /// registrations plus the methods of every policy class.
-    pub gate_abilities: Option<Vec<String>>,
+    /// registrations plus the methods of every policy class, sorted.
+    pub gate_abilities: Option<std::sync::Arc<[String]>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].

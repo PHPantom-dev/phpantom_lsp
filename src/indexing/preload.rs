@@ -270,7 +270,7 @@ impl Backend {
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
             let (php_files, resource_files) =
-                crate::references::collect_workspace_index_files_gitignore(
+                crate::classmap_scanner::collect_workspace_index_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),

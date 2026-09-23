@@ -265,22 +265,12 @@ pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
 
-    let mut returned_var_name: Option<String> = None;
-    let mut return_expr: Option<&Expression<'_>> = None;
-
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt {
-            if let Some(val) = ret.value {
-                match val {
-                    Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(bytes_to_str(dv.name).to_string());
-                    }
-                    _ => return_expr = Some(val),
-                }
-            }
-            break;
-        }
-    }
+    // A file that builds its array up over several assignments is read
+    // from the first: the tree is a snapshot of the value, not a merge of
+    // every write to it.
+    let expr = super::array_file::returned_exprs(program)
+        .into_iter()
+        .next()?;
 
     // Resolve `::class` references against the config file's own `use`
     // statements, so `use App\Models\User; ... User::class` yields the
@@ -288,22 +278,7 @@ pub(crate) fn parse_config_tree(content: &str) -> Option<ConfigNode> {
     let mut use_map: HashMap<String, String> = HashMap::new();
     Backend::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
 
-    if let Some(expr) = return_expr {
-        return Some(node_from_expr(expr, content, &use_map));
-    }
-
-    let var_name = returned_var_name?;
-    for stmt in program.statements.iter() {
-        if let Statement::Expression(expr_stmt) = stmt
-            && let Expression::Assignment(assign) = expr_stmt.expression
-            && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-            && dv.name == var_name.as_bytes()
-        {
-            return Some(node_from_expr(assign.rhs, content, &use_map));
-        }
-    }
-
-    None
+    Some(node_from_expr(expr, content, &use_map))
 }
 
 /// Resolve a class name written in a config file against its `use` statements.

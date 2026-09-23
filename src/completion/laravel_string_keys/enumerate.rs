@@ -55,7 +55,7 @@ impl Backend {
         if let Some(root) = self.workspace.workspace_root.read().clone() {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
             let filters = self.index_filters();
-            for path in crate::references::collect_php_files_gitignore(
+            for path in crate::classmap_scanner::collect_php_files_gitignore(
                 &root,
                 &vendor_dir_paths,
                 &filters,
@@ -138,12 +138,9 @@ impl Backend {
         )
     }
 
-    pub(crate) fn cached_route_names(&self) -> Vec<String> {
-        self.cached_routes()
-            .routes
-            .iter()
-            .map(|route| route.name.clone())
-            .collect()
+    /// Every named route's name, sorted.
+    pub(crate) fn cached_route_names(&self) -> std::sync::Arc<[String]> {
+        std::sync::Arc::clone(&self.cached_routes().names)
     }
 
     /// Every config key `config/` declares, sorted.
@@ -167,13 +164,13 @@ impl Backend {
     }
 
     /// Every authorization ability the project defines, from `Gate::define()`
-    /// registrations and policy class methods.
-    pub(crate) fn cached_gate_abilities(&self) -> Vec<String> {
+    /// registrations and policy class methods, sorted.
+    pub(crate) fn cached_gate_abilities(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.gate_abilities,
             |cache| cache.gate_abilities.clone(),
             |cache, names| cache.gate_abilities = Some(names),
-            || crate::virtual_members::laravel::enumerate_gate_abilities(self),
+            || crate::virtual_members::laravel::enumerate_gate_abilities(self).into(),
         )
     }
 
@@ -231,37 +228,18 @@ fn mark_trans_shape(shapes: &mut HashMap<String, bool>, key: String, is_group: b
     *existing = *existing || is_group;
 }
 
-/// Scan the workspace for `lang/*.json` files and record their top-level
-/// keys into `out`.  Laravel's JSON translations are flat
-/// `{ "Some phrase": "Translated phrase" }` objects where the key is used
-/// directly in `__('Some phrase')`, so every one is a scalar, never a
-/// group.
-///
-/// We scan the filesystem because JSON files are not PHP and therefore do
-/// not appear in the symbol maps.
+/// Record the top-level keys of the workspace's `lang/*.json` files into
+/// `out`.  A JSON translation is a flat phrase-to-line map, so every key
+/// is a scalar, never a group.
 fn collect_json_trans_key_shapes(backend: &crate::Backend, out: &mut HashMap<String, bool>) {
-    let root = match backend.workspace.workspace_root.read().clone() {
-        Some(r) => r,
-        None => return,
+    let Some(root) = backend.workspace.workspace_root.read().clone() else {
+        return;
     };
-    for sub in &["lang", "resources/lang"] {
-        let dir = root.join(sub);
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json")
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(map) =
-                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-            {
-                for k in map.keys() {
-                    mark_trans_shape(out, k.clone(), false);
-                }
-            }
+    crate::virtual_members::laravel::for_each_json_lang_file(&root, |_, map| {
+        for k in map.keys() {
+            mark_trans_shape(out, k.clone(), false);
         }
-    }
+    });
 }
 
 /// Scan a package translation directory and record keys in
