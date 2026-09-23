@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790126303426,
+  "lastUpdate": 1790126413238,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29409,6 +29409,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9ed463717c9177b571daa2efb1c1c3ad3b778fb8",
+          "message": "Find References, rename, and the reference-count lens no longer risk\nanswering one file with a receiver resolved for another",
+          "timestamp": "2026-09-23T02:32:57+02:00",
+          "tree_id": "5671034f1693f0415e157383bc289122e462a5c0",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9ed463717c9177b571daa2efb1c1c3ad3b778fb8"
+        },
+        "date": 1790126405075,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.2,
             "unit": "MiB"
           }
         ]
