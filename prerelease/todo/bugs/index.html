@@ -894,17 +894,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b335-a-for-loops-counter-keeps-its-initial-literal-inside-the-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B335. A <code>for</code> loop's counter keeps its initial literal inside the body
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#symbol-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1724,17 +1713,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b335-a-for-loops-counter-keeps-its-initial-literal-inside-the-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B335. A <code>for</code> loop's counter keeps its initial literal inside the body
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#symbol-resolution" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2068,22 +2046,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
-<h2 id="b335-a-for-loops-counter-keeps-its-initial-literal-inside-the-body">B335. A <code>for</code> loop's counter keeps its initial literal inside the body<a class="headerlink" href="#b335-a-for-loops-counter-keeps-its-initial-literal-inside-the-body" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">for ($i = 0; $i &lt; 10; $i++) {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    echo $i; // hovers as `0`; it is `int` on every iteration but the first</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">}</span>
-</code></pre></div>
-<p>The loop body is walked with the state from the init expressions only, so
-the literal <code>0</code> the counter starts at is never widened by the <code>$i++</code> the
-loop runs before every later iteration. The same shape reaches Blade
-through <code>@for</code>. The <code>for</code> body has to be walked with the state the
-increment expressions produce joined in, not with the init state alone.</p>
-<p><strong>Tests:</strong> <code>blade_preprocessing::a_for_loop_counter_is_an_int</code> and
-<code>a_for_loop_header_without_spaces_still_binds_its_counter</code> (<code>#[ignore]</code>d
-until this lands).</p>
-<p><strong>Where to look:</strong> the <code>for</code> handling in
-<code>src/type_engine/variable/forward_walk/</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <h2 id="b336-hover-finds-no-symbol-at-a-non-ascii-identifier">B336. Hover finds no symbol at a non-ASCII identifier<a class="headerlink" href="#b336-hover-finds-no-symbol-at-a-non-ascii-identifier" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
@@ -2095,10 +2058,10 @@ word-at-cursor scan only accepts ASCII identifier characters.</p>
 and <code>a_multibyte_class_name_resolves_its_static_members</code>.</p>
 <h2 id="b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias">B337. An unqualified class name inside a namespace falls back to a global alias<a class="headerlink" href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">namespace App\Http;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class Controller {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function go(): void { Cache::forget(&#39;x&#39;); }</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App\Http;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class Controller {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function go(): void { Cache::forget(&#39;x&#39;); }</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>PHP resolves <code>Cache</code> to <code>App\Http\Cache</code> and never falls back to the global
 namespace for a class name (only functions and constants fall back), so
@@ -2124,8 +2087,8 @@ and <code>a_forwarded_mixin_call_goes_to_the_contract_declaration</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h2 id="b339-a-parent-models-fillable-and-casts-do-not-reach-the-child">B339. A parent model's <code>$fillable</code> and <code>$casts</code> do not reach the child<a class="headerlink" href="#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class BaseModel extends Model { protected $fillable = [&#39;uuid&#39;]; protected $casts = [&#39;is_archived&#39; =&gt; &#39;boolean&#39;]; }</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">class User extends BaseModel {}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class BaseModel extends Model { protected $fillable = [&#39;uuid&#39;]; protected $casts = [&#39;is_archived&#39; =&gt; &#39;boolean&#39;]; }</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class User extends BaseModel {}</span>
 </code></pre></div>
 <p><code>$user-&gt;uuid</code> and <code>$user-&gt;is_archived</code> are missing: <code>LaravelModelProvider</code>
 (<code>src/virtual_members/laravel/mod.rs</code>) reads <code>class.laravel()</code> for the
