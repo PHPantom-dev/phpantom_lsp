@@ -3347,8 +3347,44 @@ instead of to the file.</p>
 <p><strong>Where to look:</strong> <code>merge_branch</code>, <code>merge_local</code> and
 <code>describes_same_state_as</code> in
 <code>type_engine/variable/forward_walk/scope_state/merge.rs</code>, the proof joins in
-<code>scope_state/proofs.rs</code>, and the branch handling in
-<code>type_engine/variable/forward_walk/control_flow.rs</code>.</p>
+<code>scope_state/proofs.rs</code>, and the branch forks: <code>fork_if_branches</code> and
+<code>merge_if_branches</code> in <code>forward_walk/if_else.rs</code> (both <code>if</code> spellings go
+through them), the loop bodies in <code>forward_walk/while_for.rs</code> and
+<code>forward_walk/foreach.rs</code>, and <code>process_try</code> / <code>process_switch</code> in
+<code>forward_walk/control_flow.rs</code>. <code>scope_state/tests.rs</code> pins what the join
+does to one variable at a time.</p>
+<p>The branch clones are not the only place the walk pays for the size of
+the scope. Measure these too before deciding what the join has to fix:</p>
+<ul>
+<li><code>record_scope_snapshot</code> (<code>forward_walk/diagnostic_cache.rs</code>) copies the
+  whole locals map at the start and again at the end of every statement
+  in a diagnostic pass (<code>walk_body_forward</code> in <code>forward_walk/mod.rs</code>, which
+  also clones a <code>pre_stmt_scope</code> per statement). That is
+  O(statements × locals) on its own, the same shape as the branch clones.</li>
+<li><code>ScopeState::snapshot_resolver</code> clones the map once per call and is
+  called once per condition narrowing (<code>cond_narrowing/apply.rs</code>,
+  <code>cond_narrowing/instanceof.rs</code>).</li>
+<li>Condition narrowing turns every local into a <code>String</code> per condition
+  (the <code>var_names</code> lists in <code>cond_narrowing/apply.rs</code>) and runs its
+  extractors per local.</li>
+<li><code>forward_walk/by_ref.rs</code> re-resolves every local in scope on every call
+  statement to see whether the call rebinds it by reference.</li>
+<li>The proof joins in <code>scope_state/proofs.rs</code> walk every key of one side,
+  <code>simplify_class_hierarchy_unions</code> runs after every multi-way join, and
+  <code>invalidate_dependent_keys</code> / <code>invalidate_receiver_state</code> in
+  <code>scope_state/mod.rs</code> <code>retain</code> over the whole map on every reassignment
+  or impure call.</li>
+</ul>
+<p>Full-scope clones at fork points, for the join rewrite: the then, per
+<code>elseif</code>, and <code>else</code> copies in <code>fork_if_branches</code> plus the implicit-else
+copy in <code>merge_if_branches</code>; <code>pre_loop_scope</code> and the post-loop join in
+each loop of <code>while_for.rs</code> and <code>foreach.rs</code>; <code>loops.rs</code> once per
+re-walk; <code>process_try</code> per <code>catch</code> and <code>process_switch</code> per arm and at
+the join; <code>closures.rs</code> on the first return; <code>loop_control.rs</code> per
+<code>break</code>/<code>continue</code>; <code>cond_narrowing/apply.rs</code> per <code>&amp;&amp;</code> operand. Narrowing
+writes into branch scopes too, and exit and return edges are recorded at
+arbitrary nesting depth and merged at an outer fork, so a "keys the branch
+wrote" set has to be carried through nested forks.</p>
 
 
 

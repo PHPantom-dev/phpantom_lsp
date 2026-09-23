@@ -937,6 +937,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b334-the-blade-view-roots-never-notice-a-resourcesviews-created-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B334. The Blade view roots never notice a <code>resources/views</code> created later
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1514,6 +1525,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#b334-the-blade-view-roots-never-notice-a-resourcesviews-created-later" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B334. The Blade view roots never notice a <code>resources/views</code> created later
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1570,7 +1592,19 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h2 id="b334-the-blade-view-roots-never-notice-a-resourcesviews-created-later">B334. The Blade view roots never notice a <code>resources/views</code> created later<a class="headerlink" href="#b334-the-blade-view-roots-never-notice-a-resourcesviews-created-later" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>laravel_view_roots</code> (<code>src/blade/view_paths.rs</code>) keeps only the configured
+directories that exist when it is first built, caches an empty list when
+the workspace root is not yet known, and is reset only when
+<code>config/view.php</code> changes (<code>LaravelStringKeyCache::invalidate_for_uri</code> in
+<code>src/lib.rs</code>). A project whose <code>resources/views</code> directory is created after
+the first Blade request, or whose roots were computed before <code>initialize</code>
+set the workspace root, resolves no view names until <code>config/view.php</code> is
+edited. The provider-resource republish does not reset the roots either.</p>
+<p><strong>Fix:</strong> reset <code>view_roots</code> when a directory a configured root names
+appears (the watcher already reports created files under it), and do not
+cache the empty answer taken before the workspace root is known.</p>
 
 
 
