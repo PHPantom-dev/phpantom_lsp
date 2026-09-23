@@ -1382,6 +1382,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1696,6 +1718,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         T41. <code>@param-out</code> is parsed but never read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
       </span>
     </span>
   </a>
@@ -2268,6 +2312,102 @@ reading that helper takes from the body.
 Once it is read, the pcre stub patches can declare <code>preg_match</code>'s and
 <code>preg_match_all</code>'s out types directly rather than inheriting
 phpstorm-stubs' <code>null|string[]</code>.</p>
+<h2 id="t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it">T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it<a class="headerlink" href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Unknown (needs investigation)</strong></p>
+<p>Found while porting Mago's <code>issue_362.php</code> (Test Porting Phase 4A): a
+static method that declares its own <code>@template T</code> and returns
+<code>self&lt;T&gt;</code> makes every completion request on a call chained off it come
+back <code>None</code> (not empty — no completion response at all), even when the
+receiving variable's type is separately pinned down by a <code>@var</code>
+annotation that makes the method's own template irrelevant.</p>
+<p>Minimal repro:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">class Product {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public function getPrice(): float { return 0.0; }</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">class Box {</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">    /**</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">     * @template T</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">     * @return self&lt;T&gt;</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">     */</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    public static function make(): self { return new self(); }</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">    public function get(): mixed {}</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="x">}</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="x">/** @var Box&lt;Product&gt; $box */</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="x">$box = Box::make();</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="x">$box-&gt;get()-&gt;  // completion() returns None here, not just an empty list</span>
+</code></pre></div>
+<p>Removing either the method-level <code>@template T</code> + <code>@return self&lt;T&gt;</code> on
+<code>make()</code> (letting it return a bare <code>self</code> and relying entirely on the
+<code>@var</code> hint), or making <code>get()</code>'s call chain off a plain <code>new Box()</code>
+instead of <code>Box::make()</code>, makes the same chain resolve <code>getPrice</code>
+correctly. So the break is specific to a <code>self&lt;T&gt;</code>-returning static
+method sitting in the middle of a chain — one hop after it (<code>Box::make()
+-&gt;</code>) still lists <code>Box</code>'s own members fine; it is the <em>second</em> hop
+(<code>-&gt;get()-&gt;</code>, the one that needs <code>T</code> substituted from the instantiated
+type) that comes back empty-handed.</p>
+<p>The same failure reproduces with the original Mago pattern too: two
+independent method-level templates (<code>K</code>, <code>V</code>, both distinct from the
+class-level <code>TKey</code>/<code>TValue</code>) inferred from an <code>array&lt;K, V&gt;</code> argument and
+returned as <code>self&lt;K, V&gt;</code>, chained straight into an instance method
+whose own <code>@return TValue</code> should resolve through it. So this is not
+purely a same-name shadowing edge case between the class-level and
+method-level template — investigate whether both share one underlying
+cause before assuming they are separate bugs.</p>
+<p>Whatever produces the instantiated receiver type for the second hop
+comes back with nothing usable — worth checking whether the generic
+substitution map built for <code>self&lt;T&gt;</code> ends up unable to resolve <code>T</code> (no
+argument binds the method-level template, and the external <code>@var</code>
+override does not appear to reach it), and whether that unresolved-<code>T</code>
+case is handled by returning an error/<code>None</code> instead of falling back to
+the class's own declared (or unsubstituted) member types the way other
+partial-resolution failures in this pipeline do.</p>
+<p><strong>Blocks:</strong> Test Porting Phase 4A pattern 362 (generic class implementing
+<code>ArrayAccess</code>/<code>IteratorAggregate</code> with a <code>self&lt;K, V&gt;</code>-returning static
+factory) cannot be ported until this is fixed — the ported test would
+assert on exactly the completion this bug empties out.</p>
+<h2 id="t43-selftypealias-inside-extendss-generic-argument-is-not-resolved">T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved<a class="headerlink" href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Found while porting Mago's <code>issue_870.php</code> (Test Porting Phase 4A). A
+class can declare its own <code>@type</code>/<code>@phpstan-type</code> alias and hand it to
+its own parent's template parameter via <code>self::</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">abstract class Car {</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    /** @return TData */</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    abstract function getData(): array;</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">/**</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x"> * @type DataArray = array{&#39;Gewicht&#39;: int}</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x"> */</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">class RedCar extends Car {</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">    public function getData(): array { return [&#39;Gewicht&#39; =&gt; 1000]; }</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>getData()</code>'s inherited <code>@return TData</code> should resolve to the
+<code>DataArray</code> shape (offering <code>Gewicht</code> for array-key completion), but
+<code>self::DataArray</code> inside the <code>@extends</code> tag's generic argument list is
+not recognised as a reference to the class's own type alias, so <code>TData</code>
+never gets substituted and completion sees only the untyped <code>array</code>
+declared return.</p>
+<p><code>extract_generics_tag</code> (<code>docblock.rs</code>, exercised by
+<code>test_extract_generics_tag_extends_single_param</code> and friends in
+<code>completion_generics.rs</code>) parses <code>@extends Foo&lt;Bar&gt;</code> generic arguments
+as plain type tokens; <code>self::DataArray</code> most likely parses as some
+<code>Named</code>/member-access token rather than being recognised as "look up
+<code>DataArray</code> in this class's own <code>type_aliases</code>, the same alias
+<code>resolve_type_alias_typed</code> already expands everywhere else."</p>
+<p><strong>Fix:</strong> when parsing a generic argument off <code>@extends</code>/<code>@implements</code>/
+<code>@template-implements</code>, recognise a <code>self::Identifier</code> token and resolve
+it against the <em>declaring</em> class's own <code>type_aliases</code> map (via
+<code>resolve_type_alias_typed</code> with that class as <code>owning_class_name</code>)
+before substituting it into the parent's template.</p>
+<p><strong>Blocks:</strong> Test Porting Phase 4A pattern 870.</p>
 
 
 

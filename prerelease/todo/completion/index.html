@@ -964,6 +964,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1514,6 +1525,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2029,6 +2051,38 @@ site pointing at a keyword would produce a bogus highlight and a rename
 edit that corrupts the hook. The fix needs a def kind those consumers
 skip (say <code>VarDefKind::ImplicitHookValue</code>) while variable completion
 includes it.</p>
+<h2 id="c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members<a class="headerlink" href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Found while porting Mago's <code>issue_1064.php</code> (Test Porting Phase 4A).
+<code>$this-&gt;</code> completion inside a trait carrying <code>@phpstan-require-extends</code>/
+<code>@psalm-require-extends</code> already offers the required class's instance
+methods and properties (<code>test_completion_require_extends_this_members_*</code>
+in <code>completion_traits.rs</code>), via <code>trait_this_bounds</code>/
+<code>extend_this_with_trait_bounds</code> in <code>type_engine/trait_context.rs</code>. Static
+access does not get the same treatment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    const int FOO = 42;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">trait Bar {</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public function foo(): int {</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
+a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,
+<code>forward_walk/callable_inference.rs</code>, <code>resolver/mod.rs</code>, and
+<code>diagnostics/deprecated.rs</code>) — none of them run for a bare <code>self::</code>/
+<code>static::</code> completion inside a trait body, so the required class's
+constants and static properties/methods never enter the candidate list
+there.</p>
+<p><strong>Fix:</strong> find where <code>self::</code>/<code>static::</code> completion resolves its target
+class for a trait method body (as opposed to <code>$this-&gt;</code>'s path) and feed
+it through the same <code>@require-extends</code>/<code>@require-implements</code> bound the
+<code>$this-&gt;</code> path already consults, rather than adding a second lookup of
+the tag.</p>
 
 
 
