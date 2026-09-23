@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790130245040,
+  "lastUpdate": 1790133808436,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29647,6 +29647,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "811d4a8e3ed5ab368b03e303312793e552359b64",
+          "message": "Find References lands on the right line in Blade templates",
+          "timestamp": "2026-09-23T05:06:08+02:00",
+          "tree_id": "8caf870cd49430737708adc0910ebd702ea84b49",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/811d4a8e3ed5ab368b03e303312793e552359b64"
+        },
+        "date": 1790133800371,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.1,
             "unit": "MiB"
           }
         ]
