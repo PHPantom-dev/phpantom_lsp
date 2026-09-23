@@ -199,7 +199,6 @@ async fn a_forelse_value_is_typed_from_the_iterable() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: a for-loop counter keeps its initial literal inside the body"]
 async fn a_for_loop_counter_is_an_int() {
     let body = "@for($i = 0; $i < 10; $i++)\n    {{ $i }}\n@endfor\n";
     let (backend, uri, text) = template(body).await;
@@ -209,7 +208,6 @@ async fn a_for_loop_counter_is_an_int() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: a for-loop counter keeps its initial literal inside the body"]
 async fn a_for_loop_header_without_spaces_still_binds_its_counter() {
     let body = "@for($j=0;$j<10;$j++)\n    {{ $j }}\n@endfor\n";
     let (backend, uri, text) = template(body).await;

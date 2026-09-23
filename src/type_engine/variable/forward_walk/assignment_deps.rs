@@ -206,6 +206,18 @@ pub(crate) fn collect_expr_assignment_deps(
     expr: &Expression<'_>,
     deps: &mut HashMap<String, HashSet<String>>,
 ) {
+    // `$i++` / `--$i` rewrites the variable from its own previous value
+    // (the literal `0` a counter starts at becomes `int`), so it is a
+    // self-edge just like an indexed write.
+    if let Some(operand) = increment_decrement_operand(expr) {
+        let mut targets = HashSet::new();
+        collect_assignment_target_vars(operand, &mut targets);
+        for target in targets {
+            deps.entry(target.clone()).or_default().insert(target);
+        }
+        return;
+    }
+
     let Expression::Assignment(assign) = expr else {
         return;
     };
@@ -238,6 +250,23 @@ pub(crate) fn collect_expr_assignment_deps(
         if indexed_write {
             entry.insert(target);
         }
+    }
+}
+
+fn increment_decrement_operand<'a>(expr: &'a Expression<'a>) -> Option<&'a Expression<'a>> {
+    use mago_syntax::cst::unary::UnaryPrefixOperator;
+
+    match expr {
+        Expression::UnaryPostfix(postfix) => Some(postfix.operand),
+        Expression::UnaryPrefix(prefix)
+            if matches!(
+                prefix.operator,
+                UnaryPrefixOperator::PreIncrement(_) | UnaryPrefixOperator::PreDecrement(_)
+            ) =>
+        {
+            Some(prefix.operand)
+        }
+        _ => None,
     }
 }
 

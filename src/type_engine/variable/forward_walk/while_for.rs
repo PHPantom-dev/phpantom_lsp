@@ -238,9 +238,7 @@ pub(crate) fn process_for<'b>(
             // already holds the types they bound.  Re-running them would
             // overwrite a loop-carried type with the first iteration's.
             LoopSeedPoint::AfterBody => {
-                for increment in for_stmt.increments.iter() {
-                    process_assignment_expr(increment, next_scope, ctx);
-                }
+                process_for_updates(for_stmt, next_scope, ctx);
             }
             LoopSeedPoint::Entry => {
                 for cond_expr in for_stmt.conditions.iter() {
@@ -276,9 +274,7 @@ pub(crate) fn process_for<'b>(
     // A loop that ran its body at least once exited from the condition
     // check that follows the update clause, so the reassignments the update
     // clause makes are part of the post-loop state.
-    for increment in for_stmt.increments.iter() {
-        process_assignment_expr(increment, scope, ctx);
-    }
+    process_for_updates(for_stmt, scope, ctx);
 
     // The loop body might not execute at all (condition false on
     // first check), so merge with the pre-loop scope.
@@ -303,6 +299,21 @@ pub(crate) fn process_for<'b>(
     // narrowing; they only hold inside the loop body where the conditions
     // were true.
     strip_synthetic_property_keys(scope);
+}
+
+/// Apply a `for` loop's update clause to `scope`.  The clause is usually
+/// an increment (`$i++`) rather than an assignment, and an increment is
+/// what widens a counter's initial literal to `int` for every iteration
+/// after the first.
+fn process_for_updates<'b>(
+    for_stmt: &'b For<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    for increment in for_stmt.increments.iter() {
+        process_assignment_expr(increment, scope, ctx);
+        process_increment_decrement(increment, scope, ctx);
+    }
 }
 
 /// Process a `do-while` loop.

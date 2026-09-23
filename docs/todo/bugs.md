@@ -38,28 +38,7 @@ No outstanding items.
 
 ## Arithmetic
 
-## B335. A `for` loop's counter keeps its initial literal inside the body
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-for ($i = 0; $i < 10; $i++) {
-    echo $i; // hovers as `0`; it is `int` on every iteration but the first
-}
-```
-
-The loop body is walked with the state from the init expressions only, so
-the literal `0` the counter starts at is never widened by the `$i++` the
-loop runs before every later iteration. The same shape reaches Blade
-through `@for`. The `for` body has to be walked with the state the
-increment expressions produce joined in, not with the init state alone.
-
-**Tests:** `blade_preprocessing::a_for_loop_counter_is_an_int` and
-`a_for_loop_header_without_spaces_still_binds_its_counter` (`#[ignore]`d
-until this lands).
-
-**Where to look:** the `for` handling in
-`src/type_engine/variable/forward_walk/`.
+No outstanding items.
 
 ## Symbol resolution
 

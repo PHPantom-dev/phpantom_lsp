@@ -12449,6 +12449,32 @@ for ($i = 0, $x = new Outer(); $i < 10; $i++, $x = $x->next()) {
     );
 }
 
+/// The counter starts at a literal, but the `$i++` the loop runs before every
+/// later iteration widens it, so the body reads it as `int`.
+#[test]
+fn hover_for_loop_counter_is_widened_by_increment() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+for ($i = 0; $i < 10; $i++) {
+    echo $i;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("echo $i"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover = hover_at(&backend, uri, content, target_line, 10).expect("expected hover on $i");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "In the body, $i should be int, got: {}",
+        text
+    );
+}
+
 // ─── __get magic method template resolution ─────────────────────────────────
 
 #[test]

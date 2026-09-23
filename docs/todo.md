@@ -98,7 +98,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B335 | [A `for` loop's counter keeps its initial literal inside the body](todo/bugs.md#b335-a-for-loops-counter-keeps-its-initial-literal-inside-the-body)                       | Medium      | Medium      |
 | B338 | [Go-to-definition on a facade call stops at the facade](todo/bugs.md#b338-go-to-definition-on-a-facade-call-stops-at-the-facade)                                          | Medium      | Medium      |
 | B339 | [A parent model's `$fillable` and `$casts` do not reach the child](todo/bugs.md#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child)                           | Medium      | Medium      |
 | B340 | [Column-name string completion recovers its receiver from text](todo/bugs.md#b340-column-name-string-completion-recovers-its-receiver-from-text)                          | Medium      | Medium      |
