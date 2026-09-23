@@ -70,28 +70,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-## B330. The chain cache tells files apart by a pointer that can be reused
-
-**Impact: Medium · Complexity: Low** (suspected, not reproduced)
-
-`chain_cache_key` (`type_engine/resolver/mod.rs:275`) mixes
-`ctx.content.as_ptr()` into the key so that `Pen::make()` under
-`use A\Pen` in one file does not answer for `use B\Pen` in another. That
-is sound only while every file's content outlives the cache. Find
-References and the lens batch keep one chain cache active for the whole
-request (`backend/requests.rs:61`, and `reference_counts/mod.rs:235`;
-the inner `with_chain_resolution_cache()` in
-`references/members.rs:843` is a no-op under an active one). They also
-walk candidate files one after another. For a closed file the content
-is a fresh `Arc<String>` from `get_file_content_arc` that is freed when
-the iteration ends, and the allocator is free to hand the next file's
-content the same address. A cache hit then serves the previous file's
-answer, and because a hit records no dependency, the
-`ResolvedMemberFile.deps` stored for the second file is incomplete too.
-
-**Fix:** key on an identity that stays alive for the cache's lifetime
-(the file's `Arc<SymbolMap>` or URI), or give each candidate file its
-own `with_isolated_chain_cache()`.
+No outstanding items.
 
 ## Array types
 

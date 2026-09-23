@@ -840,7 +840,16 @@ impl Backend {
         access_indices.sort_unstable();
         access_indices.dedup();
 
-        let _chain_guard = crate::type_engine::resolver::with_chain_resolution_cache();
+        // Isolated rather than shared: a request-wide chain cache (find
+        // references, the lens batch) keeps one map active across every
+        // candidate file, one after another.  Each file's content is a
+        // fresh `Arc<String>` freed once its resolution finishes, and the
+        // allocator can hand the next file's content the same address —
+        // `chain_cache_key` discriminates files by that address, so a
+        // shared map would then serve this file's queries the previous
+        // file's cached answer. An isolated map is only ever populated and
+        // read within this one file's resolution below.
+        let _chain_guard = crate::type_engine::resolver::with_isolated_chain_cache();
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let resolved = carried
             .into_iter()
