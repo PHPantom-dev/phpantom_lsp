@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790128971985,
+  "lastUpdate": 1790130177407,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29579,6 +29579,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 85.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d8cc4ec90ac4190a7dd3242b61390696b5073d19",
+          "message": "Files changed on disk keep counting in the reference-count lens",
+          "timestamp": "2026-09-23T04:04:32+02:00",
+          "tree_id": "c41be6d0b408252469f751a8d6f5d3838d4d9353",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d8cc4ec90ac4190a7dd3242b61390696b5073d19"
+        },
+        "date": 1790130169647,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.6,
             "unit": "MiB"
           }
         ]
