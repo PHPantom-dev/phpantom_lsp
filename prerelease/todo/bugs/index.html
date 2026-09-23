@@ -949,17 +949,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B329. The reference-count worker keeps searching while the user types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1570,17 +1559,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B329. The reference-count worker keeps searching while the user types
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1682,19 +1660,6 @@ that every cross-file walk runs suspended.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b329-the-reference-count-worker-keeps-searching-while-the-user-types">B329. The reference-count worker keeps searching while the user types<a class="headerlink" href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>schedule_member_ref_counts</code> (<code>reference_counts/mod.rs:333</code>) waits for an
-edit pause once, then loops <code>compute_pending_member_ref_counts</code> on a
-blocking thread until the queue is empty. An item stays queued whenever
-the invalidation epoch moved during the run (lines 296 to 305), and the
-epoch moves on every reparse of any file: <code>invalidate_member</code>
-(<code>reference_counts/cache.rs:331</code>) bumps it before its early return, and
-<code>invalidate_locations_in</code> bumps it whether or not an entry matched. While
-the user keeps typing, whole-workspace searches therefore run back to
-back, each invalidated by the next keystroke.</p>
-<p><strong>Fix:</strong> only bump the epoch when an entry was actually marked, and wait
-for an edit pause between iterations rather than only before the first.</p>
 <h2 id="b332-a-commented-out-use-counts-as-a-template-import">B332. A commented-out <code>@use</code> counts as a template import<a class="headerlink" href="#b332-a-commented-out-use-counts-as-a-template-import" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>use_directive_arguments</code> (<code>blade/use_directive.rs:16</code>) finds <code>@use</code> with
