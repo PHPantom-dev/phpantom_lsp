@@ -937,17 +937,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b333-a-stale-index-parse-can-pin-a-template-to-its-old-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B333. A stale index parse can pin a template to its old scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1525,17 +1514,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b333-a-stale-index-parse-can-pin-a-template-to-its-old-scope" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B333. A stale index parse can pin a template to its old scope
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1592,23 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b333-a-stale-index-parse-can-pin-a-template-to-its-old-scope">B333. A stale index parse can pin a template to its old scope<a class="headerlink" href="#b333-a-stale-index-parse-can-pin-a-template-to-its-old-scope" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>A workspace index worker lowers a closed template with the scope cached
-in <code>blade_injected_vars</code> when it starts, and its batch is applied later
-(<code>parse_ast_index_update_for_index</code> →
-<code>apply_ast_index_parse_results_batch</code>). If call-site inference re-infers
-the template in between (the detached did-open or did-save pass), writes
-the new scope to the cache and re-parses, the worker's batch still lands
-afterwards and republishes the lowering built from the old scope. The
-published lowering is self-consistent (its virtual PHP, source map and
-symbol map are published together), so positions are right, but the
-template's variables keep the old types. The next re-inference computes
-the same scope that is already cached, so it sees nothing to do and the
-stale types stay until the template itself is re-parsed.</p>
-<p><strong>Fix:</strong> record the scope a lowering was built from in the lowering, and
-drop a batch result for a template whose cached scope has moved on since
-(or re-lower it against the current scope when the batch applies).</p>
+<p>No outstanding items.</p>
 
 
 
