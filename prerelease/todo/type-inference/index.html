@@ -2222,7 +2222,7 @@ both call shapes carry the branch the other one takes.</p>
 <code>json_encode</code>'s <code>JSON_THROW_ON_ERROR</code>
 (<code>type_engine/types/flag_returns.rs</code>): read the flags argument's text at
 the call site and pick a branch from it. A conditional return type in
-<code>stub_patches.rs</code> cannot express this one, because the deciding value
+<code>stub_patches/</code> cannot express this one, because the deciding value
 arrives as a global constant (<code>PATHINFO_FILENAME</code>) and a condition can
 only name a literal value or a class constant.</p>
 <p><strong>Fix:</strong> add <code>pathinfo</code> to <code>flag_returns.rs</code>: the string branch when the

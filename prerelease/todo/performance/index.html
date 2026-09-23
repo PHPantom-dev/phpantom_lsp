@@ -3344,9 +3344,11 @@ mostly of entries neither path touches. Recording what a branch actually
 wrote and merging only those entries, or sharing the untouched part
 rather than cloning it, would make a merge proportional to the branch
 instead of to the file.</p>
-<p><strong>Where to look:</strong> <code>merge_branch</code>, <code>describes_same_state_as</code>, and the join
-helpers under them in <code>type_engine/variable/forward_walk/scope_state/merge.rs</code>,
-and the branch handling in <code>type_engine/variable/forward_walk/control_flow.rs</code>.</p>
+<p><strong>Where to look:</strong> <code>merge_branch</code>, <code>merge_local</code> and
+<code>describes_same_state_as</code> in
+<code>type_engine/variable/forward_walk/scope_state/merge.rs</code>, the proof joins in
+<code>scope_state/proofs.rs</code>, and the branch handling in
+<code>type_engine/variable/forward_walk/control_flow.rs</code>.</p>
 
 
 
