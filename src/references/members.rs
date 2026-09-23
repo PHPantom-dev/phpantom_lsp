@@ -177,6 +177,15 @@ impl Backend {
             };
             let file_ctx = self.file_context(file_uri);
 
+            // Isolated for the same reason as the guard in
+            // `resolve_member_receivers`: an outer request-level chain cache
+            // can stay active across this whole loop, and `content` is a
+            // fresh `Arc<String>` per file that is freed at the end of this
+            // iteration, so its address can be reused by a later file. A
+            // fresh map per file keeps this file's entries from leaking into
+            // (or answering for) the next one.
+            let _chain_guard = crate::type_engine::resolver::with_isolated_chain_cache();
+
             for &span_idx in symbol_map.member_access_indices(name) {
                 let span = &symbol_map.spans[span_idx];
                 let SymbolKind::MemberAccess {
