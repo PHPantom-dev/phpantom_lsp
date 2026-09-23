@@ -30,35 +30,7 @@ No outstanding items.
 
 ## Reachability
 
-## B326. A dead branch in another file hides diagnostics in the file being checked
-
-**Impact: Medium · Complexity: Low**
-
-A diagnostic pass collects the byte ranges of branches a decidable guard
-rules out (`if (false)`, a negated `method_exists` on a literal
-class and method), and drops every diagnostic of the file that starts
-inside one (`diagnostics/mod.rs:368-387`). `record_unreachable_range`
-(`type_engine/variable/forward_walk/reachability.rs:46`) records
-whenever a collection is active. It does not check which file the
-walker is in, and neither `suspend_diagnostic_scope` nor
-`suspend_snapshot_recording` stops it, even though
-`record_scope_snapshot` skips nested walks for exactly this reason
-("their statement offsets can even come from a different file").
-Return-type inference of an untyped method in another file walks that
-file's body through the same `process_if` (`control_flow.rs:113-128`,
-`318-331`). The dead ranges it records are offsets into the other file,
-and they suppress whatever the checked file reports at the same byte
-offsets.
-
-**Reproducer shape:** file A calls `(new Helper)->make()->bogus()`, and
-`Helper::make()` in file B has no return type and contains
-`if (false) { … }` spanning bytes X..Y. Any diagnostic in A that starts
-in X..Y disappears.
-
-**Fix:** tie the recorded ranges to the walk that owns the pass, either
-by keying them on the pass's content (as the snapshot map is keyed) or
-by not recording while snapshot recording is suspended, after checking
-that every cross-file walk runs suspended.
+No outstanding items.
 
 ## Narrowing
 

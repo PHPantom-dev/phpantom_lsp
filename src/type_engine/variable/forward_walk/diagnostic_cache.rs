@@ -267,3 +267,16 @@ pub(crate) fn suspend_snapshot_recording() -> SnapshotSuspendGuard {
     SUSPEND_SNAPSHOT.with(|c| c.set(c.get() + 1));
     SnapshotSuspendGuard
 }
+
+/// Whether a nested walk started by [`suspend_snapshot_recording`] is
+/// currently in progress.
+///
+/// Consulted by [`record_unreachable_range`](super::record_unreachable_range)
+/// for the same reason [`record_scope_snapshot`] checks it: a nested walk
+/// (e.g. return-type inference walking a callee's body, possibly in
+/// another file entirely) reuses the same `process_if` machinery, and its
+/// statement offsets must not be recorded as unreachable in the outer
+/// file's collection.
+pub(crate) fn snapshot_recording_suspended() -> bool {
+    SUSPEND_SNAPSHOT.with(|c| c.get() > 0)
+}
