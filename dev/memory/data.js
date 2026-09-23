@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790181235101,
+  "lastUpdate": 1790187738474,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29919,6 +29919,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d26ddb175246e617e9afbdcc1102eba860ca8298",
+          "message": "Blade component discovery reads every directory of an array PSR-4\nmapping",
+          "timestamp": "2026-09-23T20:05:01+02:00",
+          "tree_id": "e45363df8b63a98c17ac68c8122fcb8d73cf8ea9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d26ddb175246e617e9afbdcc1102eba860ca8298"
+        },
+        "date": 1790187730833,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.5,
             "unit": "MiB"
           }
         ]
