@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790122975215,
+  "lastUpdate": 1790124390805,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29341,6 +29341,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2b474c72b19f5633eda79fde7c2790efcd451438",
+          "message": "Find References and the reference-count lens no longer let a closed\nfile's cached type answer for a different file",
+          "timestamp": "2026-09-23T02:29:01+02:00",
+          "tree_id": "94511252aec42e9364055db642c3d2a632a7af55",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2b474c72b19f5633eda79fde7c2790efcd451438"
+        },
+        "date": 1790124382710,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.7,
             "unit": "MiB"
           }
         ]
