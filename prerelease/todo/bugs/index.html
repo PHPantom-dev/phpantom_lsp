@@ -937,17 +937,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B332. A commented-out <code>@use</code> counts as a template import
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1525,17 +1514,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B332. A commented-out <code>@use</code> counts as a template import
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1592,16 +1570,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b332-a-commented-out-use-counts-as-a-template-import">B332. A commented-out <code>@use</code> counts as a template import<a class="headerlink" href="#b332-a-commented-out-use-counts-as-a-template-import" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>use_directive_arguments</code> (<code>blade/use_directive.rs:16</code>) finds <code>@use</code> with
-a plain <code>find</code>. It neither masks Blade comments nor checks a word
-boundary before the <code>@</code>. So <code>{{-- @use('App\Foo') --}}</code> is taken as a
-real import by <code>analyze_template_use_block</code> (which BL1's import
-insertion builds on) and rewritten by the template rename in
-<code>rename/blade.rs:32</code>, while the preprocessor ignores it.</p>
-<p><strong>Fix:</strong> mask with <code>signature::inert_regions</code> and require a directive
-boundary (<code>directives::directive_head</code>), as the other Blade scanners do.</p>
+<p>No outstanding items.</p>
 
 
 
