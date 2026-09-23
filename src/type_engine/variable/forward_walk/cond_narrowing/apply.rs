@@ -280,17 +280,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             .find(|a| a.subject == *var_name && !a.alternatives.is_empty());
         if let Some(alias) = alias_or.filter(|a| !a.extraction.negated) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let had_types = !scope.get(var_name).is_empty();
-            let mut results = scope.get(var_name).to_vec();
-            for cls in alias_classes(alias) {
-                ResolvedType::apply_narrowing(&mut results, |class_list| {
-                    narrowing::apply_instanceof_exclusion(&cls, &var_ctx, class_list)
-                });
-                scope.record_exclusion(var_name, &cls);
-            }
-            if !results.is_empty() {
-                scope.set(var_name, results);
-            } else if had_types {
+            if exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope) {
                 scope.unreachable = true;
             }
             continue;
@@ -317,17 +307,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            let had_types = !scope.get(var_name).is_empty();
-            let mut results = scope.get(var_name).to_vec();
-            for cls_type in &classes {
-                ResolvedType::apply_narrowing(&mut results, |class_list| {
-                    narrowing::apply_instanceof_exclusion(cls_type, &var_ctx, class_list)
-                });
-                scope.record_exclusion(var_name, cls_type);
-            }
-            if !results.is_empty() {
-                scope.set(var_name, results);
-            } else if had_types {
+            if exclude_classes_in_scope(var_name, &classes, &var_ctx, scope) {
                 scope.unreachable = true;
             }
             continue;
@@ -362,20 +342,8 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                             &scope_resolver,
                         );
                     }
-                } else {
-                    let had_types = !scope.get(var_name).is_empty();
-                    let mut results = scope.get(var_name).to_vec();
-                    for target in &targets {
-                        ResolvedType::apply_narrowing(&mut results, |classes| {
-                            narrowing::apply_instanceof_exclusion(target, &var_ctx, classes)
-                        });
-                        scope.record_exclusion(var_name, target);
-                    }
-                    if !results.is_empty() {
-                        scope.set(var_name, results);
-                    } else if had_types {
-                        scope.unreachable = true;
-                    }
+                } else if exclude_classes_in_scope(var_name, &targets, &var_ctx, scope) {
+                    scope.unreachable = true;
                 }
                 continue;
             }
@@ -422,15 +390,12 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
-                let had_types = !scope.get(var_name).is_empty();
-                let mut results = scope.get(var_name).to_vec();
-                ResolvedType::apply_narrowing(&mut results, |classes| {
-                    narrowing::apply_instanceof_exclusion(&extraction.class_type, &var_ctx, classes)
-                });
-                scope.record_exclusion(var_name, &extraction.class_type);
-                if !results.is_empty() {
-                    scope.set(var_name, results);
-                } else if had_types {
+                if exclude_classes_in_scope(
+                    var_name,
+                    std::slice::from_ref(&extraction.class_type),
+                    &var_ctx,
+                    scope,
+                ) {
                     // Every alternative the variable had was excluded, so
                     // nothing can reach this path: `$v` was already an
                     // `AbstractNode` and this is the else of

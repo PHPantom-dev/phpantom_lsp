@@ -89,7 +89,7 @@ pub(crate) fn process_statement<'b>(
                     // over the same array still assumes its body runs.
                     Expression::ArrayAccess(array_access) => {
                         if let Some((base_name, key_chain)) =
-                            super::super::resolution::extract_nested_array_access_chain(
+                            super::super::array_shape_writes::extract_nested_array_access_chain(
                                 array_access,
                             )
                         {
@@ -103,12 +103,15 @@ pub(crate) fn process_statement<'b>(
                             let keys: Vec<Option<String>> = key_chain
                                 .iter()
                                 .map(|idx| {
-                                    super::super::resolution::extract_array_key_for_shape(idx)
+                                    super::super::array_shape_writes::extract_array_key_for_shape(
+                                        idx,
+                                    )
                                 })
                                 .collect();
-                            let updated = super::super::resolution::apply_nested_array_unset(
-                                &base_type, &keys,
-                            );
+                            let updated =
+                                super::super::array_shape_writes::apply_nested_array_unset(
+                                    &base_type, &keys,
+                                );
                             scope.set(&base_name, vec![ResolvedType::from_type_string(updated)]);
                         }
                     }

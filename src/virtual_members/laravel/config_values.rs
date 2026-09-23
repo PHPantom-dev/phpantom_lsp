@@ -466,7 +466,7 @@ impl Backend {
             return None;
         }
         let trees = self.cached_config_trees();
-        for (prefix, tree) in &trees {
+        for (prefix, tree) in trees.iter() {
             let prefix_parts: Vec<&str> = prefix.split('.').collect();
             if parts.len() < prefix_parts.len() {
                 continue;
@@ -484,12 +484,12 @@ impl Backend {
         None
     }
 
-    pub(crate) fn cached_config_trees(&self) -> Vec<(String, ConfigNode)> {
+    pub(crate) fn cached_config_trees(&self) -> std::sync::Arc<Vec<(String, ConfigNode)>> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.config_trees,
             |cache| cache.config_trees.clone(),
             |cache, trees| cache.config_trees = Some(trees),
-            || self.enumerate_config_trees(),
+            || std::sync::Arc::new(self.enumerate_config_trees()),
         )
     }
 

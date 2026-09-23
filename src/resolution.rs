@@ -1115,7 +1115,7 @@ impl Backend {
 
                 // Apply stub patches for phpstorm-stubs deficiencies
                 // (e.g. array_reduce returning `mixed` instead of a
-                // template-based type).  See stub_patches.rs.
+                // template-based type).  See `stub_patches`.
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }

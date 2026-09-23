@@ -323,8 +323,6 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => {
-            use crate::type_engine::variable::forward_walk;
-
             // `$this` is not available inside static methods.
             if current_class.is_some() && ctx.is_in_static_method {
                 return vec![];
@@ -359,7 +357,7 @@ fn resolve_target_classes_expr_inner(
                     !types.is_empty()
                         && types.iter().all(|rt| {
                             rt.class_info.as_ref().is_some_and(|ci| {
-                                forward_walk::is_subclass_of(
+                                crate::class_lookup::is_subclass_of(
                                     &ci.fqn(),
                                     &override_cls.fqn(),
                                     class_loader,

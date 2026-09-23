@@ -179,16 +179,12 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    // The walker compares canonical entry paths below.  Canonicalize the
-    // registered roots once as well so path aliases such as macOS's `/var`
-    // -> `/private/var` do not let vendor files through.
-    let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
-    let mut vendor_dirs: Vec<PathBuf> = vendor_dirs
-        .into_iter()
-        .map(|path| path.canonicalize().unwrap_or(path))
-        .collect();
+    // Spelled the way the source directories are (both are joined onto the
+    // workspace root), which is what the shared walker compares against.
+    let mut vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
     vendor_dirs.sort_unstable();
     vendor_dirs.dedup();
+    let vendor_dirs = std::sync::Arc::new(vendor_dirs);
 
     // A directory filter that points outside every PSR-4 source directory
     // (e.g. into vendor/) is walked directly instead of being skipped.
@@ -225,7 +221,7 @@ pub(crate) fn discover_user_files(
     // line too.  Naming a file outright bypasses it (those never reach this
     // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &[], &[], &filters, &mut files);
+        collect_php_files(dir, &std::sync::Arc::default(), &[], &filters, &mut files);
     }
 
     files.sort();
@@ -233,51 +229,27 @@ pub(crate) fn discover_user_files(
     files
 }
 
-/// Walk `dir` for PHP files, skipping anything under `skip_vendor` and
-/// keeping only files under one of the `crop` paths (all of them when
-/// `crop` is empty).
+/// Walk `dir` for PHP files through the shared workspace walker, skipping
+/// the `skip_vendor` trees and keeping only files under one of the `crop`
+/// paths (all of them when `crop` is empty).
 ///
 /// `filters` decides which extensions count as PHP source and which
 /// paths `[indexing] exclude` prunes.
 fn collect_php_files(
     dir: &Path,
-    skip_vendor: &[PathBuf],
+    skip_vendor: &std::sync::Arc<Vec<PathBuf>>,
     crop: &[&Path],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
     out: &mut Vec<PathBuf>,
 ) {
-    use ignore::WalkBuilder;
-
-    let skip_vendor = skip_vendor.to_vec();
-    let filter_excludes = std::sync::Arc::clone(filters);
-    // Same one-visit-per-target rule the shared workspace walker applies,
-    // so `analyze` cannot report the same file once per spelling a chain
-    // of links gives it.
-    let claims = crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None);
-    let walker = WalkBuilder::new(dir)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .hidden(true)
-        .parents(true)
-        .ignore(true)
-        .follow_links(true)
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir {
-                if !skip_vendor.is_empty()
-                    && let Ok(canonical) = entry.path().canonicalize()
-                    && skip_vendor.iter().any(|v| canonical.starts_with(v))
-                {
-                    return false;
-                }
-                if entry.depth() > 0 && entry.path_is_symlink() && !claims.claim(entry.path()) {
-                    return false;
-                }
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        })
-        .build();
+    let walker = crate::classmap_scanner::workspace_walk_builder(
+        dir,
+        std::sync::Arc::clone(skip_vendor),
+        std::sync::Arc::clone(filters),
+        false,
+        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
+    )
+    .build();
 
     for entry in walker.flatten() {
         let path = entry.into_path();

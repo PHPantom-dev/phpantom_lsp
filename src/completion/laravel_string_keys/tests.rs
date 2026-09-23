@@ -483,12 +483,15 @@ fn detects_every_forget_disk_array_value_and_spelling() {
 #[test]
 fn forget_disk_array_completion_filters_and_edits_the_current_value() {
     let backend = crate::Backend::new_test();
-    backend.laravel_string_key_cache.write().config_keys = Some(vec![
-        "cache.stores.archive".to_string(),
-        "filesystems.disks.archive".to_string(),
-        "filesystems.disks.archive.driver".to_string(),
-        "filesystems.disks.backup".to_string(),
-    ]);
+    backend.laravel_string_key_cache.write().config_keys = Some(
+        vec![
+            "cache.stores.archive".to_string(),
+            "filesystems.disks.archive".to_string(),
+            "filesystems.disks.archive.driver".to_string(),
+            "filesystems.disks.backup".to_string(),
+        ]
+        .into(),
+    );
 
     let content = "<?php\nuse Illuminate\\Support\\Facades\\Storage;\nStorage::forgetDisk(['backup', 'ar']);\n";
     let cursor = content.rfind("ar").unwrap() + 2;
@@ -837,7 +840,7 @@ fn concurrent_first_callers_build_the_enumeration_once() {
                             // Long enough that an unguarded
                             // check-then-fill has every thread miss.
                             std::thread::sleep(std::time::Duration::from_millis(50));
-                            vec!["home".to_string()]
+                            vec!["home".to_string()].into()
                         },
                     )
                 })
@@ -852,6 +855,6 @@ fn concurrent_first_callers_build_the_enumeration_once() {
         "the enumeration must be built once and shared, not once per caller"
     );
     for names in &results {
-        assert_eq!(names, &vec!["home".to_string()]);
+        assert_eq!(&names[..], &["home".to_string()]);
     }
 }

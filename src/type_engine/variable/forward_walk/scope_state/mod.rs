@@ -1,6 +1,9 @@
+mod class_unions;
 mod merge;
+mod proofs;
 
-pub(crate) use merge::*;
+pub(crate) use class_unions::*;
+pub(crate) use proofs::*;
 
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
 use crate::php_type::PhpType;

@@ -1265,6 +1265,8 @@ wrote and merging only those entries, or sharing the untouched part
 rather than cloning it, would make a merge proportional to the branch
 instead of to the file.
 
-**Where to look:** `merge_branch`, `describes_same_state_as`, and the join
-helpers under them in `type_engine/variable/forward_walk/scope_state/merge.rs`,
-and the branch handling in `type_engine/variable/forward_walk/control_flow.rs`.
+**Where to look:** `merge_branch`, `merge_local` and
+`describes_same_state_as` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`, the proof joins in
+`scope_state/proofs.rs`, and the branch handling in
+`type_engine/variable/forward_walk/control_flow.rs`.

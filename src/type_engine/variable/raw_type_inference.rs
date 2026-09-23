@@ -277,7 +277,7 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> Option<String> {
 /// because a value arriving after construction says the array is being
 /// built up rather than written out.
 ///
-/// [`merge_push_type`]: super::resolution::merge_push_type
+/// [`merge_push_type`]: super::array_shape_writes::merge_push_type
 fn infer_element_type<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,

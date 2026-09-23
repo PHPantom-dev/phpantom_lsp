@@ -58,9 +58,9 @@ impl Backend {
             // extracted from the same literal the cursor is inside, so the
             // half-typed name of a `Storage::fake('…')` under the cursor
             // would be offered back as a completion for itself.
-            LaravelStringKind::Config => self.cached_config_keys(),
-            LaravelStringKind::View => self.cached_view_names(),
-            LaravelStringKind::Trans => self.cached_trans_keys(),
+            LaravelStringKind::Config => self.cached_config_keys().to_vec(),
+            LaravelStringKind::View => self.cached_view_names().to_vec(),
+            LaravelStringKind::Trans => self.cached_trans_keys().to_vec(),
             LaravelStringKind::Command => self.laravel_commands.read().all_names(),
             LaravelStringKind::MorphAlias => {
                 let mut aliases = self.laravel_morph_map.read().all_aliases();

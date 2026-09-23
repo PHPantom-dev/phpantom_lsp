@@ -142,7 +142,7 @@ impl Backend {
         // Macros are invoked both statically (`Widget::shine()`) and on
         // instances (`$widget->shine()`), so prune candidate files with
         // both member-key variants.
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&[
+        let candidate_keys = [
             ReferenceIndexKey::Member {
                 name: name.to_string(),
                 is_static: false,
@@ -151,84 +151,79 @@ impl Backend {
                 name: name.to_string(),
                 is_static: true,
             },
-        ]);
-        self.begin_request_scan_window(snapshot.len(), "Scanning for macro references");
-        let mut locations = Vec::new();
-        for (file_uri, symbol_map) in &snapshot {
-            self.request_scan_file_done();
-            if symbol_map.member_access_indices(name).is_empty() {
-                continue;
-            }
+        ];
+        let mut locations = self.scan_reference_candidates(
+            &candidate_keys,
+            "Scanning for macro references",
+            |file, symbol_map, locations| {
+                if symbol_map.member_access_indices(name).is_empty() {
+                    return;
+                }
 
-            let Ok(parsed_uri) = Url::parse(file_uri) else {
-                continue;
-            };
-            // The rest of Find References reads a template as the virtual
-            // PHP its symbol map describes, and `try_translate_location`
-            // maps the results back; reading the template's own bytes here
-            // would slice every span against text the map knows nothing
-            // about.
-            let file = CandidateFile::new(self, file_uri);
-            let Some(content) = file.content() else {
-                continue;
-            };
-            let Some(source) = symbol_map.source(content) else {
-                continue;
-            };
-            let file_ctx = self.file_context(file_uri);
-
-            // Isolated for the same reason as the guard in
-            // `resolve_member_receivers`: an outer request-level chain cache
-            // can stay active across this whole loop, and `content` is a
-            // fresh `Arc<String>` per file that is freed at the end of this
-            // iteration, so its address can be reused by a later file. A
-            // fresh map per file keeps this file's entries from leaking into
-            // (or answering for) the next one.
-            let _chain_guard = crate::type_engine::resolver::with_isolated_chain_cache();
-
-            for &span_idx in symbol_map.member_access_indices(name) {
-                let span = &symbol_map.spans[span_idx];
-                let SymbolKind::MemberAccess {
-                    member_name,
-                    subject_text,
-                    is_static,
-                    ..
-                } = &span.kind
-                else {
-                    continue;
+                // The rest of Find References reads a template as the
+                // virtual PHP its symbol map describes, and
+                // `try_translate_location` maps the results back; reading the
+                // template's own bytes here would slice every span against
+                // text the map knows nothing about.
+                let Some(content) = file.content() else {
+                    return;
                 };
-                if member_name != name {
-                    continue;
-                }
-
-                let matches_macro = if subject_text.as_str(source).contains('(') {
-                    // Chained call receivers like `$query->pluck(...)->macroName()`
-                    // are expensive to resolve precisely here and are the main
-                    // real-world macro-registration rename case.
-                    true
-                } else {
-                    let subject_fqns = self.resolve_subject_to_fqns(
-                        subject_text.as_str(source),
-                        *is_static,
-                        &file_ctx,
-                        span.start,
-                        content,
-                    );
-                    !subject_fqns.is_empty()
-                        && subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn))
+                let Some(source) = symbol_map.source(content) else {
+                    return;
                 };
-                if !matches_macro {
-                    continue;
-                }
+                let file_ctx = self.file_context(file.uri());
 
-                if let Some(range) = file.range(span.start, span.end) {
-                    locations.push(Location {
-                        uri: parsed_uri.clone(),
-                        range,
-                    });
+                // Isolated for the same reason as the guard in
+                // `resolve_member_receivers`: an outer request-level chain
+                // cache can stay active across the whole scan, and `content`
+                // is a fresh `Arc<String>` per file that is freed once this
+                // file is done, so its address can be reused by a later file.
+                // A fresh map per file keeps this file's entries from leaking
+                // into (or answering for) the next one.
+                let _chain_guard = crate::type_engine::resolver::with_isolated_chain_cache();
+
+                for &span_idx in symbol_map.member_access_indices(name) {
+                    let span = &symbol_map.spans[span_idx];
+                    let SymbolKind::MemberAccess {
+                        member_name,
+                        subject_text,
+                        is_static,
+                        ..
+                    } = &span.kind
+                    else {
+                        continue;
+                    };
+                    if member_name != name {
+                        continue;
+                    }
+
+                    let matches_macro = if subject_text.as_str(source).contains('(') {
+                        // Chained call receivers like
+                        // `$query->pluck(...)->macroName()` are expensive to
+                        // resolve precisely here and are the main real-world
+                        // macro-registration rename case.
+                        true
+                    } else {
+                        let subject_fqns = self.resolve_subject_to_fqns(
+                            subject_text.as_str(source),
+                            *is_static,
+                            &file_ctx,
+                            span.start,
+                            content,
+                        );
+                        !subject_fqns.is_empty()
+                            && subject_fqns.iter().any(|fqn| hierarchy.contains(self, fqn))
+                    };
+                    if !matches_macro {
+                        continue;
+                    }
+
+                    if let Some(location) = file.location(span.start, span.end) {
+                        locations.push(location);
+                    }
                 }
-            }
-        }
+            },
+        );
 
         if include_declaration {
             let macro_scope = MemberScope::exact(targets.iter().cloned().collect());
@@ -237,6 +232,7 @@ impl Backend {
                 name,
                 Some(&macro_scope),
             );
+            sort_locations_for_references(&mut locations);
         }
 
         locations
@@ -966,90 +962,54 @@ impl Backend {
         hierarchy: Option<&MemberScope>,
         declaration_scope: Option<&MemberScope>,
     ) -> Vec<Location> {
-        let mut locations = Vec::new();
-
         let candidate_keys = member_candidate_keys(target_member, target_is_static, hierarchy);
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
-        self.begin_request_scan_window(snapshot.len(), "Scanning for member references");
-
         let member = crate::atom::atom(target_member);
-        for (file_uri, symbol_map) in &snapshot {
-            self.request_scan_file_done();
-            // First pass: name-only check to avoid unnecessary work.
-            // When a hierarchy is present (e.g. Laravel), we allow static mismatch.
-            let names_the_member = symbol_map.member_access_indices(target_member).iter().any(
-                |&idx| match &symbol_map.spans[idx].kind {
-                    SymbolKind::MemberAccess { is_static, .. } => {
-                        hierarchy.is_some() || *is_static == target_is_static
-                    }
-                    _ => false,
-                },
-            );
-            // A file whose accesses to the name all settle on a class
-            // outside the hierarchy is answered here rather than read.
-            let has_member_access_match = names_the_member
-                && hierarchy.is_none_or(|hier| {
-                    !self.member_accesses_ruled_out(file_uri, symbol_map, &[(member, hier)])
-                });
-            let has_declaration_match = include_declaration
-                && symbol_map.spans.iter().any(|span| match &span.kind {
-                    SymbolKind::MemberDeclaration { name, is_static } if name == target_member => {
-                        hierarchy.is_some() || *is_static == target_is_static
-                    }
-                    _ => false,
-                });
-            let has_potential_match = has_member_access_match || has_declaration_match;
+        let target_name = target_member.strip_prefix('$').unwrap_or(target_member);
+        self.scan_reference_candidates(
+            &candidate_keys,
+            "Scanning for member references",
+            |file, symbol_map, locations| {
+                let file_uri = file.uri();
+                // First pass: name-only check to avoid unnecessary work.
+                // When a hierarchy is present (e.g. Laravel), we allow static
+                // mismatch.
+                let names_the_member =
+                    symbol_map
+                        .member_access_indices(target_member)
+                        .iter()
+                        .any(|&idx| match &symbol_map.spans[idx].kind {
+                            SymbolKind::MemberAccess { is_static, .. } => {
+                                hierarchy.is_some() || *is_static == target_is_static
+                            }
+                            _ => false,
+                        });
+                // A file whose accesses to the name all settle on a class
+                // outside the hierarchy is answered here rather than read.
+                let has_member_access_match = names_the_member
+                    && hierarchy.is_none_or(|hier| {
+                        !self.member_accesses_ruled_out(file_uri, symbol_map, &[(member, hier)])
+                    });
 
-            // Special check for property declarations in ClassInfo (represented as Variable spans)
-            let mut check_ast_map = false;
-            if !has_potential_match
-                && include_declaration
-                && let Some(classes) = self.shared_classes_for_uri(file_uri)
-            {
-                for class in &classes {
-                    for prop in &class.properties {
-                        let prop_name = prop.name.strip_prefix('$').unwrap_or(&prop.name);
-                        let target_name = target_member.strip_prefix('$').unwrap_or(target_member);
-                        if prop_name == target_name && prop.is_static == target_is_static {
-                            check_ast_map = true;
-                            break;
-                        }
-                    }
-                    if check_ast_map {
-                        break;
-                    }
+                if has_member_access_match {
+                    self.push_member_access_matches(
+                        file,
+                        symbol_map,
+                        member,
+                        target_is_static,
+                        hierarchy,
+                        locations,
+                    );
                 }
-            }
 
-            if !has_potential_match && !check_ast_map {
-                continue;
-            }
+                if !include_declaration {
+                    return;
+                }
 
-            let parsed_uri = match Url::parse(file_uri) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
+                // Lazily resolved file context — only computed when we need
+                // to find a declaration's enclosing class.
+                let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
+                    std::cell::OnceCell::new();
 
-            let file = CandidateFile::new(self, file_uri);
-
-            // Lazily resolved file context — only computed when we need
-            // to find a declaration's enclosing class.
-            let file_ctx_cell: std::cell::OnceCell<crate::types::FileContext> =
-                std::cell::OnceCell::new();
-
-            if has_member_access_match {
-                self.push_member_access_matches(
-                    &file,
-                    symbol_map,
-                    &parsed_uri,
-                    member,
-                    target_is_static,
-                    hierarchy,
-                    &mut locations,
-                );
-            }
-
-            if include_declaration {
                 for span in &symbol_map.spans {
                     match &span.kind {
                         SymbolKind::MemberDeclaration { name, is_static }
@@ -1083,60 +1043,50 @@ impl Backend {
                                 }
                             }
 
-                            let Some(range) = file.range(span.start, span.end) else {
+                            let Some(location) = file.location(span.start, span.end) else {
                                 break;
                             };
-                            locations.push(Location {
-                                uri: parsed_uri.clone(),
-                                range,
-                            });
+                            locations.push(location);
                         }
                         _ => {}
                     }
                 }
-            }
 
-            // Property declarations use Variable spans (not
-            // MemberDeclaration) because GTD relies on the Variable
-            // kind to jump to the type hint.  Scan the uri_classes_index to
-            // pick up property declaration sites.
-            if include_declaration && let Some(classes) = self.shared_classes_for_uri(file_uri) {
-                for class in &classes {
-                    if let Some(hier) = declaration_scope.or(hierarchy)
-                        && !hier.contains(self, &class.fqn())
-                    {
-                        continue;
-                    }
-
-                    for prop in &class.properties {
-                        let prop_name = prop.name.strip_prefix('$').unwrap_or(&prop.name);
-                        let target_name = target_member.strip_prefix('$').unwrap_or(target_member);
-                        if prop_name == target_name
-                            && prop.is_static == target_is_static
-                            && prop.name_offset != 0
+                // Property declarations use Variable spans (not
+                // MemberDeclaration) because GTD relies on the Variable
+                // kind to jump to the type hint.  Scan the uri_classes_index
+                // to pick up property declaration sites.
+                if let Some(classes) = self.shared_classes_for_uri(file_uri) {
+                    for class in &classes {
+                        if let Some(hier) = declaration_scope.or(hierarchy)
+                            && !hier.contains(self, &class.fqn())
                         {
-                            // `name_offset` points at the `$` sigil while
-                            // `prop.name` excludes it, so the range must span
-                            // the `$` plus the name (`$name`, not `$nam`).
-                            let offset = prop.name_offset;
-                            let Some(range) =
-                                file.range(offset, offset + 1 + prop.name.len() as u32)
-                            else {
-                                break;
-                            };
-                            locations.push(Location {
-                                uri: parsed_uri.clone(),
-                                range,
-                            });
+                            continue;
+                        }
+
+                        for prop in &class.properties {
+                            let prop_name = prop.name.strip_prefix('$').unwrap_or(&prop.name);
+                            if prop_name == target_name
+                                && prop.is_static == target_is_static
+                                && prop.name_offset != 0
+                            {
+                                // `name_offset` points at the `$` sigil while
+                                // `prop.name` excludes it, so the range must
+                                // span the `$` plus the name (`$name`, not
+                                // `$nam`).
+                                let offset = prop.name_offset;
+                                let Some(location) =
+                                    file.location(offset, offset + 1 + prop.name.len() as u32)
+                                else {
+                                    break;
+                                };
+                                locations.push(location);
+                            }
                         }
                     }
                 }
-            }
-        }
-
-        super::sort_locations_for_references(&mut locations);
-
-        locations
+            },
+        )
     }
 
     /// What the accesses to `names` in one file resolve to, for a search
@@ -1184,12 +1134,10 @@ impl Backend {
     /// large projects.
     ///
     /// Without one, every access of the right static-ness matches.
-    #[allow(clippy::too_many_arguments)]
     fn push_member_access_matches(
         &self,
         file: &CandidateFile<'_>,
         symbol_map: &Arc<SymbolMap>,
-        parsed_uri: &Url,
         member: Atom,
         target_is_static: bool,
         hierarchy: Option<&MemberScope>,
@@ -1206,13 +1154,10 @@ impl Backend {
                 if *is_static != target_is_static {
                     continue;
                 }
-                let Some(range) = file.range(span.start, span.end) else {
+                let Some(location) = file.location(span.start, span.end) else {
                     return;
                 };
-                locations.push(Location {
-                    uri: parsed_uri.clone(),
-                    range,
-                });
+                locations.push(location);
             }
             return;
         };
@@ -1227,11 +1172,10 @@ impl Backend {
             let Some((range, targets)) = resolved.resolved_access(span_index) else {
                 continue;
             };
-            if targets.iter().any(|fqn| hierarchy.contains(self, fqn)) {
-                locations.push(Location {
-                    uri: parsed_uri.clone(),
-                    range,
-                });
+            if targets.iter().any(|fqn| hierarchy.contains(self, fqn))
+                && let Some(uri) = file.url()
+            {
+                locations.push(Location { uri, range });
             }
         }
     }

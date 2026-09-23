@@ -177,7 +177,7 @@ pub(crate) fn process_array_key_assignment<'b>(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     if let Some((base_name, key_chain)) =
-        super::super::resolution::extract_nested_array_access_chain(array_access)
+        super::super::array_shape_writes::extract_nested_array_access_chain(array_access)
     {
         apply_array_write(&base_name, &key_chain, false, assignment, scope, ctx);
     }
@@ -199,7 +199,7 @@ pub(crate) fn process_array_append<'b>(
         // of an array-access chain rather than on the variable itself.
         Expression::ArrayAccess(inner) => {
             if let Some((base_name, key_chain)) =
-                super::super::resolution::extract_nested_array_access_chain(inner)
+                super::super::array_shape_writes::extract_nested_array_access_chain(inner)
             {
                 apply_array_write(&base_name, &key_chain, true, assignment, scope, ctx);
             }
@@ -258,26 +258,29 @@ fn apply_array_write<'b>(
         return;
     }
 
-    let mut write_keys: Vec<super::super::resolution::ArrayWriteKey> = key_chain
+    let mut write_keys: Vec<super::super::array_shape_writes::ArrayWriteKey> = key_chain
         .iter()
         .map(
-            |idx| match super::super::resolution::extract_array_key_for_shape(idx) {
-                Some(key) => super::super::resolution::ArrayWriteKey::Shape(key),
+            |idx| match super::super::array_shape_writes::extract_array_key_for_shape(idx) {
+                Some(key) => super::super::array_shape_writes::ArrayWriteKey::Shape(key),
                 None => {
                     let index_types = resolve_rhs_with_scope(idx, scope, ctx);
-                    super::super::resolution::ArrayWriteKey::Keyed {
-                        key_type: super::super::resolution::infer_array_key_type(idx, &index_types),
-                        slot: super::super::resolution::extract_array_write_index(idx),
+                    super::super::array_shape_writes::ArrayWriteKey::Keyed {
+                        key_type: super::super::array_shape_writes::infer_array_key_type(
+                            idx,
+                            &index_types,
+                        ),
+                        slot: super::super::array_shape_writes::extract_array_write_index(idx),
                     }
                 }
             },
         )
         .collect();
     if append {
-        write_keys.push(super::super::resolution::ArrayWriteKey::Append);
+        write_keys.push(super::super::array_shape_writes::ArrayWriteKey::Append);
     }
 
-    let merged = super::super::resolution::merge_nested_array_write(
+    let merged = super::super::array_shape_writes::merge_nested_array_write(
         &base_type,
         &write_keys,
         &value_php_type,

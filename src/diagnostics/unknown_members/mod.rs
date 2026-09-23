@@ -88,6 +88,10 @@ use super::existence_guards::{compute_existence_guards, compute_isset_empty_argu
 use super::helpers::{
     FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
 };
+use super::member_lookup::{
+    display_class_name, has_magic_method_for_access, member_exists, member_exists_relaxed,
+    member_is_public,
+};
 use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
 
@@ -710,7 +714,7 @@ impl Backend {
         // through to the merged classes below.
         if base_classes.iter().any(|c| {
             member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
+                || (is_docblock_ref && member_exists_relaxed(c, member_name))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -748,7 +752,7 @@ impl Backend {
         // ── Check whether the member exists on ANY branch ───────────
         if resolved_classes.iter().any(|c| {
             member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
+                || (is_docblock_ref && member_exists_relaxed(c, member_name))
         }) {
             self.push_inaccessible_member(
                 uri,
@@ -930,188 +934,4 @@ fn is_downstream_of_broken_chain(subject_text: &str, broken_prefixes: &[String])
             rest.starts_with("->") || rest.starts_with("::") || rest.starts_with('[')
         }
     })
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Relaxed member check for docblock references (`@see Class::member`).
-///
-/// PHPDoc `@see` uses `::` notation for all members (instance properties,
-/// instance methods, static properties, constants), so we check every
-/// member kind regardless of `is_static` or `is_method_call`.
-fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: bool) -> bool {
-    // Check methods (case-insensitive, like PHP).
-    let lower = member_name.to_ascii_lowercase();
-    if class
-        .methods
-        .iter()
-        .any(|m| m.name.to_ascii_lowercase() == lower)
-    {
-        return true;
-    }
-    // Check instance and static properties.
-    if class.properties.iter().any(|p| p.name == member_name) {
-        return true;
-    }
-    // Check constants.
-    class.constants.iter().any(|c| c.name == member_name)
-}
-
-/// Check whether a member exists on the class *and* is public.
-///
-/// Used by the shortcut that runs before the inheritance merge, where a
-/// non-public member cannot be judged: the class in hand may be missing
-/// the magic handler that would answer for it and the ancestor that
-/// really declares it.  Confirming a public member is safe there, since
-/// nothing further up can make a public member unreachable.
-fn member_is_public(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> bool {
-    use crate::types::Visibility;
-
-    if is_method_call {
-        return class.methods.iter().any(|m| {
-            m.name.eq_ignore_ascii_case(member_name) && m.visibility == Visibility::Public
-        });
-    }
-
-    if is_static {
-        if class
-            .constants
-            .iter()
-            .any(|c| c.name == member_name && c.visibility == Visibility::Public)
-        {
-            return true;
-        }
-        return class.properties.iter().any(|p| {
-            p.is_static
-                && (p.name == member_name || format!("${}", p.name) == member_name)
-                && p.visibility == Visibility::Public
-        });
-    }
-
-    if class
-        .properties
-        .iter()
-        .any(|p| p.name == member_name && p.visibility == Visibility::Public)
-    {
-        return true;
-    }
-
-    // An Eloquent relation reached as a property is synthesized rather
-    // than declared, so it carries no visibility of its own and is
-    // always public in practice.
-    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
-}
-
-/// Check whether a member exists on the fully-resolved class.
-///
-/// For method calls, checks `methods`.  For non-method static access,
-/// checks constants first then static properties.  For instance property
-/// access, checks properties.
-///
-/// Method name matching is case-insensitive (PHP methods are
-/// case-insensitive).  Property and constant matching is case-sensitive.
-pub(crate) fn member_exists(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> bool {
-    if is_method_call {
-        // Method name matching is case-insensitive in PHP.
-        let lower = member_name.to_ascii_lowercase();
-        return class
-            .methods
-            .iter()
-            .any(|m| m.name.to_ascii_lowercase() == lower);
-    }
-
-    if is_static {
-        // Static property or constant. Constants first (most common in
-        // `Class::CONST` usage) — this also matches enum cases, which
-        // are stored as constants.
-        if class.constants.iter().any(|c| c.name == member_name) {
-            return true;
-        }
-        // Static property (e.g. `Class::$prop`).
-        // PHP static properties include the `$` in the access syntax,
-        // but the stored name may or may not include it.  Check both.
-        if class.properties.iter().any(|p| {
-            p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
-        }) {
-            return true;
-        }
-        return false;
-    }
-
-    // Instance property access (case-sensitive, per PHP semantics).
-    if class.properties.iter().any(|p| p.name == member_name) {
-        return true;
-    }
-
-    // Eloquent relation properties are the exception: `$model->orderProducts`
-    // flows through `__get()` → `isRelation()` → `method_exists()`, all of
-    // which are case-insensitive, so a differently-cased access like
-    // `$model->orderproducts` resolves the same relationship at runtime.
-    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
-}
-
-/// Check whether the class has a magic method that would handle the
-/// member access at runtime, making the "unknown member" diagnostic
-/// a false positive.
-///
-/// For property access, `__get` only suppresses the diagnostic when
-/// the class has no `@property` annotations.  When `@property` tags
-/// exist, they define the expected property surface and unknown
-/// properties should be flagged (matching PHPStan's behaviour with
-/// `reportMagicProperties: true`).
-fn has_magic_method_for_access(
-    class: &ClassInfo,
-    is_static: bool,
-    is_method_call: bool,
-    report_magic_properties: bool,
-) -> bool {
-    if is_method_call {
-        let magic = if is_static { "__callStatic" } else { "__call" };
-        return class
-            .methods
-            .iter()
-            .any(|m| m.name.eq_ignore_ascii_case(magic));
-    }
-
-    if !is_static {
-        // Instance property access — `__get` handles arbitrary property
-        // names.  When `report_magic_properties` is enabled and any
-        // virtual member provider has added properties to the class
-        // (@property docblock tags, Laravel Eloquent column inference,
-        // etc.), do not suppress — let normal member checking flag
-        // unknowns.  When disabled (the default), `__get` always
-        // suppresses.
-        let has_get = class
-            .methods
-            .iter()
-            .any(|m| m.name.eq_ignore_ascii_case("__get"));
-        if has_get {
-            if report_magic_properties {
-                let has_virtual_properties = class.properties.iter().any(|p| p.is_virtual);
-                return !has_virtual_properties;
-            }
-            return true;
-        }
-    }
-
-    false
-}
-
-fn display_class_name(class: &ClassInfo) -> String {
-    if class.name.starts_with("__anonymous@") {
-        return "anonymous class".to_string();
-    }
-
-    // Show the FQN when available for clarity.
-    class.fqn().to_string()
 }

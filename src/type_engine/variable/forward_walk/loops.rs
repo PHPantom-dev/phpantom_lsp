@@ -7,6 +7,19 @@
 use super::*;
 use std::collections::HashMap;
 
+/// Where in a loop iteration `walk_loop_body_to_fixed_point` is invoking
+/// its seeding callback.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum LoopSeedPoint {
+    /// Straight after a walk of the body, on the types that walk left
+    /// behind.  This is where a `for` loop's increment clause runs.
+    AfterBody,
+    /// On the entry scope of the next walk, once the previous walk's types
+    /// have been merged back in: re-applies the narrowing the caller did
+    /// for the first iteration.
+    Entry,
+}
+
 /// Walk a loop body until its loop-carried types stop changing.
 ///
 /// The caller has already seeded `scope` for the first iteration (bound

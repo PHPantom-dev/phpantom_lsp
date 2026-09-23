@@ -5,14 +5,19 @@ use super::*;
 ///
 /// A negated `instanceof` does not eliminate `null`: `!$x instanceof Foo`
 /// is true when `$x` is null, so `null` stays in the union. A subject the
-/// exclusions empty is left as it was, since an operand that proves
-/// nothing must not erase what the scope already knew.
-fn exclude_classes_in_scope(
+/// exclusions empty keeps its entry as it was, since an operand that
+/// proves nothing must not erase what the scope already knew.
+///
+/// Returns `true` when the exclusions emptied a variable that had types:
+/// every alternative it could hold was ruled out, so the path the caller
+/// is narrowing for cannot run and should be marked unreachable.
+pub(super) fn exclude_classes_in_scope(
     var_name: &str,
     classes: &[PhpType],
     var_ctx: &VarResolutionCtx<'_>,
     scope: &mut ScopeState,
-) {
+) -> bool {
+    let had_types = !scope.get(var_name).is_empty();
     let mut results = scope.get(var_name).to_vec();
     for cls in classes {
         ResolvedType::apply_narrowing(&mut results, |class_list| {
@@ -20,9 +25,11 @@ fn exclude_classes_in_scope(
         });
         scope.record_exclusion(var_name, cls);
     }
-    if !results.is_empty() {
-        scope.set(var_name, results);
+    if results.is_empty() {
+        return had_types;
     }
+    scope.set(var_name, results);
+    false
 }
 
 /// Narrow every subject the `&&` chain's operands prove an
@@ -90,7 +97,9 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if alias.extraction.negated {
                     // `!$isNode` — no leg of the chain held, so every one
                     // of them is excluded.
-                    exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
+                    if exclude_classes_in_scope(var_name, &classes, &var_ctx, scope) {
+                        scope.unreachable = true;
+                    }
                 } else {
                     let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
                     if !union.is_empty() {
@@ -114,7 +123,9 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if !targets.is_empty() {
                     let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
                     if negated {
-                        exclude_classes_in_scope(var_name, &targets, &var_ctx, scope);
+                        if exclude_classes_in_scope(var_name, &targets, &var_ctx, scope) {
+                            scope.unreachable = true;
+                        }
                     } else {
                         let mut resolved = Vec::new();
                         for target in &targets {
@@ -163,12 +174,14 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current
                     // scope immediately (each negation removes one type).
-                    exclude_classes_in_scope(
+                    if exclude_classes_in_scope(
                         var_name,
                         std::slice::from_ref(&extraction.class_type),
                         &var_ctx,
                         scope,
-                    );
+                    ) {
+                        scope.unreachable = true;
+                    }
                 } else {
                     // Positive instanceof: resolve and accumulate into
                     // the per-variable union.  For a single operand this

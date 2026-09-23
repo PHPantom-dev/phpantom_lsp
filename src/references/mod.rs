@@ -155,6 +155,108 @@ impl Backend {
             state.add_done(1);
         }
     }
+
+    /// Run one Find References search over the files the reference index
+    /// names as candidates for `candidate_keys`, and return what it found
+    /// in reporting order.
+    ///
+    /// This owns what every per-kind search shares: the candidate snapshot,
+    /// the progress window, one [`CandidateFile`] per file, and the final
+    /// sort.  `scan` reports the matches in one file.  Beyond two files the
+    /// scan runs on a worker pool, the way the reference-count lens batch
+    /// does, since resolving a member access's receiver or a `new`
+    /// expression's class walks the type engine over the file.
+    pub(super) fn scan_reference_candidates(
+        &self,
+        candidate_keys: &[ReferenceIndexKey],
+        progress_label: &str,
+        scan: impl Fn(&CandidateFile<'_>, &Arc<SymbolMap>, &mut Vec<Location>) + Sync,
+    ) -> Vec<Location> {
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(candidate_keys);
+        self.begin_request_scan_window(snapshot.len(), progress_label);
+
+        let scan_file = |(uri, symbol_map): &(String, Arc<SymbolMap>)| {
+            self.request_scan_file_done();
+            let file = CandidateFile::new(self, uri);
+            let mut found = Vec::new();
+            scan(&file, symbol_map, &mut found);
+            found
+        };
+        let mut locations = Vec::new();
+        if snapshot.len() <= 2 {
+            for entry in &snapshot {
+                locations.extend(scan_file(entry));
+            }
+        } else {
+            let results =
+                crate::parallel::map_indexed("reference-scan", snapshot.len(), |_, index| {
+                    let found = scan_file(&snapshot[index]);
+                    (!found.is_empty()).then_some(found)
+                });
+            for (_, found) in results {
+                locations.extend(found);
+            }
+        }
+
+        sort_locations_for_references(&mut locations);
+        locations
+    }
+}
+
+/// What one file needs to turn a class, function or constant reference
+/// span into a fully-qualified name.
+///
+/// The `use` map is loaded on the first span that needs it: most spans
+/// are answered by the name resolver alone, and most files carry no span
+/// the search is interested in at all.
+pub(super) struct SpanFqnResolver<'a> {
+    backend: &'a Backend,
+    file_uri: &'a str,
+    /// The file's first namespace, which a name the resolver does not
+    /// track is resolved against.
+    pub(super) namespace: Option<String>,
+    resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
+    use_map: std::cell::OnceCell<std::collections::HashMap<String, String>>,
+}
+
+impl<'a> SpanFqnResolver<'a> {
+    pub(super) fn new(backend: &'a Backend, file_uri: &'a str) -> Self {
+        Self {
+            backend,
+            file_uri,
+            namespace: backend.first_file_namespace(file_uri),
+            resolved_names: backend.resolved_names.read().get(file_uri).cloned(),
+            use_map: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The fully-qualified name the span at `span_start` refers to.
+    ///
+    /// A name written fully qualified already is one; otherwise the name
+    /// resolver's answer for that offset wins, and failing that (a
+    /// docblock-sourced reference, which the resolver does not track) the
+    /// file's `use` map and namespace decide.
+    pub(super) fn fqn(&self, name: &str, is_fqn: bool, span_start: u32) -> String {
+        if is_fqn {
+            return name.to_string();
+        }
+        if let Some(fqn) = self
+            .resolved_names
+            .as_deref()
+            .and_then(|rn| rn.get(span_start))
+        {
+            return fqn.to_string();
+        }
+        let use_map = self.use_map.get_or_init(|| {
+            self.backend
+                .file_imports
+                .read()
+                .get(self.file_uri)
+                .cloned()
+                .unwrap_or_default()
+        });
+        Backend::resolve_to_fqn(name, use_map, &self.namespace)
+    }
 }
 
 /// Normalise a class FQN: strip leading `\` if present.
@@ -400,6 +502,7 @@ fn visit_workspace_files_gitignore(
 pub(super) struct CandidateFile<'a> {
     backend: &'a Backend,
     uri: &'a str,
+    url: std::cell::OnceCell<Option<Url>>,
     content: std::cell::OnceCell<Option<Arc<String>>>,
     line_starts: std::cell::OnceCell<Vec<usize>>,
 }
@@ -409,9 +512,31 @@ impl<'a> CandidateFile<'a> {
         Self {
             backend,
             uri,
+            url: std::cell::OnceCell::new(),
             content: std::cell::OnceCell::new(),
             line_starts: std::cell::OnceCell::new(),
         }
+    }
+
+    /// The URI the symbol map is keyed by.
+    pub(super) fn uri(&self) -> &'a str {
+        self.uri
+    }
+
+    /// The file's URI as a location carries it, or `None` when it does not
+    /// parse.
+    pub(super) fn url(&self) -> Option<Url> {
+        self.url.get_or_init(|| Url::parse(self.uri).ok()).clone()
+    }
+
+    /// The location between two byte offsets in [`Self::content`], or
+    /// `None` when the file cannot be read or its URI does not parse.
+    pub(super) fn location(&self, start: u32, end: u32) -> Option<Location> {
+        let range = self.range(start, end)?;
+        Some(Location {
+            uri: self.url()?,
+            range,
+        })
     }
 
     /// The text Find References reads the file as (the virtual PHP of a

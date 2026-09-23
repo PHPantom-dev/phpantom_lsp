@@ -49,6 +49,7 @@ pub fn workspace_walk_builder(
     // path, so the prune above never fires and the tree is walked after
     // all, under a spelling nested inside whatever held the link.
     claims.cover(skip_dirs.iter().cloned());
+    let skip_dirs = respell_under_root(root, skip_dirs);
 
     let mut builder = WalkBuilder::new(root);
     builder
@@ -78,6 +79,33 @@ pub fn workspace_walk_builder(
             !filters.is_excluded_entry(entry.path(), is_dir)
         });
     builder
+}
+
+/// `skip_dirs`, plus each one spelled under `root` wherever it names the
+/// same directory by another path.
+///
+/// Entries are pruned by comparing paths, and a walk's paths are spelled
+/// the way its root is.  A skipped tree registered through an alias of the
+/// root (a symlinked checkout, macOS's `/var` for `/private/var`) would
+/// otherwise never compare equal and be walked after all.  Resolving the
+/// root and each skipped tree once per walk keeps the per-directory check
+/// a plain comparison.
+fn respell_under_root(root: &Path, skip_dirs: Arc<Vec<PathBuf>>) -> Arc<Vec<PathBuf>> {
+    let Ok(real_root) = root.canonicalize() else {
+        return skip_dirs;
+    };
+    let respelled: Vec<PathBuf> = skip_dirs
+        .iter()
+        .filter_map(|dir| {
+            let real_dir = dir.canonicalize().ok()?;
+            let spelled = root.join(real_dir.strip_prefix(&real_root).ok()?);
+            (!skip_dirs.contains(&spelled)).then_some(spelled)
+        })
+        .collect();
+    if respelled.is_empty() {
+        return skip_dirs;
+    }
+    Arc::new(skip_dirs.iter().cloned().chain(respelled).collect())
 }
 
 /// The link targets a single walk has already committed to descending

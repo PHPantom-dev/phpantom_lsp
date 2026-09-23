@@ -50,6 +50,7 @@ use crate::types::ResolvedType;
 
 mod array_assignment;
 mod assignment;
+mod assignment_deps;
 mod by_ref;
 mod callable_inference;
 mod closures;
@@ -71,6 +72,7 @@ mod walk_ctx;
 
 pub(crate) use array_assignment::*;
 pub(crate) use assignment::*;
+pub(crate) use assignment_deps::*;
 pub(crate) use by_ref::*;
 pub(crate) use callable_inference::*;
 pub(crate) use closures::*;

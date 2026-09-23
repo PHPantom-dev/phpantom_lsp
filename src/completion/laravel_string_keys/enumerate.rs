@@ -146,21 +146,23 @@ impl Backend {
             .collect()
     }
 
-    pub(crate) fn cached_config_keys(&self) -> Vec<String> {
+    /// Every config key `config/` declares, sorted.
+    pub(crate) fn cached_config_keys(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.config_keys,
             |cache| cache.config_keys.clone(),
             |cache, keys| cache.config_keys = Some(keys),
-            || self.enumerate_all_config_keys(),
+            || self.enumerate_all_config_keys().into(),
         )
     }
 
-    pub(crate) fn cached_view_names(&self) -> Vec<String> {
+    /// Every Blade view name the project ships, sorted.
+    pub(crate) fn cached_view_names(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.view_names,
             |cache| cache.view_names.clone(),
             |cache, names| cache.view_names = Some(names),
-            || self.blade_view_names(),
+            || self.blade_view_names().into(),
         )
     }
 
@@ -175,7 +177,8 @@ impl Backend {
         )
     }
 
-    pub(crate) fn cached_trans_keys(&self) -> Vec<String> {
+    /// Every translation key, sorted.
+    pub(crate) fn cached_trans_keys(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.trans_keys,
             |cache| cache.trans_keys.clone(),
@@ -184,7 +187,7 @@ impl Backend {
                 let mut keys: Vec<String> =
                     self.cached_trans_key_shapes().keys().cloned().collect();
                 keys.sort();
-                keys
+                keys.into()
             },
         )
     }

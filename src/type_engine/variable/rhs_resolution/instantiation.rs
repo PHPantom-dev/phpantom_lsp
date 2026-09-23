@@ -131,25 +131,10 @@ pub(super) fn resolve_rhs_instantiation(
                 ctor_owner = cls;
                 Some(c)
             } else {
-                let mut found: Option<std::sync::Arc<ClassInfo>> = None;
-                let mut cur = cls.parent_class.as_ref().map(|p| p.to_string());
-                for _ in 0..15 {
-                    let parent_name = match cur {
-                        Some(ref n) => n.clone(),
-                        None => break,
-                    };
-                    if let Some(parent) = (ctx.class_loader)(&parent_name) {
-                        if parent.get_method("__construct").is_some() {
-                            found = Some(parent);
-                            break;
-                        }
-                        cur = parent.parent_class.as_ref().map(|p| p.to_string());
-                    } else {
-                        break;
-                    }
-                }
+                let found = crate::inheritance::ancestors(cls, ctx.class_loader)
+                    .find(|(_, parent)| parent.get_method("__construct").is_some());
                 match found {
-                    Some(arc) => {
+                    Some((_, arc)) => {
                         ancestor_cls_arc = arc;
                         ctor_inherited = true;
                         ctor_owner = &ancestor_cls_arc;

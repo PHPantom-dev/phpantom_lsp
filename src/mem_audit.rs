@@ -160,7 +160,7 @@ fn s(o: &Option<String>) -> Sz {
     z
 }
 
-fn vs(v: &Vec<String>) -> Sz {
+fn vs(v: &[String]) -> Sz {
     let mut z = Sz::default();
     z.add(v.capacity() * size_of::<String>());
     for x in v {

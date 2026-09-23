@@ -21,7 +21,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::config::SemanticTokensMode;
-use crate::diagnostics::unknown_members::member_exists;
+use crate::diagnostics::member_lookup::member_exists;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind, SymbolMap, VarDefKind};
 use crate::types::{ClassInfo, ClassLikeKind};
 

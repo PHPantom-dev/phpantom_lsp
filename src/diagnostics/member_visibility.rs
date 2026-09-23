@@ -69,6 +69,7 @@
 
 use std::sync::Arc;
 
+use super::member_lookup::{MemberKind, declared_member, display_class_name};
 use crate::atom::Atom;
 use crate::class_lookup::is_subtype_of;
 use crate::inheritance::ancestors;
@@ -76,39 +77,6 @@ use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
 pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
-
-/// Which kind of member a lookup turned out to be, so the message can
-/// name it without re-deriving it from the access syntax.
-#[derive(Clone, Copy)]
-enum MemberKind {
-    Method,
-    Property,
-    StaticProperty,
-    Constant,
-}
-
-impl MemberKind {
-    fn label(self) -> &'static str {
-        match self {
-            MemberKind::Method => "method",
-            MemberKind::Property => "property",
-            MemberKind::StaticProperty => "static property",
-            MemberKind::Constant => "constant",
-        }
-    }
-
-    /// Spell the member the way PHP's own error message does.
-    fn qualify(self, owner: &str, member_name: &str) -> String {
-        match self {
-            MemberKind::Method => format!("{}::{}()", owner, member_name),
-            MemberKind::Property => format!("{}::${}", owner, member_name),
-            // Extraction strips the `$` from `Foo::$bar`, so it is put
-            // back here rather than being taken from the member name.
-            MemberKind::StaticProperty => format!("{}::${}", owner, member_name),
-            MemberKind::Constant => format!("{}::{}", owner, member_name),
-        }
-    }
-}
 
 /// What one branch of a union type says about the access.
 enum BranchVerdict {
@@ -527,47 +495,6 @@ fn private_ancestor_declaration(
     None
 }
 
-/// The visibility and kind `class` declares `member_name` with, matching
-/// the member kind the access syntax asks for.
-///
-/// Method names are compared case-insensitively and property and
-/// constant names case-sensitively, which is how PHP compares them.
-fn declared_member(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> Option<(Visibility, MemberKind)> {
-    if is_method_call {
-        return class
-            .methods
-            .iter()
-            .find(|m| m.name.eq_ignore_ascii_case(member_name))
-            .map(|m| (m.visibility, MemberKind::Method));
-    }
-
-    if is_static {
-        if let Some(constant) = class.constants.iter().find(|c| c.name == member_name) {
-            return Some((constant.visibility, MemberKind::Constant));
-        }
-        // A static property is written `Foo::$bar`, and the stored name
-        // may or may not carry the `$`.
-        return class
-            .properties
-            .iter()
-            .find(|p| {
-                p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
-            })
-            .map(|p| (p.visibility, MemberKind::StaticProperty));
-    }
-
-    class
-        .properties
-        .iter()
-        .find(|p| p.name == member_name)
-        .map(|p| (p.visibility, MemberKind::Property))
-}
-
 /// Whether the scope the access is written in may see the declaration.
 ///
 /// - `private` — only from the declaring class itself.  Privacy in PHP
@@ -662,12 +589,4 @@ fn build_message(rejection: &Rejection, member_name: &str) -> String {
         rejection.kind.qualify(&owner, member_name),
         scope,
     )
-}
-
-/// Name the class for the message, preferring the FQN.
-fn display_class_name(owner: &ClassInfo) -> String {
-    if owner.name.starts_with("__anonymous@") {
-        return "anonymous class".to_string();
-    }
-    owner.fqn().to_string()
 }

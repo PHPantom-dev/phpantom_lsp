@@ -366,14 +366,19 @@ pub(crate) struct LaravelStringKeyCache {
     /// `Arc` because both the name list and the parameter names of one route
     /// are read from it, and cloning the whole table per read would be waste.
     pub routes: Option<std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery>>,
-    pub config_keys: Option<Vec<String>>,
-    pub view_names: Option<Vec<String>>,
+    /// The config keys `config/` declares, sorted, so a lookup is a binary
+    /// search rather than a set built per diagnostic pass.  Like the other
+    /// key lists, shared behind an `Arc` so a read does not copy it.
+    pub config_keys: Option<std::sync::Arc<[String]>>,
+    /// Every Blade view name the project ships, sorted.
+    pub view_names: Option<std::sync::Arc<[String]>>,
     /// The Blade view roots `config/view.php` configures, each with its
     /// canonical spelling.  Every template's view name is worked out
     /// against them, which would otherwise re-read and re-parse the config
     /// file once per template.
     pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
-    pub trans_keys: Option<Vec<String>>,
+    /// Every translation key, sorted.
+    pub trans_keys: Option<std::sync::Arc<[String]>>,
     /// Every translation key mapped to whether it names a group (nested
     /// array) rather than a scalar entry.  Shared behind an `Arc` for the
     /// same reason as `routes`: consumers look up one key per call and
@@ -389,11 +394,16 @@ pub(crate) struct LaravelStringKeyCache {
     /// because an edit updates the entry of the one template that changed
     /// rather than replacing the whole index.
     pub blade_blocks: Option<std::sync::Arc<crate::blade::block_index::BladeBlockIndex>>,
+    /// The parsed tree of every config file, framework defaults merged in,
+    /// keyed by its prefix.  Shared behind an `Arc` because every
+    /// `config('…')` call the type engine resolves reads it.
     pub config_trees: Option<
-        Vec<(
-            String,
-            crate::virtual_members::laravel::config_values::ConfigNode,
-        )>,
+        std::sync::Arc<
+            Vec<(
+                String,
+                crate::virtual_members::laravel::config_values::ConfigNode,
+            )>,
+        >,
     >,
     /// The variables service providers share into every template, and the
     /// ones their view composers add to the templates they target, with each

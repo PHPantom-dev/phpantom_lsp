@@ -70,7 +70,7 @@ src/
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
-├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
+├── stubs.rs, stub_patches/   # Embedded phpstorm-stubs index + hand patches
 ├── phar.rs                 # Class discovery inside PHAR archives
 │
 │   # The shared type engine ("what is the type of this expression here?")
@@ -566,7 +566,7 @@ The embedded phpstorm-stubs sometimes lack `@template` annotations or have overl
 
 #### Function patches
 
-`stub_patches.rs` provides `apply_function_stub_patches(func)`, called from `find_or_load_function` in Phase 2 after parsing each function from stub source and before caching it in `global_functions`. The function dispatches to per-function patch functions based on the function name. Only functions with known deficiencies are patched; all others pass through unchanged.
+`stub_patches/` provides `apply_function_stub_patches(func)`, called from `find_or_load_function` in Phase 2 after parsing each function from stub source and before caching it in `global_functions`. The function dispatches to per-function patch functions based on the function name. Only functions with known deficiencies are patched; all others pass through unchanged.
 
 Current patches:
 
@@ -574,7 +574,7 @@ Current patches:
 
 This is analogous to the [Laravel Class Patches](#laravel-class-patches) system but for built-in PHP functions rather than framework classes. When phpstorm-stubs gains proper annotations for a patched function, the corresponding patch can be deleted.
 
-**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches.rs`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `type_engine/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
+**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches/`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `type_engine/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
 
 #### Class patches
 

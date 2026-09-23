@@ -608,7 +608,7 @@ The mechanism this needs already exists, in the shape used for
 `json_encode`'s `JSON_THROW_ON_ERROR`
 (`type_engine/types/flag_returns.rs`): read the flags argument's text at
 the call site and pick a branch from it. A conditional return type in
-`stub_patches.rs` cannot express this one, because the deciding value
+`stub_patches/` cannot express this one, because the deciding value
 arrives as a global constant (`PATHINFO_FILENAME`) and a condition can
 only name a literal value or a class constant.
 

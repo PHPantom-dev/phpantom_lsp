@@ -6,6 +6,8 @@
 //! views, translation keys, console commands, morph aliases, gate
 //! abilities), and report the ones nothing declares.
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use super::helpers;
@@ -247,10 +249,10 @@ impl Backend {
         // see, so none of its keys can be judged.  Only an application owns
         // the whole of its configuration.
         let has_config = has_config && self.is_application_project();
-        let declared_config_keys: Vec<String> = if has_config {
+        let declared_config_keys: Arc<[String]> = if has_config {
             self.cached_config_keys()
         } else {
-            Vec::new()
+            Arc::default()
         };
         // A key that `Config::set()` or the array form of the `config()`
         // helper establishes is as real as one a `config/` file declares; a
@@ -261,30 +263,15 @@ impl Backend {
         } else {
             HashSet::new()
         };
-        // The config files we managed to enumerate keys from, by name.  A
-        // key whose root segment names none of them lives in a file we
-        // cannot see, so nothing about it is knowable.  A runtime write is
-        // deliberately not a root of its own: the keys one file writes say
-        // nothing about what the rest of that namespace holds, least of all
-        // when the writes that established it were spelled dynamically.
-        let config_roots: HashSet<&str> = declared_config_keys
-            .iter()
-            .map(|key| key.split('.').next().unwrap_or(key.as_str()))
-            .collect();
-        let config_keys: HashSet<&str> = declared_config_keys
-            .iter()
-            .chain(written_config_keys.iter())
-            .map(String::as_str)
-            .collect();
-        let view_keys: HashSet<String> = if has_view {
-            self.cached_view_names().into_iter().collect()
+        let view_keys: Arc<[String]> = if has_view {
+            self.cached_view_names()
         } else {
-            HashSet::new()
+            Arc::default()
         };
-        let trans_keys: HashSet<String> = if has_trans {
-            self.cached_trans_keys().into_iter().collect()
+        let trans_keys: Arc<[String]> = if has_trans {
+            self.cached_trans_keys()
         } else {
-            HashSet::new()
+            Arc::default()
         };
         // An application whose strings live in a database still has `vendor/`'s
         // own `lang/` files on disk, so the enumerated set is non-empty while
@@ -407,8 +394,13 @@ impl Backend {
                     // Only judge a key whose config file we actually read.
                     // An unknown root means the file never reached us, so
                     // the key cannot be wrong as far as we can tell, while
-                    // a typo inside a file we did read is still caught.
-                    if !config_roots.contains(key.split('.').next().unwrap_or(key.as_str())) {
+                    // a typo inside a file we did read is still caught.  A
+                    // runtime write is deliberately not a root of its own:
+                    // the keys one file writes say nothing about what the
+                    // rest of that namespace holds, least of all when the
+                    // writes that established it were spelled dynamically.
+                    let root = key.split('.').next().unwrap_or(key.as_str());
+                    if !names_key_or_group(&declared_config_keys, root) {
                         continue;
                     }
                     // Config keys may be partial prefixes (e.g. `config('app')`)
@@ -416,19 +408,23 @@ impl Backend {
                     // direction holds for a key written at runtime: the value
                     // it stored is opaque to us, so every path under it is
                     // beyond judging as well.
-                    let valid = config_keys.contains(key.as_str())
-                        || config_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)))
+                    let valid = names_key_or_group(&declared_config_keys, key)
                         || written_config_keys.iter().any(|written| {
-                            key.strip_prefix(written.as_str())
-                                .is_some_and(|rest| rest.starts_with('.'))
+                            written == key
+                                || written
+                                    .strip_prefix(key.as_str())
+                                    .is_some_and(|rest| rest.starts_with('.'))
+                                || key
+                                    .strip_prefix(written.as_str())
+                                    .is_some_and(|rest| rest.starts_with('.'))
                         });
                     (valid, "config key", "invalid_laravel_config")
                 }
-                CheckedStringKind::View => {
-                    (view_keys.contains(key), "view", "invalid_laravel_view")
-                }
+                CheckedStringKind::View => (
+                    view_keys.binary_search(key).is_ok(),
+                    "view",
+                    "invalid_laravel_view",
+                ),
                 CheckedStringKind::Trans => {
                     // When no translation files are found at all, skip trans
                     // diagnostics entirely.  This avoids false positives in
@@ -437,10 +433,7 @@ impl Backend {
                     if trans_keys.is_empty() || trans_source_is_unknowable {
                         continue;
                     }
-                    let valid = trans_keys.contains(key)
-                        || trans_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
+                    let valid = names_key_or_group(&trans_keys, key);
                     (valid, "translation key", "invalid_laravel_trans")
                 }
                 CheckedStringKind::Command => {
@@ -578,6 +571,18 @@ impl Backend {
         // imports before looking up the model's policy.
         Some(class_loader(&name)?.fqn().to_string())
     }
+}
+
+/// Whether the sorted `keys` hold `key` itself or a key nested under it
+/// (`app` for `app.name`), which is what makes a partial prefix such as
+/// `config('app')` valid.
+fn names_key_or_group(keys: &[String], key: &str) -> bool {
+    if keys.binary_search_by(|k| k.as_str().cmp(key)).is_ok() {
+        return true;
+    }
+    let group = format!("{key}.");
+    let first_under = keys.partition_point(|k| k.as_str() < group.as_str());
+    keys.get(first_under).is_some_and(|k| k.starts_with(&group))
 }
 
 #[cfg(test)]
