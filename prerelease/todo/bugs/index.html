@@ -948,17 +948,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B333. A file changed on disk drops its references from the reference-count lenses
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1547,17 +1536,6 @@
   
 </li>
       
-        <li class="md-nav__item">
-  <a href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B333. A file changed on disk drops its references from the reference-count lenses
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
     </ul>
   
 </nav>
@@ -1624,23 +1602,6 @@ insertion builds on) and rewritten by the template rename in
 <code>rename/blade.rs:32</code>, while the preprocessor ignores it.</p>
 <p><strong>Fix:</strong> mask with <code>signature::inert_regions</code> and require a directive
 boundary (<code>directives::directive_head</code>), as the other Blade scanners do.</p>
-<h2 id="b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses">B333. A file changed on disk drops its references from the reference-count lenses<a class="headerlink" href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>reindex_files_batch</code> (<code>lib.rs</code>) handles a watched <code>CHANGED</code> or
-<code>CREATED</code> PHP file by calling <code>clear_file_maps</code>, which removes its
-<code>symbol_maps</code> entry and its reference-index entries, and then restores
-only the discovery indexes (<code>classmap_scanner::scan_file</code>). Nothing
-re-parses the file. Once the initial workspace index has completed,
-<code>ensure_workspace_index_ready_for_request</code> returns early, so the lens
-batch and <code>indexed_reference_count</code> stop seeing the references a
-changed file makes, and never see the ones a created file makes. A
-<code>git pull</code> that touches <code>B.php</code>, which calls <code>Foo::bar()</code>, drops the
-lens on <code>Foo::bar</code> by one until an explicit Find References refreshes
-the index.</p>
-<p><strong>Fix:</strong> after the purge, re-parse the changed and created files that
-the workspace index covers (<code>Backend::workspace_index_path</code>) through
-the batch index parser, the way <code>on_did_close</code> re-indexes a closed
-workspace file from disk.</p>
 
 
 
