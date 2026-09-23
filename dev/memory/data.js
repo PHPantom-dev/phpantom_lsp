@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790137718913,
+  "lastUpdate": 1790139413823,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29783,6 +29783,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "sidux@users.noreply.github.com",
+            "name": "sidux",
+            "username": "sidux"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8607ed3936105c93e771ff47e8c0b4fac1acaab0",
+          "message": "fix(indexing): Canonicalize vendor scan paths",
+          "timestamp": "2026-09-23T06:38:48+02:00",
+          "tree_id": "c4b1b6d003cc8ca3a8fabb04d6ad4afae50b0895",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8607ed3936105c93e771ff47e8c0b4fac1acaab0"
+        },
+        "date": 1790139405266,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.5,
             "unit": "MiB"
           }
         ]
