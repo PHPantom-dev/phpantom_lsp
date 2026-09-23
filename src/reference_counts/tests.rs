@@ -68,6 +68,81 @@ fn exact_location_cache_is_bounded_and_interns_uris() {
     assert_eq!(state.uris.len(), 1);
 }
 
+#[test]
+fn invalidate_member_of_an_uncached_name_does_not_bump_the_epoch() {
+    let cache = MemberRefCounts::default();
+    let epoch = cache.epoch.load(Ordering::Acquire);
+
+    cache.invalidate_member(
+        crate::atom::atom("save"),
+        &HashSet::from([Arc::from("file:///Order.php")]),
+    );
+
+    assert_eq!(cache.epoch.load(Ordering::Acquire), epoch);
+}
+
+#[test]
+fn invalidate_member_of_a_cached_name_bumps_the_epoch() {
+    let cache = MemberRefCounts::default();
+    cache.store(
+        crate::atom::atom("Order"),
+        crate::atom::atom("save"),
+        false,
+        Vec::new(),
+        false,
+    );
+    let epoch = cache.epoch.load(Ordering::Acquire);
+
+    cache.invalidate_member(
+        crate::atom::atom("save"),
+        &HashSet::from([Arc::from("file:///Order.php")]),
+    );
+
+    assert_ne!(cache.epoch.load(Ordering::Acquire), epoch);
+}
+
+#[test]
+fn invalidate_locations_in_an_unrelated_file_does_not_bump_the_epoch() {
+    let cache = MemberRefCounts::default();
+    let location = Location {
+        uri: Url::parse("file:///uses.php").unwrap(),
+        range: Range::new(Position::new(1, 2), Position::new(1, 6)),
+    };
+    cache.store(
+        crate::atom::atom("Order"),
+        crate::atom::atom("save"),
+        false,
+        vec![location],
+        false,
+    );
+    let epoch = cache.epoch.load(Ordering::Acquire);
+
+    cache.invalidate_locations_in(&HashSet::from([Arc::from("file:///unrelated.php")]));
+
+    assert_eq!(cache.epoch.load(Ordering::Acquire), epoch);
+}
+
+#[test]
+fn invalidate_locations_in_a_cached_file_bumps_the_epoch() {
+    let cache = MemberRefCounts::default();
+    let location = Location {
+        uri: Url::parse("file:///uses.php").unwrap(),
+        range: Range::new(Position::new(1, 2), Position::new(1, 6)),
+    };
+    cache.store(
+        crate::atom::atom("Order"),
+        crate::atom::atom("save"),
+        false,
+        vec![location],
+        false,
+    );
+    let epoch = cache.epoch.load(Ordering::Acquire);
+
+    cache.invalidate_locations_in(&HashSet::from([Arc::from("file:///uses.php")]));
+
+    assert_ne!(cache.epoch.load(Ordering::Acquire), epoch);
+}
+
 const ONE_CALL: &str = r#"<?php
 class Order {
     public function save(): void {}

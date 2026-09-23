@@ -361,6 +361,13 @@ impl Backend {
                             .store(false, Ordering::Release);
                         return changed;
                     }
+                    drop(pending);
+
+                    // An item stayed queued because typing invalidated it
+                    // mid-run. Wait for the same pause the first iteration
+                    // did instead of re-running immediately, or a burst of
+                    // keystrokes turns into back-to-back workspace searches.
+                    worker.await_edit_pause_blocking();
                 }
             })
             .await;
@@ -386,6 +393,19 @@ impl Backend {
                 return;
             }
             tokio::time::sleep(EDIT_PAUSE - since).await;
+        }
+    }
+
+    /// Blocking-thread equivalent of [`Self::await_edit_pause`], for the
+    /// worker loop in [`Self::schedule_member_ref_counts`], which runs on a
+    /// blocking thread rather than under the async runtime.
+    fn await_edit_pause_blocking(&self) {
+        loop {
+            let since = self.member_ref_counts.since_last_invalidation();
+            if since >= EDIT_PAUSE {
+                return;
+            }
+            std::thread::sleep(EDIT_PAUSE - since);
         }
     }
 }

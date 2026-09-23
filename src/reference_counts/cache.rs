@@ -329,16 +329,20 @@ impl MemberRefCounts {
     /// Mark every count for members of this name as needing recomputation,
     /// because `uris` changed what they contribute to it.
     pub(crate) fn invalidate_member(&self, member: Atom, uris: &HashSet<Arc<str>>) {
-        self.record_invalidation();
         let mut cache = self.counts.write();
         let Some(entries) = cache.by_member.get_mut(&member) else {
             return;
         };
+        let mut marked = false;
         for slots in entries.values_mut() {
             for cached in slots.iter_mut().flatten() {
                 cached.count_stale = true;
                 cached.locations_stale.merge(Staleness::Files(uris.clone()));
+                marked = true;
             }
+        }
+        if marked {
+            self.record_invalidation();
         }
     }
 
@@ -353,8 +357,8 @@ impl MemberRefCounts {
         if uris.is_empty() {
             return;
         }
-        self.record_invalidation();
         let mut cache = self.counts.write();
+        let mut marked = false;
         for entries in cache.by_member.values_mut() {
             for slots in entries.values_mut() {
                 for cached in slots.iter_mut().flatten() {
@@ -365,12 +369,19 @@ impl MemberRefCounts {
                                 .any(|location| uris.contains(&location.uri))
                             {
                                 cached.locations_stale.merge(Staleness::Files(uris.clone()));
+                                marked = true;
                             }
                         }
-                        None => cached.locations_stale = Staleness::Everything,
+                        None => {
+                            cached.locations_stale = Staleness::Everything;
+                            marked = true;
+                        }
                     }
                 }
             }
+        }
+        if marked {
+            self.record_invalidation();
         }
     }
 

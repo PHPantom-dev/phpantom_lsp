@@ -82,23 +82,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-## B329. The reference-count worker keeps searching while the user types
-
-**Impact: Low-Medium · Complexity: Low**
-
-`schedule_member_ref_counts` (`reference_counts/mod.rs:333`) waits for an
-edit pause once, then loops `compute_pending_member_ref_counts` on a
-blocking thread until the queue is empty. An item stays queued whenever
-the invalidation epoch moved during the run (lines 296 to 305), and the
-epoch moves on every reparse of any file: `invalidate_member`
-(`reference_counts/cache.rs:331`) bumps it before its early return, and
-`invalidate_locations_in` bumps it whether or not an entry matched. While
-the user keeps typing, whole-workspace searches therefore run back to
-back, each invalidated by the next keystroke.
-
-**Fix:** only bump the epoch when an entry was actually marked, and wait
-for an edit pause between iterations rather than only before the first.
-
 ## B332. A commented-out `@use` counts as a template import
 
 **Impact: Low · Complexity: Low**
