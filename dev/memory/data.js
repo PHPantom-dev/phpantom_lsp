@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790139520021,
+  "lastUpdate": 1790178284027,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29851,6 +29851,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "a704933f581d657f3bb94a2509489e93d86ad1d9",
+          "message": "Array key completion works for a `@phpstan-type`/`@psalm-type` alias\nnamed directly on `@var` or `@param`",
+          "timestamp": "2026-09-23T17:26:50+02:00",
+          "tree_id": "c5ce5d50353f407c39906c0a6579afd3704e75ad",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/a704933f581d657f3bb94a2509489e93d86ad1d9"
+        },
+        "date": 1790178275510,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.4,
             "unit": "MiB"
           }
         ]
