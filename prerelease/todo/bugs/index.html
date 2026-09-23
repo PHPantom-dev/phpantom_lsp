@@ -872,17 +872,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b326-a-dead-branch-in-another-file-hides-diagnostics-in-the-file-being-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B326. A dead branch in another file hides diagnostics in the file being checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#narrowing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1482,17 +1471,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b326-a-dead-branch-in-another-file-hides-diagnostics-in-the-file-being-checked" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B326. A dead branch in another file hides diagnostics in the file being checked
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#narrowing" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1624,31 +1602,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<h2 id="b326-a-dead-branch-in-another-file-hides-diagnostics-in-the-file-being-checked">B326. A dead branch in another file hides diagnostics in the file being checked<a class="headerlink" href="#b326-a-dead-branch-in-another-file-hides-diagnostics-in-the-file-being-checked" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p>A diagnostic pass collects the byte ranges of branches a decidable guard
-rules out (<code>if (false)</code>, a negated <code>method_exists</code> on a literal
-class and method), and drops every diagnostic of the file that starts
-inside one (<code>diagnostics/mod.rs:368-387</code>). <code>record_unreachable_range</code>
-(<code>type_engine/variable/forward_walk/reachability.rs:46</code>) records
-whenever a collection is active. It does not check which file the
-walker is in, and neither <code>suspend_diagnostic_scope</code> nor
-<code>suspend_snapshot_recording</code> stops it, even though
-<code>record_scope_snapshot</code> skips nested walks for exactly this reason
-("their statement offsets can even come from a different file").
-Return-type inference of an untyped method in another file walks that
-file's body through the same <code>process_if</code> (<code>control_flow.rs:113-128</code>,
-<code>318-331</code>). The dead ranges it records are offsets into the other file,
-and they suppress whatever the checked file reports at the same byte
-offsets.</p>
-<p><strong>Reproducer shape:</strong> file A calls <code>(new Helper)-&gt;make()-&gt;bogus()</code>, and
-<code>Helper::make()</code> in file B has no return type and contains
-<code>if (false) { … }</code> spanning bytes X..Y. Any diagnostic in A that starts
-in X..Y disappears.</p>
-<p><strong>Fix:</strong> tie the recorded ranges to the walk that owns the pass, either
-by keying them on the pass's content (as the snapshot map is keyed) or
-by not recording while snapshot recording is suspended, after checking
-that every cross-file walk runs suspended.</p>
+<p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
