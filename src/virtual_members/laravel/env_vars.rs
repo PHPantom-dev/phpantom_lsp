@@ -146,11 +146,14 @@ fn declared_entry(line: &str) -> Option<(&str, &str)> {
 }
 
 /// The value `key` is set to, or `None` when this file does not declare it.
+///
+/// phpdotenv lets a later line of the same file overwrite an earlier one, so a
+/// redeclared name takes its last value.
 fn declared_value(env_content: &str, key: &str) -> Option<String> {
     env_content
         .lines()
         .filter_map(declared_entry)
-        .find(|(name, _)| *name == key)
+        .rfind(|(name, _)| *name == key)
         .map(|(_, raw)| unquote_value(raw))
 }
 

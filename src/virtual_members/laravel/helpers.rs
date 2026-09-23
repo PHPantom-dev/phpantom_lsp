@@ -848,129 +848,86 @@ pub(crate) fn first_string_arg<'c>(args: &ArgumentList<'_>, content: &'c str) ->
         .map(|(value, _, _)| value)
 }
 
-/// Collect the value a call chain accumulates for one group modifier.
+/// The value a call chain sets for one group modifier.
 ///
-/// Walking `Route::name('admin.')->middleware(…)` with `method = b"name"`
-/// yields `"admin."`; the same walk with `method = b"prefix"` recovers the URI
-/// prefix of `Route::prefix('admin')->…`.  Values found on nested chain links
-/// are combined outermost-first by `join`.
-fn chain_modifier_value(
-    expr: &Expression<'_>,
-    content: &str,
-    method: &[u8],
-    join: &dyn Fn(&str, &str) -> String,
-) -> String {
-    match expr {
-        Expression::Call(Call::Method(mc)) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                return chain_modifier_value(mc.object, content, method, join);
-            };
-            let parent = chain_modifier_value(mc.object, content, method, join);
-            if ident.value.eq_ignore_ascii_case(method) {
-                let own = first_string_arg(&mc.argument_list, content).unwrap_or("");
-                join(&parent, own)
-            } else {
-                parent
-            }
-        }
+/// Walking `Route::name('admin.')->middleware(…)` with `methods = [b"name"]`
+/// yields `"admin."`; the same walk with `[b"prefix"]` recovers the URI prefix
+/// of `Route::prefix('admin')->…`.  `RouteRegistrar::attribute()` overwrites
+/// rather than appends, so when the chain sets the attribute more than once the
+/// outermost link (applied last) wins: `Route::name('a.')->name('b.')` groups
+/// under `b.`.  A link whose argument is not a string literal sets a value we
+/// cannot read, which yields the empty string.
+fn chain_modifier_value(expr: &Expression<'_>, content: &str, methods: &[&[u8]]) -> String {
+    let matches = |ident: &[u8]| methods.iter().any(|m| ident.eq_ignore_ascii_case(m));
+    let (ident, args, object) = match expr {
+        Expression::Call(Call::Method(mc)) => (&mc.method, &mc.argument_list, Some(mc.object)),
         // Route::name('prefix.') — static entry point of the chain.
-        Expression::Call(Call::StaticMethod(sc)) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
-                return String::new();
-            };
-            if ident.value.eq_ignore_ascii_case(method) {
-                first_string_arg(&sc.argument_list, content)
-                    .unwrap_or("")
-                    .to_string()
-            } else {
-                String::new()
-            }
-        }
-        _ => String::new(),
+        Expression::Call(Call::StaticMethod(sc)) => (&sc.method, &sc.argument_list, None),
+        _ => return String::new(),
+    };
+    if let ClassLikeMemberSelector::Identifier(ident) = ident
+        && matches(ident.value)
+    {
+        return first_string_arg(args, content).unwrap_or("").to_string();
+    }
+    match object {
+        Some(object) => chain_modifier_value(object, content, methods),
+        None => String::new(),
     }
 }
 
-/// Collect all `->name('...')` values from the call chain that precedes `->group()`.
+/// The route-name prefix set by the call chain that precedes `->group()`.
 ///
-/// Handles both instance method chains (`->name('prefix.')`) and the static
-/// entry point (`Route::name('prefix.')`).
+/// `RouteRegistrar` aliases `->name()` onto `->as()`, so either spelling sets
+/// it, and both the instance links and the static entry point
+/// (`Route::name('prefix.')`) are read.
 pub(crate) fn chain_name_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
-    chain_modifier_value(expr, content, b"name", &|parent, own| {
-        format!("{parent}{own}")
-    })
+    chain_modifier_value(expr, content, &[b"name", b"as"])
 }
 
-/// The statically-known head of the name prefix a call chain sets, when some
-/// `->name(…)` in it is not a plain string literal.
+/// The statically-known head of the name prefix a call chain sets, when the
+/// `->name(…)` that sets it is not a plain string literal.
 ///
 /// `Route::name('filament.' . $panelId . '.')->group(…)` yields
 /// `Some("filament.")`: the group's full prefix is incomplete, so the names it
 /// registers cannot be enumerated, but they all start with the part that was
-/// written out.  `None` means every `->name()` in the chain is a literal and
+/// written out.  `None` means the chain's name is a literal (or never set) and
 /// [`chain_name_prefix`] has the whole of it.
 pub(crate) fn chain_dynamic_name_prefix(
     expr: &Expression<'_>,
     content: &str,
     scope: &Scope,
 ) -> Option<String> {
-    let (prefix, dynamic) = chain_name_prefix_head(expr, content, scope);
-    dynamic.then_some(prefix)
-}
-
-/// The chain's name prefix as far as it is known, and whether a non-literal
-/// `->name()` argument cut it short.  Everything the chain appends past that
-/// argument is dropped: an unknown run of characters sits in front of it.
-fn chain_name_prefix_head(expr: &Expression<'_>, content: &str, scope: &Scope) -> (String, bool) {
-    let (parent, arguments) = match expr {
-        Expression::Call(Call::Method(mc)) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
-                return chain_name_prefix_head(mc.object, content, scope);
-            };
-            let (parent, dynamic) = chain_name_prefix_head(mc.object, content, scope);
-            if dynamic || !ident.value.eq_ignore_ascii_case(b"name") {
-                return (parent, dynamic);
-            }
-            (parent, &mc.argument_list)
-        }
-        // Route::name('prefix.') — static entry point of the chain.
-        Expression::Call(Call::StaticMethod(sc)) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
-                return (String::new(), false);
-            };
-            if !ident.value.eq_ignore_ascii_case(b"name") {
-                return (String::new(), false);
-            }
-            (String::new(), &sc.argument_list)
-        }
-        _ => return (String::new(), false),
+    let (ident, args, object) = match expr {
+        Expression::Call(Call::Method(mc)) => (&mc.method, &mc.argument_list, Some(mc.object)),
+        Expression::Call(Call::StaticMethod(sc)) => (&sc.method, &sc.argument_list, None),
+        _ => return None,
     };
-
-    match first_string_arg(arguments, content) {
-        Some(literal) => (format!("{parent}{literal}"), false),
-        None => match arguments.arguments.iter().next() {
-            Some(argument) => (
-                format!(
-                    "{parent}{}",
-                    const_string_prefix(argument.value(), content, scope)
-                ),
-                true,
-            ),
-            None => (parent, false),
-        },
+    if let ClassLikeMemberSelector::Identifier(ident) = ident
+        && (ident.value.eq_ignore_ascii_case(b"name") || ident.value.eq_ignore_ascii_case(b"as"))
+    {
+        if first_string_arg(args, content).is_some() {
+            return None;
+        }
+        return args
+            .arguments
+            .iter()
+            .next()
+            .map(|argument| const_string_prefix(argument.value(), content, scope));
     }
+    chain_dynamic_name_prefix(object?, content, scope)
 }
 
-/// Collect all `->prefix('...')` URI segments from the call chain that
-/// precedes `->group()`, joined into a single prefix.
+/// The `->prefix('...')` URI segment set by the call chain that precedes
+/// `->group()`.
 pub(crate) fn chain_uri_prefix<'a>(expr: &Expression<'a>, content: &str) -> String {
-    chain_modifier_value(expr, content, b"prefix", &join_uri_segments)
+    chain_modifier_value(expr, content, &[b"prefix"])
 }
 
 /// The `->uri('...')` value a Folio mount chain sets
-/// (`Folio::path(...)->uri('admin')`), joined the same way a route group's
-/// URI prefix is.
+/// (`Folio::path(...)->uri('admin')`).
 pub(crate) fn chain_uri_modifier<'a>(expr: &Expression<'a>, content: &str) -> String {
-    chain_modifier_value(expr, content, b"uri", &join_uri_segments)
+    chain_modifier_value(expr, content, &[b"uri"])
 }
 
 /// The route-name prefix a chain sets ahead of a `resource()` registration.

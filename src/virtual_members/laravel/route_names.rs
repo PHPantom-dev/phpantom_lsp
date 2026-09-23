@@ -989,6 +989,97 @@ fn chain_uri(expr: &Expression<'_>, content: &str, scope: &Scope) -> Option<Stri
     }
 }
 
+/// Whether a router method registers a route (as opposed to modifying the
+/// registrar or the route it returns).
+fn is_registration_verb(method: &[u8]) -> bool {
+    URI_FIRST_ARG_METHODS
+        .iter()
+        .chain([b"match".as_slice(), b"fallback".as_slice()].iter())
+        .any(|verb| method.eq_ignore_ascii_case(verb))
+}
+
+/// The name a `->name()` leaf gives its route, and what is left of the chain
+/// to walk once it has been read.
+struct LeafRoute<'e, 'arena> {
+    /// `None` when some part of the name is not a statically-known string.
+    name: Option<String>,
+    /// The part of the chain ahead of the registration, or the whole receiver
+    /// when no registration was found.
+    rest: Option<&'e Expression<'arena>>,
+}
+
+/// Read the full name of the route a `->name()` link belongs to.
+///
+/// `Route::name()` on a route *appends* to the name the registrar put in its
+/// action, so `Route::name('admin.')->get(…)->name('dash')->name('board')` is
+/// `admin.dashboard`.  The walk goes down the chain through every `->name()`
+/// link and any other modifier until it reaches the registration verb; the
+/// chain ahead of the verb supplies the registrar's name.  A chain with no
+/// registration verb (a router macro such as `Route::inertia(…)`) keeps the
+/// link's own name alone, as it always has.
+fn leaf_route_name<'e, 'arena>(
+    mc: &'e MethodCall<'arena>,
+    content: &str,
+    scope: &Scope,
+) -> LeafRoute<'e, 'arena> {
+    let own = mc
+        .argument_list
+        .arguments
+        .iter()
+        .next()
+        .and_then(|arg| const_string(arg.value(), content, scope));
+    // Name segments outermost-first, the one on `mc` included.
+    let mut segments = vec![own.clone()];
+    let mut cur: &'e Expression<'arena> = mc.object;
+    loop {
+        let (method, object) = match cur {
+            Expression::Call(Call::Method(link)) => match &link.method {
+                ClassLikeMemberSelector::Identifier(ident) => (ident.value, Some(link)),
+                _ => {
+                    cur = link.object;
+                    continue;
+                }
+            },
+            Expression::Call(Call::StaticMethod(sc)) => match &sc.method {
+                ClassLikeMemberSelector::Identifier(ident) => (ident.value, None),
+                _ => break,
+            },
+            _ => break,
+        };
+        if is_registration_verb(method) {
+            let (registrar, rest) = match object {
+                Some(link) => (chain_name_prefix(link.object, content), Some(link.object)),
+                None => (String::new(), None),
+            };
+            let name = segments
+                .iter()
+                .rev()
+                .try_fold(registrar, |mut name, segment| {
+                    name.push_str(segment.as_deref()?);
+                    Some(name)
+                });
+            return LeafRoute { name, rest };
+        }
+        let Some(link) = object else {
+            break;
+        };
+        if method.eq_ignore_ascii_case(b"name") {
+            segments.push(
+                link.argument_list
+                    .arguments
+                    .iter()
+                    .next()
+                    .and_then(|arg| const_string(arg.value(), content, scope)),
+            );
+        }
+        cur = link.object;
+    }
+    LeafRoute {
+        name: own,
+        rest: Some(mc.object),
+    }
+}
+
 /// Build the recorded URI of a route from its group prefix and own URI.
 fn route_uri(group_uri: &str, own_uri: Option<&str>) -> String {
     let Some(own_uri) = own_uri else {
@@ -1290,8 +1381,9 @@ fn walk_expr(
                     walk_group_body(arg.value(), content, inner, paths, scope, sink);
                 }
             } else if method == b"name" {
+                let leaf = leaf_route_name(mc, content, scope);
                 if let Some(first_arg) = mc.argument_list.arguments.iter().next()
-                    && let Some(name_val) = const_string(first_arg.value(), content, scope)
+                    && let Some(name_val) = &leaf.name
                 {
                     let full = format!("{}{name_val}", group.name);
                     // Only collect leaf names (non-prefix names that don't end with '.').
@@ -1325,6 +1417,33 @@ fn walk_expr(
                             },
                         );
                     }
+                }
+                if let Some(rest) = leaf.rest {
+                    walk_expr(rest, content, group, paths, scope, sink);
+                }
+            } else if is_registration_verb(ident.value) {
+                // `Route::name('users.index')->get(…)`: the registrar's name
+                // becomes the route's even with no `->name()` after the verb.
+                let registrar = chain_name_prefix(mc.object, content);
+                let full = format!("{}{registrar}", group.name);
+                if !registrar.is_empty() && !full.ends_with('.') {
+                    if group.unknowable {
+                        sink.open_suffix(full.clone());
+                    }
+                    let uri_prefix =
+                        join_uri_segments(group.uri, &chain_uri_prefix(mc.object, content));
+                    sink.route(
+                        RouteEntry {
+                            name: full,
+                            uri: route_uri(&uri_prefix, chain_uri(expr, content, scope).as_deref()),
+                            from_vendor: false,
+                        },
+                        RouteSite {
+                            uri: paths.uri,
+                            content,
+                            offset: expr.span().start.offset as usize,
+                        },
+                    );
                 }
                 walk_expr(mc.object, content, group, paths, scope, sink);
             } else if !walk_macro(ident.value, Some(mc.object), content, group, paths, sink) {

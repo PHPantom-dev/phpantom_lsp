@@ -334,7 +334,12 @@ fn array_node<'a>(
         let ArrayElement::KeyValue(kv) = element else {
             continue;
         };
-        let Some((key_text, _, _)) = super::helpers::extract_string_literal(kv.key, content) else {
+        // The literal's unescaped value, as PHP reads it: `'it\'s'` is the
+        // key `it's`.
+        let Expression::Literal(literal::Literal::String(key)) = kv.key else {
+            continue;
+        };
+        let Some(key_text) = key.value.and_then(|v| std::str::from_utf8(v).ok()) else {
             continue;
         };
         entries.push((
@@ -353,9 +358,9 @@ fn classify_value(
 ) -> ConfigValue {
     match expr {
         Expression::Parenthesized(p) => classify_value(p.expression, content, use_map),
-        Expression::Literal(literal::Literal::String(_)) => {
-            match super::helpers::extract_string_literal(expr, content) {
-                Some((text, _, _)) => ConfigValue::Str(text.to_string()),
+        Expression::Literal(literal::Literal::String(s)) => {
+            match s.value.and_then(|v| std::str::from_utf8(v).ok()) {
+                Some(text) => ConfigValue::Str(text.to_string()),
                 None => ConfigValue::Dynamic,
             }
         }

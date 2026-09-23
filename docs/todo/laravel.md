@@ -599,6 +599,13 @@ still partially lack:
   key" style) now completes and resolves go-to-definition, but the
   definition always lands on the top of the file rather than the key's
   actual line, and find-references does not cover JSON keys at all.
+  `Translator::get()` also consults the JSON catalogue *first*, even for a
+  dotted key, but go-to-definition and hover list the group file ahead of
+  it, and a package's `loadJsonTranslationsFrom()` directory is known to
+  the diagnostic but never navigated to. The ignored tests
+  `laravel_translation_keys::a_json_phrase_lands_on_its_own_line`,
+  `a_json_line_wins_over_a_group_file_line_for_the_same_key`, and
+  `a_package_json_phrase_reaches_its_catalogue` cover all three.
 - **Locale argument completion.** The `$locale` parameter of `__()`,
   `trans()`, `trans_choice()`, `Lang::get()/choice()/hasForLocale()`
   (positional or named) completes from the locale set derived from

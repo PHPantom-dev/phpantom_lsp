@@ -302,12 +302,20 @@ pub fn preprocess_with_vars(
                     echo::open_escaped(remaining, line_idx, &echo_closes, &mut echo_closes_at_eol)
                 {
                     lowering = matched;
-                } else if let Some(matched) = directive::open(
-                    remaining,
-                    custom_directives,
-                    &mut paren_depth,
-                    &mut in_php_directive_block,
-                ) {
+                } else if let Some(matched) = (char_idx == 0
+                    || !is_word_char(line_chars[char_idx - 1]))
+                .then(|| {
+                    // Blade anchors directives with `\B`, so the `@` in
+                    // `support@foreach.example` is text, not a loop.
+                    directive::open(
+                        remaining,
+                        custom_directives,
+                        &mut paren_depth,
+                        &mut in_php_directive_block,
+                    )
+                })
+                .flatten()
+                {
                     lowering = matched;
                 } else if let Some(matched) = tag::bound_attr(
                     remaining,
@@ -562,4 +570,9 @@ pub fn preprocess_with_vars(
     }
 
     (virtual_php, source_map)
+}
+
+/// A `\w` character in the byte-oriented sense Blade's compiler regexes use.
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }

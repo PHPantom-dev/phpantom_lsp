@@ -644,6 +644,7 @@ fn psr4_candidate_paths<'a>(
     workspace_root: &'a Path,
     class_name: &'a str,
 ) -> impl Iterator<Item = PathBuf> + 'a {
+    let class_name = class_name.strip_prefix('\\').unwrap_or(class_name);
     mappings.iter().filter_map(move |mapping| {
         let relative = if mapping.prefix.is_empty() {
             class_name

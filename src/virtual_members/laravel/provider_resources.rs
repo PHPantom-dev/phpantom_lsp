@@ -1266,7 +1266,11 @@ pub(crate) fn resolve_path_arg(
 /// The workspace-relative directory a Laravel path helper resolves against,
 /// or `None` for a function that is not one.
 fn path_helper_base(name: &[u8]) -> Option<&'static str> {
-    const HELPERS: [(&[u8], &str); 2] = [(b"base_path", ""), (b"resource_path", "resources")];
+    const HELPERS: [(&[u8], &str); 3] = [
+        (b"base_path", ""),
+        (b"resource_path", "resources"),
+        (b"lang_path", "lang"),
+    ];
     let short = name.rsplit(|&b| b == b'\\').next()?;
     HELPERS
         .iter()
