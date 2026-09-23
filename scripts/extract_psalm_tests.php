@@ -490,12 +490,7 @@ function filterAssertions(array $assertions): array
             continue;
         }
 
-        // Skip literal int/string values as types (e.g. "'hello'", "0", "1")
-        if (preg_match("/^'[^']*'$/", $type) || preg_match('/^-?\d+$/', $type)) {
-            continue;
-        }
-
-        // Skip literal bool values
+        // Skip literal bool values (PHPantom has no LiteralValue bool variant)
         if ($type === 'true' || $type === 'false') {
             continue;
         }

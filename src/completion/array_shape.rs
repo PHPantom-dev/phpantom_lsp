@@ -38,7 +38,7 @@ use crate::docblock;
 use crate::php_type::PhpType;
 use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::Loaders;
-use crate::types::{FileContext, ResolvedType};
+use crate::types::{ClassInfo, FileContext, ResolvedType};
 
 /// Well-known keys for the `$_SERVER` superglobal.
 ///
@@ -290,7 +290,33 @@ impl Backend {
         // the array access, re-parse, and retry.
         let patched_classes_storage;
         let (raw_type, effective_classes) = match raw_type {
-            Some(t) => (t, file_ctx.classes.as_slice()),
+            Some(t) if find_class_at_offset(&file_ctx.classes, cursor_offset).is_some() => {
+                (t, file_ctx.classes.as_slice())
+            }
+            Some(t) => {
+                // The docblock text scan (`find_iterable_raw_type_in_source`)
+                // found the annotation directly from source text and does not
+                // need a parsed class, so it can succeed even though the AST
+                // failed to recover the class enclosing the cursor (typically
+                // because of the unclosed `$var['` bracket at the cursor —
+                // classes parsed *before* the error can still show up in
+                // `file_ctx.classes`, so an emptiness check alone is not
+                // enough). Type alias expansion below looks the alias name up
+                // on a real `ClassInfo.type_aliases`, so it needs the
+                // patched-and-reparsed classes even when `t` itself is
+                // already resolved.
+                let patched = patch_array_access_at_cursor(content, position);
+                if patched == content {
+                    (t, file_ctx.classes.as_slice())
+                } else {
+                    patched_classes_storage = self
+                        .parse_php(&patched)
+                        .into_iter()
+                        .map(Arc::new)
+                        .collect::<Vec<_>>();
+                    (t, patched_classes_storage.as_slice())
+                }
+            }
             None => {
                 let patched = patch_array_access_at_cursor(content, position);
                 if patched == content {
@@ -321,9 +347,22 @@ impl Backend {
             }
         };
 
+        // Uses `effective_classes` which may be the patched classes when
+        // the original parse failed due to syntax errors.
+        let class_loader =
+            self.class_loader_with(effective_classes, &file_ctx.use_map, &file_ctx.namespace);
+
         // If there are prefix keys (chained access), resolve through each
-        // level of the shape to get the inner type.
-        let effective_type = self.resolve_through_prefix_keys(&raw_type, &ctx.prefix_keys);
+        // level of the shape to get the inner type. Each hop may itself be
+        // a named alias (e.g. `Bar` -> `['baz']` -> alias `Baz` -> `['qux']`
+        // -> alias `Qux`), so expand aliases at every level, not just the
+        // final one.
+        let effective_type = self.resolve_through_prefix_keys(
+            &raw_type,
+            &ctx.prefix_keys,
+            effective_classes,
+            &class_loader,
+        );
         let effective_type = match effective_type {
             Some(t) => t,
             None => return vec![],
@@ -332,10 +371,6 @@ impl Backend {
         // Expand type aliases before parsing as an array shape.
         // The raw type might be an alias name like `UserData` that
         // resolves to `array{name: string, email: string}`.
-        // Uses `effective_classes` which may be the patched classes when
-        // the original parse failed due to syntax errors.
-        let class_loader =
-            self.class_loader_with(effective_classes, &file_ctx.use_map, &file_ctx.namespace);
         let parsed = crate::type_engine::type_resolution::resolve_type_alias_typed(
             &effective_type,
             "",
@@ -481,18 +516,32 @@ impl Backend {
     ///
     /// Given a raw type like `array{meta: array{page: int, total: int}}` and
     /// prefix keys `["meta"]`, returns `Some(PhpType)` for `array{page: int, total: int}`.
+    ///
+    /// Each hop may itself be a named type alias rather than an inline
+    /// shape (e.g. chained `@psalm-type`/`@phpstan-type` aliases that
+    /// reference each other by name), so every level is expanded before
+    /// its key is looked up, not just the final result.
     fn resolve_through_prefix_keys(
         &self,
         raw_type: &PhpType,
         prefix_keys: &[String],
+        all_classes: &[Arc<ClassInfo>],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<PhpType> {
+        let mut current = raw_type.clone();
         if prefix_keys.is_empty() {
-            return Some(raw_type.clone());
+            return Some(current);
         }
 
-        let mut current = raw_type.clone();
         for key in prefix_keys {
-            current = current.shape_value_type(key)?.clone();
+            let expanded = crate::type_engine::type_resolution::resolve_type_alias_typed(
+                &current,
+                "",
+                all_classes,
+                class_loader,
+            )
+            .unwrap_or_else(|| current.clone());
+            current = expanded.shape_value_type(key)?.clone();
         }
         Some(current)
     }

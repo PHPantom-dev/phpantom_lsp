@@ -661,3 +661,116 @@ reading that helper takes from the body.
 Once it is read, the pcre stub patches can declare `preg_match`'s and
 `preg_match_all`'s out types directly rather than inheriting
 phpstorm-stubs' `null|string[]`.
+
+## T42. A static factory's own `@return self<T>` breaks every chained call after it
+**Impact: Medium · Complexity: Unknown (needs investigation)**
+
+Found while porting Mago's `issue_362.php` (Test Porting Phase 4A): a
+static method that declares its own `@template T` and returns
+`self<T>` makes every completion request on a call chained off it come
+back `None` (not empty — no completion response at all), even when the
+receiving variable's type is separately pinned down by a `@var`
+annotation that makes the method's own template irrelevant.
+
+Minimal repro:
+
+```php
+class Product {
+    public function getPrice(): float { return 0.0; }
+}
+
+/** @template T */
+class Box {
+    /**
+     * @template T
+     * @return self<T>
+     */
+    public static function make(): self { return new self(); }
+
+    /** @return T */
+    public function get(): mixed {}
+}
+
+/** @var Box<Product> $box */
+$box = Box::make();
+$box->get()->  // completion() returns None here, not just an empty list
+```
+
+Removing either the method-level `@template T` + `@return self<T>` on
+`make()` (letting it return a bare `self` and relying entirely on the
+`@var` hint), or making `get()`'s call chain off a plain `new Box()`
+instead of `Box::make()`, makes the same chain resolve `getPrice`
+correctly. So the break is specific to a `self<T>`-returning static
+method sitting in the middle of a chain — one hop after it (`Box::make()
+->`) still lists `Box`'s own members fine; it is the *second* hop
+(`->get()->`, the one that needs `T` substituted from the instantiated
+type) that comes back empty-handed.
+
+The same failure reproduces with the original Mago pattern too: two
+independent method-level templates (`K`, `V`, both distinct from the
+class-level `TKey`/`TValue`) inferred from an `array<K, V>` argument and
+returned as `self<K, V>`, chained straight into an instance method
+whose own `@return TValue` should resolve through it. So this is not
+purely a same-name shadowing edge case between the class-level and
+method-level template — investigate whether both share one underlying
+cause before assuming they are separate bugs.
+
+Whatever produces the instantiated receiver type for the second hop
+comes back with nothing usable — worth checking whether the generic
+substitution map built for `self<T>` ends up unable to resolve `T` (no
+argument binds the method-level template, and the external `@var`
+override does not appear to reach it), and whether that unresolved-`T`
+case is handled by returning an error/`None` instead of falling back to
+the class's own declared (or unsubstituted) member types the way other
+partial-resolution failures in this pipeline do.
+
+**Blocks:** Test Porting Phase 4A pattern 362 (generic class implementing
+`ArrayAccess`/`IteratorAggregate` with a `self<K, V>`-returning static
+factory) cannot be ported until this is fixed — the ported test would
+assert on exactly the completion this bug empties out.
+
+## T43. `self::TypeAlias` inside `@extends`'s generic argument is not resolved
+**Impact: Low · Complexity: Medium**
+
+Found while porting Mago's `issue_870.php` (Test Porting Phase 4A). A
+class can declare its own `@type`/`@phpstan-type` alias and hand it to
+its own parent's template parameter via `self::`:
+
+```php
+/** @template TData as array<string, mixed> */
+abstract class Car {
+    /** @return TData */
+    abstract function getData(): array;
+}
+
+/**
+ * @type DataArray = array{'Gewicht': int}
+ * @extends Car<self::DataArray>
+ */
+class RedCar extends Car {
+    public function getData(): array { return ['Gewicht' => 1000]; }
+}
+```
+
+`getData()`'s inherited `@return TData` should resolve to the
+`DataArray` shape (offering `Gewicht` for array-key completion), but
+`self::DataArray` inside the `@extends` tag's generic argument list is
+not recognised as a reference to the class's own type alias, so `TData`
+never gets substituted and completion sees only the untyped `array`
+declared return.
+
+`extract_generics_tag` (`docblock.rs`, exercised by
+`test_extract_generics_tag_extends_single_param` and friends in
+`completion_generics.rs`) parses `@extends Foo<Bar>` generic arguments
+as plain type tokens; `self::DataArray` most likely parses as some
+`Named`/member-access token rather than being recognised as "look up
+`DataArray` in this class's own `type_aliases`, the same alias
+`resolve_type_alias_typed` already expands everywhere else."
+
+**Fix:** when parsing a generic argument off `@extends`/`@implements`/
+`@template-implements`, recognise a `self::Identifier` token and resolve
+it against the *declaring* class's own `type_aliases` map (via
+`resolve_type_alias_typed` with that class as `owning_class_name`)
+before substituting it into the parent's template.
+
+**Blocks:** Test Porting Phase 4A pattern 870.
