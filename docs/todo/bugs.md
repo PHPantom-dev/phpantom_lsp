@@ -118,17 +118,3 @@ back, each invalidated by the next keystroke.
 
 **Fix:** only bump the epoch when an entry was actually marked, and wait
 for an edit pause between iterations rather than only before the first.
-
-## B332. A commented-out `@use` counts as a template import
-
-**Impact: Low · Complexity: Low**
-
-`use_directive_arguments` (`blade/use_directive.rs:16`) finds `@use` with
-a plain `find`. It neither masks Blade comments nor checks a word
-boundary before the `@`. So `{{-- @use('App\Foo') --}}` is taken as a
-real import by `analyze_template_use_block` (which BL1's import
-insertion builds on) and rewritten by the template rename in
-`rename/blade.rs:32`, while the preprocessor ignores it.
-
-**Fix:** mask with `signature::inert_regions` and require a directive
-boundary (`directives::directive_head`), as the other Blade scanners do.
