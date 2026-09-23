@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::ParseErrorEntry;
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::blade::call_site_inference::BladeScope;
 use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
@@ -60,7 +61,7 @@ fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
 }
 
 pub(crate) enum AstIndexParseResult {
-    Update(AstIndexUpdate),
+    Update(Box<AstIndexUpdate>),
     ParseFailed {
         uri: String,
         errors: Vec<ParseErrorEntry>,
@@ -87,6 +88,11 @@ pub(crate) struct AstIndexUpdate {
 pub(crate) struct BladeLowering {
     virtual_php: Arc<String>,
     source_map: crate::blade::source_map::BladeSourceMap,
+    /// The scope this lowering was seeded from, so a batch that outlives a
+    /// newer scope written by call-site re-inference can be told apart from
+    /// one still describing the current scope (see
+    /// [`Backend::apply_ast_index_parse_results_batch`]).
+    scope: BladeScope,
 }
 
 fn class_info_fqn(class: &ClassInfo) -> String {
@@ -388,6 +394,7 @@ impl Backend {
         Some(BladeLowering {
             virtual_php: Arc::new(virtual_php),
             source_map,
+            scope: injected,
         })
     }
 
@@ -423,7 +430,7 @@ impl Backend {
         }) {
             Some(mut update) => {
                 update.blade = blade;
-                AstIndexParseResult::Update(update)
+                AstIndexParseResult::Update(Box::new(update))
             }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
@@ -450,6 +457,17 @@ impl Backend {
         // buffers are always kept fresh by `did_change`, so skipping them
         // here loses nothing.
         let open_uris = self.open_files.read();
+        // A template's lowering carries the scope it was built from. If
+        // call-site re-inference has since written a newer scope for the
+        // same uri (`reinfer_and_reparse_blade_with`, which re-lowers and
+        // re-parses against it right away), this batch result is describing
+        // variables the template no longer has -- drop it rather than
+        // publish a lowering that is internally consistent but pinned to a
+        // scope nothing points at anymore. The template stays on whatever
+        // was last published (the fresh re-inference pass, if one already
+        // landed) until its own next parse computes a lowering against the
+        // current scope.
+        let injected_vars = self.blade_injected_vars.read();
 
         let mut updates = Vec::new();
         let mut failures = Vec::new();
@@ -459,7 +477,17 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    updates.push(update);
+                    if let Some(blade) = &update.blade {
+                        let current = injected_vars.get(&update.uri);
+                        let stale = match current {
+                            Some(current) => *current != blade.scope,
+                            None => blade.scope != BladeScope::default(),
+                        };
+                        if stale {
+                            continue;
+                        }
+                    }
+                    updates.push(*update);
                 }
                 AstIndexParseResult::ParseFailed { uri, errors } => {
                     if open_uris.contains_key(&uri) {
@@ -470,6 +498,7 @@ impl Backend {
             }
         }
         drop(open_uris);
+        drop(injected_vars);
 
         if !failures.is_empty() {
             let mut parse_errors = self.parse_errors.write();
@@ -2190,6 +2219,45 @@ mod tests {
                 .map(|p| p.line),
             Some(1),
             "App\\Item is on the template's second line"
+        );
+    }
+
+    /// A stale index parse must not pin a template back to the scope it
+    /// started with. If call-site re-inference computes a new scope and
+    /// re-parses the template before the index worker's older-scoped batch
+    /// applies, the batch's lowering describes variables the template no
+    /// longer has and must be dropped rather than published over the fresh
+    /// state.
+    #[test]
+    fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        // An index worker lowers the template while the scope is still
+        // empty (nothing has been cached for this uri yet).
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+
+        // Call-site re-inference computes the real scope and re-parses
+        // against it before the index worker's batch is applied.
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![("a".to_string(), "int".to_string())],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+
+        // The index worker's batch, built from the empty scope, lands last.
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        assert_eq!(
+            backend.blade_virtual_php_arc(uri).unwrap(),
+            fresh_virtual_php,
+            "a batch built from a scope the template has moved past must not \
+             overwrite the lowering built from the current scope"
         );
     }
 

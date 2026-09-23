@@ -54,23 +54,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-## B333. A stale index parse can pin a template to its old scope
-
-**Impact: Low · Complexity: Medium**
-
-A workspace index worker lowers a closed template with the scope cached
-in `blade_injected_vars` when it starts, and its batch is applied later
-(`parse_ast_index_update_for_index` →
-`apply_ast_index_parse_results_batch`). If call-site inference re-infers
-the template in between (the detached did-open or did-save pass), writes
-the new scope to the cache and re-parses, the worker's batch still lands
-afterwards and republishes the lowering built from the old scope. The
-published lowering is self-consistent (its virtual PHP, source map and
-symbol map are published together), so positions are right, but the
-template's variables keep the old types. The next re-inference computes
-the same scope that is already cached, so it sees nothing to do and the
-stale types stay until the template itself is re-parsed.
-
-**Fix:** record the scope a lowering was built from in the lowering, and
-drop a batch result for a template whose cached scope has moved on since
-(or re-lower it against the current scope when the batch applies).
+No outstanding items.
