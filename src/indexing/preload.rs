@@ -106,10 +106,12 @@ impl Backend {
     /// completed index without refreshing the filesystem.
     ///
     /// Internal consumers such as declaration CodeLens and cached reference
-    /// counts call this once per symbol. Explicit Find References requests use
+    /// counts call this once per symbol. Explicit Find References and rename
+    /// requests use
     /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request)
-    /// once at their entry point so they retain the existing on-demand refresh
-    /// that discovers files created without a watcher notification.
+    /// once at their entry point, before reading the file the request is
+    /// about, so they retain the existing on-demand refresh that discovers
+    /// files created without a watcher notification.
     pub(crate) fn ensure_workspace_index_ready_for_request(&self) {
         match self.request_progress.as_deref() {
             Some(state) => {

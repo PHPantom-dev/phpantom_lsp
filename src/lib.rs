@@ -1002,6 +1002,17 @@ pub struct Backend {
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
+    /// Held while a parse publishes a template's virtual PHP, source map,
+    /// and symbol map, which live behind three separate locks.
+    ///
+    /// Several threads can re-parse the same template at once (the
+    /// did-open and did-save call-site inference, the refresh a Find
+    /// References request runs, the workspace index), each with its own
+    /// lowering.  Publishing the three one after another without this
+    /// could leave the virtual PHP of one parse next to the symbol map of
+    /// another, and every offset in the map would then point at the wrong
+    /// text until the template is parsed again.
+    pub(crate) blade_publish_lock: Arc<Mutex<()>>,
     /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
     /// Allows editors to signal Blade files via languageId alone.
     pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
@@ -1285,6 +1296,7 @@ impl Backend {
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
+            blade_publish_lock: Arc::new(Mutex::new(())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -2071,6 +2083,7 @@ impl Backend {
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
+            blade_publish_lock: Arc::clone(&self.blade_publish_lock),
             blade_uris: Arc::clone(&self.blade_uris),
             blade_injected_vars: Arc::clone(&self.blade_injected_vars),
             typed_receiver_view_spans_cache: Arc::clone(&self.typed_receiver_view_spans_cache),

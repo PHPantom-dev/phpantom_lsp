@@ -77,6 +77,16 @@ pub(crate) struct AstIndexUpdate {
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
     symbol_map: Arc<SymbolMap>,
+    /// The lowering a template was parsed as, published together with
+    /// `symbol_map` because the map's offsets index its virtual PHP.
+    blade: Option<BladeLowering>,
+}
+
+/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// with the source map that carries positions back to the template.
+pub(crate) struct BladeLowering {
+    virtual_php: Arc<String>,
+    source_map: crate::blade::source_map::BladeSourceMap,
 }
 
 fn class_info_fqn(class: &ClassInfo) -> String {
@@ -215,9 +225,11 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
-        let content_to_parse = self
-            .record_blade_virtual_php(uri, content)
-            .unwrap_or_else(|| Arc::new(content.to_string()));
+        let blade = self.lower_blade_template(uri, content);
+        let content_to_parse = blade.as_ref().map_or_else(
+            || Arc::new(content.to_string()),
+            |lowering| Arc::clone(&lowering.virtual_php),
+        );
 
         self.laravel_string_key_cache
             .write()
@@ -238,7 +250,7 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, &content_owned)
+            self.update_ast_inner(&uri_owned, &content_owned, blade)
         });
 
         // Keep the Laravel macro index coherent with edits to files that
@@ -294,8 +306,9 @@ impl Backend {
 
     /// Inner implementation of [`update_ast`] that performs the actual parse
     /// and publishes the resulting single-file update.
-    fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
-        let update = self.build_ast_index_update(uri, content);
+    fn update_ast_inner(&self, uri: &str, content: &str, blade: Option<BladeLowering>) -> bool {
+        let mut update = self.build_ast_index_update(uri, content);
+        update.blade = blade;
         self.apply_ast_index_updates_batch(vec![update])
     }
 
@@ -326,8 +339,12 @@ impl Backend {
     }
 
     /// Preprocess a Blade template into the virtual PHP everything else
-    /// reads it as, publishing the source map and the virtual content the
-    /// position translation rides on.
+    /// reads it as, and the source map the position translation rides on.
+    ///
+    /// Nothing is published here: the lowering travels with the parse of
+    /// its virtual PHP and is published alongside the symbol map in
+    /// [`Self::apply_ast_index_updates_batch`], so the two always describe
+    /// the same text.
     ///
     /// Returns `None` for a file that is not a template, which is parsed
     /// as it stands.
@@ -344,7 +361,7 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<Arc<String>> {
+    pub(crate) fn lower_blade_template(&self, uri: &str, content: &str) -> Option<BladeLowering> {
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -368,14 +385,10 @@ impl Backend {
             Some(&components),
             &custom_directives,
         );
-        self.blade_source_maps
-            .write()
-            .insert(uri.to_string(), source_map);
-        let virtual_php = Arc::new(virtual_php);
-        self.blade_virtual_content
-            .write()
-            .insert(uri.to_string(), Arc::clone(&virtual_php));
-        Some(virtual_php)
+        Some(BladeLowering {
+            virtual_php: Arc::new(virtual_php),
+            source_map,
+        })
     }
 
     pub(crate) fn parse_ast_index_update_for_index(
@@ -396,17 +409,22 @@ impl Backend {
         // would leave it describing different text than the symbol map
         // `did_change` published, which is exactly what the rename's
         // `matches_source` check refuses to plan against.
-        let preprocessed = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
-            self.record_blade_virtual_php(uri, content)
+        let blade = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
+            self.lower_blade_template(uri, content)
         } else {
             None
         };
-        let content = preprocessed.as_ref().map_or(content, |php| php.as_str());
+        let content = blade
+            .as_ref()
+            .map_or(content, |lowering| lowering.virtual_php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
         }) {
-            Some(update) => AstIndexParseResult::Update(update),
+            Some(mut update) => {
+                update.blade = blade;
+                AstIndexParseResult::Update(update)
+            }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
                 errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
@@ -869,6 +887,7 @@ impl Backend {
                 functions,
                 defines,
                 symbol_map,
+                blade: None,
             }
         })
     }
@@ -897,6 +916,7 @@ impl Backend {
             functions: Vec<FunctionInfo>,
             defines: Vec<(String, DefineInfo)>,
             symbol_map: Arc<SymbolMap>,
+            blade: Option<BladeLowering>,
             old_function_fqns: Vec<String>,
             old_define_names: Vec<String>,
             new_function_fqns: Vec<String>,
@@ -980,6 +1000,7 @@ impl Backend {
                 functions: update.functions,
                 defines: update.defines,
                 symbol_map: update.symbol_map,
+                blade: update.blade,
                 old_function_fqns,
                 old_define_names,
                 new_function_fqns: Vec::new(),
@@ -1421,6 +1442,21 @@ impl Backend {
             .collect();
         self.reindex_references_for_symbol_maps_batch(reference_items);
 
+        // A template's lowering and its symbol map go out under one hold of
+        // the publish lock, so that of two parses of the same template racing
+        // each other, one publishes all three maps before the other starts.
+        let has_blade = prepared.iter().any(|update| update.blade.is_some());
+        let _blade_publish_guard = has_blade.then(|| self.blade_publish_lock.lock());
+        if has_blade {
+            let mut virtual_content = self.blade_virtual_content.write();
+            let mut source_maps = self.blade_source_maps.write();
+            for update in &mut prepared {
+                if let Some(blade) = update.blade.take() {
+                    virtual_content.insert(update.uri.clone(), blade.virtual_php);
+                    source_maps.insert(update.uri.clone(), blade.source_map);
+                }
+            }
+        }
         {
             let mut symbol_maps = self.symbol_maps.write();
             for update in prepared {
@@ -2107,6 +2143,54 @@ mod tests {
         let v2 = "<?php\nfunction foo(): void {}\n";
         let changed = backend.update_ast(uri, v2);
         assert!(changed, "Removing a function must be detected");
+    }
+
+    /// Two parses of one template can race: an index worker lowers it with
+    /// the scope it had, while call-site inference re-parses it with a
+    /// larger one.  Whichever lands last, the virtual PHP, the source map
+    /// and the symbol map must all come from the same parse, or every
+    /// offset in the map points at the wrong text and every position
+    /// translated back to the template is off by the prologue difference.
+    #[test]
+    fn racing_template_parses_leave_one_consistent_lowering() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![
+                    ("a".to_string(), "int".to_string()),
+                    ("b".to_string(), "string".to_string()),
+                ],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+        let symbol_map = backend.symbol_maps.read().get(uri).cloned().unwrap();
+        assert!(
+            symbol_map.matches_source(&virtual_php),
+            "the symbol map must index the virtual PHP that was published with it"
+        );
+
+        let item = symbol_map
+            .spans
+            .iter()
+            .find(|span| matches!(&span.kind, crate::symbol_map::SymbolKind::ClassReference { name, .. } if name.ends_with("Item")))
+            .expect("the template names App\\Item");
+        let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
+        assert_eq!(
+            backend
+                .try_translate_php_to_blade(uri, position)
+                .map(|p| p.line),
+            Some(1),
+            "App\\Item is on the template's second line"
+        );
     }
 
     /// Adding a parameter to a function should be detected.

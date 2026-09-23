@@ -2019,8 +2019,8 @@ class Cart {
     assert_no_duplicates(&results, "one_file_method_refs");
 }
 
-#[test]
-fn workspace_index_refreshes_after_new_file_is_added() {
+#[tokio::test]
+async fn workspace_index_refreshes_after_new_file_is_added() {
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
             "autoload": {
@@ -2045,9 +2045,12 @@ class Item {}
 
     open_file(&backend, &item_uri, &item_content);
 
-    let initial_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find initial class references");
+    let item_url = Url::parse(&item_uri).unwrap();
+    let initial_results = references_at(&backend, &item_url, 3, 6, true).await;
+    assert!(
+        !initial_results.is_empty(),
+        "should find initial class references"
+    );
 
     assert_no_duplicates(&initial_results, "workspace_refresh_initial_refs");
 
@@ -2069,9 +2072,7 @@ class Service {
     .expect("failed to write newly added PHP file");
 
     let service_uri = format!("file://{}", service_path.display());
-    let refreshed_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find refreshed class references");
+    let refreshed_results = references_at(&backend, &item_url, 3, 6, true).await;
 
     assert_no_duplicates(&refreshed_results, "workspace_refresh_refs");
     assert!(

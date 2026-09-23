@@ -401,9 +401,7 @@ impl Backend {
         // and hands over the buffer without copying it.
         let locations =
             self.with_file_content("codeLens/resolve", uri, None, |content, _| match kind {
-                "phpReferences" => {
-                    self.find_references_from_workspace_index(uri, content, position, false)
-                }
+                "phpReferences" => self.find_references(uri, content, position, false),
                 "phpMemberReferences" => {
                     let offset = data
                         .get("offset")

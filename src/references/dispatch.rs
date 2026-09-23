@@ -20,29 +20,15 @@ impl Backend {
     /// Returns all locations where the symbol under the cursor is
     /// referenced.  When `include_declaration` is true the declaration
     /// site itself is included in the results.
+    ///
+    /// Waits for the initial workspace index but does not refresh it.  A
+    /// user command that should also discover files created without a
+    /// watcher event runs [`Self::ensure_workspace_indexed_for_request`]
+    /// itself, *before* it reads `content`: the refresh re-infers Blade
+    /// templates, which rewrites their virtual PHP, so a template's
+    /// `content` and `position` read ahead of it would no longer be the
+    /// text its symbol map describes.
     pub fn find_references(
-        &self,
-        uri: &str,
-        content: &str,
-        position: Position,
-        include_declaration: bool,
-    ) -> Option<Vec<Location>> {
-        // Refresh once for the user command so files created without a
-        // watcher event remain discoverable. The per-symbol scanners below
-        // only wait for/reuse that completed index.
-        self.ensure_workspace_indexed_for_request();
-        self.find_references_inner(
-            uri,
-            content,
-            position,
-            include_declaration,
-            ReferenceSearchMode::References,
-        )
-    }
-
-    /// Resolve declaration annotations against the completed index without
-    /// turning every CodeLens item into another workspace refresh.
-    pub(crate) fn find_references_from_workspace_index(
         &self,
         uri: &str,
         content: &str,
@@ -68,7 +54,7 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         self.find_references_inner(
             uri,
             content,
