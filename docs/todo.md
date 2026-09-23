@@ -106,7 +106,6 @@ unlikely to move the needle for most users.
 | B344 | [A config list value reads as an empty shape](todo/bugs.md#b344-a-config-list-value-reads-as-an-empty-shape)                                                              | Low-Medium  | Low         |
 | B348 | [Translation groups in lang subdirectories are not enumerated](todo/bugs.md#b348-translation-groups-in-lang-subdirectories-are-not-enumerated)                            | Low-Medium  | Low         |
 | B352 | [`@lang` and `@choice` arguments are not translation keys](todo/bugs.md#b352-lang-and-choice-arguments-are-not-translation-keys)                                          | Low-Medium  | Low         |
-| B356 | [Blade component discovery reads only the first PSR-4 directory of a prefix](todo/bugs.md#b356-blade-component-discovery-reads-only-the-first-psr-4-directory-of-a-prefix) | Low-Medium  | Low         |
 | B337 | [An unqualified class name inside a namespace falls back to a global alias](todo/bugs.md#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias)  | Low-Medium  | Medium      |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
 | B346 | [Config defaults are merged recursively instead of Laravel's top-level merge](todo/bugs.md#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge) | Low-Medium  | Medium      |

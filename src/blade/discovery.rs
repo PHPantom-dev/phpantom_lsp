@@ -18,6 +18,7 @@ use std::sync::Arc;
 use super::component_tags::kebab_case;
 use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
+use crate::composer::psr4_directories_for_namespace;
 
 /// The namespace tail Laravel looks for class-based components under when no
 /// provider registers a namespace of its own.
@@ -409,7 +410,7 @@ impl Backend {
         classes
     }
 
-    /// The classes in the directory a PSR-4 mapping puts `namespace` in.
+    /// The classes in the directories a PSR-4 mapping puts `namespace` in.
     ///
     /// Empty when no mapping covers it, which is the normal case for a
     /// vendor package's namespace: the class index picks those up instead.
@@ -417,46 +418,34 @@ impl Backend {
         let Some(root) = self.workspace_root().read().clone() else {
             return Vec::new();
         };
-        let Some(dir) = self.namespace_directory(&root, namespace) else {
-            return Vec::new();
-        };
         let mut classes = Vec::new();
-        collect_class_files(&dir, &dir, namespace, &mut classes);
+        for dir in self.namespace_directories(&root, namespace) {
+            collect_class_files(&dir, &dir, namespace, &mut classes);
+        }
         classes
     }
 
-    /// Resolve `namespace` to the directory the project's own PSR-4
+    /// Resolve `namespace` to every directory the project's own PSR-4
     /// mappings put it in, taking the longest matching prefix so a nested
-    /// mapping wins over a root one.
-    fn namespace_directory(&self, root: &Path, namespace: &str) -> Option<PathBuf> {
+    /// mapping wins over a root one, and every directory of an array
+    /// mapping (`"App\\": ["app/", "src/"]`) at that prefix length.
+    fn namespace_directories(&self, root: &Path, namespace: &str) -> Vec<PathBuf> {
         let namespace = namespace.trim_matches('\\');
         let mappings = self.psr4_mappings().read();
-        let mut best: Option<(usize, PathBuf)> = None;
-        for mapping in mappings.iter() {
-            let prefix = mapping.prefix.trim_matches('\\');
-            let rest = if prefix.is_empty() {
-                Some(namespace)
-            } else if namespace.eq_ignore_ascii_case(prefix) {
-                Some("")
-            } else {
-                namespace
-                    .get(..prefix.len())
-                    .filter(|head| head.eq_ignore_ascii_case(prefix))
-                    .and_then(|_| namespace[prefix.len()..].strip_prefix('\\'))
-            };
-            let Some(rest) = rest else {
-                continue;
-            };
-            if best.as_ref().is_some_and(|(len, _)| *len >= prefix.len()) {
-                continue;
+        let mut best_len: Option<usize> = None;
+        let mut dirs = Vec::new();
+        for (mapping, dir) in psr4_directories_for_namespace(&mappings, root, namespace) {
+            let prefix_len = mapping.prefix.trim_matches('\\').len();
+            match best_len {
+                Some(len) if prefix_len < len => break,
+                _ => {}
             }
-            let mut dir = root.join(mapping.base_path.trim_start_matches("./"));
-            for segment in rest.split('\\').filter(|s| !s.is_empty()) {
-                dir.push(segment);
+            best_len = Some(prefix_len);
+            if dir.is_dir() {
+                dirs.push(dir);
             }
-            best = Some((prefix.len(), dir));
         }
-        best.map(|(_, dir)| dir).filter(|dir| dir.is_dir())
+        dirs
     }
 }
 

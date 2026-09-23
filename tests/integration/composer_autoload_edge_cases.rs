@@ -311,7 +311,6 @@ class Consumer {
 /// in each of them: component classes under either `app/` or `src/`
 /// answer to their tags.
 #[tokio::test]
-#[ignore = "known gap: Blade component discovery reads only the first PSR-4 directory of a prefix"]
 async fn components_in_every_directory_of_an_array_mapping_resolve() {
     let composer = r#"{"autoload": {"psr-4": {
         "App\\": ["app/", "src/"],

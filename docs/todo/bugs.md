@@ -365,17 +365,6 @@ the injected declaration (`src/blade/preprocessor/directive.rs`) types it
 
 **Test:** `blade_preprocessing::loop_parent_in_a_nested_loop_offers_the_outer_loops_members`.
 
-## B356. Blade component discovery reads only the first PSR-4 directory of a prefix
-
-**Impact: Low-Medium · Complexity: Low**
-
-With `"App\\": ["app/", "src/"]`, `<x-badge>` backed by
-`src/View/Components/Badge.php` is not found: `namespace_directory` in
-`src/blade/discovery.rs` keeps the first mapping for the prefix instead of
-using `psr4_directories_for_namespace`.
-
-**Test:** `composer_autoload_edge_cases::components_in_every_directory_of_an_array_mapping_resolve`.
-
 ## Miscellaneous
 
 No outstanding items.
