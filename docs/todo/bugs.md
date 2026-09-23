@@ -54,19 +54,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-## B334. The Blade view roots never notice a `resources/views` created later
-
-**Impact: Low · Complexity: Low**
-
-`laravel_view_roots` (`src/blade/view_paths.rs`) keeps only the configured
-directories that exist when it is first built, caches an empty list when
-the workspace root is not yet known, and is reset only when
-`config/view.php` changes (`LaravelStringKeyCache::invalidate_for_uri` in
-`src/lib.rs`). A project whose `resources/views` directory is created after
-the first Blade request, or whose roots were computed before `initialize`
-set the workspace root, resolves no view names until `config/view.php` is
-edited. The provider-resource republish does not reset the roots either.
-
-**Fix:** reset `view_roots` when a directory a configured root names
-appears (the watcher already reports created files under it), and do not
-cache the empty answer taken before the workspace root is known.
+No outstanding items.

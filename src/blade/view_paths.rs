@@ -4,6 +4,8 @@
 
 use std::path::{Path, PathBuf};
 
+use tower_lsp::lsp_types::Url;
+
 use crate::text_scan::unquote_php_string;
 
 /// Discover Laravel Blade view directories from `config/view.php`.
@@ -46,23 +48,49 @@ pub(crate) struct ViewRoot {
     pub canonical: Option<PathBuf>,
 }
 
+/// Whether `uri`'s file already lies under one of `roots`.
+///
+/// Used to tell an edit inside an already-known root (which needs no
+/// recompute) from a file that just appeared under a directory the cached
+/// roots don't know about yet: a `resources/views` created after the roots
+/// were first (and, until now, permanently) computed, or a custom root
+/// from `config/view.php` that didn't exist at the time. A `uri` that
+/// cannot be parsed to a file path is treated as covered, so it cannot
+/// force a spurious recompute.
+pub(crate) fn view_root_covers(roots: &[ViewRoot], uri: &str) -> bool {
+    let Some(path) = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) else {
+        return true;
+    };
+    roots.iter().any(|root| {
+        path.starts_with(&root.path)
+            || root
+                .canonical
+                .as_deref()
+                .is_some_and(|c| path.starts_with(c))
+    })
+}
+
 impl crate::Backend {
     /// The configured Blade view root directories.
     ///
     /// Reads the `paths` array from `config/view.php` (falling back to
     /// the conventional `resources/views`) so that projects with custom
     /// view directories resolve `view()` names correctly. Only existing
-    /// directories are returned. Cached until `config/view.php` changes,
-    /// and read through the editor's buffer when the file is open.
+    /// directories are returned. Cached until `config/view.php` changes or a
+    /// file appears under a directory the cached roots don't already
+    /// cover, and read through the editor's buffer when the file is open.
     pub(crate) fn laravel_view_roots(&self) -> std::sync::Arc<Vec<ViewRoot>> {
+        // The workspace root is not known before `initialize` sets it. Don't
+        // cache this answer: caching it would freeze the roots at "none"
+        // for the rest of the session once the real root becomes known.
+        let Some(root) = self.workspace.workspace_root.read().clone() else {
+            return std::sync::Arc::new(Vec::new());
+        };
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.view_roots,
             |cache| cache.view_roots.clone(),
             |cache, roots| cache.view_roots = Some(roots),
             || {
-                let Some(root) = self.workspace.workspace_root.read().clone() else {
-                    return std::sync::Arc::new(Vec::new());
-                };
                 let config_uri = crate::util::path_to_uri(&root.join("config/view.php"));
                 let config = self.get_file_content_arc(&config_uri);
                 let roots = view_paths_from_config(config.as_deref().map(String::as_str), &root)
@@ -214,5 +242,44 @@ mod tests {
         // No config/view.php present.
         let paths = discover_view_paths(root);
         assert_eq!(paths, vec![root.join("resources/views")]);
+    }
+
+    #[test]
+    fn view_roots_recompute_when_a_new_root_directory_appears() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+
+        let backend = crate::Backend::new_test();
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+
+        // No `resources/views` yet, so no roots are known.
+        assert!(backend.laravel_view_roots().is_empty());
+
+        std::fs::create_dir_all(root.join("resources/views")).unwrap();
+        let blade_path = root.join("resources/views/welcome.blade.php");
+        let content = "<p>hi</p>\n";
+        std::fs::write(&blade_path, content).unwrap();
+        let uri = crate::util::path_to_uri(&blade_path);
+        backend.update_ast(&uri, content);
+
+        let roots = backend.laravel_view_roots();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, root.join("resources/views"));
+    }
+
+    #[test]
+    fn view_roots_are_not_cached_before_workspace_root_is_known() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("resources/views")).unwrap();
+
+        let backend = crate::Backend::new_test();
+        // The workspace root is not known yet: no directory can be found.
+        assert!(backend.laravel_view_roots().is_empty());
+
+        *backend.workspace_root().write() = Some(root.to_path_buf());
+        let roots = backend.laravel_view_roots();
+        assert_eq!(roots.len(), 1);
+        assert_eq!(roots[0].path, root.join("resources/views"));
     }
 }

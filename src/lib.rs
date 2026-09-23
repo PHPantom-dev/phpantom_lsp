@@ -478,13 +478,23 @@ impl LaravelStringKeyCache {
         // file may live outside `resources/views/`. Invalidate on any
         // Blade file, any path containing a `views/` directory, and on
         // `config/view.php` itself (which changes the set of roots).
-        if uri.ends_with(".blade.php")
-            || uri.contains("/views/")
-            || uri.contains("/config/view.php")
-        {
+        let looks_like_view_file = uri.ends_with(".blade.php") || uri.contains("/views/");
+        if looks_like_view_file || uri.contains("/config/view.php") {
             self.view_names = None;
         }
-        if uri.contains("/config/view.php") {
+        // A file that is not covered by any already-known root may be the
+        // first one to land under a directory that has just appeared (a
+        // `resources/views` created after the roots were cached, or a
+        // custom root from `config/view.php` that didn't exist yet):
+        // recompute so the new directory is picked up without waiting for
+        // `config/view.php` itself to change.
+        if uri.contains("/config/view.php")
+            || (looks_like_view_file
+                && self
+                    .view_roots
+                    .as_deref()
+                    .is_some_and(|roots| !crate::blade::view_paths::view_root_covers(roots, uri)))
+        {
             self.view_roots = None;
         }
         if uri.contains("/lang/") || uri.contains("/resources/lang/") {
