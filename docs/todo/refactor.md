@@ -212,4 +212,178 @@ Each item must include:
 
 # Outstanding items
 
-No outstanding items.
+Filed by the Sprint 7 gate analysis of 2026-09-23 (round 4, scoped to
+every `src/` file changed since 0.10.0, about 400 files). The bugs the
+same pass found are filed separately in `bugs.md` (B326 to B332). Items
+are grouped so that each one touches a distinct set of files. 1 and 2
+are prerequisites for P64 and should go first.
+
+## 1. Split `forward_walk/control_flow.rs` along its existing seams
+
+`src/type_engine/variable/forward_walk/control_flow.rs` is 2,398 lines,
+and P64 rewrites its branch handling. Two blocks in it are not control
+flow at all:
+
+- The `foreach` machinery, `process_foreach` through `bind_foreach_key`
+  (about lines 1122 to 1819: `LoopSeedPoint`, `process_foreach`,
+  `resolve_foreach_iterable_type`, `resolve_foreach_expr_via_subject`,
+  `bind_foreach_value`, `is_non_empty_array_literal`,
+  `extract_foreach_var_name`, `extract_foreach_destr_key`,
+  `bind_foreach_key`). `forward_walk/foreach.rs` already calls itself
+  "the `foreach` machinery" and holds the rest of it. Move these there.
+- The assignment-dependency analysis that sizes the loop fixed point
+  (about lines 706 to 1121: `assignment_map_depth`,
+  `assignment_map_depth_with_updates`, `chain_depth`,
+  `collect_assignment_deps`, `collect_expr_assignment_deps`,
+  `collect_assignment_target_vars`, `collect_lhs_index_variables`,
+  `destructuring_element_exprs`, `collect_rhs_variables`,
+  `collect_arglist_variables`, `scope_has_changes`). It is pure AST
+  analysis. Move it to a new `forward_walk/assignment_deps.rs`.
+
+What stays is `if`/`while`/`for`/`do`/`try`/`switch`, around 1,300 lines.
+
+## 2. Split `scope_state/merge.rs` before P64 changes the join
+
+`src/type_engine/variable/forward_walk/scope_state/merge.rs` is 882
+lines. P64 changes `merge_branch` so it joins only the entries a branch
+wrote.
+
+- Move the proof joins (`join_ruled_out`, `join_non_null_implications`,
+  `join_implied_narrowings`, `same_implied_narrowings`,
+  `implication_holds`, `is_definitely_null`, `is_definitely_non_null`,
+  `same_trigger`, about lines 342 to 722) into `scope_state/proofs.rs`.
+- Move `simplify_class_hierarchy_unions` and `is_subclass_of` (about
+  723 to 882, called from `control_flow.rs`, `null_identity.rs`,
+  `resolver/mod.rs` and `blade/backing_class.rs`) out of the merge file.
+  `is_subclass_of` is a one-line wrapper over
+  `class_lookup::is_subtype_of`, so its callers can call that directly.
+- Pull the body of the `for (name, other_types) in &other.locals` loop in
+  `merge_branch` (lines 109 to 261) into its own function that joins one
+  key. P64 then calls it for the keys a branch touched, instead of
+  rewriting a 150-line loop body in place.
+
+## 3. Move the array-shape write helpers out of `variable/resolution.rs`
+
+`src/type_engine/variable/resolution.rs` (2,784 lines) has a "Shape
+mutation helpers" section (lines 1753 to 2454: `merge_nested_array_write`,
+`merge_push_type`, `merge_keyed_type`, `merge_array_plus`,
+`normalize_array_key_type`, …) that is pure `PhpType` shape work and
+uses nothing else in the file. Its callers are
+`forward_walk/array_assignment.rs`, `forward_walk/assignment.rs`,
+`raw_type_inference.rs`, `array_func_rules.rs` and
+`rhs_resolution/arithmetic.rs`. Move it to
+`src/type_engine/variable/array_shape_writes.rs` and update those paths.
+
+## 4. One class-exclusion helper in `cond_narrowing`
+
+`src/type_engine/variable/forward_walk/cond_narrowing/apply.rs` repeats
+one block four times in `apply_condition_narrowing_inverse_single` (about
+lines 281, 316, 365 and 422). Each copy excludes classes from a
+variable, calls `record_exclusion`, and marks the scope unreachable if
+that emptied a variable that had types. `exclude_classes_in_scope` in
+`cond_narrowing/instanceof.rs:10` does the same thing, minus the
+unreachable marking. Give the helper an "emptied a typed variable" result,
+make it `pub(super)`, and use it at all five sites. Decide explicitly
+whether the `&&`-chain caller in `instanceof.rs` should mark
+unreachable too, rather than leaving the two to drift.
+
+## 5. Find the inherited constructor through `inheritance::ancestors`
+
+`src/type_engine/call_resolution/return_types/call_arms.rs:838-870` and
+`src/type_engine/variable/rhs_resolution/instantiation.rs:129-163` each
+hand-roll a `for _ in 0..15` parent loop to find the nearest
+`__construct`, cloning the parent name into a `String` at every step.
+Replace both with
+`inheritance::ancestors(cls, loader).find(|(_, p)| p.get_method("__construct").is_some())`.
+(The `0..15` loop at `instantiation.rs:523` carries per-level
+`@extends` substitutions and is not a candidate.)
+
+## 6. Stop `find_declaring_interface` visiting a parent twice per level
+
+`src/inheritance/ancestry.rs:123-143` recurses into every entry of
+`interfaces` and then into `parent_class`. For an interface the parser
+stores the first `extends` in both, so a failed search down a
+single-extends chain of depth d loads 2^d classes (bounded only by
+`MAX_INHERITANCE_DEPTH`). A miss is the normal case on the code-lens
+path (`code_lens.rs:557`), and the function also serves
+`definition/member/declaring.rs:68` and `semantic_export/calls.rs:208`.
+Skip `parent_class` when it is already in `interfaces`, or track visited
+names as `collect_supertypes` does.
+
+## 7. One member lookup for the member diagnostics
+
+`declared_member` in `src/diagnostics/member_visibility.rs:535-573`,
+and `member_exists` (1018-1063) and `member_is_public` (967-1008) in
+`src/diagnostics/unknown_members/mod.rs`, each implement the same lookup:
+a case-insensitive method match, then constant before static property
+(with the `$` spelling check), then instance property. `display_class_name`
+is duplicated verbatim (`unknown_members/mod.rs:1110`,
+`member_visibility.rs:668`). Move `declared_member`, `display_class_name`
+and the member helpers after line 942 of `unknown_members/mod.rs` into a new
+`src/diagnostics/member_lookup.rs`, and express `member_exists` and
+`member_is_public` over `declared_member`. That also drops the
+per-method `to_ascii_lowercase()` and per-property `format!` allocations
+on this hot diagnostic path.
+
+## 8. One candidate-file loop for Find References
+
+The per-kind searches in `src/references/` repeat one skeleton: take the
+candidate snapshot, open a progress window, then for each file
+`Url::parse`, build a `CandidateFile`, pre-check spans, scan them, push
+locations, and finally sort. The copies are `classes.rs:65`
+(`find_class_references`), `classes.rs:184` (`find_constructor_references`),
+`functions.rs:16` (`find_function_references`), `functions.rs:128`
+(`find_constant_references`), `members.rs:125`
+(`find_laravel_macro_references`) and `members.rs:943`
+(`find_member_references`). They have already drifted:
+`find_constant_references` never opens a scan window, so its progress
+never advances. `functions.rs:35-55` also re-implements
+`SpanFqnResolver::fqn` from `classes.rs:41-57`. Add one helper in
+`references/mod.rs` that owns the loop and progress and takes a per-file
+closure, and move all six onto it. The lens batch path in
+`members.rs:474-628` already scans with `parallel::map_indexed`. Decide
+whether the helper does the same, and if so the other searches gain it
+for free.
+
+## 9. `analyze` walks files through `workspace_walk_builder`
+
+`collect_php_files` in `src/analyse/run.rs:245-290` rebuilds the
+`WalkBuilder` that `classmap_scanner::workspace_walk_builder`
+(`classmap_scanner/filters.rs:40`) provides, and has drifted from it. It
+prunes vendor by calling `canonicalize()` on every directory, and it
+never calls `claims.cover(skip_dirs)`, so a symlink into vendor is walked
+by `analyze` but not by the indexer. Build the walk from
+`workspace_walk_builder` and keep only the `crop` filter local.
+
+## 10. Share the Laravel string-key caches instead of cloning them
+
+- `cached_config_trees` (`src/virtual_members/laravel/config_values.rs:487`)
+  returns the whole `Vec<(String, ConfigNode)>` by value, and
+  `resolve_config_type` is wired into the shared loaders
+  (`resolution.rs:1656`). So every `config('x')` resolved anywhere
+  deep-clones every config tree, which now includes the framework
+  defaults. Store `config_trees` as an `Arc` (`src/lib.rs:392`,
+  `config_values.rs`, `storage.rs:162`), as `trans_key_shapes`, `routes`
+  and `blade_discovery` already are.
+- `config_keys`, `view_names` and `trans_keys` are cloned whole on each
+  read, and `src/diagnostics/laravel_string_keys.rs:285-291` copies them
+  into a fresh `HashSet<String>` for every file's diagnostic pass. Store
+  them shared (`Arc<HashSet<String>>` or similar).
+
+## 11. Split `rename/namespace.rs` the way `rename/class/` is split
+
+`src/rename/namespace.rs` grew from 602 to 807 lines and does two jobs:
+the text-edit plan (lines 26 to 460) and the PSR-4 directory-move plan
+(`namespace_merge_conflict`, `build_namespace_psr4_rename_ops`,
+`namespace_psr4_root_conflict`, `namespace_source_dirs`,
+`collect_merge_move_ops`, from line 462 on). Class rename keeps its
+equivalent in `rename/class/layout.rs`. Make it
+`rename/namespace/{mod,layout}.rs`.
+
+## 12. Split `stub_patches.rs` into function and class patches
+
+`src/stub_patches.rs` grew from 1,661 to 2,118 lines, and has two
+independent halves: function patches (about 198 to 1000) and class
+patches (about 1020 to 1634), followed by about 480 lines of inline tests.
+Make it `stub_patches/{mod,functions,classes}.rs`, and move the tests to a
+`#[path]` test file as the other large modules do.

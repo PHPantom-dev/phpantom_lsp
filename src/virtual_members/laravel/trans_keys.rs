@@ -316,3 +316,7 @@ fn value_is_group(expr: &Expression<'_>) -> bool {
         _ => false,
     }
 }
+
+#[cfg(test)]
+#[path = "trans_keys_tests.rs"]
+mod tests;

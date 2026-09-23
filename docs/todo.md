@@ -95,6 +95,12 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B326 | [A dead branch in another file hides diagnostics in the file being checked](todo/bugs.md#b326-a-dead-branch-in-another-file-hides-diagnostics-in-the-file-being-checked) | Medium      | Low         |
+| B327 | [Quotes inside `@verbatim` leak into the lowered PHP](todo/bugs.md#b327-quotes-inside-verbatim-leak-into-the-lowered-php)                                                  | Medium      | Low         |
+| B330 | [The chain cache tells files apart by a pointer that can be reused](todo/bugs.md#b330-the-chain-cache-tells-files-apart-by-a-pointer-that-can-be-reused)                   | Medium      | Low         |
+| B328 | [Closing a file drops its references from the reference-count lenses](todo/bugs.md#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses)             | Medium      | Medium      |
+| B329 | [The reference-count worker keeps searching while the user types](todo/bugs.md#b329-the-reference-count-worker-keeps-searching-while-the-user-types)                       | Low-Medium  | Low         |
+| B332 | [A commented-out `@use` counts as a template import](todo/bugs.md#b332-a-commented-out-use-counts-as-a-template-import)                                                    | Low         | Low         |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

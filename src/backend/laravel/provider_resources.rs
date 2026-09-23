@@ -142,6 +142,7 @@ impl Backend {
             cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
+            cache.trans_key_shapes = None;
             cache.routes = None;
             cache.blade_discovery = None;
         }

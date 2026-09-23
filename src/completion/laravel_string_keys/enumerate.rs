@@ -28,71 +28,57 @@ impl Backend {
         keys
     }
 
-    /// Enumerate all translation keys by scanning `lang/` files and
-    /// package translation directories discovered from service providers.
-    ///
-    /// Supports both PHP array files (`lang/en/messages.php` → `messages.key`)
-    /// and JSON translation files (`lang/en.json` → raw key strings).
-    /// Package translations use `namespace::file.key` syntax.
-    fn enumerate_all_trans_keys(&self) -> Vec<String> {
-        let snapshot = self.user_file_symbol_maps();
-        let mut keys = Vec::new();
-
-        for (file_uri, _) in &snapshot {
-            if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
-                continue;
-            }
-            if !file_uri.ends_with(".php") {
-                continue;
-            }
-            let Some(stem) = extract_lang_file_stem(file_uri) else {
-                continue;
-            };
-            let Some(content) = self.get_file_content(file_uri) else {
-                continue;
-            };
-            let decls =
-                crate::virtual_members::laravel::collect_trans_declarations(&content, &stem);
-            for d in decls {
-                keys.push(d.key);
-            }
-        }
-
-        collect_json_trans_keys(self, &mut keys);
-
-        for res in &self.laravel_provider_resources.read().trans_dirs {
-            collect_namespaced_trans_keys(&res.path, &res.namespace, &mut keys);
-        }
-
-        keys.sort();
-        keys.dedup();
-        keys
-    }
-
     /// Enumerate every translation key alongside whether it names a
     /// translation group (a nested array) rather than a scalar string
     /// entry, merging the flag across every locale and file that
     /// declares the key.
     ///
+    /// Covers PHP array files (`lang/en/messages.php` → `messages.key`),
+    /// JSON translation files (`lang/en.json` → raw key strings), and
+    /// package translation directories discovered from service providers
+    /// (`namespace::file.key`).
+    ///
     /// A key that is a group in *any* locale is recorded as a group even
     /// if another locale happens to declare it as a scalar — the return
     /// type narrowing this feeds is only safe when every locale agrees
     /// the entry is scalar.
+    ///
+    /// The project's lang files are discovered with a direct disk walk
+    /// rather than through `user_file_symbol_maps`, for the same reason
+    /// as [`for_each_config_source`](Self::for_each_config_source):
+    /// `__()` return types are resolved through the shared loaders, which
+    /// run inside the workspace index, so ensuring the index here would
+    /// re-enter its lock. Files open in the editor but not yet on disk are
+    /// taken from the already-parsed snapshot, without blocking.
     fn enumerate_all_trans_key_shapes(&self) -> HashMap<String, bool> {
-        let snapshot = self.user_file_symbol_maps();
-        let mut shapes = HashMap::new();
+        let mut lang_uris: Vec<String> = Vec::new();
+        if let Some(root) = self.workspace.workspace_root.read().clone() {
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
+            let filters = self.index_filters();
+            for path in crate::references::collect_php_files_gitignore(
+                &root,
+                &vendor_dir_paths,
+                &filters,
+                Some(self.followed_links()),
+            ) {
+                let uri = crate::util::path_to_uri(&path);
+                if is_lang_php_uri(&uri) {
+                    lang_uris.push(uri);
+                }
+            }
+        }
+        for (uri, _) in self.user_file_symbol_maps_nonblocking() {
+            if is_lang_php_uri(&uri) && !lang_uris.contains(&uri) {
+                lang_uris.push(uri);
+            }
+        }
 
-        for (file_uri, _) in &snapshot {
-            if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
-                continue;
-            }
-            if !file_uri.ends_with(".php") {
-                continue;
-            }
+        let mut shapes = HashMap::new();
+        for file_uri in &lang_uris {
             let Some(stem) = extract_lang_file_stem(file_uri) else {
                 continue;
             };
-            let Some(content) = self.get_file_content(file_uri) else {
+            let Some(content) = self.get_file_content_arc(file_uri) else {
                 continue;
             };
             let decls =
@@ -194,7 +180,12 @@ impl Backend {
             &self.laravel_string_key_build_locks.trans_keys,
             |cache| cache.trans_keys.clone(),
             |cache, keys| cache.trans_keys = Some(keys),
-            || self.enumerate_all_trans_keys(),
+            || {
+                let mut keys: Vec<String> =
+                    self.cached_trans_key_shapes().keys().cloned().collect();
+                keys.sort();
+                keys
+            },
         )
     }
 
@@ -225,91 +216,9 @@ pub(super) fn extract_lang_file_stem(uri: &str) -> Option<String> {
     Some(stem.to_string())
 }
 
-/// Scan the workspace for `lang/*.json` files and collect their top-level
-/// keys into `out`.  Laravel's JSON translations are flat
-/// `{ "Some phrase": "Translated phrase" }` objects where the key is used
-/// directly in `__('Some phrase')`.
-///
-/// We scan the filesystem because JSON files are not PHP and therefore do
-/// not appear in `user_file_symbol_maps()`.
-fn collect_json_trans_keys(backend: &crate::Backend, out: &mut Vec<String>) {
-    let root = match backend.workspace.workspace_root.read().clone() {
-        Some(r) => r,
-        None => return,
-    };
-    for sub in &["lang", "resources/lang"] {
-        let dir = root.join(sub);
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "json")
-                && let Ok(content) = std::fs::read_to_string(&path)
-                && let Ok(map) =
-                    serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-            {
-                for k in map.keys() {
-                    out.push(k.clone());
-                }
-            }
-        }
-    }
-}
-
-/// Scan a package translation directory and collect keys in
-/// `namespace::file.key` format (PHP files) or `namespace::raw_key`
-/// (JSON files with empty namespace).
-fn collect_namespaced_trans_keys(dir: &std::path::Path, namespace: &str, out: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_namespaced_trans_from_locale_dir(&path, namespace, out);
-        } else if path.extension().is_some_and(|e| e == "json")
-            && namespace.is_empty()
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && let Ok(map) =
-                serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&content)
-        {
-            for k in map.keys() {
-                out.push(k.clone());
-            }
-        }
-    }
-}
-
-fn collect_namespaced_trans_from_locale_dir(
-    dir: &std::path::Path,
-    namespace: &str,
-    out: &mut Vec<String>,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.extension().is_some_and(|e| e == "php") {
-            continue;
-        }
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        let Ok(content) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let prefix = if namespace.is_empty() {
-            stem.to_string()
-        } else {
-            format!("{namespace}::{stem}")
-        };
-        let decls = crate::virtual_members::laravel::collect_trans_declarations(&content, &prefix);
-        for d in decls {
-            out.push(d.key);
-        }
-    }
+/// Whether a user-file URI is a PHP translation file.
+fn is_lang_php_uri(uri: &str) -> bool {
+    (uri.contains("/lang/") || uri.contains("/resources/lang/")) && uri.ends_with(".php")
 }
 
 /// Record a key's group/scalar shape, OR-ing into any flag already
@@ -319,8 +228,14 @@ fn mark_trans_shape(shapes: &mut HashMap<String, bool>, key: String, is_group: b
     *existing = *existing || is_group;
 }
 
-/// The shape counterpart of [`collect_json_trans_keys`]: every JSON
-/// translation key is a scalar phrase, never a group.
+/// Scan the workspace for `lang/*.json` files and record their top-level
+/// keys into `out`.  Laravel's JSON translations are flat
+/// `{ "Some phrase": "Translated phrase" }` objects where the key is used
+/// directly in `__('Some phrase')`, so every one is a scalar, never a
+/// group.
+///
+/// We scan the filesystem because JSON files are not PHP and therefore do
+/// not appear in the symbol maps.
 fn collect_json_trans_key_shapes(backend: &crate::Backend, out: &mut HashMap<String, bool>) {
     let root = match backend.workspace.workspace_root.read().clone() {
         Some(r) => r,
@@ -346,7 +261,9 @@ fn collect_json_trans_key_shapes(backend: &crate::Backend, out: &mut HashMap<Str
     }
 }
 
-/// The shape counterpart of [`collect_namespaced_trans_keys`].
+/// Scan a package translation directory and record keys in
+/// `namespace::file.key` format (PHP files) or `namespace::raw_key`
+/// (JSON files with empty namespace).
 fn collect_namespaced_trans_key_shapes(
     dir: &std::path::Path,
     namespace: &str,

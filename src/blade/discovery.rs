@@ -117,17 +117,29 @@ impl Backend {
             if !uri.ends_with(".blade.php") && !uri.contains("/views/") {
                 return;
             }
-            let cache = self.laravel_string_key_cache.read();
             // Nothing built yet means nothing to drop.
-            let Some(discovery) = cache.blade_discovery.as_ref() else {
+            if self
+                .laravel_string_key_cache
+                .read()
+                .blade_discovery
+                .is_none()
+            {
                 return;
-            };
+            }
+            // Worked out before the cache guard is taken: the view roots are
+            // cached in the same lock, and a second read taken while a writer
+            // is queued parks behind that writer, which in turn waits on the
+            // first read.
             let names = self.view_names_for_blade_uri(uri);
             // A template outside every view root contributes no name at
             // all, so the index is as correct without it as with it.
-            let known =
-                names.is_empty() || names.iter().all(|name| discovery.views.contains_key(name));
-            drop(cache);
+            let known = names.is_empty() || {
+                let cache = self.laravel_string_key_cache.read();
+                let Some(discovery) = cache.blade_discovery.as_ref() else {
+                    return;
+                };
+                names.iter().all(|name| discovery.views.contains_key(name))
+            };
             if known {
                 return;
             }
@@ -782,6 +794,44 @@ mod tests {
         // So does a component class, wherever its namespace is rooted.
         backend.refresh_blade_discovery(&uri_of("app/View/Components/Alert.php"));
         assert!(!cached(&backend));
+    }
+
+    /// Working out a template's view names can build the cached view roots,
+    /// which writes into the same cache the index sits in, so the refresh
+    /// must not be holding that cache while it does.
+    #[test]
+    fn refreshing_a_template_can_rebuild_the_view_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        write(&root, "composer.json", "{}");
+        write(&root, "resources/views/welcome.blade.php", "");
+
+        let backend = backend_at(&root);
+        backend.blade_discovery();
+        backend.laravel_string_key_cache.write().view_roots = None;
+        write(&root, "resources/views/about.blade.php", "");
+        let uri =
+            tower_lsp::lsp_types::Url::from_file_path(root.join("resources/views/about.blade.php"))
+                .unwrap()
+                .to_string();
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let refresh = backend.clone_for_blocking();
+        std::thread::spawn(move || {
+            refresh.refresh_blade_discovery(&uri);
+            let _ = done.send(());
+        });
+        finished
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the refresh must not wait on its own hold of the cache");
+        assert!(
+            backend
+                .laravel_string_key_cache
+                .read()
+                .blade_discovery
+                .is_none(),
+            "a template the index has never seen drops it"
+        );
     }
 
     #[test]
