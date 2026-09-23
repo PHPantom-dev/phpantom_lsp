@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790139413823,
+  "lastUpdate": 1790139520021,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29817,6 +29817,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f0e82ade623bf617b1920159da5432e4df685c5d",
+          "message": "A `resources/views` directory created after a project is opened is now\nfound",
+          "timestamp": "2026-09-23T06:39:51+02:00",
+          "tree_id": "6914d6685c6c2432e948811bd0051420e662f397",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f0e82ade623bf617b1920159da5432e4df685c5d"
+        },
+        "date": 1790139510997,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.2,
             "unit": "MiB"
           }
         ]
