@@ -949,17 +949,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b327-quotes-inside-verbatim-leak-into-the-lowered-php" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B327. Quotes inside <code>@verbatim</code> leak into the lowered PHP
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1581,17 +1570,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b327-quotes-inside-verbatim-leak-into-the-lowered-php" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B327. Quotes inside <code>@verbatim</code> leak into the lowered PHP
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1704,22 +1682,6 @@ that every cross-file walk runs suspended.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b327-quotes-inside-verbatim-leak-into-the-lowered-php">B327. Quotes inside <code>@verbatim</code> leak into the lowered PHP<a class="headerlink" href="#b327-quotes-inside-verbatim-leak-into-the-lowered-php" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong></p>
-<p>The Blade preprocessor's string tracking (<code>blade/preprocessor/mod.rs:243</code>)
-is skipped for <code>Mode::Html</code>, <code>Mode::EscapedEcho</code> and <code>Mode::Comment</code>, but
-not for <code>Mode::Verbatim</code>. Inside <code>@verbatim</code> a quote therefore starts a
-tracked string, and the quoted characters go into <code>buffer</code>.
-<code>flush_buffer</code> (<code>preprocessor/shared.rs:77-96</code>) writes every mode other
-than HTML and escaped echo into the virtual PHP as-is. So
-<code>@verbatim\n&lt;div class="x" v-if="show"&gt;\n@endverbatim\n{{ $a }}</code> puts
-<code>"x""show"</code> into the PHP right before the echo, which is a syntax error.
-An unbalanced apostrophe (<code>Don't</code>) is worse: <code>in_string</code> is not reset per
-line, so <code>@endverbatim</code> is swallowed and the rest of the template is
-mis-lowered. Alpine and Vue markup, the usual content of <code>@verbatim</code>, is
-full of quotes. Neither verbatim test in <code>preprocessor/tests.rs</code> has one.</p>
-<p><strong>Fix:</strong> add <code>Mode::Verbatim</code> to the exclusion at line 243, with a
-regression test for both quote shapes.</p>
 <h2 id="b328-closing-a-file-drops-its-references-from-the-reference-count-lenses">B328. Closing a file drops its references from the reference-count lenses<a class="headerlink" href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>on_did_close</code> (<code>backend/documents.rs:219</code>) calls <code>clear_file_maps</code>,
