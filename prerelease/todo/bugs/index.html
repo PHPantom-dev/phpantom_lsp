@@ -949,10 +949,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
+  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B328. Closing a file drops its references from the reference-count lenses
+        B329. The reference-count worker keeps searching while the user types
       </span>
     </span>
   </a>
@@ -960,10 +960,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
+  <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B329. The reference-count worker keeps searching while the user types
+        B332. A commented-out <code>@use</code> counts as a template import
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B333. A file changed on disk drops its references from the reference-count lenses
       </span>
     </span>
   </a>
@@ -1559,10 +1570,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
+  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B328. Closing a file drops its references from the reference-count lenses
+        B329. The reference-count worker keeps searching while the user types
       </span>
     </span>
   </a>
@@ -1570,10 +1581,21 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" class="md-nav__link">
+  <a href="#b332-a-commented-out-use-counts-as-a-template-import" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B329. The reference-count worker keeps searching while the user types
+        B332. A commented-out <code>@use</code> counts as a template import
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B333. A file changed on disk drops its references from the reference-count lenses
       </span>
     </span>
   </a>
@@ -1660,22 +1682,6 @@ that every cross-file walk runs suspended.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h2 id="b328-closing-a-file-drops-its-references-from-the-reference-count-lenses">B328. Closing a file drops its references from the reference-count lenses<a class="headerlink" href="#b328-closing-a-file-drops-its-references-from-the-reference-count-lenses" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>on_did_close</code> (<code>backend/documents.rs:219</code>) calls <code>clear_file_maps</code>,
-which removes the file's <code>symbol_maps</code> entry and its reference-index
-entries (<code>backend/file_access.rs:374-381</code>). Once the initial workspace
-index has completed, <code>ensure_workspace_index_ready_for_request</code>
-(<code>indexing/preload.rs:212</code>) returns early and never re-parses the file.
-The lens batch (<code>user_file_symbol_maps_for_reference_keys</code>) and
-<code>indexed_reference_count</code> therefore stop seeing its references, and the
-eviction marks the counts stale, so they are recomputed without them.
-Open <code>B.php</code>, which calls <code>Foo::bar()</code>, close it, and the lens on
-<code>Foo::bar</code> drops by one. Only an explicit Find References, which
-refreshes the index, brings it back. No integration test closes a file.</p>
-<p><strong>Fix:</strong> on close, re-read a workspace file from disk and re-index it,
-as <code>on_did_close</code> already does for resource documents
-(<code>documents.rs:236-240</code>), instead of evicting it.</p>
 <h2 id="b329-the-reference-count-worker-keeps-searching-while-the-user-types">B329. The reference-count worker keeps searching while the user types<a class="headerlink" href="#b329-the-reference-count-worker-keeps-searching-while-the-user-types" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
 <p><code>schedule_member_ref_counts</code> (<code>reference_counts/mod.rs:333</code>) waits for an
@@ -1689,6 +1695,33 @@ the user keeps typing, whole-workspace searches therefore run back to
 back, each invalidated by the next keystroke.</p>
 <p><strong>Fix:</strong> only bump the epoch when an entry was actually marked, and wait
 for an edit pause between iterations rather than only before the first.</p>
+<h2 id="b332-a-commented-out-use-counts-as-a-template-import">B332. A commented-out <code>@use</code> counts as a template import<a class="headerlink" href="#b332-a-commented-out-use-counts-as-a-template-import" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p><code>use_directive_arguments</code> (<code>blade/use_directive.rs:16</code>) finds <code>@use</code> with
+a plain <code>find</code>. It neither masks Blade comments nor checks a word
+boundary before the <code>@</code>. So <code>{{-- @use('App\Foo') --}}</code> is taken as a
+real import by <code>analyze_template_use_block</code> (which BL1's import
+insertion builds on) and rewritten by the template rename in
+<code>rename/blade.rs:32</code>, while the preprocessor ignores it.</p>
+<p><strong>Fix:</strong> mask with <code>signature::inert_regions</code> and require a directive
+boundary (<code>directives::directive_head</code>), as the other Blade scanners do.</p>
+<h2 id="b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses">B333. A file changed on disk drops its references from the reference-count lenses<a class="headerlink" href="#b333-a-file-changed-on-disk-drops-its-references-from-the-reference-count-lenses" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>reindex_files_batch</code> (<code>lib.rs</code>) handles a watched <code>CHANGED</code> or
+<code>CREATED</code> PHP file by calling <code>clear_file_maps</code>, which removes its
+<code>symbol_maps</code> entry and its reference-index entries, and then restores
+only the discovery indexes (<code>classmap_scanner::scan_file</code>). Nothing
+re-parses the file. Once the initial workspace index has completed,
+<code>ensure_workspace_index_ready_for_request</code> returns early, so the lens
+batch and <code>indexed_reference_count</code> stop seeing the references a
+changed file makes, and never see the ones a created file makes. A
+<code>git pull</code> that touches <code>B.php</code>, which calls <code>Foo::bar()</code>, drops the
+lens on <code>Foo::bar</code> by one until an explicit Find References refreshes
+the index.</p>
+<p><strong>Fix:</strong> after the purge, re-parse the changed and created files that
+the workspace index covers (<code>Backend::workspace_index_path</code>) through
+the batch index parser, the way <code>on_did_close</code> re-indexes a closed
+workspace file from disk.</p>
 
 
 
