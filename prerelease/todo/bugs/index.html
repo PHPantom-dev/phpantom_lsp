@@ -1180,17 +1180,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b356-blade-component-discovery-reads-only-the-first-psr-4-directory-of-a-prefix" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B356. Blade component discovery reads only the first PSR-4 directory of a prefix
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2021,17 +2010,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b356-blade-component-discovery-reads-only-the-first-psr-4-directory-of-a-prefix" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B356. Blade component discovery reads only the first PSR-4 directory of a prefix
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2320,13 +2298,6 @@ and <code>a_multi_line_block_comment_holding_a_paren_does_not_close_the_header</
 the injected declaration (<code>src/blade/preprocessor/directive.rs</code>) types it
 <code>?object</code>, so <code>$loop-&gt;parent-&gt;index</code> offers nothing.</p>
 <p><strong>Test:</strong> <code>blade_preprocessing::loop_parent_in_a_nested_loop_offers_the_outer_loops_members</code>.</p>
-<h2 id="b356-blade-component-discovery-reads-only-the-first-psr-4-directory-of-a-prefix">B356. Blade component discovery reads only the first PSR-4 directory of a prefix<a class="headerlink" href="#b356-blade-component-discovery-reads-only-the-first-psr-4-directory-of-a-prefix" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>With <code>"App\\": ["app/", "src/"]</code>, <code>&lt;x-badge&gt;</code> backed by
-<code>src/View/Components/Badge.php</code> is not found: <code>namespace_directory</code> in
-<code>src/blade/discovery.rs</code> keeps the first mapping for the prefix instead of
-using <code>psr4_directories_for_namespace</code>.</p>
-<p><strong>Test:</strong> <code>composer_autoload_edge_cases::components_in_every_directory_of_an_array_mapping_resolve</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
