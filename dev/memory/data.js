@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790116457563,
+  "lastUpdate": 1790122975215,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29307,6 +29307,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "792f020215ee4f9ce015fccfab2daba4a6e8c776",
+          "message": "Resolving a translation key no longer waits for the workspace index",
+          "timestamp": "2026-09-23T02:05:22+02:00",
+          "tree_id": "4195adc74a1902024c70aa5fb0ec4cdc7e719a6f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/792f020215ee4f9ce015fccfab2daba4a6e8c776"
+        },
+        "date": 1790122967926,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.1,
             "unit": "MiB"
           }
         ]
