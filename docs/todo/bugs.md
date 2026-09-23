@@ -67,24 +67,3 @@ insertion builds on) and rewritten by the template rename in
 
 **Fix:** mask with `signature::inert_regions` and require a directive
 boundary (`directives::directive_head`), as the other Blade scanners do.
-
-## B333. A file changed on disk drops its references from the reference-count lenses
-
-**Impact: Medium · Complexity: Medium**
-
-`reindex_files_batch` (`lib.rs`) handles a watched `CHANGED` or
-`CREATED` PHP file by calling `clear_file_maps`, which removes its
-`symbol_maps` entry and its reference-index entries, and then restores
-only the discovery indexes (`classmap_scanner::scan_file`). Nothing
-re-parses the file. Once the initial workspace index has completed,
-`ensure_workspace_index_ready_for_request` returns early, so the lens
-batch and `indexed_reference_count` stop seeing the references a
-changed file makes, and never see the ones a created file makes. A
-`git pull` that touches `B.php`, which calls `Foo::bar()`, drops the
-lens on `Foo::bar` by one until an explicit Find References refreshes
-the index.
-
-**Fix:** after the purge, re-parse the changed and created files that
-the workspace index covers (`Backend::workspace_index_path`) through
-the batch index parser, the way `on_did_close` re-indexes a closed
-workspace file from disk.

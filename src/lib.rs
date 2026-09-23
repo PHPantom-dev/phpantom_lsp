@@ -1799,7 +1799,9 @@ impl Backend {
     /// `update_ast` stores the editor's URI string), so values are matched
     /// against both spellings.  The full
     /// [`ClassInfo`](crate::types::ClassInfo) is re-parsed lazily on next
-    /// access; this only restores the lightweight discovery indexes.
+    /// access.  Beyond the lightweight discovery indexes, only the files the
+    /// workspace index covers are parsed again here, and only once that
+    /// index exists, so their references keep counting.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
     ///
@@ -1943,6 +1945,35 @@ impl Backend {
                     ci.entry(name).or_insert_with(|| path.clone());
                 }
             }
+        }
+
+        // The purge above took the files' symbol maps and reference-index
+        // entries with it, and a completed workspace index is never walked
+        // again to put them back, so the reference-count lenses would stop
+        // counting what a changed file references and never see a created
+        // one.  Re-parse them now.  An index that has not started yet picks
+        // them up in its own walk, but one in flight may already be past
+        // them.
+        if self
+            .workspace_indexed
+            .load(std::sync::atomic::Ordering::Acquire)
+            || self.workspace_index_lock.is_locked()
+        {
+            let reparse: Vec<(String, PathBuf)> = changes
+                .iter()
+                .filter(|(_, _, change_type)| {
+                    matches!(
+                        *change_type,
+                        FileChangeType::CREATED | FileChangeType::CHANGED
+                    )
+                })
+                .filter_map(|(_, path, _)| {
+                    let uri = crate::util::path_to_uri(path);
+                    self.workspace_index_path(&uri)?;
+                    Some((uri, path.clone()))
+                })
+                .collect();
+            self.parse_paths_parallel_with_progress(&reparse, None);
         }
         classes_changed
     }

@@ -491,6 +491,82 @@ async fn closing_a_workspace_file_reindexes_it_from_disk() {
     );
 }
 
+async fn notify_watched_file(backend: &phpantom_lsp::Backend, uri: &Url, typ: FileChangeType) {
+    backend
+        .did_change_watched_files(DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: uri.clone(),
+                typ,
+            }],
+        })
+        .await;
+}
+
+/// A `git pull` rewrites files the editor does not have open.  The
+/// completed workspace index is not walked again, so the watcher has to
+/// re-parse the file or its references drop out of the lens.
+#[tokio::test]
+async fn a_file_changed_on_disk_keeps_counting_in_the_lens() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service =
+        "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &helpers_uri, helpers).await;
+    warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
+
+    let service_path = dir.path().join("src/Service.php");
+    std::fs::write(
+        &service_path,
+        "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n    helper();\n}\n",
+    )
+    .unwrap();
+    let service_uri = Url::from_file_path(&service_path).unwrap();
+    notify_watched_file(&backend, &service_uri, FileChangeType::CHANGED).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &helpers_uri, 1)
+            .await
+            .as_deref(),
+        Some("3 references"),
+        "the changed file's calls must be counted as they now are on disk"
+    );
+}
+
+#[tokio::test]
+async fn a_file_created_on_disk_counts_in_the_lens() {
+    let helpers = "<?php\nfunction helper(): void {}\n";
+    let service =
+        "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[("src/helpers.php", helpers), ("src/Service.php", service)],
+    );
+    let helpers_uri = Url::from_file_path(dir.path().join("src/helpers.php")).unwrap();
+    open_php(&backend, &helpers_uri, helpers).await;
+    warm_workspace_index(&backend, &helpers_uri, Position::new(1, 9)).await;
+
+    let job_path = dir.path().join("src/Job.php");
+    std::fs::write(
+        &job_path,
+        "<?php\nnamespace App;\nfunction job(): void {\n    helper();\n}\n",
+    )
+    .unwrap();
+    let job_uri = Url::from_file_path(&job_path).unwrap();
+    notify_watched_file(&backend, &job_uri, FileChangeType::CREATED).await;
+
+    assert_eq!(
+        resolved_reference_title(&backend, &helpers_uri, 1)
+            .await
+            .as_deref(),
+        Some("3 references"),
+        "the created file's call must be counted"
+    );
+}
+
 #[tokio::test]
 async fn a_function_lens_ignores_the_case_a_call_is_spelled_with() {
     let helpers = "<?php\nfunction helper(): void {}\n";
