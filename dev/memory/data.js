@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790133864767,
+  "lastUpdate": 1790135193523,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -29715,6 +29715,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "fec958bc3c7096b0feb8f5fbad2202065bfaf18b",
+          "message": "A Blade template's variable types no longer go stale after a controller\nor view is saved",
+          "timestamp": "2026-09-23T05:30:56+02:00",
+          "tree_id": "c0a1f286e7e0e73be15b6dc6e2b0b087075a0742",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/fec958bc3c7096b0feb8f5fbad2202065bfaf18b"
+        },
+        "date": 1790135187933,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 77.7,
             "unit": "MiB"
           }
         ]
