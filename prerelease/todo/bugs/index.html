@@ -916,17 +916,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b330-the-chain-cache-tells-files-apart-by-a-pointer-that-can-be-reused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B330. The chain cache tells files apart by a pointer that can be reused
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1559,17 +1548,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b330-the-chain-cache-tells-files-apart-by-a-pointer-that-can-be-reused" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B330. The chain cache tells files apart by a pointer that can be reused
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1720,25 +1698,7 @@ that every cross-file walk runs suspended.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h2 id="b330-the-chain-cache-tells-files-apart-by-a-pointer-that-can-be-reused">B330. The chain cache tells files apart by a pointer that can be reused<a class="headerlink" href="#b330-the-chain-cache-tells-files-apart-by-a-pointer-that-can-be-reused" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Low</strong> (suspected, not reproduced)</p>
-<p><code>chain_cache_key</code> (<code>type_engine/resolver/mod.rs:275</code>) mixes
-<code>ctx.content.as_ptr()</code> into the key so that <code>Pen::make()</code> under
-<code>use A\Pen</code> in one file does not answer for <code>use B\Pen</code> in another. That
-is sound only while every file's content outlives the cache. Find
-References and the lens batch keep one chain cache active for the whole
-request (<code>backend/requests.rs:61</code>, and <code>reference_counts/mod.rs:235</code>;
-the inner <code>with_chain_resolution_cache()</code> in
-<code>references/members.rs:843</code> is a no-op under an active one). They also
-walk candidate files one after another. For a closed file the content
-is a fresh <code>Arc&lt;String&gt;</code> from <code>get_file_content_arc</code> that is freed when
-the iteration ends, and the allocator is free to hand the next file's
-content the same address. A cache hit then serves the previous file's
-answer, and because a hit records no dependency, the
-<code>ResolvedMemberFile.deps</code> stored for the second file is incomplete too.</p>
-<p><strong>Fix:</strong> key on an identity that stays alive for the cache's lifetime
-(the file's <code>Arc&lt;SymbolMap&gt;</code> or URI), or give each candidate file its
-own <code>with_isolated_chain_cache()</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
