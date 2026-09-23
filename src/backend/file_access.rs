@@ -370,7 +370,8 @@ impl Backend {
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
     /// reference index.
     ///
-    /// Called from `did_close` to clean up state when a file is closed.
+    /// Called from `did_close` to clean up state when a file the workspace
+    /// index does not cover is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
@@ -405,6 +406,33 @@ impl Backend {
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+
+    /// The on-disk path of `uri` when it is a PHP file the workspace index
+    /// covers: inside the workspace root, outside the vendor directories,
+    /// not excluded by `[indexing] exclude`, and with a PHP extension.
+    ///
+    /// Such a file has to stay indexed after the editor closes it, since
+    /// the reference index and the reference-count lenses read it whether
+    /// or not it is open, and the completed workspace index is never walked
+    /// again to put it back.
+    pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
+        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let root = self.workspace.workspace_root.read().clone()?;
+        if !path.starts_with(&root) {
+            return None;
+        }
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+        {
+            return None;
+        }
+        let filters = self.index_filters();
+        (filters.is_php_file(&path) && !filters.is_excluded_path(&path, false)).then_some(path)
     }
 }
 

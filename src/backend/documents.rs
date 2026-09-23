@@ -240,6 +240,14 @@ impl Backend {
             } else {
                 self.clear_file_maps(&uri);
             }
+        } else if let Some(content) = self
+            .workspace_index_path(&uri)
+            .and_then(|path| std::fs::read_to_string(path).ok())
+        {
+            // A workspace file stays in the index once closed, as the file
+            // on disk rather than the buffer: unsaved edits are discarded
+            // with the buffer, and the references it made keep counting.
+            self.update_ast(&uri, &content);
         } else {
             self.clear_file_maps(&uri);
         }
