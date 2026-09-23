@@ -240,7 +240,10 @@ pub fn preprocess_with_vars(
                 continue;
             }
 
-            if !matches!(mode, Mode::Html | Mode::EscapedEcho(_) | Mode::Comment) {
+            if !matches!(
+                mode,
+                Mode::Html | Mode::EscapedEcho(_) | Mode::Comment | Mode::Verbatim
+            ) {
                 if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;

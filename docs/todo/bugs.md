@@ -82,26 +82,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-## B327. Quotes inside `@verbatim` leak into the lowered PHP
-
-**Impact: Medium · Complexity: Low**
-
-The Blade preprocessor's string tracking (`blade/preprocessor/mod.rs:243`)
-is skipped for `Mode::Html`, `Mode::EscapedEcho` and `Mode::Comment`, but
-not for `Mode::Verbatim`. Inside `@verbatim` a quote therefore starts a
-tracked string, and the quoted characters go into `buffer`.
-`flush_buffer` (`preprocessor/shared.rs:77-96`) writes every mode other
-than HTML and escaped echo into the virtual PHP as-is. So
-`@verbatim\n<div class="x" v-if="show">\n@endverbatim\n{{ $a }}` puts
-`"x""show"` into the PHP right before the echo, which is a syntax error.
-An unbalanced apostrophe (`Don't`) is worse: `in_string` is not reset per
-line, so `@endverbatim` is swallowed and the rest of the template is
-mis-lowered. Alpine and Vue markup, the usual content of `@verbatim`, is
-full of quotes. Neither verbatim test in `preprocessor/tests.rs` has one.
-
-**Fix:** add `Mode::Verbatim` to the exclusion at line 243, with a
-regression test for both quote shapes.
-
 ## B328. Closing a file drops its references from the reference-count lenses
 
 **Impact: Medium · Complexity: Medium**

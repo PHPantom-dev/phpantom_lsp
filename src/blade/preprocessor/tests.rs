@@ -1513,6 +1513,42 @@ fn test_preprocess_verbatim_with_comment_syntax() {
 }
 
 #[test]
+fn test_preprocess_verbatim_with_quotes() {
+    // Alpine/Vue markup inside @verbatim is full of quoted attributes; a
+    // quote must not start a tracked PHP string that leaks into the buffer.
+    let content = "@verbatim\n<div class=\"x\" v-if=\"show\">\n@endverbatim\n{{ $a }}\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        !php.contains("\"x\"") && !php.contains("\"show\""),
+        "quoted verbatim content should be skipped, not lowered into PHP: {}",
+        php
+    );
+    assert!(
+        php.contains("$a"),
+        "content after endverbatim should work: {}",
+        php
+    );
+}
+
+#[test]
+fn test_preprocess_verbatim_with_unbalanced_quote() {
+    // An unbalanced apostrophe (e.g. "Don't") must not be treated as opening
+    // a PHP string, or @endverbatim on a later line gets swallowed.
+    let content = "@verbatim\nDon't touch this\n@endverbatim\n{{ $a }}\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        !php.contains("Don't touch this"),
+        "verbatim content should be skipped: {}",
+        php
+    );
+    assert!(
+        php.contains("$a"),
+        "content after endverbatim should still be lowered: {}",
+        php
+    );
+}
+
+#[test]
 fn test_preprocess_error_directive() {
     let content = "@error('email')\n    <p>{{ $message }}</p>\n@enderror\n";
     let (php, _) = preprocess(content);
