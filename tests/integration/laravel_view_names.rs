@@ -794,3 +794,133 @@ async fn a_caller_that_stops_rendering_leaves_the_other_callers_data() {
         "only the caller that moved away should drop out, got {after}"
     );
 }
+
+// ─── Find All References ────────────────────────────────────────────────────
+
+/// The references reported a couple of characters into the first
+/// occurrence of `needle` in `content`, as `(file name, line)` pairs.
+async fn view_references_at(
+    backend: &phpantom_lsp::Backend,
+    uri: &Url,
+    content: &str,
+    needle: &str,
+    include_declaration: bool,
+) -> Vec<(String, u32)> {
+    let position = position_of(content, needle);
+    let found = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(position.line, position.character + 2),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let mut sites: Vec<(String, u32)> = found
+        .iter()
+        .map(|l| {
+            let path = l.uri.path();
+            let name = path.rsplit('/').next().unwrap_or(path).to_string();
+            (name, l.range.start.line)
+        })
+        .collect();
+    sites.sort();
+    sites
+}
+
+const PROFILE_PAGE: &str = "\
+<div>
+    @include('users.profile')
+    @each('users.profile', $users, 'user')
+</div>
+";
+
+/// A workspace with two controllers that render `users.profile`, a page
+/// that includes it, and the template itself, scanned.
+async fn profile_workspace() -> (phpantom_lsp::Backend, tempfile::TempDir, String) {
+    let caller = controller("UserController", "return view('users.profile');");
+    let other = controller(
+        "TeamController",
+        "return view('users.profile', ['user' => 1]);",
+    );
+    let (backend, dir) = create_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("app/UserController.php", &caller),
+            ("app/TeamController.php", &other),
+            ("resources/views/page.blade.php", PROFILE_PAGE),
+            (
+                "resources/views/users/profile.blade.php",
+                "<p>{{ $user }}</p>\n",
+            ),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    (backend, dir, caller)
+}
+
+/// Every PHP call site that names a view is a reference to it.
+///
+/// Case adapted from laravel-lsp's MIT-licensed test suite.
+#[tokio::test]
+async fn find_references_on_a_view_name_reaches_every_php_caller() {
+    let (backend, _dir, caller) = profile_workspace().await;
+    let uri = open_php_file(&backend, "app/UserController.php").await;
+
+    let found = view_references_at(&backend, &uri, &caller, "users.profile", false).await;
+    assert_eq!(
+        found
+            .iter()
+            .filter(|(file, _)| file.ends_with("Controller.php"))
+            .cloned()
+            .collect::<Vec<_>>(),
+        vec![
+            ("TeamController.php".to_string(), 4),
+            ("UserController.php".to_string(), 4),
+        ]
+    );
+}
+
+/// With the declaration included, the template the name resolves to is one
+/// of the references, as go-to-definition already finds it.
+#[tokio::test]
+#[ignore = "known gap: a view's template is dropped from references that include the declaration"]
+async fn find_references_on_a_view_name_includes_the_template_as_its_declaration() {
+    let (backend, _dir, caller) = profile_workspace().await;
+    let uri = open_php_file(&backend, "app/UserController.php").await;
+    let found = view_references_at(&backend, &uri, &caller, "users.profile", true).await;
+    assert!(
+        found.contains(&("profile.blade.php".to_string(), 0)),
+        "{found:?}"
+    );
+}
+
+/// `@include` and `@each` name a view as surely as `view()` does.
+#[tokio::test]
+#[ignore = "known gap: Blade @include/@each sites are not view references"]
+async fn find_references_on_a_view_name_reaches_blade_includes() {
+    let (backend, _dir, caller) = profile_workspace().await;
+    let uri = open_php_file(&backend, "app/UserController.php").await;
+    let expected = vec![
+        ("TeamController.php".to_string(), 4),
+        ("UserController.php".to_string(), 4),
+        ("page.blade.php".to_string(), 1),
+        ("page.blade.php".to_string(), 2),
+    ];
+    assert_eq!(
+        view_references_at(&backend, &uri, &caller, "users.profile", false).await,
+        expected
+    );
+
+    let page = open_blade_template(&backend, "resources/views/page.blade.php").await;
+    assert_eq!(
+        view_references_at(&backend, &page, PROFILE_PAGE, "users.profile", false).await,
+        expected
+    );
+}

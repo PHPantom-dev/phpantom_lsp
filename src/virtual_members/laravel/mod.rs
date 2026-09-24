@@ -167,7 +167,7 @@ pub(crate) use macros::{
 };
 pub(crate) use model_extraction::{
     extract_laravel_metadata, has_inheritable_model_metadata, has_scope_attribute,
-    infer_relationship_from_method, inherit_model_metadata,
+    inherit_model_metadata, relationship_return_type,
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;
@@ -914,6 +914,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(
                             &prop_name,
@@ -945,6 +946,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
                     },
@@ -1020,6 +1022,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         pivot_using,
                         pivot_columns,
                     }),
+                    description: method.description.clone(),
                     ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
                 });
             }

@@ -219,9 +219,14 @@ impl Backend {
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
-        // For interfaces and abstract classes, the forward direction
-        // applies: find concrete implementors that define the method.
-        if current_class.kind == ClassLikeKind::Interface || current_class.is_abstract {
+        // For interfaces, abstract classes, and traits, the forward
+        // direction applies: find concrete implementors that define the
+        // method.
+        if matches!(
+            current_class.kind,
+            ClassLikeKind::Interface | ClassLikeKind::Trait
+        ) || current_class.is_abstract
+        {
             return self.resolve_interface_member_implementations(
                 uri,
                 content,

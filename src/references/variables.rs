@@ -90,7 +90,23 @@ impl Backend {
         // scope plus every nested closure/arrow-function scope that
         // can see the variable (via explicit `use` or implicit arrow
         // capture) without being shadowed.
-        let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        let mut reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        // `global $var` binds a function's `$var` to the file's top-level
+        // `$var`, so the program scope and every scope that declares the
+        // global are one variable.
+        let global_decl_scopes = symbol_map
+            .var_defs
+            .iter()
+            .filter(|d| d.name == var_name && d.kind == VarDefKind::GlobalDecl)
+            .map(|d| d.scope_start);
+        if scope_start == 0 || global_decl_scopes.clone().any(|s| s == scope_start) {
+            for scope in std::iter::once(0).chain(global_decl_scopes) {
+                if !reachable_scopes.contains(&scope) {
+                    reachable_scopes
+                        .extend(Self::collect_capture_scopes(symbol_map, var_name, scope));
+                }
+            }
+        }
         let lines = LineIndex::new(content);
         // The start offset of every location pushed so far, so the
         // declaration pass below skips a token the span pass already found.
@@ -226,8 +242,13 @@ impl Backend {
             // A variable is implicitly captured if:
             //   1. The arrow scope is directly nested in a reachable scope.
             //   2. There is no parameter with the same name in the arrow scope.
+            // Every other nested scope (a closure, or a function declared
+            // inside the scope) sees an outer variable only through `use`,
+            // which the rule above already handled.
             for &(scope_start, _scope_end) in &symbol_map.scopes {
-                if reachable.contains(&scope_start) {
+                if reachable.contains(&scope_start)
+                    || !symbol_map.arrow_fn_scopes.contains(&scope_start)
+                {
                     continue;
                 }
                 let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
@@ -241,19 +262,6 @@ impl Backend {
                         && d.kind == VarDefKind::Parameter
                 });
                 if has_shadowing_param {
-                    continue;
-                }
-                // Closures create new variable scopes and require explicit
-                // `use`: a scope that captures *any* variable is a closure
-                // body, and our variable is not in its `use` list (the
-                // rule above would have reached it), so it is not
-                // available there.  Only transparent arrow scopes are
-                // auto-included.
-                let is_closure_scope = symbol_map
-                    .var_defs
-                    .iter()
-                    .any(|d| d.scope_start == scope_start && d.kind == VarDefKind::ClosureCapture);
-                if is_closure_scope {
                     continue;
                 }
                 // Only include the scope if the variable appears in it, to

@@ -14,7 +14,11 @@ use crate::common::{
     LARAVEL_SRC_COMPOSER, complete_labels_at_opened, create_initialized_psr4_workspace,
     definition_locations, goto_definition_at, hover_text_at, messages_with_code, position_after,
 };
-use tower_lsp::lsp_types::{Location, Url};
+use tower_lsp::LanguageServer;
+use tower_lsp::lsp_types::{
+    Location, PartialResultParams, ReferenceContext, ReferenceParams, TextDocumentIdentifier,
+    TextDocumentPositionParams, Url, WorkDoneProgressParams,
+};
 
 const CONSUMER_PATH: &str = "src/Links.php";
 
@@ -886,5 +890,100 @@ Route::resource('/bare', BareController::class);
     assert!(
         !labels.iter().any(|l| l.contains('/')),
         "no route name may contain a slash, got: {labels:?}"
+    );
+}
+
+// ─── Find All References ────────────────────────────────────────────────────
+
+const USERS_AND_TEAMS_ROUTES: &str = "<?php\nRoute::get('/users', 'index')->name('users.index');\nRoute::get('/teams', 'index')->name('teams.index');\n";
+
+/// The references reported one character into the text after `needle` in
+/// `content`, as sorted `(file name, line)` pairs.
+async fn route_references(
+    backend: &phpantom_lsp::Backend,
+    uri: Url,
+    content: &str,
+    needle: &str,
+    include_declaration: bool,
+) -> Vec<(String, u32)> {
+    let mut position = position_after(content, needle);
+    position.character += 1;
+    let found = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+    let mut sites: Vec<(String, u32)> = found
+        .iter()
+        .map(|l| {
+            let path = l.uri.path();
+            (
+                path.rsplit('/').next().unwrap_or(path).to_string(),
+                l.range.start.line,
+            )
+        })
+        .collect();
+    sites.sort();
+    sites
+}
+
+/// Every `route()` call naming a route is a reference to it, and with the
+/// declaration included so is the `->name()` that registers it.
+///
+/// Case adapted from laravel-lsp's MIT-licensed test suite.
+#[tokio::test]
+async fn find_references_on_a_route_name_reaches_its_calls_and_registration() {
+    let (backend, _dir, uri, consumer) = workspace_calling(
+        &[("routes/web.php", USERS_AND_TEAMS_ROUTES)],
+        &["users.index", "teams.index", "users.index"],
+    )
+    .await;
+
+    assert_eq!(
+        route_references(&backend, uri.clone(), &consumer, "route('", false).await,
+        vec![("Links.php".to_string(), 4), ("Links.php".to_string(), 6)]
+    );
+    assert_eq!(
+        route_references(&backend, uri, &consumer, "route('", true).await,
+        vec![
+            ("Links.php".to_string(), 4),
+            ("Links.php".to_string(), 6),
+            ("web.php".to_string(), 1),
+        ]
+    );
+}
+
+/// The `->name()` that registers a route is as good a starting point as a
+/// call naming it.
+#[tokio::test]
+#[ignore = "known gap: find-references on a route's ->name() registration finds nothing"]
+async fn find_references_from_a_route_registration_reaches_its_calls() {
+    let (backend, dir, _uri, _consumer) = workspace_calling(
+        &[("routes/web.php", USERS_AND_TEAMS_ROUTES)],
+        &["users.index", "teams.index", "users.index"],
+    )
+    .await;
+    let routes_uri = Url::from_file_path(dir.path().join("routes/web.php")).unwrap();
+    crate::common::open_php(&backend, &routes_uri, USERS_AND_TEAMS_ROUTES).await;
+    assert_eq!(
+        route_references(
+            &backend,
+            routes_uri,
+            USERS_AND_TEAMS_ROUTES,
+            "->name('",
+            false
+        )
+        .await,
+        vec![("Links.php".to_string(), 4), ("Links.php".to_string(), 6)]
     );
 }

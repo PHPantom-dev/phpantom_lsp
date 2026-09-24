@@ -33,7 +33,7 @@ use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom, atom_bytes, bytes_to_str};
 use crate::docblock;
 use crate::types::*;
-use crate::virtual_members::laravel::{has_scope_attribute, infer_relationship_from_method};
+use crate::virtual_members::laravel::{has_scope_attribute, relationship_return_type};
 
 use super::attributes;
 use super::{
@@ -1145,16 +1145,10 @@ impl Backend {
                         }
                     }
 
-                    // When no return type was resolved from docblocks or
-                    // native type hints, try to infer an Eloquent
-                    // relationship type from the method body text.
-                    // For example, `$this->hasMany(Post::class)` produces
-                    // a return type of `HasMany<Post>`.
-                    let return_type = if return_type.is_none() {
-                        infer_relationship_from_method(method, doc_ctx)
-                    } else {
-                        return_type
-                    };
+                    // An Eloquent relationship's related model comes from
+                    // the body (`$this->hasMany(Post::class)`) when the
+                    // declared type does not name it.
+                    let return_type = relationship_return_type(return_type, method, doc_ctx);
 
                     // Merge `@param` docblock types into parameter type
                     // hints so that callable signatures like

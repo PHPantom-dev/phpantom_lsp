@@ -1285,3 +1285,402 @@ class Controller {
         "the parent model's columns must not leak past the relationship, got: {labels:?}"
     );
 }
+
+// ─── Hover on magic members ─────────────────────────────────────────────────
+
+const HOVER_USER_PHP: &str = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Casts\Attribute;
+class User extends Model {
+    protected $casts = ['born_at' => 'datetime'];
+    /** The posts this user wrote. */
+    public function posts(): HasMany { return $this->hasMany(Post::class); }
+    /** The team the user belongs to. */
+    public function team(): BelongsTo { return $this->belongsTo(Team::class); }
+    /** Only users active in the last N days. */
+    public function scopeActive(Builder $query, int $days): void {}
+    /** The user's full name. */
+    public function getFullNameAttribute(): string { return ''; }
+    /** The name shown in the header. */
+    protected function displayName(): Attribute { return Attribute::make(); }
+}
+"#;
+
+const HOVER_CONSUMER_PHP: &str = r#"<?php
+namespace App\Models;
+class Consumer {
+    public function run(User $user): void {
+        $user->posts;
+        $user->posts_count;
+        $user->team;
+        $user->full_name;
+        $user->display_name;
+        $user->born_at;
+        User::active(7);
+    }
+}
+"#;
+
+/// The hover a character into `needle` in [`HOVER_CONSUMER_PHP`].
+async fn magic_hover(needle: &str) -> String {
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", HOVER_USER_PHP),
+        (
+            "src/Models/Post.php",
+            "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass Post extends Model {}\n",
+        ),
+        (
+            "src/Models/Team.php",
+            "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass Team extends Model {}\n",
+        ),
+        ("src/Models/Consumer.php", HOVER_CONSUMER_PHP),
+    ]);
+    let uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    open_php(&backend, &uri, HOVER_CONSUMER_PHP).await;
+    let (line, character) = crate::common::line_char_of(HOVER_CONSUMER_PHP, needle);
+    crate::common::markup_hover_at(&backend, &uri, line, character + 1).await
+}
+
+fn assert_mentions(hover: &str, expected: &[&str]) {
+    for part in expected {
+        assert!(hover.contains(part), "expected {part:?} in hover:\n{hover}");
+    }
+}
+
+#[tokio::test]
+async fn relationship_hover_names_the_related_model_the_body_passes() {
+    assert_mentions(
+        &magic_hover("posts;").await,
+        &[
+            "`Collection<Post>`",
+            "relationship `posts`",
+            "The posts this user wrote.",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn singular_relationship_hover_names_the_related_model_the_body_passes() {
+    assert_mentions(
+        &magic_hover("team;").await,
+        &[
+            "Team",
+            "relationship `team`",
+            "The team the user belongs to.",
+        ],
+    );
+}
+
+#[tokio::test]
+async fn relationship_count_hover_is_an_int() {
+    assert_mentions(
+        &magic_hover("posts_count").await,
+        &["`int`", "relationship count `posts`"],
+    );
+}
+
+#[tokio::test]
+async fn legacy_accessor_hover_shows_its_type_and_description() {
+    assert_mentions(
+        &magic_hover("full_name").await,
+        &["`string`", "computed property", "The user's full name."],
+    );
+}
+
+#[tokio::test]
+async fn attribute_accessor_hover_shows_its_description() {
+    assert_mentions(
+        &magic_hover("display_name").await,
+        &["computed property", "The name shown in the header."],
+    );
+}
+
+#[tokio::test]
+async fn cast_hover_names_the_cast() {
+    assert_mentions(
+        &magic_hover("born_at").await,
+        &["`Carbon`", "cast `datetime`"],
+    );
+}
+
+#[tokio::test]
+async fn scope_hover_shows_its_description_without_the_query_parameter() {
+    let hover = magic_hover("active(7)").await;
+    assert_mentions(
+        &hover,
+        &["active(int $days)", "Only users active in the last N days."],
+    );
+    assert!(!hover.contains("$query"), "{hover}");
+}
+
+// ─── Builder methods offered on a model ─────────────────────────────────────
+
+const WHERE_USER_PHP: &str = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class User extends Model {
+    protected $fillable = ['email'];
+}
+"#;
+
+/// The completion items offered at the `§` in `consumer`, run against
+/// the framework stubs with `replaced` stub files swapped in and the
+/// `extra` app files added.
+async fn complete_in(
+    replaced: &[(&str, &str)],
+    extra: &[(&str, &str)],
+    consumer: &str,
+) -> Vec<CompletionItem> {
+    let (backend, _dir, uri, text, position) = open_with(replaced, extra, consumer).await;
+    crate::common::complete_at(&backend, &uri, &text, position.line, position.character).await
+}
+
+/// A workspace of the framework stubs, with `replaced` stub files swapped
+/// in and `extra` app files added, where `consumer` (holding a `§` cursor)
+/// is open as `src/Models/Consumer.php`.
+async fn open_with(
+    replaced: &[(&str, &str)],
+    extra: &[(&str, &str)],
+    consumer: &str,
+) -> (
+    phpantom_lsp::Backend,
+    tempfile::TempDir,
+    Url,
+    String,
+    Position,
+) {
+    let (text, position) = split_cursor(consumer);
+    let mut files: Vec<(&str, &str)> = framework_stubs()
+        .into_iter()
+        .map(|(path, content)| {
+            let swapped = replaced.iter().find(|(p, _)| *p == path);
+            (path, swapped.map_or(content, |(_, c)| *c))
+        })
+        .collect();
+    files.extend_from_slice(extra);
+    files.push(("src/Models/Consumer.php", text.as_str()));
+    let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
+    let uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    open_php(&backend, &uri, &text).await;
+    (backend, dir, uri, text, position)
+}
+
+/// The `detail` of the method item offered under `name`.
+fn method_detail(items: &[CompletionItem], name: &str) -> String {
+    items
+        .iter()
+        .find(|i| {
+            i.kind == Some(CompletionItemKind::METHOD)
+                && i.filter_text.as_deref().unwrap_or(&i.label) == name
+        })
+        .unwrap_or_else(|| panic!("no `{name}` method among {:?}", method_names(items)))
+        .detail
+        .clone()
+        .unwrap_or_default()
+}
+
+fn consumer_running(body: &str) -> String {
+    format!(
+        "<?php\nnamespace App\\Models;\nclass Consumer {{\n    public function run(): void {{\n        {body}\n    }}\n}}\n"
+    )
+}
+
+#[tokio::test]
+async fn forwarded_builder_methods_show_the_models_builder_as_their_return_type() {
+    let items = complete_in(
+        &[],
+        &[("src/Models/User.php", WHERE_USER_PHP)],
+        &consumer_running("User::§"),
+    )
+    .await;
+    assert_eq!(method_detail(&items, "where"), "Builder<User>");
+    assert_eq!(method_detail(&items, "whereEmail"), "Builder<User>");
+}
+
+#[tokio::test]
+async fn where_method_is_offered_for_the_implicit_primary_key() {
+    let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass User extends Model {}\n";
+    let items = complete_in(
+        &[],
+        &[("src/Models/User.php", user)],
+        &consumer_running("User::§"),
+    )
+    .await;
+    assert!(
+        method_names(&items).contains(&"whereId"),
+        "{:?}",
+        method_names(&items)
+    );
+}
+
+#[tokio::test]
+async fn where_method_follows_a_custom_primary_key() {
+    let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass User extends Model {\n    protected $primaryKey = 'passport_number';\n}\n";
+    let items = complete_in(
+        &[],
+        &[("src/Models/User.php", user)],
+        &consumer_running("User::§"),
+    )
+    .await;
+    let methods = method_names(&items);
+    assert!(methods.contains(&"wherePassportNumber"), "{methods:?}");
+    assert!(!methods.contains(&"whereId"), "{methods:?}");
+}
+
+#[tokio::test]
+#[ignore = "known gap: SoftDeletes does not contribute a deleted_at column"]
+async fn soft_deletes_contributes_a_deleted_at_column() {
+    let soft_deletes = "<?php\nnamespace Illuminate\\Database\\Eloquent;\ntrait SoftDeletes {\n    public static function withTrashed() {}\n}\n";
+    let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nuse Illuminate\\Database\\Eloquent\\SoftDeletes;\nclass User extends Model {\n    use SoftDeletes;\n}\n";
+    let extra = [
+        ("vendor/illuminate/Eloquent/SoftDeletes.php", soft_deletes),
+        ("src/Models/User.php", user),
+    ];
+    let statics = complete_in(&[], &extra, &consumer_running("User::§")).await;
+    assert!(
+        method_names(&statics).contains(&"whereDeletedAt"),
+        "{:?}",
+        method_names(&statics)
+    );
+    let members = complete_in(&[], &extra, &consumer_running("(new User())->§")).await;
+    assert!(
+        property_names(&members).contains(&"deleted_at"),
+        "{:?}",
+        property_names(&members)
+    );
+}
+
+/// The label of the signature shown at the `§` in `consumer`.
+async fn signature_label_in(
+    replaced: &[(&str, &str)],
+    extra: &[(&str, &str)],
+    consumer: &str,
+) -> String {
+    use tower_lsp::LanguageServer;
+    let (backend, _dir, uri, _text, position) = open_with(replaced, extra, consumer).await;
+    let help = backend
+        .signature_help(SignatureHelpParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap()
+        .expect("expected signature help");
+    help.signatures[help.active_signature.unwrap_or(0) as usize]
+        .label
+        .clone()
+}
+
+#[tokio::test]
+async fn a_column_named_like_a_real_builder_method_does_not_shadow_it() {
+    let query_builder = r#"<?php
+namespace Illuminate\Database\Query;
+class Builder {
+    /** @return $this */
+    public function whereDate($column, $operator, $value = null) { return $this; }
+}
+"#;
+    let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nclass User extends Model {\n    protected $fillable = ['date'];\n}\n";
+    let replaced = [("vendor/illuminate/Query/Builder.php", query_builder)];
+    let extra = [("src/Models/User.php", user)];
+    for body in ["User::whereDate(§);", "User::query()->whereDate(§);"] {
+        let label = signature_label_in(&replaced, &extra, &consumer_running(body)).await;
+        assert!(label.contains("$operator"), "{body}: {label}");
+    }
+}
+
+#[tokio::test]
+async fn a_scope_named_like_a_column_where_method_wins() {
+    let user = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Builder;
+class User extends Model {
+    protected $fillable = ['email'];
+    public function scopeWhereEmail(Builder $query, string $domain): void {}
+}
+"#;
+    let extra = [("src/Models/User.php", user)];
+    let label = signature_label_in(&[], &extra, &consumer_running("User::whereEmail(§);")).await;
+    assert!(label.contains("string $domain"), "{label}");
+
+    let (backend, _dir, uri, text, _) =
+        open_with(&[], &extra, &consumer_running("User::whereEmail§('x');")).await;
+    let (line, character) = crate::common::line_char_of(&text, "whereEmail");
+    let targets =
+        definition_locations(goto_definition_at(&backend, &uri, line, character + 2).await);
+    let (scope_line, _) = crate::common::line_char_of(user, "scopeWhereEmail");
+    assert!(
+        targets
+            .iter()
+            .any(|t| t.uri.path().ends_with("/User.php") && t.range.start.line == scope_line),
+        "{targets:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_models_own_static_method_wins_over_the_builder_method_of_that_name() {
+    let model = MODEL_PHP.replace(
+        "    protected $guarded = ['*'];",
+        "    protected $guarded = ['*'];\n    /** @return \\Illuminate\\Database\\Eloquent\\Builder<static> */\n    public static function with($relations) { return new Builder(); }",
+    );
+    let builder = BUILDER_PHP.replace(
+        "    /** @return static */\n    public function orderBy",
+        "    /** @return $this */\n    public function with($relations, $callback = null) { return $this; }\n    /** @return static */\n    public function orderBy",
+    );
+    let replaced = [
+        ("vendor/illuminate/Eloquent/Model.php", model.as_str()),
+        ("vendor/illuminate/Eloquent/Builder.php", builder.as_str()),
+    ];
+    let extra = [("src/Models/User.php", WHERE_USER_PHP)];
+
+    let label = signature_label_in(&replaced, &extra, &consumer_running("User::with(§);")).await;
+    assert!(!label.contains("$callback"), "{label}");
+
+    let items = complete_in(&replaced, &extra, &consumer_running("User::§")).await;
+    assert_eq!(
+        method_names(&items)
+            .iter()
+            .filter(|m| **m == "with")
+            .count(),
+        1,
+        "{:?}",
+        method_names(&items)
+    );
+
+    let (backend, _dir, uri, text, _) = open_with(
+        &replaced,
+        &extra,
+        &consumer_running("User::with§('posts');"),
+    )
+    .await;
+    let (line, character) = crate::common::line_char_of(&text, "with(");
+    let targets =
+        definition_locations(goto_definition_at(&backend, &uri, line, character + 1).await);
+    assert!(
+        targets.iter().all(|t| t.uri.path().ends_with("/Model.php")) && !targets.is_empty(),
+        "{targets:?}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "known gap: the base Model's own declared properties become where{Column} methods"]
+async fn the_base_models_own_properties_are_not_columns() {
+    let items = complete_in(
+        &[],
+        &[("src/Models/User.php", WHERE_USER_PHP)],
+        &consumer_running("User::§"),
+    )
+    .await;
+    let methods = method_names(&items);
+    assert!(methods.contains(&"whereEmail"), "{methods:?}");
+    assert!(!methods.contains(&"whereGuarded"), "{methods:?}");
+}

@@ -17,7 +17,7 @@ use crate::Backend;
 
 use super::balance::{Span, block_pairs};
 use super::blocks::{BlockRole, analyse};
-use super::component_tags::{TagKind, tag_spans};
+use super::component_tags::{TagKind, legacy_slot_name, tag_spans};
 
 /// One entry of a template's outline, in raw Blade byte offsets.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,8 +77,15 @@ impl Backend {
                         .blade_component_fqn(&tag.name)
                         .or_else(|| self.anonymous_component_view(&tag.name, &anonymous)),
                 };
+                // The legacy `<x-slot name="footer">` is the same slot as
+                // `<x-slot:footer>`, so it is listed the same way.
+                let name = match (&tag.kind, tag.name.as_str()) {
+                    (TagKind::Blade, "slot") => legacy_slot_name(content, tag.name_span.end)
+                        .map_or_else(|| "slot".to_string(), |slot| format!("slot:{slot}")),
+                    _ => tag.name,
+                };
                 OutlineEntry {
-                    name: format!("{}{}", &tag.kind.opening()[1..], tag.name),
+                    name: format!("{}{}", &tag.kind.opening()[1..], name),
                     detail,
                     kind: SymbolKind::CLASS,
                     span: tag.span,

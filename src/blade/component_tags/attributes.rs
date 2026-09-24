@@ -361,6 +361,12 @@ fn slot_tag_name(masked: &str, tag_name: &str, lexed: &TagAttributes) -> Option<
     })
 }
 
+/// The name a `<x-slot>` tag's opening tag gives it through its
+/// `name="…"` attribute, lexing from `name_end`, the end of the tag name.
+pub(crate) fn legacy_slot_name(content: &str, name_end: usize) -> Option<String> {
+    slot_tag_name(content, "slot", &lex_tag_attributes(content, name_end))
+}
+
 /// Convert a kebab-case attribute name to the camelCase variable name
 /// Blade exposes it as (`Illuminate\Support\Str::camel`). A PHP variable
 /// name cannot contain a hyphen, so only the camelCase form of a

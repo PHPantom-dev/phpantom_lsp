@@ -175,6 +175,32 @@ async fn a_key_resolves_in_every_locale_that_declares_it() {
     }
 }
 
+/// Hover quotes the line in the application's configured locale, whatever
+/// order the locale directories are read in.
+#[tokio::test]
+async fn hover_quotes_the_configured_locale() {
+    for (config, expected) in [
+        (None, "`These credentials do not match our records.`"),
+        (
+            Some("<?php\nreturn ['locale' => 'es', 'fallback_locale' => 'en'];\n"),
+            "`Estas credenciales no coinciden.`",
+        ),
+        (
+            Some("<?php\nreturn ['locale' => 'fr', 'fallback_locale' => 'en'];\n"),
+            "`These credentials do not match our records.`",
+        ),
+    ] {
+        let mut files = vec![("lang/es/auth.php", AUTH_ES), ("lang/en/auth.php", AUTH_EN)];
+        if let Some(app) = config {
+            files.push(("config/app.php", app));
+        }
+        let (backend, _dir, uri, content) =
+            workspace(LARAVEL_APP_COMPOSER, &files, "__('auth.failed');").await;
+        let text = hover_on(&backend, &uri, &content, "auth.failed").await;
+        assert!(text.contains(expected), "config {config:?}: got {text}");
+    }
+}
+
 /// A locale that has no file for the group simply has nothing to offer.
 #[tokio::test]
 async fn a_locale_without_the_group_file_contributes_no_location() {

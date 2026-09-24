@@ -2023,6 +2023,7 @@ class User extends Model {
 
 // ─── Relationship without generics (singular) produces nothing ──────────────
 
+// Neither the declared type nor the body names the related model.
 #[tokio::test]
 async fn test_singular_relationship_without_generics_produces_nothing() {
     let user_php = "\
@@ -2031,7 +2032,7 @@ namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
 use Illuminate\\Database\\Eloquent\\Relations\\HasOne;
 class User extends Model {
-    public function profile(): HasOne { return $this->hasOne(Profile::class); }
+    public function profile(): HasOne { return $this->hasOne($this->profileClass()); }
     public function test() {
         $user = new User();
         $user->
@@ -2052,6 +2053,7 @@ class User extends Model {
 
 // ─── Collection relationship without generics falls back to Model ───────────
 
+// Neither the declared type nor the body names the related model.
 #[tokio::test]
 async fn test_collection_relationship_without_generics_uses_model_fallback() {
     let user_php = "\
@@ -2060,7 +2062,7 @@ namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
 use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
 class User extends Model {
-    public function posts(): HasMany { return $this->hasMany(Post::class); }
+    public function posts(): HasMany { return $this->hasMany($this->postClass()); }
     public function test() {
         $user = new User();
         $user->

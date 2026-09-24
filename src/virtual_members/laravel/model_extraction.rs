@@ -17,13 +17,14 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::parser::DocblockCtx;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     CastSources, FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation,
     model_declaration,
 };
-use crate::util::strip_fqn_prefix;
+use crate::util::{short_name, strip_fqn_prefix};
 
+use super::relationships::is_inferable_relationship_short_name;
 use super::{
     extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
     infer_relationship_from_body,
@@ -54,7 +55,7 @@ pub(crate) fn has_scope_attribute(method: &class_like::method::Method<'_>) -> bo
 ///
 /// This enables relationship property synthesis on models whose
 /// relationship methods carry no generic `@return` annotation.
-pub(crate) fn infer_relationship_from_method<'a>(
+fn infer_relationship_from_method<'a>(
     method: &class_like::method::Method<'a>,
     doc_ctx: Option<&DocblockCtx<'a>>,
 ) -> Option<PhpType> {
@@ -72,6 +73,36 @@ pub(crate) fn infer_relationship_from_method<'a>(
     let end = ctx.content.floor_char_boundary(end);
     let body_text = &ctx.content[start..end];
     infer_relationship_from_body(body_text)
+}
+
+/// A method's return type, filled in from its body when that says more.
+///
+/// With no declared type, the body's `$this->hasMany(Post::class)` is the
+/// only source.  A bare relationship class as the declared type
+/// (`: HasMany`, the usual way to write a relationship without a
+/// docblock) names the relationship but not the related model, which the
+/// same body call supplies.
+pub(crate) fn relationship_return_type<'a>(
+    declared: Option<PhpType>,
+    method: &class_like::method::Method<'a>,
+    doc_ctx: Option<&DocblockCtx<'a>>,
+) -> Option<PhpType> {
+    let Some(declared) = declared else {
+        return infer_relationship_from_method(method, doc_ctx);
+    };
+    let TypeKind::Named(name) = declared.kind() else {
+        return Some(declared);
+    };
+    let declared_short = short_name(name);
+    if !is_inferable_relationship_short_name(declared_short) {
+        return Some(declared);
+    }
+    match infer_relationship_from_method(method, doc_ctx) {
+        Some(inferred) if matches!(inferred.kind(), TypeKind::Generic(g) if short_name(&g.name) == declared_short) => {
+            Some(inferred)
+        }
+        _ => Some(declared),
+    }
 }
 
 /// Extract the policy class name from a `#[UsePolicy(X::class)]` attribute.

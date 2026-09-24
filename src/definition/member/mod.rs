@@ -313,7 +313,10 @@ impl Backend {
             // synthesised from column names.  They have no real method
             // declaration; GTD should jump to the column's string literal
             // in the relevant Eloquent array ($fillable, $casts, etc.).
+            // A real method of that name, such as a `scopeWhereEmail`
+            // scope, is what Laravel calls instead, so it wins.
             if extends_eloquent_model(lookup_class, &class_loader)
+                && Self::classify_member(&declaring_class, &search_name, access_hint).is_none()
                 && let Some(column) = where_property_method_to_column(&effective_name)
                 && let Some(location) = self.eloquent_array_entry_location(
                     &declaring_fqn,

@@ -50,15 +50,119 @@ No outstanding items.
 
 ## Docblock handling
 
-No outstanding items.
+## B366. A union continued on the next docblock line loses the whole type
+
+**Impact: Low · Complexity: Low-Medium**
+
+`@param array<int, Widget>` followed by a line starting `|Widget $items`
+is one type, `array<int, Widget>|Widget`. `split_type_token`
+(`src/docblock/type_strings.rs`) ends the token at the whitespace before
+the continuation's `|`, so the rest is read as the variable name, the tag
+matches no parameter, and the parameter keeps no type at all. The
+union/intersection suffix it consumes after a closing `>` or `}` has to
+look past whitespace (including the joined line break) for a leading `|`
+or `&`. Pinned by the ignored
+`docblock_types::param_type_continued_on_the_next_line_is_one_union`.
 
 ## Laravel
 
-No outstanding items.
+## B360. References, reference lenses, and rename miss an Eloquent magic member's uses
+
+**Impact: Medium · Complexity: Medium-High**
+
+A scope, accessor, or mutator is declared under one name and used under
+another: `scopeActive()` is called as `active()`, `getFullNameAttribute()`
+and an `Attribute`-returning `fullName()` are read as `->full_name`,
+`setLogoAttribute()` is written as `->logo = …`. Go-to-definition follows
+a use back to its declaration (`src/definition/member/`), but nothing under
+`src/references/` maps the declaration forward, so find-references on the
+declaring method finds only direct calls to it. The member reference
+lens (`indexed_member_reference_count` in `src/code_lens.rs`) counts the
+same way, so live scopes and accessors read "0 references", and a
+rename of the declaration strands every use. Relationship methods have
+the same shape through their `->posts` property reads. Pinned by the
+four ignored `definition_laravel::references_on_*` tests.
+
+## B361. `SoftDeletes` does not contribute a `deleted_at` column
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`SoftDeletes::initializeSoftDeletes()` adds a `datetime` cast for
+`getDeletedAtColumn()` (`deleted_at` unless the model defines a
+`DELETED_AT` constant), so a soft-deleting model has a `Carbon|null`
+`$deleted_at` and a `whereDeletedAt()` finder. Nothing in
+`src/virtual_members/laravel/` synthesises either outside the migration
+parser, so a model without a migration or schema gets neither. The model
+extraction that already reads `CREATED_AT`/`UPDATED_AT` is the place to
+record the trait and the column name, including through a parent model.
+Pinned by the ignored
+`laravel_eloquent_magic::soft_deletes_contributes_a_deleted_at_column`.
+
+## B362. The base `Model`'s own declared properties become `where{Column}` methods
+
+**Impact: Medium · Complexity: Medium**
+
+`collect_column_names` (`src/virtual_members/laravel/where_property.rs`)
+counts every property on the inheritance-resolved class as a column, and
+that includes the properties Eloquent's `Model` and its traits declare for
+configuration. Against the real framework, `User::` offers `whereTable`,
+`whereConnection`, `whereIncrementing`, `wherePerPage`, and the rest,
+none of which Laravel treats as a column (a declared property is never an
+attribute: `__get` only runs for undeclared or inaccessible names). The
+properties declared by the framework's base model need excluding the way
+`base_model_methods` already excludes its methods in
+`src/virtual_members/laravel/mod.rs`; the other callers of
+`collect_column_names` (`class_lookup.rs`,
+`diagnostics/type_errors/compatibility.rs`) share the fix. Pinned by the
+ignored `laravel_eloquent_magic::the_base_models_own_properties_are_not_columns`.
+
+## B363. Find-references on a route's `->name()` registration finds nothing
+
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+Find-references on a `route('users.index')` call lists every call and,
+with the declaration included, the `->name('users.index')` that registers
+it. Starting from that `->name()` literal returns nothing: the literal is
+not a `LaravelStringKey` span, so `src/references/dispatch.rs` never
+reaches the string-key path. A config key already answers from its
+declaration (`test_find_references_laravel_config_from_declaration_site`);
+a route registration needs the same, through the route table
+`resolve_route_definitions` reads. Pinned by the ignored
+`laravel_route_names::find_references_from_a_route_registration_reaches_its_calls`.
 
 ## Blade
 
-No outstanding items.
+## B364. Blade `@include` and `@each` are not view references
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Find-references on a view name lists every PHP `view('users.profile')`
+call but none of the `@include('users.profile')` or
+`@each('users.profile', …)` directives that render it, whether the search
+starts in PHP or in the template, and whether or not the template is
+open. `find_string_key_usages` (`src/virtual_members/laravel/string_keys.rs`)
+only walks the snapshot of user PHP symbol maps; a template's spans index
+its virtual PHP, so reaching them needs the template maps in the snapshot
+and their locations translated back into template coordinates. Pinned by
+the ignored
+`laravel_view_names::find_references_on_a_view_name_reaches_blade_includes`.
+
+## B365. A view's template is dropped from references that include the declaration
+
+**Impact: Low · Complexity: Medium**
+
+With the declaration included, find-references on a view name should list
+the template it resolves to, which go-to-definition already finds.
+`find_laravel_string_key_references` adds it, at line 0 of
+`profile.blade.php`, but that location is in the template's own
+coordinates, and the `references` handler (`src/server.rs`) then runs
+every Blade location through `try_translate_location` as though it
+indexed the virtual PHP. Line 0 of the virtual PHP is the injected
+prologue, which has no template position, so the location is dropped. A
+result list mixing both coordinate systems needs each location to say
+which one it is in, or the declaration added after translation. Pinned by
+the ignored
+`laravel_view_names::find_references_on_a_view_name_includes_the_template_as_its_declaration`.
 
 ## Miscellaneous
 

@@ -86,6 +86,14 @@ const RELATIONSHIP_METHOD_FQN_MAP: &[(&str, &str)] = &[
     ),
 ];
 
+/// Whether `short` is the short name of a relationship class that
+/// [`infer_relationship_from_body`] can produce.
+pub(crate) fn is_inferable_relationship_short_name(short: &str) -> bool {
+    RELATIONSHIP_METHOD_FQN_MAP
+        .iter()
+        .any(|(_, fqn)| short_name(fqn) == short)
+}
+
 /// Known Eloquent relationship class short names that yield a single
 /// (nullable) related model instance when accessed as a property.
 const SINGULAR_RELATIONSHIPS: &[&str] = &["HasOne", "MorphOne", "BelongsTo", "HasOneThrough"];

@@ -84,6 +84,12 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
                 push(col);
             }
         }
+
+        // The primary key every model has, unless `getKeyName()` computes
+        // its name at runtime.
+        if !laravel.has_get_key_name_method {
+            push(laravel.primary_key.as_deref().unwrap_or("id"));
+        }
     }
 
     // ── Properties already on the class ─────────────────────────────

@@ -2447,6 +2447,50 @@ return [
     );
 }
 
+/// A string that only looks like a config key is not a read of it.
+///
+/// Case adapted from laravel-lsp's MIT-licensed test suite.
+#[tokio::test]
+async fn find_references_on_a_config_key_skips_plain_strings_that_spell_it() {
+    let service_php = "\
+<?php
+namespace App\\Services;
+class Service {
+    public function demo(): void {
+        $name = config('app.name');
+        $key = 'app.name';
+        logger('app.name');
+        $same = ['app.name' => 1];
+    }
+}
+";
+    let config_app_php = "<?php\nreturn [\n    'name' => 'Laravel',\n];\n";
+    let (backend, dir) = make_workspace(&[
+        ("src/Services/Service.php", service_php),
+        ("config/app.php", config_app_php),
+    ]);
+
+    let (line, character) = crate::common::line_char_of(service_php, "app.name");
+    let results = find_references_at(
+        &backend,
+        &dir,
+        "src/Services/Service.php",
+        service_php,
+        line,
+        character + 2,
+        false,
+    )
+    .await
+    .expect("find_references should return locations for config key");
+
+    let lines: Vec<u32> = results
+        .iter()
+        .filter(|l| l.uri.as_str().ends_with("/Service.php"))
+        .map(|l| l.range.start.line)
+        .collect();
+    assert_eq!(lines, vec![line], "{results:#?}");
+}
+
 #[tokio::test]
 async fn test_find_references_laravel_config_exclude_declaration() {
     let service_php = "\
@@ -4371,5 +4415,120 @@ async fn test_goto_definition_blade_each_directive() {
             .ends_with("/resources/views/partials/row.blade.php"),
         "Should jump to partials/row.blade.php, got: {}",
         target_uri
+    );
+}
+
+// ─── Find All References on Eloquent magic members ──────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite.  A scope, an
+// accessor, or a mutator is declared under one name and used under another,
+// so the references a declaration reports are the uses of the magic name.
+
+const MAGIC_AUTHOR_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Builder;
+class BlogAuthor extends Model {
+    public function scopeActive(Builder $query): void {}
+    public function getDisplayNameAttribute(): string { return ''; }
+    protected function avatarUrl(): \\Illuminate\\Database\\Eloquent\\Casts\\Attribute {
+        return new \\Illuminate\\Database\\Eloquent\\Casts\\Attribute();
+    }
+    public function setLogoAttribute($value): void {}
+}
+";
+
+const MAGIC_CONSUMER_PHP: &str = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(BlogAuthor $author): void {
+        BlogAuthor::active();
+        BlogAuthor::query()->active();
+        $author->display_name;
+        $author->avatar_url;
+        $author->logo = 'x';
+    }
+}
+";
+
+/// The `(line, character)` of each reference found from the declaration
+/// named `member` in [`MAGIC_AUTHOR_PHP`], sorted, declaration excluded.
+async fn magic_member_reference_sites(member: &str) -> Vec<(String, u32, u32)> {
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/BlogAuthor.php", MAGIC_AUTHOR_PHP),
+        ("src/Models/Consumer.php", MAGIC_CONSUMER_PHP),
+    ]);
+    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    open_php(&backend, &consumer_uri, MAGIC_CONSUMER_PHP).await;
+    let (line, character) = crate::common::line_char_of(MAGIC_AUTHOR_PHP, member);
+    let found = find_references_at(
+        &backend,
+        &dir,
+        "src/Models/BlogAuthor.php",
+        MAGIC_AUTHOR_PHP,
+        line,
+        character + 2,
+        false,
+    )
+    .await
+    .unwrap_or_default();
+    let mut sites: Vec<(String, u32, u32)> = found
+        .iter()
+        .map(|l| {
+            let file = l.uri.path().rsplit('/').next().unwrap_or("").to_string();
+            (file, l.range.start.line, l.range.start.character)
+        })
+        .collect();
+    sites.sort();
+    sites
+}
+
+/// Where `needle` starts in [`MAGIC_CONSUMER_PHP`].
+fn consumer_site(needle: &str) -> (String, u32, u32) {
+    let (line, character) = crate::common::line_char_of(MAGIC_CONSUMER_PHP, needle);
+    ("Consumer.php".to_string(), line, character)
+}
+
+#[tokio::test]
+#[ignore = "known gap: references on Eloquent magic members"]
+async fn references_on_a_scope_find_its_calls_under_the_scope_name() {
+    let (line, _) =
+        crate::common::line_char_of(MAGIC_CONSUMER_PHP, "BlogAuthor::query()->active()");
+    assert_eq!(
+        magic_member_reference_sites("scopeActive").await,
+        vec![
+            consumer_site("active();"),
+            ("Consumer.php".to_string(), line, 29),
+        ]
+    );
+}
+
+#[tokio::test]
+#[ignore = "known gap: references on Eloquent magic members"]
+async fn references_on_a_legacy_accessor_find_its_property_reads() {
+    let (file, line, character) = consumer_site("display_name");
+    assert_eq!(
+        magic_member_reference_sites("getDisplayNameAttribute").await,
+        vec![(file, line, character)]
+    );
+}
+
+#[tokio::test]
+#[ignore = "known gap: references on Eloquent magic members"]
+async fn references_on_an_attribute_accessor_find_its_property_reads() {
+    assert_eq!(
+        magic_member_reference_sites("avatarUrl").await,
+        vec![consumer_site("avatar_url")]
+    );
+}
+
+#[tokio::test]
+#[ignore = "known gap: references on Eloquent magic members"]
+async fn references_on_a_mutator_find_its_property_writes() {
+    assert_eq!(
+        magic_member_reference_sites("setLogoAttribute").await,
+        vec![consumer_site("logo =")]
     );
 }
