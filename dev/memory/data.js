@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790229810100,
+  "lastUpdate": 1790229837288,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30089,6 +30089,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 84.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "f412b1e0b15b5992d3e42edf5bbdda22b949b598",
+          "message": "An unqualified class name inside a namespace no longer falls back to a\nLaravel facade alias",
+          "timestamp": "2026-09-24T07:48:35+02:00",
+          "tree_id": "6dd363a207921259048c2b0464dd5d43b436d036",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/f412b1e0b15b5992d3e42edf5bbdda22b949b598"
+        },
+        "date": 1790229828296,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.5,
             "unit": "MiB"
           }
         ]
