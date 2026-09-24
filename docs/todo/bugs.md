@@ -288,19 +288,7 @@ statically known, so every `.env.<name>` should count as a declaration.
 
 ## Blade
 
-## B354. A `)` inside a PHP comment closes a Blade directive's arguments
-
-**Impact: Low · Complexity: Medium**
-
-`@foreach ($users /* :) */ as $user)` ends the header at the comment's `)`,
-so the binding is lost and the injected `/** @var … */` docblock lands
-inside the open comment. Laravel balances directive parentheses with
-`token_get_all`, which skips comments. `consume_args`/`closes_args`
-(`src/blade/preprocessor/directive.rs`, `shared.rs`) track strings but not
-`/* */`, `//`, or `#` comments.
-
-**Tests:** `blade_preprocessing::a_paren_inside_a_block_comment_does_not_close_the_header`
-and `a_multi_line_block_comment_holding_a_paren_does_not_close_the_header`.
+No outstanding items.
 
 ## Miscellaneous
 

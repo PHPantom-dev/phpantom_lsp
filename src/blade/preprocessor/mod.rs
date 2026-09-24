@@ -159,6 +159,10 @@ pub fn preprocess_with_vars(
     let mut paren_depth = 0;
     let mut in_string: Option<char> = None;
     let mut is_escaped = false;
+    // A `/* ... */` comment can span lines, so it is tracked like
+    // `in_string` above; a `//`/`#` comment always ends at the newline, so
+    // it is tracked per-line instead (declared inside the line loop below).
+    let mut in_block_comment = false;
     let mut html = HtmlPos {
         in_tag: false,
         attr_string: None,
@@ -206,6 +210,7 @@ pub fn preprocess_with_vars(
         let following = &lines[line_idx + 1..];
 
         echo_closes_at_eol = false;
+        let mut in_line_comment = false;
 
         if mode == Mode::Html && in_php_directive_block {
             mode = Mode::Php(false);
@@ -244,7 +249,23 @@ pub fn preprocess_with_vars(
                 mode,
                 Mode::Html | Mode::EscapedEcho(_) | Mode::Comment | Mode::Verbatim
             ) {
-                if let Some(quote) = in_string {
+                if in_line_comment {
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += ch.len_utf16() as u32;
+                    continue;
+                } else if in_block_comment {
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += ch.len_utf16() as u32;
+                    if ch == '*' && line_chars.get(char_idx) == Some(&'/') {
+                        buffer.push('/');
+                        char_idx += 1;
+                        current_utf16_col += 1;
+                        in_block_comment = false;
+                    }
+                    continue;
+                } else if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;
                     } else if ch == '\\' {
@@ -261,6 +282,22 @@ pub fn preprocess_with_vars(
                     buffer.push(ch);
                     char_idx += 1;
                     current_utf16_col += ch.len_utf16() as u32;
+                    continue;
+                } else if ch == '/' && line_chars.get(char_idx + 1) == Some(&'*') {
+                    in_block_comment = true;
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += 1;
+                    continue;
+                } else if (ch == '/' && line_chars.get(char_idx + 1) == Some(&'/'))
+                    || (ch == '#' && line_chars.get(char_idx + 1) != Some(&'['))
+                {
+                    // A bare `#` starts a shell-style comment, but `#[` opens a
+                    // PHP attribute instead.
+                    in_line_comment = true;
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += 1;
                     continue;
                 }
             }

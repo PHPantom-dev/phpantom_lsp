@@ -279,7 +279,6 @@ async fn a_header_wrapped_across_many_continuation_lines_keeps_the_binding() {
 /// Blade finds the closing paren with PHP's own tokenizer, so a `)` inside a
 /// comment in the header does not end the argument list.
 #[tokio::test]
-#[ignore = "known gap: a `)` inside a PHP comment closes a Blade directive's arguments"]
 async fn a_paren_inside_a_block_comment_does_not_close_the_header() {
     let body = "@foreach ($users /* :) */ as $user)\n    {{ $user->name }}\n@endforeach\n";
     let (backend, uri, text) = template(body).await;
@@ -313,7 +312,6 @@ async fn a_hash_comment_on_the_first_line_of_a_wrapped_header_ends_at_the_line_b
 }
 
 #[tokio::test]
-#[ignore = "known gap: a `)` inside a PHP comment closes a Blade directive's arguments"]
 async fn a_multi_line_block_comment_holding_a_paren_does_not_close_the_header() {
     let body = "@foreach ($users /* keep only\n    the :) active ones */\n    as $user)\n    {{ $user->name }}\n@endforeach\n";
     let (backend, uri, text) = template(body).await;

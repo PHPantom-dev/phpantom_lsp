@@ -114,7 +114,6 @@ unlikely to move the needle for most users.
 | B353 | [`.env.<environment>` files are not read](todo/bugs.md#b353-envenvironment-files-are-not-read)                                                                            | Low         | Low         |
 | B341 | [Any `->name()` call in a route file registers a route](todo/bugs.md#b341-any-name-call-in-a-route-file-registers-a-route)                                                | Low         | Medium      |
 | B343 | [View call-site data unions a key's values instead of keeping the last write](todo/bugs.md#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write) | Low         | Medium      |
-| B354 | [A `)` inside a PHP comment closes a Blade directive's arguments](todo/bugs.md#b354-a--inside-a-php-comment-closes-a-blade-directives-arguments)                          | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
