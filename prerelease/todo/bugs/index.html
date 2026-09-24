@@ -905,17 +905,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b336-hover-finds-no-symbol-at-a-non-ascii-identifier" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B336. Hover finds no symbol at a non-ASCII identifier
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1713,17 +1702,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b336-hover-finds-no-symbol-at-a-non-ascii-identifier" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B336. Hover finds no symbol at a non-ASCII identifier
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2026,14 +2004,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h2 id="b336-hover-finds-no-symbol-at-a-non-ascii-identifier">B336. Hover finds no symbol at a non-ASCII identifier<a class="headerlink" href="#b336-hover-finds-no-symbol-at-a-non-ascii-identifier" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>PHP identifiers may contain any byte from <code>0x80</code> up, so <code>$café</code> and
-<code>class Modèl</code> are legal. Completion after <code>$café-&gt;</code> and <code>Modèl::</code> works,
-but hover with the cursor on the identifier itself returns nothing: the
-word-at-cursor scan only accepts ASCII identifier characters.</p>
-<p><strong>Tests:</strong> <code>position_encoding_robustness::a_multibyte_variable_name_resolves_its_type</code>
-and <code>a_multibyte_class_name_resolves_its_static_members</code>.</p>
 <h2 id="b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias">B337. An unqualified class name inside a namespace falls back to a global alias<a class="headerlink" href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App\Http;</span>
