@@ -372,7 +372,7 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         ),
 
         // -- Slice: T[] -------------------------------------------------------
-        cst::Type::Slice(s) => PhpType::array_of(convert(src, s.inner)),
+        cst::Type::Slice(s) => convert_with_postfix(src, s.inner, &PhpType::array_of),
 
         // -- Shape types ------------------------------------------------------
         cst::Type::Shape(s) => {
@@ -399,36 +399,12 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
 
         // -- Callable types ---------------------------------------------------
         cst::Type::Callable(c) => {
-            // `pure-callable` / `pure-closure` name a callable whose purity we
-            // do not model; the callable part of them we do.
-            let written = bytes_to_str(c.keyword.value);
-            let kind = unmodelled_refinement_base(written).unwrap_or(written);
-            match &c.specification {
-                Some(spec) => {
-                    let params: Vec<CallableParam> = spec
-                        .parameters
-                        .entries
-                        .iter()
-                        .map(|p| {
-                            let type_hint = match &p.parameter_type {
-                                Some(t) => convert(src, t),
-                                None => PhpType::mixed(),
-                            };
-                            CallableParam {
-                                type_hint,
-                                optional: p.is_optional(),
-                                variadic: p.is_variadic(),
-                            }
-                        })
-                        .collect();
-                    let return_type = spec
-                        .return_type
-                        .as_ref()
-                        .map(|rt| convert(src, rt.return_type));
-                    PhpType::callable_spec(kind, params, return_type)
-                }
-                None => PhpType::named(atom(kind)),
-            }
+            let return_type = c
+                .specification
+                .as_ref()
+                .and_then(|spec| spec.return_type.as_ref())
+                .map(|rt| convert(src, rt.return_type));
+            convert_callable(src, c, return_type)
         }
 
         // -- Conditional types ------------------------------------------------
@@ -462,9 +438,9 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         cst::Type::IntRange(r) => PhpType::int_range(r.min.to_string(), r.max.to_string()),
 
         // -- Index access: T[K] -----------------------------------------------
-        cst::Type::IndexAccess(i) => {
-            PhpType::index_access(convert(src, i.target), convert(src, i.index))
-        }
+        cst::Type::IndexAccess(i) => convert_with_postfix(src, i.target, &|target| {
+            PhpType::index_access(target, convert(src, i.index))
+        }),
 
         // -- Variable (e.g. $this in conditional types) -----------------------
         cst::Type::Variable(v) | cst::Type::ThisVariable(v) => {
@@ -533,6 +509,64 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
 
         // -- Catch-all for anything else (non_exhaustive) ---------------------
         other => PhpType::raw(other.to_string()),
+    }
+}
+
+/// Apply a postfix to the innermost unparenthesized callable return type.
+/// Mago binds `[]` and `[K]` outside `callable(): T`; PHPDoc binds them to
+/// `T`. Keep the CST's parentheses until this is settled, so `(callable(): T)[]`
+/// remains an array of callables. Composing postfixes preserves their order
+/// without allocating an intermediate list or rebuilding a callable twice.
+fn convert_with_postfix(
+    src: &str,
+    ty: &cst::Type<'_>,
+    postfix: &dyn Fn(PhpType) -> PhpType,
+) -> PhpType {
+    match ty {
+        cst::Type::Slice(s) => {
+            convert_with_postfix(src, s.inner, &|inner| postfix(PhpType::array_of(inner)))
+        }
+        cst::Type::IndexAccess(i) => convert_with_postfix(src, i.target, &|target| {
+            postfix(PhpType::index_access(target, convert(src, i.index)))
+        }),
+        cst::Type::Callable(c)
+            if let Some(spec) = &c.specification
+                && let Some(rt) = &spec.return_type =>
+        {
+            let return_type = convert_with_postfix(src, rt.return_type, postfix);
+            convert_callable(src, c, Some(return_type))
+        }
+        _ => postfix(convert(src, ty)),
+    }
+}
+
+/// Convert a callable with its already-converted return type.
+fn convert_callable(src: &str, c: &cst::CallableType<'_>, return_type: Option<PhpType>) -> PhpType {
+    // `pure-callable` / `pure-closure` name a callable whose purity we
+    // do not model; the callable part of them we do.
+    let written = bytes_to_str(c.keyword.value);
+    let kind = unmodelled_refinement_base(written).unwrap_or(written);
+    match &c.specification {
+        Some(spec) => {
+            let params: Vec<CallableParam> = spec
+                .parameters
+                .entries
+                .iter()
+                .map(|p| {
+                    let type_hint = match &p.parameter_type {
+                        Some(t) => convert(src, t),
+                        None => PhpType::mixed(),
+                    };
+                    CallableParam {
+                        type_hint,
+                        optional: p.is_optional(),
+                        variadic: p.is_variadic(),
+                    }
+                })
+                .collect();
+            PhpType::callable_spec(kind, params, return_type)
+        }
+        None => PhpType::named(atom(kind)),
     }
 }
 

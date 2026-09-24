@@ -1223,7 +1223,9 @@ mod tests {
 
         let params = DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(real.join("src/Help.php")).unwrap(),
+                // The temp directory itself can be a symlink, as /var is on macOS.
+                uri: Url::from_file_path(real.join("src/Help.php").canonicalize().unwrap())
+                    .unwrap(),
                 typ: FileChangeType::CREATED,
             }],
         };

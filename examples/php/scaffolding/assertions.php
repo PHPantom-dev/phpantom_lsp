@@ -1662,6 +1662,12 @@ function runDemoAssertions(): void
         'an arrow function must satisfy a declared Closure(Scaffolding\Pen): string'
     );
 
+    // ── Callable array return types ─────────────────────────────────────
+    $suggestions = new CallableArrayReturnDemo();
+    assert($suggestions->demo() === ['alice', 'bob'], 'an array-returning arrow function must satisfy the nullable callback');
+    assert($suggestions->suggestions(null) === [], 'a nullable callback must accept null');
+    assert($suggestions->suggestions(static fn (string $input): array => [$input]) === ['alice'], 'the callback must receive the input and return strings');
+
     // ── @mixin generic substitution scaffolding ─────────────────────────
     $mixinBuilder = new Scaffolding\ScaffoldingMixinBuilder();
     assert($mixinBuilder->firstOrFail() === null, 'Scaffolding\ScaffoldingMixinBuilder::firstOrFail() must return mixed');

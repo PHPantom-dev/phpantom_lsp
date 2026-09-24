@@ -9878,6 +9878,54 @@ takesStringCallback(static function (int $value): int { return $value; });
     );
 }
 
+#[test]
+fn callable_return_suffix_accepts_array_returning_closures_and_null() {
+    let php = r#"<?php
+namespace App;
+
+class Question {
+    /** @param (callable(string):string[])|null $callback */
+    public function setAutocompleterCallback(?callable $callback): static {
+        return $this;
+    }
+}
+
+/** @param list<string> $users */
+function configure(array $users): void {
+    $question = new Question();
+    $question->setAutocompleterCallback(static fn (): array => $users);
+    $question->setAutocompleterCallback(static fn (string $input): array => [$input]);
+    $question->setAutocompleterCallback(static function (string $input): array { return [$input]; });
+    $question->setAutocompleterCallback(null);
+}
+"#;
+    let diags = collect(php);
+    assert!(diags.is_empty(), "{diags:?}");
+}
+
+#[test]
+fn callable_return_suffix_still_rejects_incompatible_arguments() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param (callable(string):string[])|null $callback */
+function configure(?callable $callback): void {}
+
+configure(static fn (): string => 'wrong');
+configure(static fn (): int => 42);
+configure(42);
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "{diags:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("callable(string): array<string>")),
+        "{messages:?}"
+    );
+}
+
 /// A closure that declares no return type carries none on its resolved type,
 /// and neither does a first-class callable — both have to stay silent rather
 /// than be read as returning nothing.

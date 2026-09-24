@@ -265,6 +265,97 @@ fn round_trip_callables() {
 }
 
 #[test]
+fn callable_return_suffix_binds_to_return_type() {
+    for (input, expected) in [
+        (
+            "(callable(string):string[])|null",
+            "(callable(string): array<string>)|null",
+        ),
+        ("callable(): string[][]", "callable(): array<array<string>>"),
+        ("Closure(int): string[]", "Closure(int): array<string>"),
+        (r"\Closure(int): string[]", r"\Closure(int): array<string>"),
+        ("pure-callable(): string[]", "callable(): array<string>"),
+        ("pure-closure(): string[]", r"\Closure(): array<string>"),
+        (
+            "callable(): (string|int)[]",
+            "callable(): array<string|int>",
+        ),
+        (
+            "callable(): callable(): string[][]",
+            "callable(): callable(): array<array<string>>",
+        ),
+        (
+            "callable(): (callable(): string)[]",
+            "callable(): array<callable(): string>",
+        ),
+        (
+            "array{cb: callable(string[]): string[]}",
+            "array{cb: callable(array<string>): array<string>}",
+        ),
+        (
+            "callable(callable(int): string[]): bool",
+            "callable(callable(int): array<string>): bool",
+        ),
+        (
+            "callable(string=, int...): string[]",
+            "callable(string=, int...): array<string>",
+        ),
+        ("callable(...): string[]", "callable(...): array<string>"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+}
+
+#[test]
+fn callable_return_suffix_preserves_index_access_order() {
+    for (input, expected) in [
+        ("callable(): T[K]", "callable(): (T[K])"),
+        ("callable(): T[K][]", "callable(): array<T[K]>"),
+        ("callable(): T[][K]", "callable(): (array<T>[K])"),
+        ("callable(): T[K][V]", "callable(): (T[K][V])"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+    assert_eq!(
+        PhpType::parse("(callable(): T)[K]"),
+        PhpType::index_access(PhpType::parse("callable(): T"), PhpType::named(atom("K")))
+    );
+}
+
+#[test]
+fn callable_return_suffix_respects_parentheses_and_missing_return_types() {
+    for (input, expected) in [
+        ("(callable(): string)[]", "array<callable(): string>"),
+        (
+            "(callable(): string[])[][]",
+            "array<array<callable(): array<string>>>",
+        ),
+        (
+            "(callable(): string[]|null)[]",
+            "array<(callable(): array<string>)|null>",
+        ),
+        ("callable[]", "array<callable>"),
+        ("callable()[]", "array<callable()>"),
+        ("Closure[]", "array<Closure>"),
+        ("callable(): callable[]", "callable(): array<callable>"),
+    ] {
+        assert_eq!(
+            PhpType::parse(input).to_string(),
+            PhpType::parse(expected).to_string(),
+            "{input}"
+        );
+    }
+}
+
+#[test]
 fn round_trip_class_string() {
     // mago Display bug: class-string<Foo> → class-string<<Foo>>
     assert_round_trip_expected("class-string<Foo>", "class-string<Foo>");

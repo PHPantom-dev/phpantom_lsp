@@ -88,6 +88,24 @@ namespace Block2 {
 // ─── Variable hover ─────────────────────────────────────────────────────────
 
 #[test]
+fn callable_return_suffix_hover_shows_array_return_type() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/** @param (callable(string):string[])|null $callback */
+function configure(?callable $callback): void {
+    $callback;
+}
+"#;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, 3, 6).expect("hover on callback parameter");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$callback = (callable(string): array<string>)|null"),
+        "{text}"
+    );
+}
+
+#[test]
 fn hover_this_variable() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
