@@ -1081,17 +1081,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b352-lang-and-choice-arguments-are-not-translation-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B352. <code>@lang</code> and <code>@choice</code> arguments are not translation keys
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1834,17 +1823,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b352-lang-and-choice-arguments-are-not-translation-keys" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B352. <code>@lang</code> and <code>@choice</code> arguments are not translation keys
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2063,15 +2041,6 @@ its <code>laravel-</code> prefix dropped). None of the <code>has*()</code> calls
 so every such package's translation keys (and, by the same route, its
 views and config) are unknown.</p>
 <p><strong>Test:</strong> <code>laravel_translation_keys::a_package_tools_provider_registers_its_short_name</code>.</p>
-<h2 id="b352-lang-and-choice-arguments-are-not-translation-keys">B352. <code>@lang</code> and <code>@choice</code> arguments are not translation keys<a class="headerlink" href="#b352-lang-and-choice-arguments-are-not-translation-keys" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>translate_directive</code> (<code>src/blade/directives.rs</code>) lowers <code>@lang('x')</code> and
-<code>@choice('x', $n)</code> to a generic <code>blade_directive(...)</code> call, so the key gets
-no completion, go-to-definition, hover, or diagnostic. They compile to
-<code>app('translator')-&gt;get()</code> / <code>-&gt;choice()</code> and should lower to
-<code>__()</code>/<code>trans_choice()</code> so the translation string context sees them.</p>
-<p><strong>Tests:</strong> <code>laravel_translation_keys::the_lang_directive_reaches_the_line</code>
-and <code>the_choice_directive_reaches_the_line</code>.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
