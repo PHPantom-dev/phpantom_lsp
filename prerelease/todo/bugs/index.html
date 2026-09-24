@@ -905,17 +905,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B337. An unqualified class name inside a namespace falls back to a global alias
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1702,17 +1691,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B337. An unqualified class name inside a namespace falls back to a global alias
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2004,20 +1982,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h2 id="b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias">B337. An unqualified class name inside a namespace falls back to a global alias<a class="headerlink" href="#b337-an-unqualified-class-name-inside-a-namespace-falls-back-to-a-global-alias" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">namespace App\Http;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class Controller {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function go(): void { Cache::forget(&#39;x&#39;); }</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-</code></pre></div>
-<p>PHP resolves <code>Cache</code> to <code>App\Http\Cache</code> and never falls back to the global
-namespace for a class name (only functions and constants fall back), so
-without <code>use Illuminate\Support\Facades\Cache;</code> this is a fatal error.
-PHPantom offers the global <code>Cache</code> alias's members instead. Check whether
-the fallback is specific to the Laravel alias table or general class
-resolution before fixing.</p>
-<p><strong>Test:</strong> <code>laravel_facade_resolution::bare_alias_in_a_namespaced_file_without_an_import_stays_unresolved</code>.</p>
 <h2 id="b338-go-to-definition-on-a-facade-call-stops-at-the-facade">B338. Go-to-definition on a facade call stops at the facade<a class="headerlink" href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>Auth::guard()</code> completes and hovers with <code>AuthManager::guard()</code>'s
@@ -2035,8 +1999,8 @@ and <code>a_forwarded_mixin_call_goes_to_the_contract_declaration</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h2 id="b339-a-parent-models-fillable-and-casts-do-not-reach-the-child">B339. A parent model's <code>$fillable</code> and <code>$casts</code> do not reach the child<a class="headerlink" href="#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class BaseModel extends Model { protected $fillable = [&#39;uuid&#39;]; protected $casts = [&#39;is_archived&#39; =&gt; &#39;boolean&#39;]; }</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">class User extends BaseModel {}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class BaseModel extends Model { protected $fillable = [&#39;uuid&#39;]; protected $casts = [&#39;is_archived&#39; =&gt; &#39;boolean&#39;]; }</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class User extends BaseModel {}</span>
 </code></pre></div>
 <p><code>$user-&gt;uuid</code> and <code>$user-&gt;is_archived</code> are missing: <code>LaravelModelProvider</code>
 (<code>src/virtual_members/laravel/mod.rs</code>) reads <code>class.laravel()</code> for the
