@@ -1284,10 +1284,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t26-globbed-constant-unions-foobar_" class="md-nav__link">
+  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T26. Globbed constant unions (<code>Foo::BAR_*</code>)
+        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
       </span>
     </span>
   </a>
@@ -1626,10 +1626,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#t26-globbed-constant-unions-foobar_" class="md-nav__link">
+  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        T26. Globbed constant unions (<code>Foo::BAR_*</code>)
+        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
       </span>
     </span>
   </a>
@@ -2059,11 +2059,21 @@ landed, which makes reconciliation much simpler than working with
 raw strings.</p>
 <hr />
 <hr />
-<h2 id="t26-globbed-constant-unions-foobar_">T26. Globbed constant unions (<code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-globbed-constant-unions-foobar_" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Resolve wildcard constant patterns like <code>Foo::BAR_*</code> to the union of
-all matching constant types on the class. PHPStan supports this syntax
-in docblock type strings:</p>
+<h2 id="t26-class-constants-named-as-docblock-types-foobar-foobar_">T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A class constant named in a type position is not read at all: <code>@param
+Foo::BAR $x</code>, <code>@param self::FOO|self::BAR $x</code> and <code>@param C::class|D::class
+$x</code> all stay as unresolved text (or fall back to the native hint), where
+PHPStan and Psalm give the constant's value (<code>'bar'</code>, <code>'bar'|'foo'</code>,
+<code>'App\C'|'App\D'</code>). The same constants are read when they are the operand
+of <code>key-of&lt;&gt;</code>/<code>value-of&lt;&gt;</code>, through <code>constant_operand_shape</code>, so the value
+lookup exists; the bare reference just never reaches it. Found porting
+Psalm's <code>ConstValuesTest</code> and <code>ReconcilerTest</code>; the assertions are <code>// SKIP</code>
+in <code>tests/psalm_assertions/const_values.php</code> and
+<code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
+<p>The wildcard form resolves a pattern like <code>Foo::BAR_*</code> to the union of all
+matching constant types on the class. PHPStan supports this syntax in
+docblock type strings:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Status {</span>
 <a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
 <a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>

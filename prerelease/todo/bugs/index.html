@@ -880,6 +880,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b343-a-switch-case-does-not-narrow-a-literal-union" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B343. A <code>switch</code> case does not narrow a literal union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B344. The falsy branch of a truthiness check keeps the object half
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b345-a-type-check-does-not-split-an-iterable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B345. A type check does not split an <code>iterable</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B346. <code>instanceof</code> on a class-or-interface union drops the intersection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -901,6 +951,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1479,6 +1546,56 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b343-a-switch-case-does-not-narrow-a-literal-union" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B343. A <code>switch</code> case does not narrow a literal union
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B344. The falsy branch of a truthiness check keeps the object half
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b345-a-type-check-does-not-split-an-iterable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B345. A type check does not split an <code>iterable</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B346. <code>instanceof</code> on a class-or-interface union drops the intersection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1500,6 +1617,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Symbol resolution">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1604,11 +1738,66 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b343-a-switch-case-does-not-narrow-a-literal-union">B343. A <code>switch</code> case does not narrow a literal union<a class="headerlink" href="#b343-a-switch-case-does-not-narrow-a-literal-union" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param &quot;foo&quot;|&quot;bar&quot; $s */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(string $s): void {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    switch ($s) {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        case &quot;foo&quot;:</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">            $s; // should be &#39;foo&#39;, is &quot;foo&quot;|&quot;bar&quot;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">            break;</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    }</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>if ($s === "foo")</code> narrows the same parameter, so the literal is
+understood; the <code>case</code> arm does not apply the loose comparison PHP makes
+there. Found porting Psalm's <code>ConstValuesTest</code> (<code>noRedundantConditionWithSwitch</code>);
+the assertion is <code>// SKIP</code> in <code>tests/psalm_assertions/const_values.php</code>.</p>
+<h3 id="b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half">B344. The falsy branch of a truthiness check keeps the object half<a class="headerlink" href="#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param Foo|false $a  @param class-string&lt;Foo&gt;|null $c */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f($a, $c): void {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if (!$a) { $a; } // should be false, is Foo|false</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    if (!$c) { $c; } // should be null, is class-string&lt;Foo&gt;|null</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>An object is always truthy (<code>SimpleXMLElement</code> aside) and a <code>class-string</code>
+is never empty, so the falsy branch can drop both. The truthy branch
+already drops <code>false</code>/<code>null</code>. Found porting Psalm's <code>ReconcilerTest</code>;
+the assertions are <code>// SKIP</code> in
+<code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
+<h3 id="b345-a-type-check-does-not-split-an-iterable">B345. A type check does not split an <code>iterable</code><a class="headerlink" href="#b345-a-type-check-does-not-split-an-iterable" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>On <code>iterable&lt;int, string&gt;</code>, <code>is_array()</code> should leave <code>array&lt;int, string&gt;</code>
+and <code>is_object()</code> / <code>instanceof \Traversable</code> / <code>!is_array()</code> should leave
+<code>Traversable&lt;int, string&gt;</code>. Today <code>is_array()</code> keeps the whole iterable and
+the object checks produce a bare <code>Traversable</code>, losing the generic
+arguments that drive foreach value completion. Found porting Psalm's
+<code>ReconcilerTest</code> (<code>iterableToArray</code>, <code>iterableAndObject</code>, …); the assertions
+are <code>// SKIP</code> in <code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
+<h3 id="b346-instanceof-on-a-class-or-interface-union-drops-the-intersection">B346. <code>instanceof</code> on a class-or-interface union drops the intersection<a class="headerlink" href="#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>On <code>SomeClass|SomeInterface</code>, <code>$x instanceof SomeInterface</code> should give
+<code>(SomeClass&amp;SomeInterface)|SomeInterface</code>: a non-final <code>SomeClass</code> can have
+a subclass that implements the interface. PHPantom gives <code>SomeInterface</code>,
+so the <code>SomeClass</code> members of that half are lost. Found porting Psalm's
+<code>ReconcilerTest</code>; the assertions are <code>// SKIP</code> in
+<code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file">B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file<a class="headerlink" href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>In a file with several braced <code>namespace</code> blocks that each declare an <code>A</code>,
+a method's <code>@return key-of&lt;A::FOO&gt;</code> is evaluated against the first <code>A</code> in
+the file, whichever block the method is declared in. The operand reaches
+<code>constant_operand_shape</code> unqualified, and <code>find_class_by_name</code> matches the
+short name. Class names in the same position already resolve against the
+block they are used in; the class half of a constant operand has to be
+qualified the same way (against the declaring file's namespace and <code>use</code>
+imports) before the type leaves its declaration. Rare outside test
+fixtures. Found porting Psalm's <code>KeyOfArrayTest</code>; two assertions are
+<code>// SKIP</code> in <code>tests/psalm_assertions/key_of_array.php</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
