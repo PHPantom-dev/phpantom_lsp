@@ -98,7 +98,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B340 | [Column-name string completion recovers its receiver from text](todo/bugs.md#b340-column-name-string-completion-recovers-its-receiver-from-text)                          | Medium      | Medium      |
 | B349 | [Package and published translation files are misclassified](todo/bugs.md#b349-package-and-published-translation-files-are-misclassified)                                  | Medium      | Medium      |
 | B357 | [The pivot index only sees relationships in files already parsed](todo/bugs.md#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed)                    | Medium      | Medium      |
 | B344 | [A config list value reads as an empty shape](todo/bugs.md#b344-a-config-list-value-reads-as-an-empty-shape)                                                              | Low-Medium  | Low         |

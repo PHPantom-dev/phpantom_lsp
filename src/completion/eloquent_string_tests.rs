@@ -222,6 +222,26 @@ fn test_a_comment_before_the_double_colon_does_not_hide_the_receiver() {
     assert!(ctx.is_static);
 }
 
+/// A receiver that is itself a chain is kept whole, so the resolver sees the
+/// relationship call or relation property rather than just its last name.
+#[test]
+fn test_a_chained_receiver_is_kept_whole() {
+    let content = "<?php\n$user->posts()->where('";
+    let ctx = eloquent_ctx_at(content, at_end(content)).expect("a where() call");
+    assert_eq!(ctx.subject, "$user->posts()");
+
+    let content = "<?php\n$user->posts->where('";
+    let ctx = eloquent_ctx_at(content, at_end(content)).expect("a where() call");
+    assert_eq!(ctx.subject, "$user->posts");
+}
+
+#[test]
+fn test_a_multi_line_chain_is_kept_whole() {
+    let content = "<?php\n$user->posts()\n    ->latest()\n    ->where('";
+    let ctx = eloquent_ctx_at(content, at_end(content)).expect("a where() call");
+    assert_eq!(ctx.subject, "$user->posts()->latest()");
+}
+
 /// A word between the receiver's operator and an unrelated call (`and`/`or`,
 /// or any other identifier) must not be mistaken for that operator's callee.
 #[test]

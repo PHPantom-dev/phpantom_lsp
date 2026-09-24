@@ -653,12 +653,27 @@ fn resolve_target_classes_expr_inner(
                 receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
             );
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
+            // The generic members of the property's hint, e.g.
+            // `Collection<int, Post>`.  The classes resolved from it carry
+            // only its base name, so each is given its generic spelling
+            // back once narrowing has settled which classes remain.
+            let mut generic_hints: Vec<PhpType> = Vec::new();
             for cls in &base_arcs {
-                let resolved = super::type_resolution::resolve_property_types(
-                    property,
-                    cls,
+                let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
+                    continue;
+                };
+                let resolved = super::type_resolution::type_hint_to_classes_typed(
+                    &hint,
+                    &cls.fqn(),
                     all_classes,
                     class_loader,
+                );
+                generic_hints.extend(
+                    hint.unwrap_nullable()
+                        .union_members()
+                        .into_iter()
+                        .filter(|member| matches!(member.kind(), TypeKind::Generic(_)))
+                        .cloned(),
                 );
 
                 ClassInfo::extend_unique_arc(&mut arc_results, resolved);
@@ -720,6 +735,20 @@ fn resolve_target_classes_expr_inner(
                 let mut narrowed = ResolvedType::from_classes(arc_results);
                 if is_intersection {
                     ResolvedType::tag_as_intersection(&mut narrowed);
+                } else if !generic_hints.is_empty() {
+                    for rt in &mut narrowed {
+                        let Some(class) = &rt.class_info else {
+                            continue;
+                        };
+                        let fqn = class.fqn();
+                        if let Some(hint) = generic_hints.iter().find(|hint| {
+                            hint.base_name().is_some_and(|base| {
+                                base == fqn.as_str() || crate::util::short_name(&fqn) == base
+                            })
+                        }) {
+                            rt.type_string = hint.clone();
+                        }
+                    }
                 }
                 narrowed
             }

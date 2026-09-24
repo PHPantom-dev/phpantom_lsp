@@ -54,22 +54,6 @@ No outstanding items.
 
 ## Laravel
 
-## B340. Column-name string completion recovers its receiver from text
-
-**Impact: Medium · Complexity: Medium**
-
-`$user->posts()->where('|')` and `$user->posts->where('|')` offer no
-columns. `extract_subject_backwards` in `src/completion/eloquent_string.rs`
-scans the source backwards for an identifier, which stops at `->` and `)`,
-so the receiver is never a chain. This is a second, text-based resolver
-beside the shared pipeline. Resolve the receiver expression through the
-forward walker instead (`HasMany<Post, …>` mixes in `Builder<Post>`, and
-the relation property is `Collection<int, Post>`), then read the model from
-the resolved type.
-
-**Tests:** `laravel_eloquent_magic::relationship_query_where_offers_the_related_models_columns`
-and `relation_collection_where_offers_the_related_models_columns`.
-
 ## B341. Any `->name()` call in a route file registers a route
 
 **Impact: Low · Complexity: Medium**

@@ -1225,7 +1225,6 @@ class User extends Model {
 "#;
 
 #[tokio::test]
-#[ignore = "known gap: column-name string completion recovers its receiver from text"]
 async fn relation_collection_where_offers_the_related_models_columns() {
     let (caller, pos) = split_cursor(
         r#"<?php
@@ -1257,7 +1256,6 @@ class Controller {
 }
 
 #[tokio::test]
-#[ignore = "known gap: column-name string completion recovers its receiver from text"]
 async fn relationship_query_where_offers_the_related_models_columns() {
     let (caller, pos) = split_cursor(
         r#"<?php
