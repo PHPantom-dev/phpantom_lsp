@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790238237126,
+  "lastUpdate": 1790238672072,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30599,6 +30599,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 85.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "325e77c76df5e000d804891ca8e4418326432ea8",
+          "message": "A config or translation key declared with an escaped quote is now\nnavigable",
+          "timestamp": "2026-09-24T10:13:06+02:00",
+          "tree_id": "4f3b361a8fb7e52c52e17309ce326f8a4139f1c2",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/325e77c76df5e000d804891ca8e4418326432ea8"
+        },
+        "date": 1790238663692,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.3,
             "unit": "MiB"
           }
         ]
