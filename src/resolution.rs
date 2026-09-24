@@ -168,6 +168,17 @@ impl Backend {
     ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        self.find_or_load_class_with_aliases(class_name, true)
+    }
+
+    /// [`find_or_load_class`](Self::find_or_load_class), with Laravel's
+    /// facade class-alias table consulted only when `facade_aliases` is set.
+    /// The container string-binding table is always consulted.
+    fn find_or_load_class_with_aliases(
+        &self,
+        class_name: &str,
+        facade_aliases: bool,
+    ) -> Option<Arc<ClassInfo>> {
         if class_name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN {
             let configured = self.laravel_date_class.read().clone()?;
             let configured = configured
@@ -197,7 +208,11 @@ impl Backend {
         // real project class of the same name always wins, and non-class
         // strings like `blade.compiler` still resolve to their bound concrete
         // class.
-        self.resolve_laravel_alias(class_name)
+        if facade_aliases {
+            self.resolve_laravel_alias(class_name)
+        } else {
+            self.resolve_laravel_container_alias(class_name)
+        }
     }
 
     /// Like [`find_or_load_class`], but accepts a pre-parsed `PhpType`,
@@ -1238,9 +1253,6 @@ impl Backend {
                 if let Some(cls) = self.find_or_load_class(&ns_qualified) {
                     return Some(cls);
                 }
-                if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(name)) {
-                    return Some(cls);
-                }
                 // The facade alias table must not be reached from here:
                 // it is populated by a runtime `class_alias()` call that
                 // only ever lands the alias in the *global* namespace,
@@ -1250,7 +1262,7 @@ impl Backend {
                 // arbitrary runtime strings a provider binds, never real
                 // class-name syntax, so no namespace ever applies to
                 // them in the first place.
-                return self.resolve_laravel_container_alias(name);
+                return self.find_or_load_class_with_aliases(name, false);
             }
             // Global scope: no namespace context at all, so the alias
             // fallback is exactly where PHP's own `class_alias()` would

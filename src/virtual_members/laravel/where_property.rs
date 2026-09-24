@@ -30,12 +30,14 @@ use crate::types::{ClassInfo, MethodInfo, ParameterInfo};
 use super::ELOQUENT_BUILDER_FQN;
 use super::helpers::snake_to_pascal;
 
-/// Collect all known column names from a raw (unresolved) model class.
+/// Collect all known column names from a model class.
 ///
 /// This reads directly from `LaravelMetadata` fields and from the
 /// class's own declared/virtual properties, avoiding a full
 /// `resolve_class_fully` call (which would recurse through
-/// `LaravelModelProvider`).
+/// `LaravelModelProvider`).  Pass at least an inheritance-resolved class:
+/// a raw one lacks the `$fillable`/`$casts` it inherits from a parent
+/// model.
 pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut columns = Vec::new();
@@ -105,8 +107,8 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
 
 /// Build `where{PropertyName}()` virtual methods for a model's columns.
 ///
-/// Reads column names directly from the raw `class` (no recursive
-/// resolution) and synthesizes a `where{StudlyCase}()` method for each.
+/// Reads column names directly from `class` (no recursive resolution,
+/// so pass an inheritance-resolved class) and synthesizes a `where{StudlyCase}()` method for each.
 /// Each method accepts a single `$value` parameter (typed `mixed`) and
 /// returns `Builder<ConcreteModel>`.
 ///

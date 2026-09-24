@@ -466,10 +466,20 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     z += opt_ty(&l.factory_model);
     z += opt_ty(&l.custom_collection);
     z += opt_ty(&l.custom_builder);
-    z.add(l.casts_definitions.capacity() * size_of::<(String, String)>());
-    for (a, b) in &l.casts_definitions {
-        z.add(a.capacity());
-        z.add(b.capacity());
+    let cast_sources = l.cast_sources.as_deref();
+    if cast_sources.is_some() {
+        z.add(size_of::<crate::types::CastSources>());
+    }
+    for casts in std::iter::once(&l.casts_definitions).chain(
+        cast_sources
+            .into_iter()
+            .flat_map(|c| [&c.property, &c.method]),
+    ) {
+        z.add(casts.capacity() * size_of::<(String, String)>());
+        for (a, b) in casts {
+            z.add(a.capacity());
+            z.add(b.capacity());
+        }
     }
     z += vs(&l.dates_definitions);
     z.add(l.attributes_definitions.capacity() * size_of::<(String, PhpType)>());
@@ -483,6 +493,7 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
         z.add(b.capacity());
     }
     z += vs(&l.column_names);
+    z.add(l.column_sources.capacity() * size_of::<u16>());
     for o in [
         &l.connection_name,
         &l.table_name,

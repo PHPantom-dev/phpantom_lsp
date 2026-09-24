@@ -166,7 +166,8 @@ pub(crate) use macros::{
     synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
-    extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
+    extract_laravel_metadata, has_inheritable_model_metadata, has_scope_attribute,
+    infer_relationship_from_method, inherit_model_metadata,
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;

@@ -1646,50 +1646,42 @@ impl Backend {
             // classes like `DecimalCast` (imported via `use`) are
             // loadable cross-file when `cast_type_to_php_type` calls
             // the class loader.
-            {
-                let casts: Vec<(String, String)> = class
-                    .laravel()
-                    .map(|l| l.casts_definitions.clone())
-                    .unwrap_or_default();
-                if !casts.is_empty() {
-                    let resolved: Vec<(String, String)> = casts
-                        .into_iter()
-                        .map(|(col, cast_type)| {
-                            // Only resolve class-like cast types (not
-                            // built-in strings like "boolean", "datetime",
-                            // etc.).  A simple heuristic: if the value
-                            // contains an uppercase letter and is not a
-                            // known built-in, treat it as a class name.
-                            //
-                            // Skip names that already contain a `\` — they
-                            // are already qualified (e.g. the string literal
-                            // `'App\Casts\HtmlCast'`).  Passing them through
-                            // `resolve_name` would prepend the file's
-                            // namespace, producing a broken FQN like
-                            // `App\Models\App\Casts\HtmlCast`.
-                            let first_segment = cast_type.split(':').next().unwrap_or(&cast_type);
-                            if first_segment.contains('\\') || first_segment.starts_with('\\') {
-                                // Already qualified — strip leading `\` if present to produce canonical FQN.
-                                let canonical = cast_type
-                                    .strip_prefix('\\')
-                                    .map_or(cast_type.clone(), |s| s.to_string());
-                                (col, canonical)
-                            } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
-                                let resolved_class =
-                                    Self::resolve_name(first_segment, use_map, namespace);
-                                if resolved_class != first_segment {
-                                    // Re-attach any `:argument` suffix.
-                                    let suffix = &cast_type[first_segment.len()..];
-                                    (col, format!("{resolved_class}{suffix}"))
-                                } else {
-                                    (col, cast_type)
-                                }
-                            } else {
-                                (col, cast_type)
-                            }
-                        })
-                        .collect();
-                    class.laravel_mut().casts_definitions = resolved;
+            if let Some(laravel) = class.laravel.as_deref_mut() {
+                let resolve_cast = |cast_type: &mut String| {
+                    // Only resolve class-like cast types (not built-in
+                    // strings like "boolean", "datetime", etc.).  A simple
+                    // heuristic: if the value contains an uppercase letter
+                    // and is not a known built-in, treat it as a class name.
+                    //
+                    // Skip names that already contain a `\` — they are
+                    // already qualified (e.g. the string literal
+                    // `'App\Casts\HtmlCast'`).  Passing them through
+                    // `resolve_name` would prepend the file's namespace,
+                    // producing a broken FQN like
+                    // `App\Models\App\Casts\HtmlCast`.
+                    let first_segment = cast_type.split(':').next().unwrap_or(cast_type);
+                    if first_segment.contains('\\') {
+                        // Already qualified — strip leading `\` if present
+                        // to produce canonical FQN.
+                        if let Some(stripped) = cast_type.strip_prefix('\\') {
+                            *cast_type = stripped.to_string();
+                        }
+                    } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
+                        let resolved_class = Self::resolve_name(first_segment, use_map, namespace);
+                        if resolved_class != first_segment {
+                            // Re-attach any `:argument` suffix.
+                            let suffix = &cast_type[first_segment.len()..];
+                            *cast_type = format!("{resolved_class}{suffix}");
+                        }
+                    }
+                };
+                let sources = laravel.cast_sources.as_deref_mut().into_iter();
+                for (_, cast_type) in laravel
+                    .casts_definitions
+                    .iter_mut()
+                    .chain(sources.flat_map(|s| s.property.iter_mut().chain(s.method.iter_mut())))
+                {
+                    resolve_cast(cast_type);
                 }
             }
 

@@ -49,6 +49,16 @@ function assertMethodReturnType(string $class, string $method, string $expected)
     check("$class::$method() returns $expected (got $actual)", $actual === $expected);
 }
 
+// ─── Model settings inherited from a base model ─────────────────────────────
+
+// Danish declares no $fillable or $casts of its own, so PHP hands it Pastry's.
+$danish = new \App\Models\Danish();
+check('Danish inherits $fillable from Pastry', $danish->getFillable() === ['sku']);
+check(
+    'Danish inherits $casts from Pastry',
+    ($danish->getCasts()['is_vegan'] ?? null) === 'boolean'
+);
+
 // ─── Scope vs Model method shadowing ────────────────────────────────────────
 
 // Model::fresh() is public — a subclass CANNOT define a #[Scope] named "fresh"

@@ -54,26 +54,6 @@ No outstanding items.
 
 ## Laravel
 
-## B339. A parent model's `$fillable` and `$casts` do not reach the child
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-class BaseModel extends Model { protected $fillable = ['uuid']; protected $casts = ['is_archived' => 'boolean']; }
-class User extends BaseModel {}
-```
-
-`$user->uuid` and `$user->is_archived` are missing: `LaravelModelProvider`
-(`src/virtual_members/laravel/mod.rs`) reads `class.laravel()` for the
-model itself only. PHP inherits a property the child does not redeclare,
-so each model-metadata field (`$fillable`, `$guarded`, `$casts`, `$dates`,
-`$attributes`, `$hidden`, `$appends`, `$primaryKey`, `$keyType`,
-`$timestamps`, the timestamp column constants) has to come from the
-nearest class in the parent chain that declares it. That needs the
-metadata to record "declared" separately from "empty".
-
-**Test:** `laravel_eloquent_magic::columns_declared_on_a_parent_model_are_inherited`.
-
 ## B340. Column-name string completion recovers its receiver from text
 
 **Impact: Medium · Complexity: Medium**
@@ -233,6 +213,20 @@ handles a bare `__DIR__` on the left of the concatenation, so the namespace
 resolves nowhere. The same helper serves views, config, and routes.
 
 **Test:** `laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves`.
+
+## B357. The pivot index only sees relationships in files already parsed
+
+**Impact: Medium · Complexity: Medium**
+
+`rebuild_laravel_pivot_index` (`src/resolution.rs`) builds the reverse
+pivot index from `uri_classes_index`, so a model only gets its `$pivot`
+(or `->as()`-renamed) property when the file declaring the
+`belongsToMany` that targets it has been parsed. `phpantom_lsp analyze
+--project-root examples/laravel examples/laravel/app/Demo.php` reports
+`Property 'pivot' not found on class 'App\Models\BakeryRecipe'` (and the
+same for `ingredient`), which the full-project run does not, because
+`Bakery.php` is never parsed. The index needs the relationship methods of
+every model the classmap knows about, not just the loaded ones.
 
 ## Blade
 

@@ -311,7 +311,13 @@ impl Backend {
             EloquentStringKind::Relation => {
                 self.build_relation_completions(&model_class, &es_ctx, &class_loader)
             }
-            EloquentStringKind::Column => self.build_column_completions(&model_class, &es_ctx),
+            EloquentStringKind::Column => {
+                // Base resolution folds in the `$fillable`/`$casts` a
+                // parent model declares.
+                let model_class =
+                    crate::virtual_members::resolve_class_base_cached(&model_class, &class_loader);
+                self.build_column_completions(&model_class, &es_ctx)
+            }
         };
 
         if items.is_empty() {

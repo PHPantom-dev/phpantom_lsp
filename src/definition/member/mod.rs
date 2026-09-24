@@ -230,9 +230,12 @@ impl Backend {
             // ── Timestamp constant redirect ─────────────────────────
             // When the property name matches a timestamp column,
             // jump straight to the CREATED_AT / UPDATED_AT constant.
+            // Base resolution sees a `CREATED_AT` a parent model overrides.
             if extends_eloquent_model(lookup_class, &class_loader)
-                && let Some(const_name) =
-                    Self::timestamp_property_to_constant(lookup_class, &effective_name)
+                && let Some(const_name) = Self::timestamp_property_to_constant(
+                    &crate::virtual_members::resolve_class_base_cached(lookup_class, &class_loader),
+                    &effective_name,
+                )
                 && let Some((const_class, const_fqn)) =
                     Self::find_declaring_class(lookup_class, const_name, &class_loader)
                 && let Some(location) = self.member_position_location(

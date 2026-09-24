@@ -19,6 +19,7 @@ use App\Models\Bakery;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
 use App\Models\Customer;
+use App\Models\Danish;
 use App\Models\Loaf;
 use App\Models\PostCollection;
 use App\Models\Review;
@@ -125,6 +126,12 @@ class Demo
         $post = new BlogPost();
         $post->author;                // relationship BelongsTo     → BlogAuthor
         $post->author()->associate($post->author); // associate() on BelongsTo
+
+        // A model inherits the $fillable and $casts of the base model it
+        // extends. Danish declares neither; both come from Pastry.
+        $danish = new Danish();
+        $danish->is_vegan;            // inherited $casts 'boolean' → bool
+        $danish->sku;                 // inherited $fillable        → mixed
     }
 
 

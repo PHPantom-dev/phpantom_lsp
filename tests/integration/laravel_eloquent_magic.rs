@@ -36,6 +36,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class Model {
+    protected $guarded = ['*'];
     /** @return \Illuminate\Database\Eloquent\Builder<static> */
     public static function query() { return new Builder(); }
     /** @return \Illuminate\Database\Eloquent\Builder<static> */
@@ -744,7 +745,6 @@ class User extends Model {
 }
 
 #[tokio::test]
-#[ignore = "known gap: a parent model's `$fillable`/`$casts` do not reach the child"]
 async fn columns_declared_on_a_parent_model_are_inherited() {
     let base_php = r#"<?php
 namespace App\Models;
@@ -780,6 +780,130 @@ class User extends BaseModel {
     assert!(
         props.contains(&"is_archived"),
         "a cast declared on the parent model should be inherited, got: {props:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_subclass_inherits_each_model_setting_it_does_not_redeclare() {
+    let base_php = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class BaseModel extends Model {
+    protected $fillable = ['uuid'];
+    protected $hidden = ['secret_token'];
+    protected $casts = ['is_archived' => 'boolean'];
+}
+"#;
+    let (user_php, pos) = split_cursor(
+        r#"<?php
+namespace App\Models;
+class User extends BaseModel {
+    protected $hidden = [];
+    protected function casts(): array {
+        return ['nickname' => 'string'];
+    }
+    public function demo() {
+        $user = new User();
+        $user->§
+    }
+}
+"#,
+    );
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/BaseModel.php", base_php),
+        ("src/Models/User.php", user_php.as_str()),
+    ]);
+
+    let items = complete(&backend, &dir, "src/Models/User.php", &user_php, pos).await;
+    let props = property_names(&items);
+
+    assert!(
+        props.contains(&"uuid"),
+        "redeclaring `$hidden` should keep the parent's `$fillable`, got: {props:?}"
+    );
+    assert!(
+        !props.contains(&"secret_token"),
+        "an empty `$hidden` on the child hides the parent's, got: {props:?}"
+    );
+    assert!(
+        props.contains(&"nickname"),
+        "the child's own `casts()` should apply, got: {props:?}"
+    );
+    assert!(
+        single_property_detail(&items, "is_archived").contains("bool"),
+        "a `casts()` method on the child merges over the parent's `$casts` property"
+    );
+    assert!(
+        !props.contains(&"*"),
+        "the framework Model's `$guarded = ['*']` is a default, not a column, got: {props:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_date_cast_resolves_to_the_configured_date_class_inside_a_namespace() {
+    let date_php = r#"<?php
+namespace App\Models;
+class BakeryDate {
+    public function isFresh(): bool { return true; }
+}
+"#;
+    let (invoice_php, pos) = split_cursor(
+        r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class Invoice extends Model {
+    protected $casts = ['paid_at' => 'datetime'];
+    public function demo() {
+        $this->paid_at->§
+    }
+}
+"#,
+    );
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/BakeryDate.php", date_php),
+        ("src/Models/Invoice.php", invoice_php.as_str()),
+    ]);
+    *backend.laravel_date_class().write() = Some(Some("App\\Models\\BakeryDate".to_string()));
+
+    let items = complete(&backend, &dir, "src/Models/Invoice.php", &invoice_php, pos).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"isFresh"),
+        "a `datetime` cast should resolve to the configured date class, got: {methods:?}"
+    );
+}
+
+#[tokio::test]
+async fn where_methods_cover_columns_declared_on_a_parent_model() {
+    let base_php = r#"<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+class BaseModel extends Model {
+    protected $fillable = ['email_address'];
+}
+"#;
+    let (user_php, pos) = split_cursor(
+        r#"<?php
+namespace App\Models;
+class User extends BaseModel {
+    public function demo() {
+        User::§
+    }
+}
+"#,
+    );
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/BaseModel.php", base_php),
+        ("src/Models/User.php", user_php.as_str()),
+    ]);
+
+    let items = complete(&backend, &dir, "src/Models/User.php", &user_php, pos).await;
+    let methods = method_names(&items);
+
+    assert!(
+        methods.contains(&"whereEmailAddress"),
+        "a fillable column declared on the parent model should get a where method, got: {methods:?}"
     );
 }
 
