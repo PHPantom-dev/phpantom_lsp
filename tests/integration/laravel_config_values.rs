@@ -163,7 +163,6 @@ async fn a_double_quoted_key_is_declared() {
 /// A key whose name contains an escaped quote is named by its unescaped
 /// spelling, which is the string `config()` is called with.
 #[tokio::test]
-#[ignore = "known gap: config key enumeration reads a key's raw source instead of its value"]
 async fn a_key_with_an_escaped_quote_is_named_by_its_value() {
     let config = "<?php\nreturn [\n    'it\\'s' => 'escaped',\n];\n";
     let consumer = demo("        config(\"app.it's\");");
@@ -261,10 +260,9 @@ async fn an_empty_string_value_is_a_string() {
     assert!(hover.contains("string"), "got {hover}");
 }
 
-/// A list of class names is not an empty array: its entries have no string
-/// keys, but they are still there.
+/// A list of class names is a list of those classes, not an empty array:
+/// its entries have no string keys, but they are still there.
 #[tokio::test]
-#[ignore = "known gap: a config list value reads as an empty shape"]
 async fn a_list_value_is_not_an_empty_array() {
     let config = "<?php\nreturn [\n    'handlers' => [\n        App\\Handlers\\First::class,\n        App\\Handlers\\Second::class,\n    ],\n];\n";
     let consumer = demo("        $handlers = config('pipeline.handlers');\n        $handlers;");
@@ -277,8 +275,8 @@ async fn a_list_value_is_not_an_empty_array() {
 
     let hover = hover_on(&backend, &uri, &consumer, "$handlers;").await;
     assert!(
-        hover.contains("array") && !hover.contains("array{}"),
-        "a two-entry list should not read as an empty shape, got {hover}"
+        hover.contains("list<class-string<First>|class-string<Second>>"),
+        "a two-entry list should read as a list of its entries, got {hover}"
     );
 }
 
@@ -401,7 +399,6 @@ async fn the_applications_published_config_wins_over_the_package_default() {
 /// application publishes replaces the package's group whole, so a nested
 /// key only the package's copy had is gone.
 #[tokio::test]
-#[ignore = "known gap: config defaults are merged recursively instead of Laravel's top-level merge"]
 async fn a_published_group_replaces_the_packages_group_whole() {
     let app_config = "<?php\nreturn [\n    'theme' => [\n        'color' => 'red',\n    ],\n];\n";
     let consumer =
@@ -446,7 +443,6 @@ async fn definition_of_a_package_key_reaches_the_package_file() {
 /// it left out is still declared in the package's file, and that is where
 /// go-to-definition belongs.
 #[tokio::test]
-#[ignore = "known gap: config go-to-definition never falls back to a package or framework file"]
 async fn definition_of_an_unpublished_package_key_reaches_the_package_file() {
     let app_config = "<?php\nreturn [\n    'prefix' => 'app-',\n];\n";
     let consumer = demo("        config('widgets.size');");
@@ -564,7 +560,6 @@ async fn a_framework_default_key_the_application_omits_is_known() {
 /// Go-to-definition on a framework default the application does not
 /// override lands on the framework's declaration of it.
 #[tokio::test]
-#[ignore = "known gap: config go-to-definition never falls back to a package or framework file"]
 async fn definition_of_a_framework_default_key_reaches_the_framework_file() {
     let consumer = demo("        config('app.faker_locale');");
     let (backend, _dir, uri) = create_initialized_psr4_workspace(
@@ -630,7 +625,6 @@ async fn a_mergeable_framework_option_keeps_the_entries_the_application_omits() 
 /// framework's whole: its `mysql` connection has no `host`, and its
 /// `redis` group has no `options`.
 #[tokio::test]
-#[ignore = "known gap: config defaults are merged recursively instead of Laravel's top-level merge"]
 async fn an_application_group_replaces_the_framework_group_whole() {
     let consumer = demo(
         "        config('database.connections.mysql.host');\n        config('database.redis.options');\n        $redis = config('database.redis');\n        $redis;",

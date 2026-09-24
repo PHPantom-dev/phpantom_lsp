@@ -72,6 +72,24 @@ pub(crate) fn collect_laravel_config_declarations(
     out
 }
 
+/// Where a config file comes from, which decides how Laravel merges it
+/// beneath the files that take precedence over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigSourceKind {
+    /// A file in the application's own `config/` directory.
+    Project,
+    /// A package file a service provider registers with `mergeConfigFrom()`.
+    Package,
+    /// One of the framework's own defaults, which `LoadConfiguration`
+    /// merges beneath the application's file of the same name.
+    Framework,
+}
+
+/// The directory holding the framework's default config files.
+fn framework_config_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("vendor/laravel/framework/config")
+}
+
 // ─── Keys declared at runtime ─────────────────────────────────────────────────
 
 /// The config keys a single file declares at runtime, read from the
@@ -180,7 +198,10 @@ impl Backend {
     /// and deadlocks. Only the files' contents are needed, not their symbol
     /// maps. Files that are open in the editor but not yet on disk are taken
     /// from the already-parsed snapshot, without blocking on the index.
-    pub(crate) fn for_each_config_source(&self, mut visit: impl FnMut(&str, &str)) {
+    pub(crate) fn for_each_config_source(
+        &self,
+        mut visit: impl FnMut(&str, ConfigSourceKind, &str),
+    ) {
         let workspace_root = self.workspace.workspace_root.read().clone();
         let mut config_uris: Vec<String> = Vec::new();
         if let Some(root) = &workspace_root {
@@ -210,20 +231,20 @@ impl Backend {
                 continue;
             };
             if let Some(content) = self.get_file_content_arc(file_uri) {
-                visit(&prefix, &content);
+                visit(&prefix, ConfigSourceKind::Project, &content);
             }
         }
 
         for res in &self.laravel_provider_resources.read().config_files {
             if let Ok(content) = std::fs::read_to_string(&res.path) {
-                visit(&res.namespace, &content);
+                visit(&res.namespace, ConfigSourceKind::Package, &content);
             }
         }
 
         let Some(root) = workspace_root else {
             return;
         };
-        let Ok(entries) = std::fs::read_dir(root.join("vendor/laravel/framework/config")) else {
+        let Ok(entries) = std::fs::read_dir(framework_config_dir(&root)) else {
             return;
         };
         for entry in entries.flatten() {
@@ -235,7 +256,7 @@ impl Backend {
                 continue;
             };
             if let Ok(content) = std::fs::read_to_string(&path) {
-                visit(stem, &content);
+                visit(stem, ConfigSourceKind::Framework, &content);
             }
         }
     }
@@ -299,53 +320,58 @@ pub(crate) fn find_config_references(
 /// Called from `resolve_from_symbol` when the symbol map contains a
 /// [`SymbolKind::LaravelStringKey`] span with `kind == Config` at the cursor —
 /// no file re-parse is needed for the usage side.
+///
+/// The files that can declare the key are tried in the order Laravel lets
+/// them win: the application's `config/` files, then the package files
+/// service providers merge beneath them, then the framework's defaults.
+/// The first that declares the key is the one whose value survives the
+/// merge.  When none does, the key's own file is still the best place to
+/// land.
 pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Option<Location> {
     let parts: Vec<&str> = key.split('.').collect();
     let root = backend.workspace.workspace_root.read().clone()?;
+
+    let mut candidates: Vec<(String, std::path::PathBuf)> = Vec::new();
     let config_dir = root.join("config");
-
     for i in 1..=parts.len() {
-        let (file_parts, _) = parts.split_at(i);
-        let rel_path = file_parts.join("/");
-        let config_path = config_dir.join(format!("{}.php", rel_path));
-
-        if config_path.is_file() {
-            let target_uri = Url::from_file_path(&config_path).ok()?;
-            let target_uri_string = target_uri.to_string();
-            let target_content = backend.get_file_content(&target_uri_string)?;
-
-            let stem = file_parts.join(".");
-            let declarations = collect_laravel_config_declarations(&target_content, &stem);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::text_position::offset_to_position(&target_content, decl.start);
-                return Some(crate::definition::point_location(target_uri, pos));
-            }
-
-            return Some(crate::definition::point_location(
-                target_uri,
-                Position::new(0, 0),
-            ));
+        let file_parts = &parts[..i];
+        let path = config_dir.join(format!("{}.php", file_parts.join("/")));
+        if path.is_file() {
+            candidates.push((file_parts.join("."), path));
         }
     }
-
-    let first_part = parts.first()?;
     for res in &backend.laravel_provider_resources.read().config_files {
-        if res.namespace == *first_part && res.path.is_file() {
-            let target_uri = Url::from_file_path(&res.path).ok()?;
-            let target_content = std::fs::read_to_string(&res.path).ok()?;
-            let declarations = collect_laravel_config_declarations(&target_content, &res.namespace);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::text_position::offset_to_position(&target_content, decl.start);
-                return Some(crate::definition::point_location(target_uri, pos));
-            }
-            return Some(crate::definition::point_location(
-                target_uri,
-                Position::new(0, 0),
-            ));
+        let covers = key
+            .strip_prefix(res.namespace.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'));
+        if covers && res.path.is_file() {
+            candidates.push((res.namespace.clone(), res.path.clone()));
+        }
+    }
+    if let Some(first) = parts.first() {
+        let path = framework_config_dir(&root).join(format!("{first}.php"));
+        if path.is_file() {
+            candidates.push((first.to_string(), path));
         }
     }
 
-    None
+    let mut fallback = None;
+    for (prefix, path) in candidates {
+        let Ok(target_uri) = Url::from_file_path(&path) else {
+            continue;
+        };
+        let Some(target_content) = backend.get_file_content_arc(target_uri.as_str()) else {
+            continue;
+        };
+        let declarations = collect_laravel_config_declarations(&target_content, &prefix);
+        if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+            let pos = crate::text_position::offset_to_position(&target_content, decl.start);
+            return Some(crate::definition::point_location(target_uri, pos));
+        }
+        fallback.get_or_insert(target_uri);
+    }
+
+    fallback.map(|uri| crate::definition::point_location(uri, Position::new(0, 0)))
 }
 
 /// Find all references for a Laravel config key across the project.

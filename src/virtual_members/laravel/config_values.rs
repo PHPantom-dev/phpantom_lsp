@@ -25,6 +25,7 @@ use mago_allocator::LocalArena;
 use mago_database::file::FileId;
 use mago_syntax::cst::*;
 
+use super::config_keys::ConfigSourceKind;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, ShapeEntry};
@@ -179,6 +180,21 @@ impl ConfigNode {
                     .collect();
                 PhpType::array_shape(shape_entries)
             }
+            ConfigNode::List(items) => {
+                let mut members: Vec<PhpType> = Vec::new();
+                for item in items {
+                    let ty = item.to_php_type();
+                    if !members.contains(&ty) {
+                        members.push(ty);
+                    }
+                }
+                let element = if members.len() == 1 {
+                    members.pop().unwrap_or_else(PhpType::mixed)
+                } else {
+                    PhpType::union(members)
+                };
+                PhpType::list(element)
+            }
         }
     }
 }
@@ -195,6 +211,9 @@ pub(crate) enum ConfigNode {
     /// A nested array, ordered by declaration so callers can enumerate keys
     /// for fan-out (e.g. every configured guard).
     Array(Vec<(String, ConfigNode)>),
+    /// An array whose entries have no string keys, e.g. a list of handler
+    /// classes.  Its positions are not config keys.
+    List(Vec<ConfigNode>),
     /// A leaf value.
     Leaf(ConfigValue),
 }
@@ -221,7 +240,7 @@ impl ConfigNode {
     pub(crate) fn child_keys(&self) -> Vec<String> {
         match self {
             ConfigNode::Array(entries) => entries.iter().map(|(key, _)| key.clone()).collect(),
-            ConfigNode::Leaf(_) => Vec::new(),
+            ConfigNode::List(_) | ConfigNode::Leaf(_) => Vec::new(),
         }
     }
 
@@ -229,27 +248,44 @@ impl ConfigNode {
     pub(crate) fn value_at(&self, path: &[&str]) -> Option<&ConfigValue> {
         match self.get(path)? {
             ConfigNode::Leaf(value) => Some(value),
-            ConfigNode::Array(_) => None,
+            ConfigNode::Array(_) | ConfigNode::List(_) => None,
         }
     }
 
-    /// Fill in keys present in `defaults` but absent here, recursing into
-    /// nested arrays.  Keys already present keep their higher-precedence
-    /// value, so a project config file wins over the framework defaults it
-    /// only partially overrides.  A leaf on either side is authoritative: an
-    /// existing leaf is never replaced by a default array, and a default leaf
-    /// never merges into an existing array.
-    fn merge_defaults(&mut self, defaults: ConfigNode) {
+    /// Every key beneath this node, spelled as a dotted path under `prefix`:
+    /// groups and leaves alike, but not the positions of a list.
+    pub(crate) fn collect_keys(&self, prefix: &str, out: &mut Vec<String>) {
+        let ConfigNode::Array(entries) = self else {
+            return;
+        };
+        for (key, child) in entries {
+            let dotted = format!("{prefix}.{key}");
+            child.collect_keys(&dotted, out);
+            out.push(dotted);
+        }
+    }
+
+    /// Merge a lower-precedence config beneath this one the way
+    /// `array_merge($lower, $this)` does: a top-level key this config
+    /// declares keeps its whole value, however much of it `lower` spells
+    /// out, and only the keys it leaves out are taken from `lower`.  The
+    /// keys named in `deep` are merged one level further, which is what
+    /// `LoadConfiguration` does for the framework's mergeable options.
+    fn merge_beneath(&mut self, lower: ConfigNode, deep: &[&str]) {
         let ConfigNode::Array(target) = self else {
             return;
         };
-        let ConfigNode::Array(source) = defaults else {
+        let ConfigNode::Array(source) = lower else {
             return;
         };
-        for (key, default_child) in source {
+        for (key, lower_child) in source {
             match target.iter_mut().find(|(k, _)| *k == key) {
-                Some((_, existing)) => existing.merge_defaults(default_child),
-                None => target.push((key, default_child)),
+                Some((_, existing)) => {
+                    if deep.contains(&key.as_str()) {
+                        existing.merge_beneath(lower_child, &[]);
+                    }
+                }
+                None => target.push((key, lower_child)),
             }
         }
     }
@@ -320,7 +356,54 @@ fn node_from_expr(
         Expression::Parenthesized(p) => node_from_expr(p.expression, content, use_map),
         Expression::Array(arr) => array_node(arr.elements.iter(), content, use_map),
         Expression::LegacyArray(arr) => array_node(arr.elements.iter(), content, use_map),
+        Expression::Call(Call::Function(fc)) if matches!(fc.function, Expression::Identifier(ident) if ident.value().eq_ignore_ascii_case(b"array_merge")) => {
+            array_merge_node(fc, content, use_map)
+        }
         other => ConfigNode::Leaf(classify_value(other, content, use_map)),
+    }
+}
+
+/// `array_merge()` over config arrays: a later string key replaces an
+/// earlier one, and positional entries are appended.  An argument that is
+/// not an array literal contributes keys we cannot see, so only the ones
+/// spelled out are kept.
+fn array_merge_node(
+    fc: &FunctionCall<'_>,
+    content: &str,
+    use_map: &HashMap<String, String>,
+) -> ConfigNode {
+    let mut entries: Vec<(String, ConfigNode)> = Vec::new();
+    let mut items = Vec::new();
+    for arg in fc.argument_list.arguments.iter() {
+        match node_from_expr(arg.value(), content, use_map) {
+            ConfigNode::Array(arg_entries) => {
+                for (key, node) in arg_entries {
+                    set_entry(&mut entries, key, node);
+                }
+            }
+            ConfigNode::List(arg_items) => items.extend(arg_items),
+            ConfigNode::Leaf(_) => {}
+        }
+    }
+    array_or_list(entries, items)
+}
+
+/// Store `node` under `key`, replacing an earlier entry of the same key in
+/// place the way PHP does for a duplicate array key.
+fn set_entry(entries: &mut Vec<(String, ConfigNode)>, key: String, node: ConfigNode) {
+    match entries.iter_mut().find(|(k, _)| *k == key) {
+        Some((_, existing)) => *existing = node,
+        None => entries.push((key, node)),
+    }
+}
+
+/// An array with only positional entries is a list; one with any string
+/// key is read by its keys.
+fn array_or_list(entries: Vec<(String, ConfigNode)>, items: Vec<ConfigNode>) -> ConfigNode {
+    if entries.is_empty() && !items.is_empty() {
+        ConfigNode::List(items)
+    } else {
+        ConfigNode::Array(entries)
     }
 }
 
@@ -330,24 +413,39 @@ fn array_node<'a>(
     use_map: &HashMap<String, String>,
 ) -> ConfigNode {
     let mut entries = Vec::new();
+    let mut items = Vec::new();
     for element in elements {
-        let ArrayElement::KeyValue(kv) = element else {
-            continue;
+        let kv = match element {
+            ArrayElement::KeyValue(kv) => kv,
+            ArrayElement::Value(value) => {
+                items.push(node_from_expr(value.value, content, use_map));
+                continue;
+            }
+            _ => continue,
         };
         // The literal's unescaped value, as PHP reads it: `'it\'s'` is the
         // key `it's`.
-        let Expression::Literal(literal::Literal::String(key)) = kv.key else {
-            continue;
+        let key_text = match kv.key {
+            Expression::Literal(literal::Literal::String(key)) => {
+                match key.value.and_then(|v| std::str::from_utf8(v).ok()) {
+                    Some(text) => text,
+                    None => continue,
+                }
+            }
+            // `0 => …` is a position like any other.
+            Expression::Literal(literal::Literal::Integer(_)) => {
+                items.push(node_from_expr(kv.value, content, use_map));
+                continue;
+            }
+            _ => continue,
         };
-        let Some(key_text) = key.value.and_then(|v| std::str::from_utf8(v).ok()) else {
-            continue;
-        };
-        entries.push((
+        set_entry(
+            &mut entries,
             key_text.to_string(),
             node_from_expr(kv.value, content, use_map),
-        ));
+        );
     }
-    ConfigNode::Array(entries)
+    array_or_list(entries, items)
 }
 
 /// Classify a leaf value expression into a [`ConfigValue`].
@@ -426,6 +524,23 @@ fn classify_call(
     }
 }
 
+/// The options of a framework config file that `LoadConfiguration` merges
+/// entry by entry rather than letting the application's value replace
+/// them whole, as listed in its `mergeableOptions()`.
+fn framework_mergeable_options(file: &str) -> &'static [&'static str] {
+    match file {
+        "auth" => &["guards", "providers", "passwords"],
+        "broadcasting" => &["connections"],
+        "cache" => &["stores"],
+        "database" => &["connections"],
+        "filesystems" => &["disks"],
+        "logging" => &["channels"],
+        "mail" => &["mailers"],
+        "queue" => &["connections"],
+        _ => &[],
+    }
+}
+
 /// Append a classified value into a `OneOf` accumulator, flattening nested
 /// `OneOf`s so ternary chains stay a single flat set of arms.
 fn flatten_one_of(value: ConfigValue, out: &mut Vec<ConfigValue>) {
@@ -474,17 +589,24 @@ impl Backend {
     }
 
     fn enumerate_config_trees(&self) -> Vec<(String, ConfigNode)> {
-        // Lower-precedence sources only fill keys the higher-precedence tree
-        // for the same prefix leaves unset, so a project `config/app.php` that
-        // publishes just a handful of keys still inherits the framework
-        // defaults for everything it does not override.
+        // Lower-precedence sources only fill the top-level keys the
+        // higher-precedence tree for the same prefix leaves unset, so a
+        // project `config/app.php` that publishes just a handful of keys
+        // still inherits the framework defaults for everything it does not
+        // override, while a group it does publish is its own whole value.
         let mut trees: Vec<(String, ConfigNode)> = Vec::new();
-        self.for_each_config_source(|prefix, content| {
+        self.for_each_config_source(|prefix, kind, content| {
             let Some(tree) = parse_config_tree(content) else {
                 return;
             };
             match trees.iter_mut().find(|(p, _)| p == prefix) {
-                Some((_, existing)) => existing.merge_defaults(tree),
+                Some((_, existing)) => {
+                    let deep = match kind {
+                        ConfigSourceKind::Framework => framework_mergeable_options(prefix),
+                        ConfigSourceKind::Project | ConfigSourceKind::Package => &[],
+                    };
+                    existing.merge_beneath(tree, deep);
+                }
                 None => trees.push((prefix.to_string(), tree)),
             }
         });

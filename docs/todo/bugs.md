@@ -98,57 +98,17 @@ across *different* call sites.
 **Tests:** `laravel_view_names::a_duplicate_key_in_the_data_array_keeps_the_last_value`
 and `a_with_call_replaces_the_same_key_from_the_data_argument`.
 
-## B344. A config list value reads as an empty shape
-
-**Impact: Low-Medium · Complexity: Low**
-
-`'handlers' => [FooHandler::class, BarHandler::class]` makes
-`config('logging.handlers')` hover as `array{}`: `array_node` in
-`src/virtual_members/laravel/config_values.rs` skips every element without
-a key. A keyless array is a list and should type as one (`list<…>` of its
-element types, or at least a non-empty `array`).
-
-**Test:** `laravel_config_values::a_list_value_is_not_an_empty_array`.
-
-## B345. Config key enumeration reads a key's raw source instead of its value
+## B358. A string key argument is read from its raw source, not its value
 
 **Impact: Low · Complexity: Low**
 
-`'it\'s' => …` declares the key `it's`, but the unknown-config-key
-diagnostic flags `config('app.it\'s')`/`config("app.it's")` because the key
-reader (`src/virtual_members/laravel/config_keys.rs` and the enumeration
-behind completion) slices the literal's source text. Read the literal's
-unescaped `value`, as `config_values.rs` now does.
-
-**Test:** `laravel_config_values::a_key_with_an_escaped_quote_is_named_by_its_value`.
-
-## B346. Config defaults are merged recursively instead of Laravel's top-level merge
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`mergeConfigFrom()` is `array_merge($package, $app)`: a group the
-application publishes replaces the package's group whole. The framework's
-own defaults (`LoadConfiguration`) merge one level deeper, and only for its
-list of mergeable options. `merge_defaults` merges at every level and key
-enumeration takes the union of all sources, so keys the application
-deliberately removed are still offered and accepted.
-
-**Tests:** `laravel_config_values::a_published_group_replaces_the_packages_group_whole`
-and `an_application_group_replaces_the_framework_group_whole`.
-
-## B347. Config go-to-definition never falls back to a package or framework file
-
-**Impact: Low-Medium · Complexity: Medium**
-
-When `config/<file>.php` exists, `resolve_config_key_declaration`
-(`config_keys.rs`) returns line 0 of it even when the key is declared only
-by the package's config (`mergeConfigFrom`) or the framework's
-`vendor/laravel/framework/config/<file>.php`. The key is known (no
-diagnostic, hover types it), so navigation should reach the file that
-declares it.
-
-**Tests:** `laravel_config_values::definition_of_an_unpublished_package_key_reaches_the_package_file`
-and `definition_of_a_framework_default_key_reaches_the_framework_file`.
+`config('app.it\'s')` names the key `it's`, but `push_laravel_string_span`
+(`src/symbol_map/extraction/laravel.rs`) slices the literal's source text, so
+the call site records `app.it\'s` and the unknown-key diagnostic flags a key
+the config declares. The same helper feeds every Laravel string kind (routes,
+views, translations), so any key spelled with an escape sequence is misread.
+The key should come from the literal's unescaped `value`; the span stays on
+the source text.
 
 ## B357. The pivot index only sees relationships in files already parsed
 

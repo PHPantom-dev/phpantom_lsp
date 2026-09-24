@@ -99,11 +99,8 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B357 | [The pivot index only sees relationships in files already parsed](todo/bugs.md#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed)                    | Medium      | Medium      |
-| B344 | [A config list value reads as an empty shape](todo/bugs.md#b344-a-config-list-value-reads-as-an-empty-shape)                                                              | Low-Medium  | Low         |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
-| B346 | [Config defaults are merged recursively instead of Laravel's top-level merge](todo/bugs.md#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge) | Low-Medium  | Medium      |
-| B347 | [Config go-to-definition never falls back to a package or framework file](todo/bugs.md#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file)      | Low-Medium  | Medium      |
-| B345 | [Config key enumeration reads a key's raw source instead of its value](todo/bugs.md#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value)             | Low         | Low         |
+| B358 | [A string key argument is read from its raw source, not its value](todo/bugs.md#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value)                   | Low         | Low         |
 | B341 | [Any `->name()` call in a route file registers a route](todo/bugs.md#b341-any-name-call-in-a-route-file-registers-a-route)                                                | Low         | Medium      |
 | B343 | [View call-site data unions a key's values instead of keeping the last write](todo/bugs.md#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |

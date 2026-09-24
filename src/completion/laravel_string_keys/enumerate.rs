@@ -10,19 +10,14 @@ use std::collections::HashMap;
 use crate::Backend;
 
 impl Backend {
-    /// Enumerate all config keys by scanning `config/` files and
-    /// package config files discovered from service providers.
+    /// Enumerate all config keys the merged configuration holds: the
+    /// project's `config/` files with the package and framework defaults
+    /// merged beneath them, the way Laravel merges them.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
-        use crate::virtual_members::laravel::collect_laravel_config_declarations;
-
         let mut keys = Vec::new();
-        self.for_each_config_source(|prefix, content| {
-            keys.extend(
-                collect_laravel_config_declarations(content, prefix)
-                    .into_iter()
-                    .map(|d| d.key),
-            );
-        });
+        for (prefix, tree) in self.cached_config_trees().iter() {
+            tree.collect_keys(prefix, &mut keys);
+        }
         keys.sort();
         keys.dedup();
         keys
