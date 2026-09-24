@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790238016305,
+  "lastUpdate": 1790238237126,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30565,6 +30565,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9022af205d2d6cc600ee30602bcd348f2ec3ade0",
+          "message": "A config, route, view, or translation key argument spelled with an\nescaped quote is known by the name PHP reads",
+          "timestamp": "2026-09-24T10:06:00+02:00",
+          "tree_id": "5cbca4e16060df85708931e43a93262361687623",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9022af205d2d6cc600ee30602bcd348f2ec3ade0"
+        },
+        "date": 1790238227917,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.2,
             "unit": "MiB"
           }
         ]
