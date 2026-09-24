@@ -1158,17 +1158,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b355-loop-parent-is-typed-object-not-the-loop-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B355. <code>$loop-&gt;parent</code> is typed <code>?object</code>, not the loop shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1977,17 +1966,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b355-loop-parent-is-typed-object-not-the-loop-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B355. <code>$loop-&gt;parent</code> is typed <code>?object</code>, not the loop shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2255,12 +2233,6 @@ inside the open comment. Laravel balances directive parentheses with
 <code>/* */</code>, <code>//</code>, or <code>#</code> comments.</p>
 <p><strong>Tests:</strong> <code>blade_preprocessing::a_paren_inside_a_block_comment_does_not_close_the_header</code>
 and <code>a_multi_line_block_comment_holding_a_paren_does_not_close_the_header</code>.</p>
-<h2 id="b355-loop-parent-is-typed-object-not-the-loop-shape">B355. <code>$loop-&gt;parent</code> is typed <code>?object</code>, not the loop shape<a class="headerlink" href="#b355-loop-parent-is-typed-object-not-the-loop-shape" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>In a nested <code>@foreach</code>, <code>$loop-&gt;parent</code> is the outer loop's <code>$loop</code>, but
-the injected declaration (<code>src/blade/preprocessor/directive.rs</code>) types it
-<code>?object</code>, so <code>$loop-&gt;parent-&gt;index</code> offers nothing.</p>
-<p><strong>Test:</strong> <code>blade_preprocessing::loop_parent_in_a_nested_loop_offers_the_outer_loops_members</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
