@@ -328,7 +328,6 @@ async fn reference_ranges_after_multibyte_text_are_utf16_columns() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: hover finds no symbol at a non-ASCII identifier"]
 async fn a_multibyte_variable_name_resolves_its_type() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///multibyte_variable.php").unwrap();
@@ -354,7 +353,6 @@ $café->";
 }
 
 #[tokio::test]
-#[ignore = "known gap: hover finds no symbol at a non-ASCII identifier"]
 async fn a_multibyte_class_name_resolves_its_static_members() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///multibyte_class.php").unwrap();

@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | B346 | [Config defaults are merged recursively instead of Laravel's top-level merge](todo/bugs.md#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge) | Low-Medium  | Medium      |
 | B347 | [Config go-to-definition never falls back to a package or framework file](todo/bugs.md#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file)      | Low-Medium  | Medium      |
 | B351 | [Package-tools `hasTranslations()` registers nothing](todo/bugs.md#b351-package-tools-hastranslations-registers-nothing)                                                  | Low-Medium  | Medium      |
-| B336 | [Hover finds no symbol at a non-ASCII identifier](todo/bugs.md#b336-hover-finds-no-symbol-at-a-non-ascii-identifier)                                                      | Low         | Low         |
 | B345 | [Config key enumeration reads a key's raw source instead of its value](todo/bugs.md#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value)             | Low         | Low         |
 | B350 | [A `dirname(__DIR__)` path argument is not followed](todo/bugs.md#b350-a-dirname__dir__-path-argument-is-not-followed)                                                    | Low         | Low         |
 | B353 | [`.env.<environment>` files are not read](todo/bugs.md#b353-envenvironment-files-are-not-read)                                                                            | Low         | Low         |

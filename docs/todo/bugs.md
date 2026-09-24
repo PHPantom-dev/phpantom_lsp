@@ -42,18 +42,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-## B336. Hover finds no symbol at a non-ASCII identifier
-
-**Impact: Low · Complexity: Low**
-
-PHP identifiers may contain any byte from `0x80` up, so `$café` and
-`class Modèl` are legal. Completion after `$café->` and `Modèl::` works,
-but hover with the cursor on the identifier itself returns nothing: the
-word-at-cursor scan only accepts ASCII identifier characters.
-
-**Tests:** `position_encoding_robustness::a_multibyte_variable_name_resolves_its_type`
-and `a_multibyte_class_name_resolves_its_static_members`.
-
 ## B337. An unqualified class name inside a namespace falls back to a global alias
 
 **Impact: Low-Medium · Complexity: Medium**

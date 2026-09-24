@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Hover works on an unfinished `->` or `::` at the end of a file.** Typing `$user->` or `Model::` and pausing to check the receiver's type before finishing the member name showed nothing: the incomplete statement has no member name to parse yet, so it was dropped from the file's symbol map entirely rather than kept as a partial result. Hovering the variable or class name itself now falls back to reading it straight from the source in that case.
 - **Blade component discovery reads every directory of an array PSR-4 mapping.** With `"App\\": ["app/", "src/"]`, `<x-badge>` backed by `src/View/Components/Badge.php` is now found: previously only the first directory of the mapping was scanned.
 - **`$loop->parent` inside a nested `@foreach` offers the outer loop's members.** It used to type as bare `?object`, so `$loop->parent->index` and the rest of Blade's loop variable offered nothing.
 - **A `for` loop's counter reads as `int` inside the body.** In `for ($i = 0; $i < 10; $i++)`, hovering `$i` in the body showed the literal `0` it starts at, as if the loop only ever ran once. The `$i++` in the header (or a lone `$i++` in any loop body) now carries into the iterations that follow, in PHP files and in Blade `@for` loops alike.
