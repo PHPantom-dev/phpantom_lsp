@@ -314,16 +314,17 @@ impl Backend {
     }
 
     /// Mark the reverse pivot index stale when `content` (at `uri`) affects
-    /// many-to-many relationships — either it now contains a `belongsToMany`/
-    /// `morphToMany` call, or it previously contributed one (an edit may have
+    /// many-to-many relationships — either it now looks like it declares
+    /// one, or it previously contributed one (an edit may have
     /// removed the last such relation). A no-op for unrelated edits.
     pub(crate) fn refresh_laravel_pivots(&self, uri: &str, content: &str) {
         use std::sync::atomic::Ordering;
         if self.laravel_pivots_dirty.load(Ordering::Relaxed) {
             return;
         }
-        let has_m2m = memchr::memmem::find(content.as_bytes(), b"belongsToMany").is_some()
-            || memchr::memmem::find(content.as_bytes(), b"morphToMany").is_some();
+        let has_m2m = crate::virtual_members::laravel::source_may_declare_pivot_relationship(
+            content.as_bytes(),
+        );
         if has_m2m || self.laravel_pivots.read().contributes(uri) {
             self.laravel_pivots_dirty.store(true, Ordering::Relaxed);
             // A pivot accessor is attached to the *target* model, which the

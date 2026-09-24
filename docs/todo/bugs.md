@@ -110,20 +110,6 @@ views, translations), so any key spelled with an escape sequence is misread.
 The key should come from the literal's unescaped `value`; the span stays on
 the source text.
 
-## B357. The pivot index only sees relationships in files already parsed
-
-**Impact: Medium · Complexity: Medium**
-
-`rebuild_laravel_pivot_index` (`src/resolution.rs`) builds the reverse
-pivot index from `uri_classes_index`, so a model only gets its `$pivot`
-(or `->as()`-renamed) property when the file declaring the
-`belongsToMany` that targets it has been parsed. `phpantom_lsp analyze
---project-root examples/laravel examples/laravel/app/Demo.php` reports
-`Property 'pivot' not found on class 'App\Models\BakeryRecipe'` (and the
-same for `ingredient`), which the full-project run does not, because
-`Bakery.php` is never parsed. The index needs the relationship methods of
-every model the classmap knows about, not just the loaded ones.
-
 ## Blade
 
 No outstanding items.

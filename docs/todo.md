@@ -98,7 +98,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B357 | [The pivot index only sees relationships in files already parsed](todo/bugs.md#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed)                    | Medium      | Medium      |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
 | B358 | [A string key argument is read from its raw source, not its value](todo/bugs.md#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value)                   | Low         | Low         |
 | B341 | [Any `->name()` call in a route file registers a route](todo/bugs.md#b341-any-name-call-in-a-route-file-registers-a-route)                                                | Low         | Medium      |

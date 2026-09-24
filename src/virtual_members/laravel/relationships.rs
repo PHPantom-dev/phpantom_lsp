@@ -199,6 +199,14 @@ pub(crate) fn is_pivot_relationship(return_type: &PhpType) -> bool {
     PIVOT_RELATIONSHIPS.contains(&short_name(base))
 }
 
+/// Cheap byte pre-filter: whether PHP `source` could declare a many-to-many
+/// relationship, either through a `BelongsToMany`/`MorphToMany` return type
+/// or a `belongsToMany`/`morphToMany`/`morphedByMany` builder call.
+pub(crate) fn source_may_declare_pivot_relationship(source: &[u8]) -> bool {
+    memchr::memmem::find(source, b"ToMany").is_some()
+        || memchr::memmem::find(source, b"edByMany").is_some()
+}
+
 /// Whether `class` declares at least one many-to-many relationship method,
 /// i.e. one whose related models carry a `$pivot`.
 pub(crate) fn class_declares_pivot_relationship(class: &ClassInfo) -> bool {

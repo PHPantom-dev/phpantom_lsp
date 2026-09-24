@@ -118,7 +118,9 @@ pub(crate) fn parse_user_files(
 /// providers.  Without it the `now()`/`today()` helpers and the Date
 /// facade resolve to nothing, `config()`/`view()`/`trans()`/`route()`
 /// string keys are all unknown, and morph aliases, gate abilities, Artisan
-/// command names, and vendor-registered macros read as invalid, so a run
+/// command names, and vendor-registered macros read as invalid, and a
+/// many-to-many target declared outside the analysed paths has no `$pivot`,
+/// so a run
 /// would report (or fix against) false positives.  A project that is not
 /// Laravel has nothing to discover.
 pub(crate) fn discover_laravel_resources(backend: &Backend) {
@@ -135,4 +137,5 @@ pub(crate) fn discover_laravel_resources(backend: &Backend) {
     // FQN index the vendor entries are missing.
     backend.build_laravel_command_index();
     backend.build_laravel_macro_index(&providers);
+    backend.load_laravel_pivot_sources();
 }

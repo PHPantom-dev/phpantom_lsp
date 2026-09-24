@@ -553,6 +553,7 @@ impl Backend {
             let discovered = run_blocking_cancel_safe("build_laravel_indexes", move || {
                 index_backend.build_laravel_provider_indexes();
                 index_backend.build_laravel_command_index();
+                index_backend.load_laravel_pivot_sources();
 
                 // Build the Blade index now that the view roots and component
                 // namespaces providers register are known, so the first

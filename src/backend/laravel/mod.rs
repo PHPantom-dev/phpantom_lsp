@@ -14,6 +14,7 @@ mod date_class;
 mod gates;
 mod macros;
 mod morph_map;
+mod pivots;
 mod provider_resources;
 mod schema;
 mod storage;

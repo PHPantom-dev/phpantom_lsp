@@ -225,7 +225,7 @@ use relationships::{
 };
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
-    extract_with_pivot_columns,
+    extract_with_pivot_columns, source_may_declare_pivot_relationship,
 };
 
 pub use scopes::build_scope_methods_for_builder;
