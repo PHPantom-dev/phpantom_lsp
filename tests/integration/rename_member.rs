@@ -2,7 +2,8 @@
 //! class, and enum cases.
 
 use crate::common::{
-    apply_edits, create_test_backend, edits_for_uri, line_char_of, open_php, prepare_rename, rename,
+    apply_edits, create_test_backend, edits_for_uri, line_char_of, open_php, prepare_rename,
+    rename, rename_result,
 };
 use tower_lsp::lsp_types::*;
 
@@ -921,4 +922,81 @@ async fn rename_unit_enum_case() {
         "Reference should be renamed: {}",
         result
     );
+}
+
+// ─── Eloquent magic members ─────────────────────────────────────────────────
+
+const ELOQUENT_MODEL: &str = r#"<?php
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Model;
+    class Author extends Model {
+        public function scopeActive($query): void {}
+        public function getDisplayNameAttribute(): string { return ''; }
+    }
+}
+"#;
+
+const ELOQUENT_USAGE: &str = r#"<?php
+namespace App;
+function show(Author $author): void {
+    Author::active();
+    echo $author->display_name;
+}
+"#;
+
+/// Open the model and a file that uses it, returning both URIs.
+async fn open_eloquent_files(backend: &phpantom_lsp::Backend) -> (Url, Url) {
+    let model_uri = Url::parse("file:///Author.php").unwrap();
+    let usage_uri = Url::parse("file:///usage.php").unwrap();
+    open_php(backend, &model_uri, ELOQUENT_MODEL).await;
+    open_php(backend, &usage_uri, ELOQUENT_USAGE).await;
+    (model_uri, usage_uri)
+}
+
+#[tokio::test]
+async fn renaming_a_scope_renames_its_calls_under_the_scope_name() {
+    let backend = create_test_backend();
+    let (uri, usage_uri) = open_eloquent_files(&backend).await;
+
+    let (line, character) = line_char_of(ELOQUENT_MODEL, "scopeActive");
+    let edit = rename(&backend, &uri, line, character + 1, "scopeRecent")
+        .await
+        .expect("expected a scope rename");
+    let result = apply_edits(ELOQUENT_MODEL, &edits_for_uri(&edit, &uri));
+    assert!(result.contains("function scopeRecent($query)"), "{result}");
+    let usage = apply_edits(ELOQUENT_USAGE, &edits_for_uri(&edit, &usage_uri));
+    assert!(usage.contains("Author::recent();"), "{usage}");
+}
+
+#[tokio::test]
+async fn renaming_an_accessor_renames_its_property_reads() {
+    let backend = create_test_backend();
+    let (uri, usage_uri) = open_eloquent_files(&backend).await;
+
+    let (line, character) = line_char_of(ELOQUENT_MODEL, "getDisplayNameAttribute");
+    let edit = rename(&backend, &uri, line, character + 1, "getFullNameAttribute")
+        .await
+        .expect("expected an accessor rename");
+    let result = apply_edits(ELOQUENT_MODEL, &edits_for_uri(&edit, &uri));
+    assert!(
+        result.contains("function getFullNameAttribute()"),
+        "{result}"
+    );
+    let usage = apply_edits(ELOQUENT_USAGE, &edits_for_uri(&edit, &usage_uri));
+    assert!(usage.contains("$author->full_name;"), "{usage}");
+}
+
+#[tokio::test]
+async fn renaming_a_scope_out_of_its_convention_is_refused() {
+    let backend = create_test_backend();
+    let (uri, _) = open_eloquent_files(&backend).await;
+
+    let (line, character) = line_char_of(ELOQUENT_MODEL, "scopeActive");
+    let refusal = rename_result(&backend, &uri, line, character + 1, "recent")
+        .await
+        .expect_err("a scope renamed without its prefix strands its calls");
+    assert!(refusal.contains("`active`"), "{refusal}");
 }

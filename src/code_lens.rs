@@ -268,7 +268,13 @@ impl Backend {
         if declaration_offset == 0 {
             return None;
         }
-        let candidate_count = self.indexed_member_reference_count(&member)?;
+        let mut candidate_count = self.indexed_member_reference_count(&member)?;
+        // A scope or an accessor is used under a name of its own, which
+        // the search counts too.
+        if let Some(magic) = self.eloquent_magic_member_at(origin_uri, declaration_offset, &member)
+        {
+            candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
+        }
         let origin_url = Url::parse(origin_uri).ok()?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(

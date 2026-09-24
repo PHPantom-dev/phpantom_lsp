@@ -1941,3 +1941,57 @@ function persist(Order $order): void {
     .expect("the background count did not land");
     assert_eq!(counted, "1 reference");
 }
+
+#[test]
+fn a_model_scope_or_accessor_lens_counts_the_name_it_is_used_by() {
+    const MODEL_URI: &str = "file:///Author.php";
+    const USAGE_URI: &str = "file:///usage.php";
+    const LATER_URI: &str = "file:///later.php";
+    let backend = create_test_backend();
+    let model = r#"<?php
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Model;
+    class Author extends Model {
+        public function scopeActive($query): void {}
+        public function getDisplayNameAttribute(): string { return ''; }
+    }
+}
+"#;
+    let usage = r#"<?php
+function show(\App\Author $author): void {
+    \App\Author::active();
+    echo $author->display_name;
+}
+"#;
+    seed_open_file(&backend, USAGE_URI, usage);
+    let lenses = declaration_lenses(&backend, MODEL_URI, model);
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 7).as_deref(),
+        Some("1 reference")
+    );
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 8).as_deref(),
+        Some("1 reference")
+    );
+
+    // A file that held no reference before gains one under the magic name,
+    // which has to mark the accessor's count stale.
+    let later = r#"<?php
+function list_author(\App\Author $author): void {
+    echo $author->display_name;
+}
+"#;
+    seed_open_file(&backend, LATER_URI, later);
+    backend.handle_code_lens(MODEL_URI, model);
+    assert!(backend.compute_pending_member_ref_counts());
+    let lenses = backend
+        .handle_code_lens(MODEL_URI, model)
+        .unwrap_or_default();
+    assert_eq!(
+        unresolved_title_on_line(&lenses, 8).as_deref(),
+        Some("2 references")
+    );
+}

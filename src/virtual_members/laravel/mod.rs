@@ -124,6 +124,7 @@ pub(crate) mod gates;
 pub(crate) mod helpers;
 mod higher_order_proxy;
 mod macros;
+mod magic_uses;
 mod model_extraction;
 pub(crate) mod morph_map;
 pub(crate) mod patches;
@@ -215,6 +216,7 @@ use accessors::{
     extract_modern_accessor_type, is_legacy_accessor, is_legacy_mutator, is_modern_accessor,
     legacy_accessor_property_name, legacy_mutator_property_name,
 };
+pub(crate) use magic_uses::{MagicMemberKind, declaring_method_names};
 pub(crate) use where_property::where_property_method_to_column;
 
 pub(crate) use pivots::{LaravelPivotIndex, build_pivot_index, inject_pivot};

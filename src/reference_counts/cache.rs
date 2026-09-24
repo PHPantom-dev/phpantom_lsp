@@ -328,17 +328,25 @@ impl MemberRefCounts {
 
     /// Mark every count for members of this name as needing recomputation,
     /// because `uris` changed what they contribute to it.
+    ///
+    /// An Eloquent scope or accessor is counted under the name it is used
+    /// by (`active` for `scopeActive`), so the methods that name can stand
+    /// for are marked too.
     pub(crate) fn invalidate_member(&self, member: Atom, uris: &HashSet<Arc<str>>) {
+        let declaring = crate::virtual_members::laravel::declaring_method_names(&member)
+            .map(|name| crate::atom::atom(&name));
         let mut cache = self.counts.write();
-        let Some(entries) = cache.by_member.get_mut(&member) else {
-            return;
-        };
         let mut marked = false;
-        for slots in entries.values_mut() {
-            for cached in slots.iter_mut().flatten() {
-                cached.count_stale = true;
-                cached.locations_stale.merge(Staleness::Files(uris.clone()));
-                marked = true;
+        for name in std::iter::once(member).chain(declaring) {
+            let Some(entries) = cache.by_member.get_mut(&name) else {
+                continue;
+            };
+            for slots in entries.values_mut() {
+                for cached in slots.iter_mut().flatten() {
+                    cached.count_stale = true;
+                    cached.locations_stale.merge(Staleness::Files(uris.clone()));
+                    marked = true;
+                }
             }
         }
         if marked {

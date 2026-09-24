@@ -32,6 +32,7 @@
 mod classes;
 mod covers;
 mod dispatch;
+mod eloquent;
 mod functions;
 mod member_scope;
 mod members;

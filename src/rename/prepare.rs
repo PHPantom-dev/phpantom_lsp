@@ -18,7 +18,7 @@ use crate::util::build_fqn;
 
 use super::RenameOutcome;
 use super::namespace::find_namespace_segment_at_offset;
-use super::validate::{is_valid_new_name, span_spells_its_name};
+use super::validate::{is_valid_new_name, range_text, span_spells_its_name};
 
 /// The text a single function or constant reference should be replaced
 /// with, or `None` when it must be left exactly as it is.
@@ -221,10 +221,29 @@ impl Backend {
             return Ok(None);
         }
 
+        // A scope or an accessor is also used under a name the model derives
+        // from the method's (`active` for `scopeActive`), and those uses
+        // have to follow the rename.
+        let magic_rename = match &span.kind {
+            SymbolKind::MemberDeclaration { name, .. } => self
+                .eloquent_magic_member_at(uri, span.start, name)
+                .map(|magic| match magic.kind.use_name(new_name) {
+                    Some(new_use) => Ok((magic.use_name, new_use)),
+                    None => Err(format!(
+                        "`{new_name}` does not follow the naming convention that makes \
+                         `{name}` usable as `{}`, so its uses could not be renamed",
+                        magic.use_name
+                    )),
+                })
+                .transpose()?,
+            _ => None,
+        };
+
         // The reference finders read one symbol map per file, so each
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
-        if !self.rename_locations_verified(&span.kind, &locations) {
+        let magic_use = magic_rename.as_ref().map(|(old_use, _)| old_use.as_str());
+        if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
             return Ok(None);
         }
 
@@ -338,6 +357,13 @@ impl Backend {
                 } else {
                     bare_name.to_string()
                 }
+            } else if let Some((old_use, new_use)) = &magic_rename
+                && loc_content
+                    .as_deref()
+                    .and_then(|c| range_text(c, location.range))
+                    .is_some_and(|text| text == old_use.as_str())
+            {
+                new_use.clone()
             } else {
                 new_name.to_string()
             };

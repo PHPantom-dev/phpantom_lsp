@@ -42,7 +42,21 @@ No outstanding items.
 
 ## Symbol resolution
 
-No outstanding items.
+## B367. A class name in a file with several braced namespaces resolves against the first one
+
+**Impact: Low-Medium · Complexity: Medium**
+
+In a file that declares more than one `namespace Foo { … }` block, a
+member access's receiver written as a bare class name is resolved
+against the file's *first* namespace rather than the block it sits in.
+With `namespace Other { … }` followed by `namespace App { class Author
+{ public static function make() {} } function show() { Author::make(); } }`,
+the receiver of `Author::make()` resolves to `Other\Author`, so Find
+References on `make()` finds nothing. The reference search
+(`src/references/receivers.rs`, `member_scope.rs`) resolves receivers
+through `file_context`, whose `namespace` is the first one the file
+declares, rather than `file_context_at`, which picks the namespace block
+that contains the access.
 
 ## Array types
 
@@ -54,22 +68,7 @@ No outstanding items.
 
 ## Laravel
 
-## B360. References, reference lenses, and rename miss an Eloquent magic member's uses
-
-**Impact: Medium · Complexity: Medium-High**
-
-A scope, accessor, or mutator is declared under one name and used under
-another: `scopeActive()` is called as `active()`, `getFullNameAttribute()`
-and an `Attribute`-returning `fullName()` are read as `->full_name`,
-`setLogoAttribute()` is written as `->logo = …`. Go-to-definition follows
-a use back to its declaration (`src/definition/member/`), but nothing under
-`src/references/` maps the declaration forward, so find-references on the
-declaring method finds only direct calls to it. The member reference
-lens (`indexed_member_reference_count` in `src/code_lens.rs`) counts the
-same way, so live scopes and accessors read "0 references", and a
-rename of the declaration strands every use. Relationship methods have
-the same shape through their `->posts` property reads. Pinned by the
-four ignored `definition_laravel::references_on_*` tests.
+No outstanding items.
 
 ## Blade
 

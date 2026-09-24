@@ -347,13 +347,21 @@ impl Backend {
                 let (hierarchy, declaration_scope) = self
                     .resolve_member_declaration_scopes(uri, span_start, name, *is_static, mode)
                     .unzip();
-                self.find_member_references(
+                let mut locations = self.find_member_references(
                     name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.flatten().as_ref(),
-                )
+                );
+                if let Some(magic) = self.eloquent_magic_member_at(uri, span_start, name) {
+                    locations.extend(
+                        self.eloquent_magic_references_batch(&[&magic], None)
+                            .into_iter()
+                            .flatten(),
+                    );
+                }
+                locations
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 // `$this` is a file-local variable, not a cross-file class search.

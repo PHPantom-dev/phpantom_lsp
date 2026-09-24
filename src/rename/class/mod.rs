@@ -78,7 +78,7 @@ impl Backend {
         let locations = self
             .find_references_for_rename(&definition_uri, &content, position, true)
             .ok_or_else(|| format!("Could not find references to `{old_fqn}`."))?;
-        if !self.rename_locations_verified(&span.kind, &locations) {
+        if !self.rename_locations_verified(&span.kind, None, &locations) {
             return Err(format!(
                 "The workspace changed while `{old_fqn}` was being indexed; retry the move."
             ));
