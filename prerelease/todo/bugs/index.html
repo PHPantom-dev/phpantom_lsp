@@ -1004,28 +1004,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b364-blade-include-and-each-are-not-view-references" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B364. Blade <code>@include</code> and <code>@each</code> are not view references
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b365-a-views-template-is-dropped-from-references-that-include-the-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B365. A view's template is dropped from references that include the declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1680,28 +1658,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b364-blade-include-and-each-are-not-view-references" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B364. Blade <code>@include</code> and <code>@each</code> are not view references
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b365-a-views-template-is-dropped-from-references-that-include-the-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B365. A view's template is dropped from references that include the declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#miscellaneous" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1831,32 +1787,7 @@ a route registration needs the same, through the route table
 <code>resolve_route_definitions</code> reads. Pinned by the ignored
 <code>laravel_route_names::find_references_from_a_route_registration_reaches_its_calls</code>.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<h2 id="b364-blade-include-and-each-are-not-view-references">B364. Blade <code>@include</code> and <code>@each</code> are not view references<a class="headerlink" href="#b364-blade-include-and-each-are-not-view-references" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Find-references on a view name lists every PHP <code>view('users.profile')</code>
-call but none of the <code>@include('users.profile')</code> or
-<code>@each('users.profile', …)</code> directives that render it, whether the search
-starts in PHP or in the template, and whether or not the template is
-open. <code>find_string_key_usages</code> (<code>src/virtual_members/laravel/string_keys.rs</code>)
-only walks the snapshot of user PHP symbol maps; a template's spans index
-its virtual PHP, so reaching them needs the template maps in the snapshot
-and their locations translated back into template coordinates. Pinned by
-the ignored
-<code>laravel_view_names::find_references_on_a_view_name_reaches_blade_includes</code>.</p>
-<h2 id="b365-a-views-template-is-dropped-from-references-that-include-the-declaration">B365. A view's template is dropped from references that include the declaration<a class="headerlink" href="#b365-a-views-template-is-dropped-from-references-that-include-the-declaration" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>With the declaration included, find-references on a view name should list
-the template it resolves to, which go-to-definition already finds.
-<code>find_laravel_string_key_references</code> adds it, at line 0 of
-<code>profile.blade.php</code>, but that location is in the template's own
-coordinates, and the <code>references</code> handler (<code>src/server.rs</code>) then runs
-every Blade location through <code>try_translate_location</code> as though it
-indexed the virtual PHP. Line 0 of the virtual PHP is the injected
-prologue, which has no template position, so the location is dropped. A
-result list mixing both coordinate systems needs each location to say
-which one it is in, or the declaration added after translation. Pinned by
-the ignored
-<code>laravel_view_names::find_references_on_a_view_name_includes_the_template_as_its_declaration</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 
