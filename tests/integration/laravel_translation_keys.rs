@@ -1008,7 +1008,6 @@ async fn a_translation_in_a_blade_echo_reaches_the_line() {
 
 /// `@lang('key')` compiles to `app('translator')->get('key')`.
 #[tokio::test]
-#[ignore = "known gap: `@lang`/`@choice` arguments are not translation keys"]
 async fn the_lang_directive_reaches_the_line() {
     let template = "<h1>@lang('messages.welcome')</h1>\n";
     let (backend, _dir, uri) = blade_workspace(template).await;
@@ -1021,7 +1020,6 @@ async fn the_lang_directive_reaches_the_line() {
 
 /// `@choice('key', $n)` compiles to `app('translator')->choice('key', $n)`.
 #[tokio::test]
-#[ignore = "known gap: `@lang`/`@choice` arguments are not translation keys"]
 async fn the_choice_directive_reaches_the_line() {
     let template = "<p>@choice('messages.apples', 3)</p>\n";
     let (backend, _dir, uri) = blade_workspace(template).await;

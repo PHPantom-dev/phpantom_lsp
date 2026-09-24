@@ -248,19 +248,6 @@ views and config) are unknown.
 
 **Test:** `laravel_translation_keys::a_package_tools_provider_registers_its_short_name`.
 
-## B352. `@lang` and `@choice` arguments are not translation keys
-
-**Impact: Low-Medium · Complexity: Low**
-
-`translate_directive` (`src/blade/directives.rs`) lowers `@lang('x')` and
-`@choice('x', $n)` to a generic `blade_directive(...)` call, so the key gets
-no completion, go-to-definition, hover, or diagnostic. They compile to
-`app('translator')->get()` / `->choice()` and should lower to
-`__()`/`trans_choice()` so the translation string context sees them.
-
-**Tests:** `laravel_translation_keys::the_lang_directive_reaches_the_line`
-and `the_choice_directive_reaches_the_line`.
-
 ## Blade
 
 No outstanding items.

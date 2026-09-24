@@ -1084,8 +1084,19 @@ pub fn translate_directive(directive: &str) -> String {
         // render directive's data array, so it gets a marker of its own.
         "each" => "blade_each_directive".to_string(),
         "slot" | "props" | "aware" | "class" | "style" | "checked" | "selected" | "disabled"
-        | "readonly" | "required" | "json" | "dump" | "lang" | "choice" | "js" | "vite"
-        | "fonts" | "dd" => "blade_directive".to_string(),
+        | "readonly" | "required" | "json" | "dump" | "js" | "vite" | "fonts" | "dd" => {
+            "blade_directive".to_string()
+        }
+        // `@lang('key')` and `@choice('key', $n)` compile to
+        // `app('translator')->get('key')` / `->choice('key', $n)`, so they
+        // lower to the real helper calls rather than the generic
+        // `blade_directive` marker: symbol extraction recognises the
+        // translation-key argument of `__()`/`trans_choice()` by callee
+        // name, and this way the key gets the same completion,
+        // go-to-definition, hover, and diagnostic support as any other
+        // translation call.
+        "lang" => "__".to_string(),
+        "choice" => "trans_choice".to_string(),
         // `unset(...)` is a language construct, not a function — it cannot
         // be passed as an argument to `blade_directive(...)`, so it keeps
         // its own real name instead of the generic marker.
