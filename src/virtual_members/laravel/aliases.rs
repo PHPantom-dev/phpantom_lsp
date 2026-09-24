@@ -205,6 +205,28 @@ impl Backend {
         self.find_or_load_class(fqn)
     }
 
+    /// Like [`resolve_laravel_alias`](Self::resolve_laravel_alias), but only
+    /// consults the container string-binding table, never the facade
+    /// class-alias table.
+    ///
+    /// Used by [`resolve_class_name`](crate::resolution::Backend::resolve_class_name)'s
+    /// namespace-friendly fallback for an unqualified name: a container key
+    /// (`'sentry'`, `'blade.compiler'`) is an arbitrary runtime string a
+    /// provider binds, never real class-name syntax, so no namespace rule
+    /// ever applies to it and it is always safe to resolve. A facade alias
+    /// (`Cache`, `Auth`, …) IS a class name PHP's own namespace rules apply
+    /// to, and Laravel's `class_alias()` only ever lands it in the global
+    /// namespace, so it must not be reached this way from inside a
+    /// namespace.
+    pub(crate) fn resolve_laravel_container_alias(&self, name: &str) -> Option<Arc<ClassInfo>> {
+        let aliases = self.laravel_aliases();
+        if aliases.is_empty() {
+            return None;
+        }
+        let fqn = aliases.container.get(name)?;
+        self.find_or_load_class(fqn)
+    }
+
     /// The concrete class FQN a container string alias (e.g. `'app'`, as
     /// returned by a facade's `getFacadeAccessor()`) is bound to, without
     /// loading the class. Used when a caller needs the name itself rather

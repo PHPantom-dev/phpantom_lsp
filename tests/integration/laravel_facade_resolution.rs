@@ -256,7 +256,6 @@ async fn bare_alias_in_a_file_without_a_namespace_resolves_to_the_facade() {
 /// and never falls back to the global one, so inside `App\Http` a bare
 /// `Cache` is `App\Http\Cache`, not the global alias.
 #[tokio::test]
-#[ignore = "known gap: an unqualified alias inside a namespace falls back to the global alias"]
 async fn bare_alias_in_a_namespaced_file_without_an_import_stays_unresolved() {
     let content = "\
 <?php

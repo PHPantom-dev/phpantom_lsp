@@ -42,26 +42,6 @@ No outstanding items.
 
 ## Symbol resolution
 
-## B337. An unqualified class name inside a namespace falls back to a global alias
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-namespace App\Http;
-class Controller {
-    public function go(): void { Cache::forget('x'); }
-}
-```
-
-PHP resolves `Cache` to `App\Http\Cache` and never falls back to the global
-namespace for a class name (only functions and constants fall back), so
-without `use Illuminate\Support\Facades\Cache;` this is a fatal error.
-PHPantom offers the global `Cache` alias's members instead. Check whether
-the fallback is specific to the Laravel alias table or general class
-resolution before fixing.
-
-**Test:** `laravel_facade_resolution::bare_alias_in_a_namespaced_file_without_an_import_stays_unresolved`.
-
 ## B338. Go-to-definition on a facade call stops at the facade
 
 **Impact: Medium · Complexity: Medium**

@@ -1238,9 +1238,23 @@ impl Backend {
                 if let Some(cls) = self.find_or_load_class(&ns_qualified) {
                     return Some(cls);
                 }
+                if let Some(cls) = self.find_or_load_class_typed(&PhpType::parse(name)) {
+                    return Some(cls);
+                }
+                // The facade alias table must not be reached from here:
+                // it is populated by a runtime `class_alias()` call that
+                // only ever lands the alias in the *global* namespace,
+                // so a bare `Cache` inside `App\Http` can never actually
+                // be the facade. The container table is exempt from that
+                // rule: its keys (`'sentry'`, `'blade.compiler'`) are
+                // arbitrary runtime strings a provider binds, never real
+                // class-name syntax, so no namespace ever applies to
+                // them in the first place.
+                return self.resolve_laravel_container_alias(name);
             }
-            // Global scope: either no namespace context, or the
-            // namespace-qualified lookup above did not find a match.
+            // Global scope: no namespace context at all, so the alias
+            // fallback is exactly where PHP's own `class_alias()` would
+            // have put it.
             return self.find_or_load_class(name);
         }
 

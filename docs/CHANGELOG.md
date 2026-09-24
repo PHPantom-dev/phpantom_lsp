@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An unqualified class name inside a namespace no longer falls back to a Laravel facade alias.** `Cache::forget('x')` inside `namespace App\Http` offered the global `Cache` facade's members even without a `use Illuminate\Support\Facades\Cache;` import, even though PHP itself resolves `Cache` to `App\Http\Cache` there and never falls back to the global namespace for a class name. A container string binding (`app('sentry')`) is unaffected: it is an arbitrary runtime key a provider binds, not real class-name syntax, so no namespace rule applies to it.
 - **Hover works on an unfinished `->` or `::` at the end of a file.** Typing `$user->` or `Model::` and pausing to check the receiver's type before finishing the member name showed nothing: the incomplete statement has no member name to parse yet, so it was dropped from the file's symbol map entirely rather than kept as a partial result. Hovering the variable or class name itself now falls back to reading it straight from the source in that case.
 - **Blade component discovery reads every directory of an array PSR-4 mapping.** With `"App\\": ["app/", "src/"]`, `<x-badge>` backed by `src/View/Components/Badge.php` is now found: previously only the first directory of the mapping was scanned.
 - **`$loop->parent` inside a nested `@foreach` offers the outer loop's members.** It used to type as bare `?object`, so `$loop->parent->index` and the rest of Blade's loop variable offered nothing.
