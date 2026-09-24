@@ -234,20 +234,6 @@ resolves nowhere. The same helper serves views, config, and routes.
 
 **Test:** `laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves`.
 
-## B351. Package-tools `hasTranslations()` registers nothing
-
-**Impact: Low-Medium · Complexity: Medium**
-
-A `spatie/laravel-package-tools` provider declares its resources through
-`configurePackage(Package $package)`:
-`$package->name('laravel-billing')->hasTranslations()` registers the
-package's `resources/lang` under the short name `billing` (the name with
-its `laravel-` prefix dropped). None of the `has*()` calls are modelled,
-so every such package's translation keys (and, by the same route, its
-views and config) are unknown.
-
-**Test:** `laravel_translation_keys::a_package_tools_provider_registers_its_short_name`.
-
 ## Blade
 
 No outstanding items.

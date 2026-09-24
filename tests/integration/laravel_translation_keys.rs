@@ -853,7 +853,6 @@ class BillingServiceProvider
 /// register `<package>/resources/lang` under the package's short name, which
 /// drops a leading `laravel-`.
 #[tokio::test]
-#[ignore = "known gap: package-tools `hasTranslations()` registers nothing"]
 async fn a_package_tools_provider_registers_its_short_name() {
     let provider = "\
 <?php

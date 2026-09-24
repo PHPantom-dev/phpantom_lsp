@@ -601,7 +601,7 @@ fn test_preprocess_lang_directive_optional_argument() {
 
     let (php, _) = preprocess("@lang($key)\n<p>after</p>");
     assert!(
-        php.contains("blade_directive ($key);"),
+        php.contains("__ ($key);"),
         "@lang(...) should type-check its argument: {}",
         php
     );
@@ -654,7 +654,7 @@ fn test_preprocess_unset_directive() {
 fn test_preprocess_choice_js_dd_directives_consume_arguments() {
     let (php, _) = preprocess("@choice('apples', $count)\n<p>after</p>");
     assert!(
-        php.contains("blade_directive ('apples', $count);"),
+        php.contains("trans_choice ('apples', $count);"),
         "@choice should type-check its arguments: {}",
         php
     );
