@@ -982,17 +982,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B357. The pivot index only sees relationships in files already parsed
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1636,17 +1625,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B357. The pivot index only sees relationships in files already parsed
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1765,17 +1743,6 @@ the config declares. The same helper feeds every Laravel string kind (routes,
 views, translations), so any key spelled with an escape sequence is misread.
 The key should come from the literal's unescaped <code>value</code>; the span stays on
 the source text.</p>
-<h2 id="b357-the-pivot-index-only-sees-relationships-in-files-already-parsed">B357. The pivot index only sees relationships in files already parsed<a class="headerlink" href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>rebuild_laravel_pivot_index</code> (<code>src/resolution.rs</code>) builds the reverse
-pivot index from <code>uri_classes_index</code>, so a model only gets its <code>$pivot</code>
-(or <code>-&gt;as()</code>-renamed) property when the file declaring the
-<code>belongsToMany</code> that targets it has been parsed. <code>phpantom_lsp analyze
---project-root examples/laravel examples/laravel/app/Demo.php</code> reports
-<code>Property 'pivot' not found on class 'App\Models\BakeryRecipe'</code> (and the
-same for <code>ingredient</code>), which the full-project run does not, because
-<code>Bakery.php</code> is never parsed. The index needs the relationship methods of
-every model the classmap knows about, not just the loaded ones.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
