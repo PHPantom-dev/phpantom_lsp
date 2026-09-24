@@ -938,17 +938,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B342. Published package views under <code>resources/views/vendor</code> are ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1559,17 +1548,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B342. Published package views under <code>resources/views/vendor</code> are ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1658,17 +1636,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b342-published-package-views-under-resourcesviewsvendor-are-ignored">B342. Published package views under <code>resources/views/vendor</code> are ignored<a class="headerlink" href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>loadViewsFrom($path, 'widgets')</code> registers <code>resources/views/vendor/widgets</code>
-<em>ahead of</em> the package's own directory, so a published copy is what renders
-and a view only the published directory holds is still <code>widgets::name</code>.
-Neither <code>scan_view_names</code> (<code>src/blade/discovery.rs</code>) nor
-<code>resolve_view_definitions</code> (<code>src/virtual_members/laravel/view_names.rs</code>)
-looks there.</p>
-<p><strong>Tests:</strong> <code>laravel_view_names::a_published_copy_of_a_package_view_wins_over_the_original</code>,
-<code>a_view_only_the_published_directory_holds_is_known</code>, and
-<code>a_published_package_template_is_typed_by_its_namespaced_call_site</code>.</p>
 <h2 id="b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value">B358. A string key argument is read from its raw source, not its value<a class="headerlink" href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>config('app.it\'s')</code> names the key <code>it's</code>, but <code>push_laravel_string_span</code>
