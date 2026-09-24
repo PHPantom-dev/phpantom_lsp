@@ -905,17 +905,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B338. Go-to-definition on a facade call stops at the facade
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1680,17 +1669,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B338. Go-to-definition on a facade call stops at the facade
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1960,16 +1938,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h2 id="b338-go-to-definition-on-a-facade-call-stops-at-the-facade">B338. Go-to-definition on a facade call stops at the facade<a class="headerlink" href="#b338-go-to-definition-on-a-facade-call-stops-at-the-facade" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>Auth::guard()</code> completes and hovers with <code>AuthManager::guard()</code>'s
-signature, but go-to-definition finds nothing: <code>find_declaring_class</code>
-(<code>src/definition/member/declaring.rs</code>) walks ancestors and <code>@mixin</code>s but
-never follows the facade accessor to the concrete class. The same applies
-to a member the concrete class gets through its own <code>@mixin</code>
-(<code>Auth::check()</code> → <code>Guard::check()</code>).</p>
-<p><strong>Tests:</strong> <code>laravel_facade_resolution::a_forwarded_facade_call_goes_to_the_concrete_declaration</code>
-and <code>a_forwarded_mixin_call_goes_to_the_contract_declaration</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
