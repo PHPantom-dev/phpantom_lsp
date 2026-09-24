@@ -1037,17 +1037,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b350-a-dirname__dir__-path-argument-is-not-followed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B350. A <code>dirname(__DIR__)</code> path argument is not followed
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1757,17 +1746,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b350-a-dirname__dir__-path-argument-is-not-followed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B350. A <code>dirname(__DIR__)</code> path argument is not followed
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1953,14 +1931,6 @@ keeps only the last path segment.</p>
 <code>a_published_package_file_is_not_an_application_group</code>,
 <code>a_key_only_a_published_package_file_declares_is_unknown</code>, and
 <code>a_package_translation_is_not_an_application_group</code>.</p>
-<h2 id="b350-a-dirname__dir__-path-argument-is-not-followed">B350. A <code>dirname(__DIR__)</code> path argument is not followed<a class="headerlink" href="#b350-a-dirname__dir__-path-argument-is-not-followed" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>$this-&gt;loadTranslationsFrom(dirname(__DIR__).'/lang', 'billing')</code> is the
-common spelling in a package whose provider sits in <code>src/</code>, but
-<code>extract_dir_concat_path</code> (<code>src/virtual_members/laravel/helpers.rs</code>) only
-handles a bare <code>__DIR__</code> on the left of the concatenation, so the namespace
-resolves nowhere. The same helper serves views, config, and routes.</p>
-<p><strong>Test:</strong> <code>laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves</code>.</p>
 <h2 id="b357-the-pivot-index-only-sees-relationships-in-files-already-parsed">B357. The pivot index only sees relationships in files already parsed<a class="headerlink" href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>rebuild_laravel_pivot_index</code> (<code>src/resolution.rs</code>) builds the reverse
