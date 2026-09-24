@@ -249,7 +249,7 @@ impl Backend {
         };
         let mut names = Vec::new();
         collect_first_type_arguments(&subject_type, &mut names);
-        self.class_names_to_fqns(names, ctx)
+        self.class_names_to_fqns(names, ctx, span.start)
     }
 }
 

@@ -203,11 +203,13 @@ impl Backend {
         content: &str,
     ) -> Vec<String> {
         match self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content) {
-            Some(php_type) => self.class_names_to_fqns(php_type.top_level_class_names(), ctx),
+            Some(php_type) => {
+                self.class_names_to_fqns(php_type.top_level_class_names(), ctx, access_offset)
+            }
             None => self.resolve_static_laravel_builder_subject_to_fqns(
                 subject_text,
                 &ctx.use_map,
-                &ctx.namespace,
+                ctx.namespace_at(access_offset),
                 &self.class_loader(ctx),
             ),
         }
@@ -228,7 +230,7 @@ impl Backend {
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map: &ctx.use_map,
-            namespace: &ctx.namespace,
+            namespace: ctx.namespace_at(access_offset),
             content,
             class_loader: &class_loader,
             backend: Some(self),
@@ -251,6 +253,7 @@ impl Backend {
         &self,
         names: Vec<String>,
         ctx: &crate::types::FileContext,
+        access_offset: u32,
     ) -> Vec<String> {
         names
             .into_iter()
@@ -262,7 +265,7 @@ impl Backend {
                     normalize_fqn(&Self::resolve_to_fqn(
                         &normalized,
                         &ctx.use_map,
-                        &ctx.namespace,
+                        ctx.namespace_at(access_offset),
                     ))
                 }
             })

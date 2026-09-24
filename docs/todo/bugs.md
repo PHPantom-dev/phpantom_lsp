@@ -42,21 +42,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-## B367. A class name in a file with several braced namespaces resolves against the first one
-
-**Impact: Low-Medium · Complexity: Medium**
-
-In a file that declares more than one `namespace Foo { … }` block, a
-member access's receiver written as a bare class name is resolved
-against the file's *first* namespace rather than the block it sits in.
-With `namespace Other { … }` followed by `namespace App { class Author
-{ public static function make() {} } function show() { Author::make(); } }`,
-the receiver of `Author::make()` resolves to `Other\Author`, so Find
-References on `make()` finds nothing. The reference search
-(`src/references/receivers.rs`, `member_scope.rs`) resolves receivers
-through `file_context`, whose `namespace` is the first one the file
-declares, rather than `file_context_at`, which picks the namespace block
-that contains the access.
+No outstanding items.
 
 ## Array types
 

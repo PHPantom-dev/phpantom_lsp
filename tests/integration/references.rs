@@ -3172,6 +3172,39 @@ async fn test_namespaced_class_references() {
     );
 }
 
+#[tokio::test]
+async fn test_braced_namespace_resolves_receiver_against_its_own_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multi_ns.php").unwrap();
+
+    let text = concat!(
+        "<?php\n",                                    // L0
+        "namespace Other {\n",                        // L1
+        "    class Author {}\n",                      // L2
+        "}\n",                                        // L3
+        "namespace App {\n",                          // L4
+        "    class Author {\n",                       // L5
+        "        public static function make() {}\n", // L6
+        "    }\n",                                    // L7
+        "    function show() {\n",                    // L8
+        "        Author::make();\n",                  // L9
+        "    }\n",                                    // L10
+        "}\n",                                        // L11
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `make` at L6 is declared on `App\Author`; the call at L9 sits in the
+    // same `App` block, so it must be found even though `Other\Author` is
+    // declared first in the file.
+    let locs = references_at(&backend, &uri, 6, 31, false).await;
+    assert!(
+        locs.iter().any(|l| l.range.start.line == 9),
+        "Expected a reference at L9 (Author::make() in the `App` namespace), got {:?}",
+        locs
+    );
+}
+
 // ─── Edge Cases ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
