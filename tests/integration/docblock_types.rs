@@ -2356,7 +2356,6 @@ async fn test_var_leading_backslash_bypasses_same_short_name_import() {
 ///
 /// Case adapted from laravel-lsp's MIT-licensed test suite.
 #[test]
-#[ignore = "known gap: a union continued on the next docblock line loses the whole type"]
 fn param_type_continued_on_the_next_line_is_one_union() {
     crate::common::assert_assigned_types(
         "<?php

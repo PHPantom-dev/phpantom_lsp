@@ -100,7 +100,6 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
 | B360 | [References, reference lenses, and rename miss an Eloquent magic member's uses](todo/bugs.md#b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses) | Medium      | Medium-High |
-| B366 | [A union continued on the next docblock line loses the whole type](todo/bugs.md#b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type) | Low         | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

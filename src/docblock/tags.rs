@@ -1122,6 +1122,11 @@ pub fn find_iterable_raw_type_in_source(
     // *next* line is an assignment to our variable.
     let mut prev_non_empty_line: Option<&str> = None;
 
+    // A `|Type`/`&Type` union or intersection continuation collected from
+    // a line below, waiting to be joined onto the `@param`/`@var` tag
+    // that starts the type (see the continuation handling below).
+    let mut pending_continuation: Option<String> = None;
+
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
 
@@ -1217,6 +1222,55 @@ pub fn find_iterable_raw_type_in_source(
                 prev_non_empty_line = Some(trimmed);
             }
             continue;
+        }
+
+        // ── Union/intersection continued on the next docblock line ──
+        // `@param array<int, Widget>` followed by a line starting
+        // `|Widget $items` is one type. The continuation carries no
+        // `@param`/`@var` keyword of its own, so fold it into a pending
+        // tail instead of matching it as a tag; once the scanner reaches
+        // the tag line above it, join the two back into one type string.
+        if is_comment_line {
+            let inner = strip_docblock_line_delimiters(trimmed);
+            let is_continuation = inner.starts_with('|') || inner.starts_with('&');
+
+            if is_continuation && pending_continuation.is_some() {
+                let existing = pending_continuation.take().unwrap();
+                pending_continuation = Some(format!("{inner} {existing}"));
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
+
+            if let Some(tail) = pending_continuation.take() {
+                let rest = inner
+                    .strip_prefix("@var")
+                    .or_else(|| inner.strip_prefix("@param"));
+                if let Some(rest) = rest {
+                    let rest = rest.trim_start();
+                    if !rest.is_empty() {
+                        let combined = format!("{rest} {tail}");
+                        let (type_token, remainder) = split_type_token(&combined);
+                        if let Some(name) = remainder.split_whitespace().next()
+                            && name == var_name
+                        {
+                            return Some(PhpType::parse(type_token));
+                        }
+                    }
+                }
+                // Not the tag after all — the continuation is discarded
+                // and this line falls through to the ordinary checks
+                // below.
+            }
+
+            if is_continuation && inner.contains(var_name) {
+                pending_continuation = Some(inner.to_string());
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
         }
 
         // ── Named annotation: line mentions the variable name ───────

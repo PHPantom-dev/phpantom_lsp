@@ -55,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A `@param` union continued onto the next docblock line keeps its full type.** `@param array<int, Widget>` followed by a line starting `|Widget $items` is one type, `array<int, Widget>|Widget`, but the parameter used to keep no type at all: the continuation was read as an unrelated line and never joined back onto the tag it wraps.
 - **Renaming a variable stays inside its scope.** Renaming a function's `$user` no longer also renames a closure's own `$user` when the closure does not capture it with `use`, and renaming a top-level script variable no longer reaches into functions declared in the same file. Find-references and highlighting follow the same scope.
 - **Renaming a global follows `global $name`.** Renaming a top-level variable now also renames it inside every function that declares it with `global`, and renaming it from inside such a function reaches the top-level variable, instead of silently breaking the link between them.
 - **Rename refuses a name that is not valid PHP.** Renaming a variable, class, function, method, or constant to something like `1bad`, `foo-bar`, or `$this` is refused with a message instead of writing code that no longer parses.

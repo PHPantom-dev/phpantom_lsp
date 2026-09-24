@@ -50,19 +50,7 @@ No outstanding items.
 
 ## Docblock handling
 
-## B366. A union continued on the next docblock line loses the whole type
-
-**Impact: Low · Complexity: Low-Medium**
-
-`@param array<int, Widget>` followed by a line starting `|Widget $items`
-is one type, `array<int, Widget>|Widget`. `split_type_token`
-(`src/docblock/type_strings.rs`) ends the token at the whitespace before
-the continuation's `|`, so the rest is read as the variable name, the tag
-matches no parameter, and the parameter keeps no type at all. The
-union/intersection suffix it consumes after a closing `>` or `}` has to
-look past whitespace (including the joined line break) for a leading `|`
-or `&`. Pinned by the ignored
-`docblock_types::param_type_continued_on_the_next_line_is_one_union`.
+No outstanding items.
 
 ## Laravel
 
