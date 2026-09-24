@@ -938,17 +938,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b359-go-to-definition-for-a-configtrans-key-misses-an-escaped-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B359. Go-to-definition for a config/trans key misses an escaped declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1548,17 +1537,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b359-go-to-definition-for-a-configtrans-key-misses-an-escaped-declaration" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B359. Go-to-definition for a config/trans key misses an escaped declaration
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1636,23 +1614,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b359-go-to-definition-for-a-configtrans-key-misses-an-escaped-declaration">B359. Go-to-definition for a config/trans key misses an escaped declaration<a class="headerlink" href="#b359-go-to-definition-for-a-configtrans-key-misses-an-escaped-declaration" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>walk_elements</code> (<code>src/virtual_members/laravel/array_file.rs</code>) reads an array
-key's text with <code>extract_string_literal</code>, which slices the literal's raw
-source rather than resolving its unescaped <code>value</code>. A config key declared as
-<code>'it\'s' =&gt; …</code> is therefore recorded as <code>it\'s</code>, not <code>it's</code>. Every consumer
-of <code>for_each_entry</code>/<code>walk_elements</code> compares that raw text against a key
-built from the literal's actual value elsewhere in the pipeline (config
-reads go through <code>push_laravel_string_span</code>, which now resolves <code>value</code>; the
-config-value tree in <code>config_values.rs</code> already does the same), so a
-declaration spelled with an escape sequence never matches: go-to-definition
-(<code>collect_laravel_config_declarations</code> in <code>config_keys.rs</code>,
-<code>resolve_config_key_definition_fallback</code>) and find-all-references
-(<code>find_config_references</code>, <code>find_all_config_references</code>) all miss it, and the
-same applies to the trans-key equivalent in <code>trans_keys.rs</code>. The fix is the
-same shape as the one applied to <code>push_laravel_string_span</code>: read the
-literal's <code>value</code> for the key text, keep the span on the source text.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
