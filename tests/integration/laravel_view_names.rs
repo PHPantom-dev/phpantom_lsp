@@ -443,7 +443,6 @@ async fn two_call_sites_in_one_file_union_their_types() {
 /// A key written twice in one array literal keeps the last value, as PHP
 /// does.
 #[tokio::test]
-#[ignore = "known gap: view call-site data unions a key's values instead of keeping the last write"]
 async fn a_duplicate_key_in_the_data_array_keeps_the_last_value() {
     let (backend, _dir) = create_psr4_workspace(
         LARAVEL_APP_COMPOSER,
@@ -477,7 +476,6 @@ async fn a_duplicate_key_in_the_data_array_keeps_the_last_value() {
 /// `View::with()` assigns into the data the view was made with, so a key it
 /// names replaces the one the data argument passed.
 #[tokio::test]
-#[ignore = "known gap: view call-site data unions a key's values instead of keeping the last write"]
 async fn a_with_call_replaces_the_same_key_from_the_data_argument() {
     let (backend, _dir) = create_psr4_workspace(
         LARAVEL_APP_COMPOSER,

@@ -182,6 +182,26 @@ fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
     }
 }
 
+/// Drop every entry a later one at the same call site overwrites.
+///
+/// A PHP array keeps the last of a duplicated key and `View::with()`
+/// assigns over the data the view was made with, so the template only
+/// ever sees the last write. The entries are not collected in source
+/// order (a chained `->with(…)` is walked before the call it hangs off),
+/// so the key's position decides which write is last.
+fn keep_last_writes(vars: &mut Vec<PassedVar>) {
+    let overwritten = |var: &PassedVar| {
+        vars.iter()
+            .any(|other| other.name == var.name && other.key_range.0 > var.key_range.0)
+    };
+    let keep: Vec<bool> = vars.iter().map(|var| !overwritten(var)).collect();
+    if keep.iter().all(|&k| k) {
+        return;
+    }
+    let mut keep = keep.into_iter();
+    vars.retain(|_| keep.next().unwrap_or(true));
+}
+
 /// The canonical spelling of a template path, for comparing against a
 /// canonical view root.
 ///
@@ -1137,6 +1157,7 @@ impl Backend {
                         framework_bound,
                     });
                 }
+                keep_last_writes(&mut vars);
                 result.push(ResolvedViewCall {
                     name_range: site.name_range,
                     vars,

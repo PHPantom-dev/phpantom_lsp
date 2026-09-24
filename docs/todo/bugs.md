@@ -84,20 +84,6 @@ looks there.
 `a_view_only_the_published_directory_holds_is_known`, and
 `a_published_package_template_is_typed_by_its_namespaced_call_site`.
 
-## B343. View call-site data unions a key's values instead of keeping the last write
-
-**Impact: Low · Complexity: Medium**
-
-`view('x', ['user' => $a, 'user' => $b])` and
-`view('x', ['user' => $a])->with('user', $b)` both leave the template with
-only `$b` (a PHP array keeps the last duplicate key, and `View::with()`
-overwrites), but call-site inference types `$user` as the union of both.
-Within one call site the last write should win; the union is only right
-across *different* call sites.
-
-**Tests:** `laravel_view_names::a_duplicate_key_in_the_data_array_keeps_the_last_value`
-and `a_with_call_replaces_the_same_key_from_the_data_argument`.
-
 ## B358. A string key argument is read from its raw source, not its value
 
 **Impact: Low · Complexity: Low**
