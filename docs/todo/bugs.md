@@ -54,21 +54,6 @@ No outstanding items.
 
 ## Laravel
 
-## B342. Published package views under `resources/views/vendor` are ignored
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`loadViewsFrom($path, 'widgets')` registers `resources/views/vendor/widgets`
-*ahead of* the package's own directory, so a published copy is what renders
-and a view only the published directory holds is still `widgets::name`.
-Neither `scan_view_names` (`src/blade/discovery.rs`) nor
-`resolve_view_definitions` (`src/virtual_members/laravel/view_names.rs`)
-looks there.
-
-**Tests:** `laravel_view_names::a_published_copy_of_a_package_view_wins_over_the_original`,
-`a_view_only_the_published_directory_holds_is_known`, and
-`a_published_package_template_is_typed_by_its_namespaced_call_site`.
-
 ## B358. A string key argument is read from its raw source, not its value
 
 **Impact: Low · Complexity: Low**

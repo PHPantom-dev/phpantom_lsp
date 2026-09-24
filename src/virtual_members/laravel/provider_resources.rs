@@ -668,8 +668,11 @@ pub(crate) fn extract_provider_resources(
                 &mc.argument_list,
                 content,
                 &scope,
-                package_tools_short_name(&name),
-                &package_tools_base_dir(file_path),
+                &PackageToolsContext {
+                    short_name: package_tools_short_name(&name),
+                    package_base_dir: &package_tools_base_dir(file_path),
+                    workspace_root,
+                },
                 &mut resources,
             );
             return ControlFlow::Continue(());
@@ -682,10 +685,11 @@ pub(crate) fn extract_provider_resources(
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
         // The namespaced `load*From(path, namespace)` registrations differ
-        // only in which list they land in.
+        // only in which list they land in. `loadViewsFrom` is handled
+        // separately below: unlike the other two, it has a published-package
+        // override to check for first.
         let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
             b"mergeconfigfrom" => Some(&mut resources.config_files),
-            b"loadviewsfrom" => Some(&mut resources.view_dirs),
             b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
             _ => None,
         };
@@ -700,6 +704,15 @@ pub(crate) fn extract_provider_resources(
                     path,
                     namespace: ns.to_string(),
                 });
+            }
+        } else if method_lower == b"loadviewsfrom" {
+            if args.len() >= 2
+                && let Some(path) =
+                    resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+                && let Some((ns, _, _)) =
+                    super::helpers::extract_string_literal(args[1].value(), content)
+            {
+                push_view_dir_registration(&mut resources, path, ns.to_string(), workspace_root);
             }
         } else if method_lower == b"loadjsontranslationsfrom" && !args.is_empty() {
             if let Some(path) =
@@ -1114,6 +1127,43 @@ fn package_tools_base_dir(file_path: &Path) -> PathBuf {
     }
 }
 
+/// Registers a `loadViewsFrom($path, $namespace)` resource the way
+/// `Illuminate\Support\ServiceProvider::loadViewsFrom()` actually resolves
+/// it: before adding `$path` itself, it checks each configured view root for
+/// a `vendor/$namespace` directory and, if one exists, adds that first.
+/// `FileViewFinder` renders the first hint registered for a namespace, so a
+/// published copy (created by `artisan vendor:publish`) wins over the
+/// package's own directory, and a view only the published directory holds
+/// still resolves.
+fn push_view_dir_registration(
+    resources: &mut ProviderResources,
+    path: PathBuf,
+    namespace: String,
+    workspace_root: &Path,
+) {
+    for root in crate::blade::discover_view_paths(workspace_root) {
+        let published = root.join("vendor").join(&namespace);
+        if published.is_dir() {
+            resources.view_dirs.push(ProviderResource {
+                path: published,
+                namespace: namespace.clone(),
+            });
+        }
+    }
+    resources
+        .view_dirs
+        .push(ProviderResource { path, namespace });
+}
+
+/// The context a `$package->has*()` registration (see
+/// [`record_package_tools_registration`]) reads its default namespace and
+/// resource directory from.
+struct PackageToolsContext<'a> {
+    short_name: &'a str,
+    package_base_dir: &'a Path,
+    workspace_root: &'a Path,
+}
+
 /// `$package->hasTranslations()`, `->hasViews($namespace = null)`, and
 /// `->hasConfigFile($name = null)`: the resource registrations
 /// `spatie/laravel-package-tools` exposes on `Package`. Each defaults its
@@ -1126,8 +1176,7 @@ fn record_package_tools_registration(
     argument_list: &ArgumentList<'_>,
     content: &str,
     scope: &Scope,
-    short_name: &str,
-    package_base_dir: &Path,
+    ctx: &PackageToolsContext<'_>,
     resources: &mut ProviderResources,
 ) {
     let first_arg_name = argument_list
@@ -1138,22 +1187,34 @@ fn record_package_tools_registration(
 
     match method {
         b"hastranslations" => {
-            let resolved = package_base_dir.join("..").join("resources").join("lang");
+            let resolved = ctx
+                .package_base_dir
+                .join("..")
+                .join("resources")
+                .join("lang");
             resources.trans_dirs.push(ProviderResource {
                 path: resolved.canonicalize().unwrap_or(resolved),
-                namespace: short_name.to_string(),
+                namespace: ctx.short_name.to_string(),
             });
         }
         b"hasviews" => {
-            let resolved = package_base_dir.join("..").join("resources").join("views");
-            resources.view_dirs.push(ProviderResource {
-                path: resolved.canonicalize().unwrap_or(resolved),
-                namespace: first_arg_name.unwrap_or_else(|| short_name.to_string()),
-            });
+            let resolved = ctx
+                .package_base_dir
+                .join("..")
+                .join("resources")
+                .join("views");
+            let namespace = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
+            push_view_dir_registration(
+                resources,
+                resolved.canonicalize().unwrap_or(resolved),
+                namespace,
+                ctx.workspace_root,
+            );
         }
         b"hasconfigfile" => {
-            let config_name = first_arg_name.unwrap_or_else(|| short_name.to_string());
-            let resolved = package_base_dir
+            let config_name = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
+            let resolved = ctx
+                .package_base_dir
                 .join("..")
                 .join("config")
                 .join(format!("{config_name}.php"));

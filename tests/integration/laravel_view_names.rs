@@ -172,7 +172,6 @@ async fn a_package_view_resolves_through_its_registered_namespace() {
 /// of the package's own directory, so a published copy is the template
 /// Laravel renders.
 #[tokio::test]
-#[ignore = "known gap: published package views under resources/views/vendor are ignored"]
 async fn a_published_copy_of_a_package_view_wins_over_the_original() {
     let caller = controller("WidgetController", "return view('widgets::card');");
     let (backend, _dir) = create_psr4_workspace(
@@ -211,7 +210,6 @@ async fn a_published_copy_of_a_package_view_wins_over_the_original() {
 /// A template that exists only in the published directory is still a
 /// `package::name` view: the finder looks there before the package.
 #[tokio::test]
-#[ignore = "known gap: published package views under resources/views/vendor are ignored"]
 async fn a_view_only_the_published_directory_holds_is_known() {
     let caller = controller("WidgetController", "return view('widgets::banner');");
     let (backend, _dir) = create_psr4_workspace(
@@ -646,7 +644,6 @@ async fn a_package_template_is_typed_by_its_namespaced_call_site() {
 /// The published copy of a package template is what a `package::name` call
 /// renders, so that call's data types it.
 #[tokio::test]
-#[ignore = "known gap: published package views under resources/views/vendor are ignored"]
 async fn a_published_package_template_is_typed_by_its_namespaced_call_site() {
     let (backend, _dir) = create_psr4_workspace(
         PACKAGE_COMPOSER,
