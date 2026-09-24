@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790243462598,
+  "lastUpdate": 1790243734192,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30735,6 +30735,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 86.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "650c53e361992e1783124069eabee92c989be336",
+          "message": "A `@param` union continued onto the next docblock line keeps its full\ntype",
+          "timestamp": "2026-09-24T11:37:09+02:00",
+          "tree_id": "950cf05e406c595a81b89d037f7e06bb2511dfe5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/650c53e361992e1783124069eabee92c989be336"
+        },
+        "date": 1790243725403,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.3,
             "unit": "MiB"
           }
         ]
