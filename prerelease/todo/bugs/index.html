@@ -938,17 +938,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b340-column-name-string-completion-recovers-its-receiver-from-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B340. Column-name string completion recovers its receiver from text
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b341-any-name-call-in-a-route-file-registers-a-route" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1669,17 +1658,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b340-column-name-string-completion-recovers-its-receiver-from-text" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B340. Column-name string completion recovers its receiver from text
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b341-any-name-call-in-a-route-file-registers-a-route" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1878,18 +1856,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b340-column-name-string-completion-recovers-its-receiver-from-text">B340. Column-name string completion recovers its receiver from text<a class="headerlink" href="#b340-column-name-string-completion-recovers-its-receiver-from-text" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>$user-&gt;posts()-&gt;where('|')</code> and <code>$user-&gt;posts-&gt;where('|')</code> offer no
-columns. <code>extract_subject_backwards</code> in <code>src/completion/eloquent_string.rs</code>
-scans the source backwards for an identifier, which stops at <code>-&gt;</code> and <code>)</code>,
-so the receiver is never a chain. This is a second, text-based resolver
-beside the shared pipeline. Resolve the receiver expression through the
-forward walker instead (<code>HasMany&lt;Post, …&gt;</code> mixes in <code>Builder&lt;Post&gt;</code>, and
-the relation property is <code>Collection&lt;int, Post&gt;</code>), then read the model from
-the resolved type.</p>
-<p><strong>Tests:</strong> <code>laravel_eloquent_magic::relationship_query_where_offers_the_related_models_columns</code>
-and <code>relation_collection_where_offers_the_related_models_columns</code>.</p>
 <h2 id="b341-any-name-call-in-a-route-file-registers-a-route">B341. Any <code>-&gt;name()</code> call in a route file registers a route<a class="headerlink" href="#b341-any-name-call-in-a-route-file-registers-a-route" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p><code>$builder-&gt;name('x')-&gt;save()</code> or <code>$obj-&gt;getUser()-&gt;name('user')</code> in
