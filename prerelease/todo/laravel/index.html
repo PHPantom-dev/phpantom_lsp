@@ -1190,17 +1190,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l12-hasuuids-hasulids-trait-id-typed-as-string" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L12. <code>HasUuids</code> / <code>HasUlids</code> trait — <code>$id</code> typed as <code>string</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l47-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1876,17 +1865,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l12-hasuuids-hasulids-trait-id-typed-as-string" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L12. <code>HasUuids</code> / <code>HasUlids</code> trait — <code>$id</code> typed as <code>string</code>
       </span>
     </span>
   </a>
@@ -2571,25 +2549,6 @@ hard-coding the two known classes.  A simpler approach: add
 <code>@method</code> tags to bundled stubs for the most common dynamic <code>with*</code>
 methods, or document this as a known limitation.</p>
 <hr />
-<h4 id="l12-hasuuids-hasulids-trait-id-typed-as-string">L12. <code>HasUuids</code> / <code>HasUlids</code> trait — <code>$id</code> typed as <code>string</code><a class="headerlink" href="#l12-hasuuids-hasulids-trait-id-typed-as-string" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Models that use <code>Illuminate\Database\Eloquent\Concerns\HasUuids</code> or
-<code>HasUlids</code> have their primary key (<code>$id</code> by default) typed as
-<code>string</code> instead of <code>int</code>. Currently PHPantom does not inspect these
-traits, so <code>$model-&gt;id</code> resolves to <code>int</code> (from the default Model
-stub) instead of <code>string</code>.</p>
-<p>Larastan's <code>bug-2188.php</code> tests this: <code>assertType('string', $uuidModel-&gt;id)</code>.</p>
-<p><strong>Where to change:</strong> In <code>LaravelModelProvider::provide</code>, after
-synthesizing other virtual properties, check whether the model's
-<code>used_traits</code> (recursively, including parent traits) contains
-<code>HasUuids</code> or <code>HasUlids</code>. If so, synthesize a virtual <code>id</code> property
-typed as <code>string</code> (or override the existing one). The trait also
-overrides <code>getKeyType()</code> to return <code>'string'</code> and
-<code>getIncrementing()</code> to return <code>false</code>, but for virtual property
-purposes just the <code>id</code> type is the main gap.</p>
-<p>Alternatively, if the stubs for these traits include <code>@property</code>
-tags or a typed <code>$id</code> override, the PHPDoc provider may handle it
-automatically once the traits are loaded.</p>
 <h4 id="l47-morph-aliases-in-_type-column-comparisons">L47. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l47-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
 <p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
