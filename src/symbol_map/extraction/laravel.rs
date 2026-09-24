@@ -117,6 +117,12 @@ pub(super) fn try_emit_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
+    if kind == crate::symbol_map::LaravelStringKind::Trans {
+        if let Some(key) = argument_expr_for_parameter(argument_list, "key") {
+            push_laravel_string_span(kind, false, false, key, content, spans);
+        }
+        return;
+    }
     emit_laravel_string_span(kind, false, 0, argument_list, content, spans);
 }
 
@@ -466,6 +472,12 @@ fn push_laravel_string_span(
     let Some(mut key) = s.value.and_then(crate::atom::literal_bytes_to_str) else {
         return;
     };
+
+    if kind == crate::symbol_map::LaravelStringKind::Trans
+        && let Expression::Literal(Literal::String(string)) = expr
+    {
+        key = string.value.map(bytes_to_str).unwrap_or(key);
+    }
 
     if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
         // Require at least one dot: bare keys like 'app' are not valid config paths.

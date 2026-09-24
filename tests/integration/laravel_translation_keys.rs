@@ -339,7 +339,6 @@ async fn a_json_phrase_resolves_in_every_locale_catalogue() {
 /// Navigating to a phrase lands on the entry that declares it, not on the
 /// top of the catalogue.
 #[tokio::test]
-#[ignore = "known gap: JSON translation navigation lands on line 0 and loses to group files"]
 async fn a_json_phrase_lands_on_its_own_line() {
     let (backend, _dir, uri, content) = workspace(
         LARAVEL_APP_COMPOSER,
@@ -375,7 +374,6 @@ async fn a_json_phrase_is_what_hover_quotes() {
 /// into a group, so a dotted key the catalogue declares is the catalogue's
 /// line even when a group file declares it too.
 #[tokio::test]
-#[ignore = "known gap: JSON translation navigation lands on line 0 and loses to group files"]
 async fn a_json_line_wins_over_a_group_file_line_for_the_same_key() {
     let (backend, _dir, uri, content) = workspace(
         LARAVEL_APP_COMPOSER,
@@ -450,7 +448,6 @@ class BillingServiceProvider
 
 /// The same package phrase is somewhere go-to-definition can land.
 #[tokio::test]
-#[ignore = "known gap: JSON translation navigation lands on line 0 and loses to group files"]
 async fn a_package_json_phrase_reaches_its_catalogue() {
     let provider = "\
 <?php

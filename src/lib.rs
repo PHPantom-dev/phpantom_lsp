@@ -377,13 +377,8 @@ pub(crate) struct LaravelStringKeyCache {
     /// against them, which would otherwise re-read and re-parse the config
     /// file once per template.
     pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
-    /// Every translation key, sorted.
-    pub trans_keys: Option<std::sync::Arc<[String]>>,
-    /// Every translation key mapped to whether it names a group (nested
-    /// array) rather than a scalar entry.  Shared behind an `Arc` for the
-    /// same reason as `routes`: consumers look up one key per call and
-    /// cloning the whole map per lookup would be waste.
-    pub trans_key_shapes: Option<std::sync::Arc<HashMap<String, bool>>>,
+    /// Shared translation declarations, values, locales, and file locations.
+    pub translations: Option<Arc<crate::virtual_members::laravel::TranslationCatalog>>,
     /// The Blade templates and component classes the project ships, keyed
     /// by the names Laravel addresses them under.  Shared behind an `Arc`
     /// because consumers look up a single name in one of its three maps and
@@ -435,8 +430,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
     pub view_roots: parking_lot::Mutex<()>,
-    pub trans_keys: parking_lot::Mutex<()>,
-    pub trans_key_shapes: parking_lot::Mutex<()>,
+    pub translations: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
     pub blade_discovery: parking_lot::Mutex<()>,
     pub blade_blocks: parking_lot::Mutex<()>,
@@ -497,9 +491,13 @@ impl LaravelStringKeyCache {
         {
             self.view_roots = None;
         }
-        if uri.contains("/lang/") || uri.contains("/resources/lang/") {
-            self.trans_keys = None;
-            self.trans_key_shapes = None;
+        if uri.contains("/lang/")
+            || self
+                .translations
+                .as_ref()
+                .is_some_and(|catalog| catalog.contains_uri(uri))
+        {
+            self.translations = None;
         }
     }
 }
