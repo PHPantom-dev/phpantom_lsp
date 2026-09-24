@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790232786302,
+  "lastUpdate": 1790232835515,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30259,6 +30259,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 76.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "787b5d37d0622814c5a25632b1b14feda843a54e",
+          "message": "A model inherits the Eloquent settings of the base model it extends",
+          "timestamp": "2026-09-24T08:37:21+02:00",
+          "tree_id": "0df2b26b909cc2ae60b7316e187ec8fcf8413b43",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/787b5d37d0622814c5a25632b1b14feda843a54e"
+        },
+        "date": 1790232827287,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 75.5,
             "unit": "MiB"
           }
         ]
