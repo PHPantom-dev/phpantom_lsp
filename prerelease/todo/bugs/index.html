@@ -960,17 +960,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B343. View call-site data unions a key's values instead of keeping the last write
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1603,17 +1592,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B343. View call-site data unions a key's values instead of keeping the last write
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1724,16 +1702,6 @@ looks there.</p>
 <p><strong>Tests:</strong> <code>laravel_view_names::a_published_copy_of_a_package_view_wins_over_the_original</code>,
 <code>a_view_only_the_published_directory_holds_is_known</code>, and
 <code>a_published_package_template_is_typed_by_its_namespaced_call_site</code>.</p>
-<h2 id="b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write">B343. View call-site data unions a key's values instead of keeping the last write<a class="headerlink" href="#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>view('x', ['user' =&gt; $a, 'user' =&gt; $b])</code> and
-<code>view('x', ['user' =&gt; $a])-&gt;with('user', $b)</code> both leave the template with
-only <code>$b</code> (a PHP array keeps the last duplicate key, and <code>View::with()</code>
-overwrites), but call-site inference types <code>$user</code> as the union of both.
-Within one call site the last write should win; the union is only right
-across <em>different</em> call sites.</p>
-<p><strong>Tests:</strong> <code>laravel_view_names::a_duplicate_key_in_the_data_array_keeps_the_last_value</code>
-and <code>a_with_call_replaces_the_same_key_from_the_data_argument</code>.</p>
 <h2 id="b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value">B358. A string key argument is read from its raw source, not its value<a class="headerlink" href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p><code>config('app.it\'s')</code> names the key <code>it's</code>, but <code>push_laravel_string_span</code>
