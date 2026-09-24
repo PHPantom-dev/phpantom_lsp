@@ -1722,6 +1722,31 @@ class ClosureLiteralDemo
 }
 
 
+// ── Callable Array Return Types ─────────────────────────────────────────────
+// Try: hover $callback below — string[] is the callback's return type.
+// Passing an array-returning closure or null produces no type mismatch.
+
+class CallableArrayReturnDemo
+{
+    /**
+     * @param (callable(string): string[])|null $callback
+     * @return string[]
+     */
+    public function suggestions(?callable $callback): array
+    {
+        return $callback === null ? [] : $callback('alice');
+    }
+
+    /** @return string[] */
+    public function demo(): array
+    {
+        $users = ['alice', 'bob'];
+        $this->suggestions(null);
+        return $this->suggestions(static fn (): array => $users);
+    }
+}
+
+
 // ── Conditional Return Types ────────────────────────────────────────────────
 
 class ConditionalReturnDemo
