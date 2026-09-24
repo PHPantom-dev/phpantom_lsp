@@ -6311,6 +6311,202 @@ class MyException extends NativeException {}
     );
 }
 
+/// A global function typed with `\context`, which exists only via `class_alias()`.
+const ALIASED_GLOBAL_PARAM_PHP: &str = r#"<?php
+class_alias(Core\context::class, 'context');
+
+function is_enrolled(context $context): bool { return true; }
+"#;
+
+/// Argument diagnostics for `php`, with an unrelated `App\context` also indexed.
+fn collect_against_aliased_global_param(php: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///core/context.php",
+        "<?php\nnamespace Core;\n\nabstract class context {}\nfinal class course_context extends context {}\n",
+    );
+    backend.update_ast("file:///lib/accesslib.php", ALIASED_GLOBAL_PARAM_PHP);
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    messages_with_code(&out, "type_mismatch_argument")
+}
+
+#[test]
+fn caller_import_does_not_rename_a_global_parameter_type() {
+    let msgs = collect_against_aliased_global_param(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function check(): bool {
+    return is_enrolled(new \Core\course_context()) && new context() instanceof context;
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context` in `is_enrolled()` was written in the global namespace, so \
+         the caller's `use App\\context;` has no say in what it names: {msgs:?}"
+    );
+}
+
+#[test]
+fn caller_namespace_does_not_rename_a_global_parameter_type() {
+    let msgs = collect_against_aliased_global_param(
+        r#"<?php
+namespace App;
+
+function check(): bool {
+    return is_enrolled(new \Core\course_context());
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context` in `is_enrolled()` is the global name, not `App\\context` \
+         just because the call sits in namespace `App`: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_imported_class_passed_to_a_same_named_global_parameter_type() {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib/accesslib.php",
+        r#"<?php
+abstract class context {}
+
+function is_enrolled(context $context): bool { return true; }
+"#,
+    );
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    let php = r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function check(): bool {
+    return is_enrolled(new context());
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("expects context") && m.contains("got App\\context")),
+        "`App\\context` does not extend the global `context`: {msgs:?}"
+    );
+}
+
+/// Argument diagnostics for `php` against a real global `context` and an `App\context`.
+fn collect_against_global_context(php: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    backend.update_ast(
+        "file:///lib/accesslib.php",
+        r#"<?php
+class context {}
+
+function get_ctx(): context { return new context(); }
+
+function takes(context $c): bool { return true; }
+"#,
+    );
+    backend.update_ast(
+        "file:///app/context.php",
+        "<?php\nnamespace App;\n\nfinal class context {}\n",
+    );
+    backend.update_ast("file:///test.php", php);
+
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    messages_with_code(&out, "type_mismatch_argument")
+}
+
+#[test]
+fn caller_import_does_not_rename_a_global_return_type() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function run(): bool {
+    return takes(get_ctx()) && new context() instanceof context;
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`get_ctx()` returns the global `context` whatever the caller \
+         imports: {msgs:?}"
+    );
+}
+
+#[test]
+fn native_parameter_hint_keeps_the_class_its_import_names() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+function wants_app(context $c): bool { return true; }
+
+class Svc {
+    public function run(context $native): bool {
+        return wants_app($native);
+    }
+}
+
+function run_fn(context $native): bool {
+    $closure = fn(context $inner): bool => wants_app($inner);
+    return wants_app($native) && $closure($native);
+}
+"#,
+    );
+    assert!(
+        msgs.is_empty(),
+        "`context $native` means `App\\context` in a file that imports it, \
+         even with a global `context` in the project: {msgs:?}"
+    );
+}
+
+#[test]
+fn flags_native_parameter_hint_passed_to_a_same_named_global_parameter_type() {
+    let msgs = collect_against_global_context(
+        r#"<?php
+namespace App\Service;
+
+use App\context;
+
+class Svc {
+    public function run(context $native): bool {
+        return takes($native);
+    }
+}
+"#,
+    );
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("expects context") && m.contains("got App\\context")),
+        "`$native` is an `App\\context`, which the global `context` \
+         parameter does not accept: {msgs:?}"
+    );
+}
+
 // ─── Bare array (Array(mixed)) passed to typed array parameter ──────────────
 
 #[test]
