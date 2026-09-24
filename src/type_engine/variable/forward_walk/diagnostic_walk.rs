@@ -635,7 +635,14 @@ pub(crate) fn seed_closure_params(
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
 
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+        // Qualify the hint against this file's imports, as in `seed_params`.
+        let native_type = param.hint.as_ref().map(|h| {
+            crate::util::resolve_source_php_type_names(
+                &extract_hint_type(h),
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.class_loader,
+            )
+        });
 
         // Check the `@param` docblock annotation.
         //
