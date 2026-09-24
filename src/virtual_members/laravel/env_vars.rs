@@ -6,6 +6,8 @@
 //! What a name resolves *to* is the line that declares it in the project's
 //! `.env`, which is what this module supplies.
 
+use std::path::Path;
+
 use tower_lsp::lsp_types::{Location, Position, Url};
 
 use crate::Backend;
@@ -15,8 +17,26 @@ use crate::Backend;
 ///
 /// `.env` is the one the framework actually loads; `.env.example` is the
 /// committed inventory of what a project expects, and is all a fresh clone
-/// has before anyone copies it.
-const ENV_FILES: [&str; 2] = [".env", ".env.example"];
+/// has before anyone copies it; Laravel also loads a `.env.<environment>`
+/// file (e.g. `.env.testing`) in place of `.env` when it exists. Which
+/// environment is active is not statically known, so the workspace root is
+/// scanned for every name that matches rather than checking a fixed list.
+fn dotenv_file_names(root: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(root)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name == ".env" || name.starts_with(".env."))
+        .collect();
+    names.sort_by_key(|name| match name.as_str() {
+        ".env" => (0u8, String::new()),
+        ".env.example" => (1u8, String::new()),
+        _ => (2u8, name.clone()),
+    });
+    names
+}
 
 /// Resolve an environment-variable name to the line declaring it in each
 /// dotenv file that does.
@@ -31,8 +51,8 @@ pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Locat
     };
     let mut fallback = None;
     let mut declarations = Vec::new();
-    for name in ENV_FILES {
-        let path = root.join(name);
+    for name in dotenv_file_names(&root) {
+        let path = root.join(&name);
         let (Ok(content), Ok(uri)) = (std::fs::read_to_string(&path), Url::from_file_path(&path))
         else {
             continue;
@@ -58,7 +78,7 @@ pub(crate) fn resolve_env_definitions(backend: &Backend, key: &str) -> Vec<Locat
 /// the value it is set to.
 pub(crate) struct EnvDeclaration {
     /// The dotenv file, as a workspace-relative name.
-    pub file: &'static str,
+    pub file: String,
     /// The value as written, with surrounding quotes and any trailing
     /// comment removed.  Empty for a name declared with no value.
     pub value: String,
@@ -70,8 +90,8 @@ pub(crate) struct EnvDeclaration {
 /// when nothing in it declares the name: hover has to tell the two apart.
 pub(crate) fn env_declaration(backend: &Backend, key: &str) -> Option<EnvDeclaration> {
     let root = backend.workspace.workspace_root.read().clone()?;
-    ENV_FILES.into_iter().find_map(|file| {
-        let content = std::fs::read_to_string(root.join(file)).ok()?;
+    dotenv_file_names(&root).into_iter().find_map(|file| {
+        let content = std::fs::read_to_string(root.join(&file)).ok()?;
         let value = declared_value(&content, key)?;
         Some(EnvDeclaration { file, value })
     })
@@ -100,14 +120,15 @@ pub(crate) fn env_name_is_sensitive(key: &str) -> bool {
 /// Every variable name the project's dotenv files declare, sorted and
 /// deduplicated.
 ///
-/// Read from disk on demand rather than cached: there are at most two files,
-/// and an edit to `.env` has to show up in the next completion.
+/// Read from disk on demand rather than cached: there are only ever a
+/// handful of dotenv files, and an edit to `.env` has to show up in the next
+/// completion.
 pub(crate) fn enumerate_env_keys(backend: &Backend) -> Vec<String> {
     let Some(root) = backend.workspace.workspace_root.read().clone() else {
         return Vec::new();
     };
-    let mut keys: Vec<String> = ENV_FILES
-        .iter()
+    let mut keys: Vec<String> = dotenv_file_names(&root)
+        .into_iter()
         .filter_map(|name| std::fs::read_to_string(root.join(name)).ok())
         .flat_map(|content| {
             content

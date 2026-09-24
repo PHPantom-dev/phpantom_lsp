@@ -313,7 +313,6 @@ async fn files_that_only_resemble_a_dotenv_file_are_not_read() {
 /// is how `.env.testing` supplies the test suite's database, so a variable
 /// declared there is declared.
 #[tokio::test]
-#[ignore = "known gap: `.env.<environment>` files are not read"]
 async fn an_environment_specific_dotenv_file_declares_the_variable_too() {
     let (backend, _dir, uri, content) = workspace(
         &[

@@ -261,19 +261,6 @@ no completion, go-to-definition, hover, or diagnostic. They compile to
 **Tests:** `laravel_translation_keys::the_lang_directive_reaches_the_line`
 and `the_choice_directive_reaches_the_line`.
 
-## B353. `.env.<environment>` files are not read
-
-**Impact: Low · Complexity: Low**
-
-Laravel loads `.env.{APP_ENV}` in place of `.env` when it exists, which is
-how `.env.testing` supplies a test suite's database. `ENV_FILES` in
-`src/virtual_members/laravel/env_vars.rs` lists only `.env` and
-`.env.example`, so a variable declared only in `.env.testing` is reported
-as undeclared and has no definition. Which environment is active is not
-statically known, so every `.env.<name>` should count as a declaration.
-
-**Test:** `laravel_env_keys::an_environment_specific_dotenv_file_declares_the_variable_too`.
-
 ## Blade
 
 No outstanding items.
