@@ -354,31 +354,6 @@ methods, or document this as a known limitation.
 
 ---
 
-#### L12. `HasUuids` / `HasUlids` trait — `$id` typed as `string`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Models that use `Illuminate\Database\Eloquent\Concerns\HasUuids` or
-`HasUlids` have their primary key (`$id` by default) typed as
-`string` instead of `int`. Currently PHPantom does not inspect these
-traits, so `$model->id` resolves to `int` (from the default Model
-stub) instead of `string`.
-
-Larastan's `bug-2188.php` tests this: `assertType('string', $uuidModel->id)`.
-
-**Where to change:** In `LaravelModelProvider::provide`, after
-synthesizing other virtual properties, check whether the model's
-`used_traits` (recursively, including parent traits) contains
-`HasUuids` or `HasUlids`. If so, synthesize a virtual `id` property
-typed as `string` (or override the existing one). The trait also
-overrides `getKeyType()` to return `'string'` and
-`getIncrementing()` to return `false`, but for virtual property
-purposes just the `id` type is the main gap.
-
-Alternatively, if the stubs for these traits include `@property`
-tags or a typed `$id` override, the PHPDoc provider may handle it
-automatically once the traits are loaded.
-
 #### L47. Morph aliases in `*_type` column comparisons
 
 **Impact: Low-Medium · Complexity: Medium-High**
@@ -599,6 +574,13 @@ still partially lack:
   key" style) now completes and resolves go-to-definition, but the
   definition always lands on the top of the file rather than the key's
   actual line, and find-references does not cover JSON keys at all.
+  `Translator::get()` also consults the JSON catalogue *first*, even for a
+  dotted key, but go-to-definition and hover list the group file ahead of
+  it, and a package's `loadJsonTranslationsFrom()` directory is known to
+  the diagnostic but never navigated to. The ignored tests
+  `laravel_translation_keys::a_json_phrase_lands_on_its_own_line`,
+  `a_json_line_wins_over_a_group_file_line_for_the_same_key`, and
+  `a_package_json_phrase_reaches_its_catalogue` cover all three.
 - **Locale argument completion.** The `$locale` parameter of `__()`,
   `trans()`, `trans_choice()`, `Lang::get()/choice()/hasForLocale()`
   (positional or named) completes from the locale set derived from

@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use parking_lot::RwLock;
+use tower_lsp::lsp_types::Range;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, AtomSet, atom};
@@ -121,7 +122,7 @@ impl ReferenceIndexKey {
 /// per-file `Arc<str>`) mapped to the number of spans in that URI that
 /// reference the key's name — the two facts consumers actually read
 /// (`reference_candidate_uris_for_keys` needs the URI set,
-/// `inlay_hints::ref_count` needs the count). Declarations and the
+/// `indexed_reference_count` needs the count). Declarations and the
 /// alias keys a reference is merely searchable under contribute a URI
 /// but no count, so a class is never credited with the references to a
 /// namesake in another namespace. The per-span `start`/`end` offsets and
@@ -144,26 +145,61 @@ pub(crate) struct ReferenceIndexInner {
 #[derive(Clone, Copy)]
 struct ResolvedMemberAccess {
     span_index: u32,
+    /// Where the access sits, so a warm file answers a search without its
+    /// text being read again to convert the span's byte offsets.
+    range: Range,
     target_start: u32,
     target_len: u32,
 }
 
-/// Receiver classes resolved for every member access in one immutable symbol
-/// map.  Targets are packed into one allocation; the access table points into
-/// it and stays sorted by symbol-span index for binary lookup.
+/// Receiver classes resolved for the accesses to a set of member names in one
+/// immutable symbol map.  Targets are packed into one allocation; the access
+/// table points into it and stays sorted by symbol-span index for binary
+/// lookup.
+///
+/// Each access also carries the LSP range it occupies.  That is the only other
+/// thing a search needs the file's text for, so an entry that covers every name
+/// a search asks about answers it outright: no `read_to_string` for a file the
+/// editor does not have open, and no offset-to-position pass over it.
+///
+/// Resolving a receiver means running the type engine over the whole enclosing
+/// file, so an entry only covers the member names a search actually asked
+/// about: a file with two hundred member accesses and one `->save()` pays for
+/// the one.  `covered` records which names those were, because an absent
+/// access and an access that resolved to nothing are indistinguishable in the
+/// table below — without it a later search for a different name would read
+/// this entry as "no receiver anywhere" and silently drop every reference in
+/// the file.
+///
+/// `deps` records the classes and functions the resolution consulted, so an
+/// edit elsewhere in the workspace drops the entries it can have changed
+/// rather than the whole layer.  See
+/// [`resolution_deps`](crate::resolution_deps).
 pub(crate) struct ResolvedMemberFile {
     symbol_map: Arc<SymbolMap>,
+    /// The member names this entry resolved the accesses of, sorted.
+    covered: Box<[Atom]>,
     accesses: Vec<ResolvedMemberAccess>,
     targets: Vec<Atom>,
+    /// The names this entry's resolution depended on, sorted.  Keyed the way
+    /// [`dep_key`](crate::resolution_deps::dep_key) keys them.
+    deps: Box<[Atom]>,
 }
 
 impl ResolvedMemberFile {
-    pub(crate) fn new(symbol_map: Arc<SymbolMap>, mut resolved: Vec<(usize, Vec<Atom>)>) -> Self {
-        resolved.sort_unstable_by_key(|(span_index, _)| *span_index);
-        let target_count = resolved.iter().map(|(_, targets)| targets.len()).sum();
+    pub(crate) fn new(
+        symbol_map: Arc<SymbolMap>,
+        mut covered: Vec<Atom>,
+        mut resolved: Vec<(usize, Range, Vec<Atom>)>,
+        mut deps: Vec<Atom>,
+    ) -> Self {
+        covered.sort_unstable();
+        covered.dedup();
+        resolved.sort_unstable_by_key(|(span_index, ..)| *span_index);
+        let target_count = resolved.iter().map(|(_, _, targets)| targets.len()).sum();
         let mut accesses = Vec::with_capacity(resolved.len());
         let mut packed_targets = Vec::with_capacity(target_count);
-        for (span_index, mut targets) in resolved {
+        for (span_index, range, mut targets) in resolved {
             if targets.is_empty() {
                 continue;
             }
@@ -173,30 +209,91 @@ impl ResolvedMemberFile {
             packed_targets.extend(targets);
             accesses.push(ResolvedMemberAccess {
                 span_index: span_index as u32,
+                range,
                 target_start: target_start as u32,
                 target_len: (packed_targets.len() - target_start) as u32,
             });
         }
+        // A receiver the entry names is a dependency whether or not the walk
+        // that produced it had to load the class: an edit to it can change
+        // which declaration the access belongs to.
+        deps.extend(
+            packed_targets
+                .iter()
+                .map(|target| crate::resolution_deps::dep_key(target)),
+        );
+        deps.sort_unstable();
+        deps.dedup();
         Self {
             symbol_map,
+            covered: covered.into_boxed_slice(),
             accesses,
             targets: packed_targets,
+            deps: deps.into_boxed_slice(),
         }
     }
 
-    pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
-        let Ok(span_index) = u32::try_from(span_index) else {
-            return &[];
-        };
-        let Ok(index) = self
+    /// The names this entry's resolution depended on, so a later walk that
+    /// carries its resolutions over carries their dependencies too.
+    pub(crate) fn deps(&self) -> &[Atom] {
+        &self.deps
+    }
+
+    /// Whether an edit to any of `changed` can have changed what this entry
+    /// resolved.  `changed` is the smaller side by far (one edit's classes
+    /// against a file's whole dependency set), so it drives the loop.
+    fn depends_on_any(&self, changed: &[Atom]) -> bool {
+        changed
+            .iter()
+            .any(|name| self.deps.binary_search(name).is_ok())
+    }
+
+    /// Whether this entry already answers for every one of `members`.
+    pub(crate) fn covers(&self, members: impl IntoIterator<Item = Atom>) -> bool {
+        members
+            .into_iter()
+            .all(|member| self.covered.binary_search(&member).is_ok())
+    }
+
+    pub(crate) fn covered(&self) -> &[Atom] {
+        &self.covered
+    }
+
+    /// The resolutions already recorded, so a search that needs one more
+    /// member name carries them over instead of walking the file again for
+    /// names a previous search already paid for.
+    pub(crate) fn resolutions(&self) -> impl Iterator<Item = (usize, Range, Vec<Atom>)> + '_ {
+        self.accesses.iter().map(|access| {
+            let start = access.target_start as usize;
+            (
+                access.span_index as usize,
+                access.range,
+                self.targets[start..start + access.target_len as usize].to_vec(),
+            )
+        })
+    }
+
+    /// The range and receiver classes recorded for one access, or `None` when
+    /// the entry holds none for it: the search that built the entry either did
+    /// not ask about that member name, or the receiver resolved to nothing.
+    pub(crate) fn resolved_access(&self, span_index: usize) -> Option<(Range, &[Atom])> {
+        let span_index = u32::try_from(span_index).ok()?;
+        let index = self
             .accesses
             .binary_search_by_key(&span_index, |access| access.span_index)
-        else {
-            return &[];
-        };
+            .ok()?;
         let access = self.accesses[index];
         let start = access.target_start as usize;
-        &self.targets[start..start + access.target_len as usize]
+        Some((
+            access.range,
+            &self.targets[start..start + access.target_len as usize],
+        ))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn targets_for_span(&self, span_index: usize) -> &[Atom] {
+        self.resolved_access(span_index)
+            .map_or(&[][..], |(_, targets)| targets)
     }
 
     fn matches_symbol_map(&self, symbol_map: &Arc<SymbolMap>) -> bool {
@@ -208,8 +305,13 @@ impl ResolvedMemberFile {
         (
             self.accesses.len(),
             self.accesses.capacity() * std::mem::size_of::<ResolvedMemberAccess>()
-                + self.targets.capacity() * std::mem::size_of::<Atom>(),
-            usize::from(self.accesses.capacity() > 0) + usize::from(self.targets.capacity() > 0),
+                + self.targets.capacity() * std::mem::size_of::<Atom>()
+                + self.covered.len() * std::mem::size_of::<Atom>()
+                + self.deps.len() * std::mem::size_of::<Atom>(),
+            usize::from(self.accesses.capacity() > 0)
+                + usize::from(self.targets.capacity() > 0)
+                + usize::from(!self.covered.is_empty())
+                + usize::from(!self.deps.is_empty()),
         )
     }
 }
@@ -246,6 +348,8 @@ pub(crate) fn new_reference_index() -> ReferenceIndex {
 }
 
 impl Backend {
+    /// The entry cached for `uri`, when it describes the same symbol map and
+    /// already covers every member name the caller is searching for.
     pub(crate) fn resolved_member_file(
         &self,
         uri: &str,
@@ -263,9 +367,16 @@ impl Backend {
         &self,
         uri: &str,
         symbol_map: Arc<SymbolMap>,
-        resolved: Vec<(usize, Vec<Atom>)>,
+        covered: Vec<Atom>,
+        resolved: Vec<(usize, Range, Vec<Atom>)>,
+        deps: Vec<Atom>,
     ) -> Arc<ResolvedMemberFile> {
-        let built = Arc::new(ResolvedMemberFile::new(Arc::clone(&symbol_map), resolved));
+        let built = Arc::new(ResolvedMemberFile::new(
+            Arc::clone(&symbol_map),
+            covered,
+            resolved,
+            deps,
+        ));
 
         // A didChange parse may have replaced the symbol map while the
         // semantic walk was running. The result remains usable by its caller,
@@ -280,10 +391,15 @@ impl Backend {
         }
 
         let mut index = self.reference_index.write();
+        // A concurrent worker may have cached the same file first.  Keep its
+        // entry only when it answers for at least as many member names as this
+        // one, or the narrower entry would drop the names this walk just paid
+        // for and the next search would walk the file again.
         if let Some(existing) = index
             .resolved_members
             .get(uri)
             .filter(|file| file.matches_symbol_map(&symbol_map))
+            .filter(|file| file.covers(built.covered().iter().copied()))
         {
             return Arc::clone(existing);
         }
@@ -298,8 +414,38 @@ impl Backend {
         built
     }
 
+    /// Drop every cached receiver resolution.
+    ///
+    /// For an edit whose effect on the type engine cannot be named: a
+    /// Laravel registry (the macro table, the container aliases, the pivot
+    /// index, the configured date class) is consulted without a class
+    /// lookup naming the provider that registered it, so an entry that read
+    /// one records no dependency on it.
     pub(crate) fn clear_resolved_member_files(&self) {
         self.reference_index.write().resolved_members.clear();
+    }
+
+    /// Drop the cached receiver resolutions that consulted one of `changed`,
+    /// keeping the rest.
+    ///
+    /// `changed` holds the [`dep_key`](crate::resolution_deps::dep_key) of
+    /// every class and function an edit altered, *including* the classes
+    /// that inherit from them: a cached full resolution reads its parents
+    /// from the resolved-class cache rather than loading them, so it records
+    /// no dependency on a parent it never looked up.  The caller closes that
+    /// over the inheritance and mixin graph before calling here (which is
+    /// what the resolved-class cache's own eviction already computes).
+    pub(crate) fn retain_resolved_member_files(&self, changed: &[Atom]) {
+        if changed.is_empty() {
+            return;
+        }
+        let mut index = self.reference_index.write();
+        if index.resolved_members.is_empty() {
+            return;
+        }
+        index
+            .resolved_members
+            .retain(|_, file| !file.depends_on_any(changed));
     }
 
     pub(crate) fn evict_reference_index_uri(&self, uri: &str) {
@@ -312,11 +458,12 @@ impl Backend {
         };
         evict_reference_index_uri_locked(&mut index, uri);
         drop(index);
+        let evicted: HashSet<Arc<str>> = std::iter::once(Arc::from(uri)).collect();
         if track_members {
-            self.member_ref_counts.invalidate_locations_all();
+            self.member_ref_counts.invalidate_locations_in(&evicted);
         }
         for name in dropped.into_keys() {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &evicted);
         }
         self.forget_class_shape(uri);
     }
@@ -448,8 +595,19 @@ impl Backend {
         }
         crate::util::retain_by_mask(&mut rebuilt, &keep);
 
-        if track_members && !rebuilt.is_empty() {
-            self.member_ref_counts.invalidate_locations_all();
+        // Only the files this pass reparsed can have moved an access, so a
+        // cached result is rescanned in those files alone rather than being
+        // thrown away and searched for across the workspace again.
+        let reparsed: HashSet<Arc<str>> = if track_members {
+            rebuilt
+                .iter()
+                .map(|(uri, _)| Arc::from(uri.as_str()))
+                .collect()
+        } else {
+            HashSet::new()
+        };
+        if track_members {
+            self.member_ref_counts.invalidate_locations_in(&reparsed);
         }
 
         // Which member names each file contributed a reference to, so the
@@ -505,7 +663,7 @@ impl Backend {
         drop(index);
 
         for name in stale {
-            self.member_ref_counts.invalidate_member(name);
+            self.member_ref_counts.invalidate_member(name, &reparsed);
         }
     }
 

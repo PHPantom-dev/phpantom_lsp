@@ -25,7 +25,7 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::code_actions::{CodeActionData, make_code_action_data};
+use crate::code_actions::{CodeActionData, indent_of_line_at, make_code_action_data};
 use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
@@ -606,7 +606,7 @@ fn build_add_tag_edit(content: &str, info: &EnclosingClassInfo) -> Option<Vec<Te
         let closing = doc_content.rfind("*/")?;
 
         // Determine the indentation from the docblock.
-        let indent = extract_docblock_indent(content, doc.start);
+        let indent = indent_of_line_at(content, doc.start);
 
         let insert_offset = doc.start + closing;
         let insert_pos = offset_to_position(content, insert_offset);
@@ -720,16 +720,6 @@ fn build_final_constructor_edit(content: &str, info: &EnclosingClassInfo) -> Opt
 }
 
 // ── Utility helpers ─────────────────────────────────────────────────────────
-
-/// Extract the indentation of the docblock from its position in the
-/// content.
-fn extract_docblock_indent(content: &str, doc_start: usize) -> String {
-    let line_start = content[..doc_start].rfind('\n').map(|p| p + 1).unwrap_or(0);
-    content[line_start..doc_start]
-        .chars()
-        .take_while(|c| c.is_whitespace())
-        .collect()
-}
 
 /// Extract the indentation of the line starting at `line_start`.
 fn extract_line_indent(content: &str, line_start: usize) -> String {

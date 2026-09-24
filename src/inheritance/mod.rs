@@ -17,6 +17,7 @@
 //! properties have their template parameter references replaced with the
 //! concrete types.
 
+pub mod ancestry;
 pub mod enrichment;
 pub mod generics;
 pub mod traits;
@@ -32,6 +33,7 @@ use crate::virtual_members::{
 };
 
 // Re-export functions that are used internally
+pub(crate) use ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 
@@ -141,7 +143,10 @@ impl MergeDedup {
     }
 }
 
-use crate::virtual_members::laravel::{factory_model_type, is_factory_class};
+use crate::virtual_members::laravel::{
+    ELOQUENT_MODEL_FQN, factory_model_type, has_inheritable_model_metadata, inherit_model_metadata,
+    is_factory_class,
+};
 
 /// Resolve a class together with all inherited members from its parent
 /// chain.
@@ -238,6 +243,18 @@ pub(crate) fn resolve_class_with_inheritance(
         // readonly whether or not it repeats the keyword, and the
         // properties it inherits are readonly as well.
         merged.is_readonly |= parent.is_readonly;
+
+        // Eloquent model configuration (`$fillable`, `$casts`,
+        // `$primaryKey`, …) comes from the nearest class that declares it.
+        // The framework's own `Model` is skipped: its declarations are the
+        // defaults (`$guarded = ['*']`, `$primaryKey = 'id'`, …) that an
+        // undeclared setting already stands for.
+        if let Some(parent_meta) = parent.laravel()
+            && has_inheritable_model_metadata(parent_meta)
+            && !parent.fqn().eq_ignore_ascii_case(ELOQUENT_MODEL_FQN)
+        {
+            inherit_model_metadata(merged.laravel_mut(), parent_meta);
+        }
 
         // Build the substitution map for this parent level.
         //

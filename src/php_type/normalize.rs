@@ -232,10 +232,10 @@ impl PhpType {
             .cloned()
             .collect();
 
-        match kept.len() {
-            0 => self.clone(),
-            1 => kept.into_iter().next().unwrap(),
-            _ => PhpType::union(kept),
+        if kept.is_empty() {
+            self.clone()
+        } else {
+            PhpType::union(kept)
         }
     }
 
@@ -296,10 +296,10 @@ impl PhpType {
 
         crate::util::retain_by_mask(&mut flattened, &keep);
 
-        match flattened.len() {
-            0 => PhpType::never(),
-            1 => flattened.into_iter().next().unwrap(),
-            _ => PhpType::union(flattened),
+        if flattened.is_empty() {
+            PhpType::never()
+        } else {
+            PhpType::union(flattened)
         }
     }
 

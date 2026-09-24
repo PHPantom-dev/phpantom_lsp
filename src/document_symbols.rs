@@ -276,7 +276,7 @@ fn class_to_symbol(class: &ClassInfo, idx: &LineIndex<'_>) -> Option<DocumentSym
         if constant.is_virtual {
             continue;
         }
-        if let Some(sym) = constant_to_symbol(constant, idx, class.kind == ClassLikeKind::Enum) {
+        if let Some(sym) = constant_to_symbol(constant, idx) {
             children.push(sym);
         }
     }
@@ -457,13 +457,7 @@ fn property_to_symbol(prop: &PropertyInfo, idx: &LineIndex<'_>) -> Option<Docume
 
 /// Convert a `ConstantInfo` to a `DocumentSymbol`.
 #[allow(deprecated)]
-fn constant_to_symbol(
-    constant: &ConstantInfo,
-    idx: &LineIndex<'_>,
-    is_enum: bool,
-) -> Option<DocumentSymbol> {
-    let _ = is_enum;
-
+fn constant_to_symbol(constant: &ConstantInfo, idx: &LineIndex<'_>) -> Option<DocumentSymbol> {
     let (kind, detail) = if constant.is_enum_case {
         (SymbolKind::ENUM_MEMBER, constant.enum_value.clone())
     } else {

@@ -283,7 +283,7 @@ pub(crate) fn infer_arithmetic_result_type(
 /// union as well as numeric addition.
 ///
 /// Two arrays union their keys, which
-/// [`merge_array_plus`](super::super::resolution::merge_array_plus) works
+/// [`merge_array_plus`](super::super::array_shape_writes::merge_array_plus) works
 /// out from whatever both sides know. Only a mix of an array and a number
 /// has no meaningful result type: PHP raises a `TypeError` for it, so a bare
 /// `array` stands in rather than a number the operation cannot produce.
@@ -302,7 +302,7 @@ pub(crate) fn infer_addition_result_type(
         } else {
             ResolvedType::types_joined(lhs_types)
         };
-        return super::super::resolution::merge_array_plus(
+        return super::super::array_shape_writes::merge_array_plus(
             &lhs_type,
             &ResolvedType::types_joined(rhs_types),
         );

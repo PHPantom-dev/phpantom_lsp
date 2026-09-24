@@ -95,12 +95,7 @@ pub(crate) fn narrow_to_null_in_scope(var_name: &str, scope: &mut ScopeState) {
     // the opposite — `bool|string` came out of a falsy branch as `null`
     // while `non_null_type()` stood in for this check, because a union
     // with nothing to strip still has a non-null part.
-    narrow_to_in_scope(
-        var_name,
-        scope,
-        PhpType::null(),
-        scope_state::type_admits_null,
-    );
+    narrow_to_in_scope(var_name, scope, PhpType::null(), PhpType::accepts_null);
 }
 
 /// Narrow a variable in scope to `false` only.
@@ -201,11 +196,10 @@ pub(crate) fn strip_false_from_scope(var_name: &str, scope: &mut ScopeState) {
         if let TypeKind::Union(members) = ty.kind() {
             let non_false: Vec<PhpType> =
                 members.iter().filter(|m| !is_false(m)).cloned().collect();
-            rt.type_string = match non_false.len() {
-                0 => return None,
-                1 => non_false.into_iter().next().unwrap(),
-                _ => PhpType::union(non_false),
-            };
+            if non_false.is_empty() {
+                return None;
+            }
+            rt.type_string = PhpType::union(non_false);
         }
         Some(rt)
     });
@@ -255,6 +249,42 @@ pub(super) fn strip_null_from_array_element(
     strip_null_from_array_shape_key(base_var, key_name, scope);
     seed_synthetic_key_if_needed(access_key, scope, ctx);
     strip_null_from_scope(access_key, scope);
+}
+
+/// Strip `null` from whatever a condition proved non-null, whether that
+/// is a plain subject or one element of an array.
+pub(super) fn strip_null_from_subject(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match split_array_access_key(var_name) {
+        Some((base, key)) => strip_null_from_array_element(var_name, base, key, scope, ctx),
+        None => {
+            seed_synthetic_key_if_needed(var_name, scope, ctx);
+            strip_null_from_scope(var_name, scope);
+        }
+    }
+}
+
+/// Like [`strip_null_from_subject`], but an array element is narrowed on
+/// the base variable's shape only.
+///
+/// This is what a guard clause leaves behind: the synthetic `$a["k"]`
+/// entry belongs to the branch that was taken, while the shape refinement
+/// is what the code past the guard reads.
+pub(super) fn strip_null_from_subject_shape(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match split_array_access_key(var_name) {
+        Some((base, key)) => strip_null_from_array_shape_key(base, key, scope),
+        None => {
+            seed_synthetic_key_if_needed(var_name, scope, ctx);
+            strip_null_from_scope(var_name, scope);
+        }
+    }
 }
 
 pub(crate) fn strip_null_from_array_shape_key(

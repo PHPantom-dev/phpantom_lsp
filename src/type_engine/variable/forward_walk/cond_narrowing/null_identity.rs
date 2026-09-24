@@ -1,5 +1,4 @@
 use super::*;
-use crate::type_engine::variable::forward_walk::scope_state::type_admits_null;
 
 /// Strip `null` from a subject that an identity comparison has matched
 /// against a value that cannot be `null`.
@@ -27,9 +26,7 @@ pub(super) fn apply_identity_comparison_null_narrowing<'b>(
     collect_identity_comparisons(condition, truthy, &mut compared);
 
     for (subject, comparand) in compared {
-        let Some(key) =
-            expr_to_var_name(subject).or_else(|| narrowing::expr_to_subject_key(subject))
-        else {
+        let Some(key) = expr_to_subject(subject) else {
             continue;
         };
         // The cheap half first: with no null to rule out there is
@@ -218,7 +215,9 @@ fn recorded_narrows_current(
             narrow.type_string.unwrap_nullable().class_name(),
             wide.type_string.unwrap_nullable().class_name(),
         ) {
-            (Some(child), Some(parent)) => is_subclass_of(child, parent, ctx.class_loader),
+            (Some(child), Some(parent)) => {
+                crate::class_lookup::is_subclass_of(child, parent, ctx.class_loader)
+            }
             _ => false,
         }
     };
@@ -348,7 +347,7 @@ pub(super) fn strip_null_by_constant_identity(
     }
     if constant_types
         .iter()
-        .any(|rt| type_admits_null(&rt.type_string))
+        .any(|rt| rt.type_string.accepts_null())
     {
         return;
     }

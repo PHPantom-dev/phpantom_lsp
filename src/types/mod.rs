@@ -1502,6 +1502,47 @@ pub mod attribute_target {
     pub const TARGET_ALL: u8 = (1 << 6) - 1; // 63
 }
 
+/// Flags for the list-valued Eloquent model properties a class declares
+/// itself, stored as a bitmask in [`LaravelMetadata::declared`].
+///
+/// A subclass inherits each of these from the nearest ancestor that
+/// declares it, so "declared as `[]`" (which hides the parent's value) has
+/// to be told apart from "not declared" (which inherits it). The
+/// scalar-valued fields carry that distinction in their own `Option`.
+pub mod model_declaration {
+    /// The class declares a `$casts` property.
+    pub const CASTS_PROPERTY: u16 = 1;
+    /// The class declares a `casts()` method.
+    pub const CASTS_METHOD: u16 = 1 << 1;
+    /// The class declares a `$dates` property.
+    pub const DATES: u16 = 1 << 2;
+    /// The class declares an `$attributes` property.
+    pub const ATTRIBUTES: u16 = 1 << 3;
+    /// The class declares a `$fillable` property.
+    pub const FILLABLE: u16 = 1 << 4;
+    /// The class declares a `$guarded` property.
+    pub const GUARDED: u16 = 1 << 5;
+    /// The class declares a `$hidden` property.
+    pub const HIDDEN: u16 = 1 << 6;
+    /// The class declares a `$visible` property.
+    pub const VISIBLE: u16 = 1 << 7;
+    /// The class declares an `$appends` property.
+    pub const APPENDS: u16 = 1 << 8;
+    /// The column-name lists that feed [`LaravelMetadata::column_names`](super::LaravelMetadata::column_names).
+    pub const COLUMN_LISTS: u16 = FILLABLE | GUARDED | HIDDEN | VISIBLE | APPENDS;
+}
+
+/// The `$casts` property and `casts()` method entries of a model, kept
+/// apart so a subclass that redeclares one of them still inherits the
+/// other.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CastSources {
+    /// Entries of the `$casts` property.
+    pub property: Vec<(String, String)>,
+    /// Entries returned by the `casts()` method.
+    pub method: Vec<(String, String)>,
+}
+
 /// Laravel-specific metadata extracted from class declarations.
 ///
 /// Grouped into a sub-struct to keep the core `ClassInfo` focused on
@@ -1541,6 +1582,14 @@ pub struct LaravelMetadata {
     /// properties, mapping cast type strings to PHP types (e.g.
     /// `datetime` to `Carbon\Carbon`, `boolean` to `bool`).
     pub casts_definitions: Vec<(String, String)>,
+    /// The two sources of [`casts_definitions`](Self::casts_definitions),
+    /// recorded only when the model has both a `$casts` property and a
+    /// `casts()` method (its own or inherited). With a single source,
+    /// `casts_definitions` already is that source's list.
+    pub cast_sources: Option<Box<CastSources>>,
+    /// Which list-valued model properties the class declares itself, as
+    /// [`model_declaration`] flags.
+    pub declared: u16,
     /// Column names extracted from the deprecated `$dates` property
     /// array.
     ///
@@ -1569,6 +1618,13 @@ pub struct LaravelMetadata {
     /// properties as a last-resort fallback when a column is not
     /// already covered by `$casts` or `$attributes`.
     pub column_names: Vec<String>,
+    /// The [`model_declaration`] list flags each entry of
+    /// [`column_names`](Self::column_names) comes from, index for index.
+    ///
+    /// Lets a subclass that redeclares `$hidden` still inherit the parent's
+    /// `$fillable`. An entry past the end of this list belongs to every
+    /// declared column list.
+    pub column_sources: Vec<u16>,
     /// Explicit Eloquent `$connection` property.
     pub connection_name: Option<String>,
     /// Explicit Eloquent `$table` property.
@@ -1596,6 +1652,12 @@ pub struct LaravelMetadata {
     /// and cannot be resolved statically, so no implicit primary key
     /// property is synthesized.
     pub has_get_key_name_method: bool,
+    /// Columns returned by the model's own `uniqueIds()` override.
+    ///
+    /// - `None` — not declared, or not a literal list of strings.
+    /// - `Some(["uuid"])` — `HasUuids`/`HasUlids` generate these columns;
+    ///   the primary key is only a string when it is listed.
+    pub unique_ids: Option<Vec<String>>,
     /// Whether `$timestamps` is explicitly set on the model.
     ///
     /// - `None` — not declared (inherits the default, which is `true`
@@ -1618,6 +1680,12 @@ pub struct LaravelMetadata {
     ///   property should be synthesized.
     /// - `Some(Some("modified"))` — custom column name.
     pub updated_at_name: Option<Option<String>>,
+    /// Whether the model uses Eloquent's `SoftDeletes` trait, which casts
+    /// its deletion column to a date.
+    pub soft_deletes: bool,
+    /// Override for the `DELETED_AT` column name constant `SoftDeletes`
+    /// reads. `None` when not declared (the default `"deleted_at"`).
+    pub deleted_at_name: Option<String>,
     /// Custom Eloquent builder class for the model.
     ///
     /// Detected from three Laravel mechanisms:
@@ -2069,6 +2137,10 @@ pub struct ClassInfo {
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────
 
+/// Prefix of the synthetic name the parser gives an anonymous class
+/// (`__anonymous@<offset of its opening brace>`).
+pub const ANONYMOUS_CLASS_PREFIX: &str = "__anonymous@";
+
 impl ClassInfo {
     /// Return the fully-qualified name of this class.
     ///
@@ -2098,6 +2170,30 @@ impl ClassInfo {
     #[inline]
     pub fn cache_fqn(&mut self) {
         self.fqn = Some(self.compute_fqn());
+    }
+
+    /// Populate the cached FQN for a class parsed out of `uri`.
+    ///
+    /// Identical to [`cache_fqn`] for a named class. An anonymous class is
+    /// named after the offset of its opening brace *within its own file* and
+    /// is deliberately kept out of the workspace declaration index, so nothing
+    /// else makes it unique across the workspace. Boilerplate-identical files
+    /// put that brace on the same offset (every Laravel migration is
+    /// `return new class extends Migration {` after the same header), and the
+    /// stores keyed by FQN — the resolved-class cache and the method store —
+    /// would then let whichever file resolved first answer for both. The URI
+    /// goes into the FQN rather than into `name`, which reaches the user
+    /// through hover and the outline.
+    pub fn cache_fqn_in_uri(&mut self, uri: &str) {
+        if self.name.starts_with(ANONYMOUS_CLASS_PREFIX) {
+            self.fqn = Some(crate::atom::atom(&format!(
+                "{}@{}",
+                self.compute_fqn(),
+                uri
+            )));
+        } else {
+            self.cache_fqn();
+        }
     }
 
     /// Rebuild the `method_index` from the current `methods` vec.

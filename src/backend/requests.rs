@@ -68,6 +68,15 @@ impl Backend {
         // instead of a poorer answer for the identical code.
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
 
+        // For the same reason, hand the workspace's resolved classes to the
+        // handler.  A class resolution that is not given a cache builds a
+        // throwaway one, so without this every call that reaches
+        // `resolve_class_fully` without one re-runs the whole inheritance
+        // merge, virtual-member synthesis, and (on Laravel) builder
+        // forwarding for a model that the diagnostic pass resolved long ago.
+        let _resolved_classes_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
+
         // Parse the document at most once per request.  The type engine
         // reaches the AST through `with_parsed_program` from many places
         // (variable resolution, closures, property narrowing, …); without
@@ -166,6 +175,42 @@ impl Backend {
             );
         }
         Ok(result)
+    }
+}
+
+#[cfg(test)]
+mod request_scope_tests {
+    use crate::Backend;
+
+    /// Every handler resolves classes against the workspace's own store.
+    ///
+    /// A resolution that is handed no store builds a throwaway one, so a
+    /// handler that runs without this re-merges the inheritance, virtual
+    /// members, and framework synthesis of every class it touches, however
+    /// many times the project has already resolved them.
+    #[test]
+    fn a_request_resolves_against_the_workspaces_class_store() {
+        let backend = Backend::new_test();
+        let uri = "file:///Widget.php";
+        let source = "<?php\nclass Widget {}\n";
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), std::sync::Arc::new(source.to_string()));
+        backend.update_ast(uri, source);
+
+        let active = backend
+            .handle_with_uri("test", uri, |_| {
+                Some(crate::virtual_members::active_resolved_class_cache().map(std::ptr::from_ref))
+            })
+            .expect("the handler runs")
+            .expect("the file is readable");
+
+        assert_eq!(
+            active,
+            Some(std::ptr::from_ref(&backend.resolved_class_cache)),
+            "the handler must see this backend's store, not a throwaway"
+        );
     }
 }
 

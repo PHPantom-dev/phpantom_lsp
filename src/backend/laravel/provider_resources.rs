@@ -5,20 +5,20 @@
 use crate::Backend;
 
 impl Backend {
-    pub(crate) fn build_provider_resources(&self) {
+    pub(crate) fn build_provider_resources(&self, providers: &super::LaravelProviders) {
         let mut scans = crate::virtual_members::laravel::ProviderScans::default();
         let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-        for (fqn, origin) in self.laravel_providers_with_origin() {
-            scans.record_registered(&fqn);
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
+        for (fqn, origin) in providers.with_origin() {
+            scans.record_registered(fqn);
+            let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
             if !seen.insert(uri.clone()) {
                 continue;
             }
             let Some((identity, resources)) =
-                self.scan_provider_resources(&uri, None, &fqn, origin)
+                self.scan_provider_resources(&uri, None, fqn, *origin)
             else {
                 continue;
             };
@@ -98,6 +98,18 @@ impl Backend {
         Some((identity, resources))
     }
 
+    /// Drop a deleted provider file's registrations from the merged table.
+    pub(super) fn forget_laravel_provider_resources(&self, uri: &str) {
+        let merged = {
+            let mut scans = self.laravel_provider_scans.write();
+            if !scans.is_built() || !scans.remove(uri) {
+                return;
+            }
+            scans.merged()
+        };
+        self.publish_provider_resources(merged);
+    }
+
     /// Publish a freshly merged provider-resource table, dropping the caches
     /// that were derived from the previous one.
     fn publish_provider_resources(
@@ -130,6 +142,7 @@ impl Backend {
             cache.config_trees = None;
             cache.view_names = None;
             cache.trans_keys = None;
+            cache.trans_key_shapes = None;
             cache.routes = None;
             cache.blade_discovery = None;
         }
@@ -137,8 +150,12 @@ impl Backend {
         // The provider bindings overlay the core container alias table, which
         // an earlier resolution may already have built without them.
         if has_bindings {
-            *self.laravel_aliases.write() = None;
+            self.laravel_aliases.invalidate();
             self.clear_class_not_found_cache();
+            // A binding is followed without a class lookup naming the
+            // provider that registered it, so a cached receiver resolution
+            // records no dependency on the alias table.
+            self.clear_resolved_member_files();
         }
 
         // Which directives exist decides what the preprocessor lowers rather
@@ -177,7 +194,12 @@ impl Backend {
     /// them the container would let win, and only the merge knows that.  A
     /// cheap no-op for every file that is not a registered provider, and until
     /// the full scan has run.
-    pub(crate) fn refresh_laravel_provider_resources(&self, uri: &str, content: &str) {
+    pub(crate) fn refresh_laravel_provider_resources(
+        &self,
+        uri: &str,
+        content: &str,
+        providers: &super::ProvidersOnce<'_>,
+    ) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
@@ -189,7 +211,7 @@ impl Backend {
         // in what order, both of which the merge depends on, so a change to it
         // rebuilds from scratch.
         if self.is_laravel_provider_list_uri(uri) {
-            self.build_provider_resources();
+            self.build_provider_resources(providers.get());
             return;
         }
 
@@ -204,7 +226,7 @@ impl Backend {
             // full scan ran, because the file is written after the list that
             // names it.  It joins the table the moment it parses.
             if self.declares_registered_provider(uri) {
-                self.build_provider_resources();
+                self.build_provider_resources(providers.get());
             }
             return;
         };

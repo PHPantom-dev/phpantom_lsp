@@ -3,14 +3,12 @@ use std::sync::Arc;
 
 use mago_allocator::LocalArena;
 use mago_database::file::FileId;
-use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
-use crate::atom::bytes_to_str;
-use crate::references::push_unique_location;
+use crate::references::push_location;
 use crate::symbol_map::{LaravelStringKind, SymbolKind, SymbolMap, SymbolSpan};
-use crate::text_position::offset_to_position;
+use crate::text_position::{LineIndex, offset_to_position};
 
 #[derive(Debug)]
 pub(crate) struct ConfigKeyMatch {
@@ -47,117 +45,34 @@ pub(crate) fn collect_laravel_config_declarations(
     let file_id = FileId::new(b"input.php");
     let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
     let mut out = Vec::new();
-
-    let mut returned_var_name: Option<&str> = None;
-    let mut return_expr: Option<&Expression<'_>> = None;
-
-    for stmt in program.statements.iter() {
-        if let Statement::Return(ret) = stmt {
-            if let Some(val) = ret.value {
-                match val {
-                    Expression::Variable(Variable::Direct(dv)) => {
-                        returned_var_name = Some(bytes_to_str(dv.name));
-                    }
-                    _ => {
-                        return_expr = Some(val);
-                    }
-                }
-            }
-            break;
-        }
+    for expr in super::array_file::returned_exprs(program) {
+        super::array_file::for_each_entry(expr, content, &mut |path, start, end, _value| {
+            out.push(ConfigKeyMatch {
+                key: super::array_file::dotted_key(prefix, path),
+                start,
+                end,
+            });
+        });
     }
-
-    let mut path = Vec::new();
-    if let Some(expr) = return_expr {
-        collect_expr_declarations(expr, content, prefix, &mut path, &mut out);
-    } else if let Some(var_name) = returned_var_name {
-        for stmt in program.statements.iter() {
-            if let Statement::Expression(expr_stmt) = stmt
-                && let Expression::Assignment(assign) = expr_stmt.expression
-                && let Expression::Variable(Variable::Direct(dv)) = assign.lhs
-                && bytes_to_str(dv.name) == var_name
-            {
-                collect_expr_declarations(assign.rhs, content, prefix, &mut path, &mut out);
-            }
-        }
-    }
-
     out
 }
 
-// ─── Declaration walker ───────────────────────────────────────────────────────
-
-fn collect_expr_declarations<'content>(
-    expr: &Expression<'_>,
-    content: &'content str,
-    prefix: &str,
-    path: &mut Vec<&'content str>,
-    out: &mut Vec<ConfigKeyMatch>,
-) {
-    match expr {
-        Expression::Array(arr) => {
-            collect_array_declarations(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::LegacyArray(arr) => {
-            collect_array_declarations(arr.elements.iter(), content, prefix, path, out);
-        }
-        Expression::Parenthesized(p) => {
-            collect_expr_declarations(p.expression, content, prefix, path, out);
-        }
-        Expression::Call(Call::Function(fc)) => {
-            if let Expression::Identifier(ident) = fc.function
-                && ident.value().eq_ignore_ascii_case(b"array_merge")
-            {
-                for arg in fc.argument_list.arguments.iter() {
-                    let arg_expr = match arg {
-                        Argument::Positional(pos) => pos.value,
-                        Argument::Named(named) => named.value,
-                    };
-                    collect_expr_declarations(arg_expr, content, prefix, path, out);
-                }
-            }
-        }
-        _ => {}
-    }
+/// Where a config file comes from, which decides how Laravel merges it
+/// beneath the files that take precedence over it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ConfigSourceKind {
+    /// A file in the application's own `config/` directory.
+    Project,
+    /// A package file a service provider registers with `mergeConfigFrom()`.
+    Package,
+    /// One of the framework's own defaults, which `LoadConfiguration`
+    /// merges beneath the application's file of the same name.
+    Framework,
 }
 
-fn collect_array_declarations<'a, 'content>(
-    elements: impl Iterator<Item = &'a ArrayElement<'a>>,
-    content: &'content str,
-    prefix: &str,
-    path: &mut Vec<&'content str>,
-    out: &mut Vec<ConfigKeyMatch>,
-) {
-    for element in elements {
-        let ArrayElement::KeyValue(kv) = element else {
-            continue;
-        };
-        let (key_text, key_start, key_end) =
-            match super::helpers::extract_string_literal(kv.key, content) {
-                Some(k) => k,
-                None => continue,
-            };
-
-        let capacity = prefix.len()
-            + path.iter().map(|segment| segment.len() + 1).sum::<usize>()
-            + key_text.len()
-            + 1;
-        let mut dot_key = String::with_capacity(capacity);
-        dot_key.push_str(prefix);
-        for segment in path.iter().copied().chain(std::iter::once(key_text)) {
-            dot_key.push('.');
-            dot_key.push_str(segment);
-        }
-        out.push(ConfigKeyMatch {
-            key: dot_key,
-            start: key_start,
-            end: key_end,
-        });
-
-        path.push(key_text);
-        collect_expr_declarations(kv.value, content, prefix, path, out);
-        path.pop();
-    }
+/// The directory holding the framework's default config files.
+fn framework_config_dir(root: &std::path::Path) -> std::path::PathBuf {
+    root.join("vendor/laravel/framework/config")
 }
 
 // ─── Keys declared at runtime ─────────────────────────────────────────────────
@@ -225,18 +140,108 @@ impl Backend {
         }
     }
 
-    /// Every config key the project declares at runtime.
+    /// Whether a config key the project declares at runtime covers `key`.
     ///
     /// `Config::set('filesystems.disks.ondemand', […])` in a test's `setUp()`
     /// establishes a key no `config/` file declares, and a read of it
-    /// afterwards is as valid as a read of one that ships on disk.
-    pub(crate) fn runtime_config_keys(&self) -> std::collections::HashSet<String> {
+    /// afterwards is as valid as a read of one that ships on disk.  The
+    /// value a write stored is opaque, so every path under a written key
+    /// is beyond judging as well, and a read of a group above one is as
+    /// real as the write.
+    pub(crate) fn runtime_config_key_covers(&self, key: &str) -> bool {
         self.laravel_runtime_config_keys
             .read()
             .values()
             .flatten()
-            .cloned()
-            .collect()
+            .any(|written| {
+                written == key
+                    || written
+                        .strip_prefix(key)
+                        .is_some_and(|rest| rest.starts_with('.'))
+                    || key
+                        .strip_prefix(written.as_str())
+                        .is_some_and(|rest| rest.starts_with('.'))
+            })
+    }
+
+    /// Visit every config file a Laravel project reads, highest precedence
+    /// first, with the key prefix its entries live under: the project's
+    /// own `config/` files, then the files service providers register, then
+    /// the framework's defaults.
+    ///
+    /// Config-key completion and config-type resolution both read the
+    /// config through here, so they cannot see different files.
+    ///
+    /// The project's files are discovered with a direct disk walk rather
+    /// than through `user_file_symbol_maps`, which forces the workspace
+    /// index. Config-type resolution runs *inside* class loading
+    /// (`patch_storage_disk_type`) and inside the blade injected-vars
+    /// refresh the index itself performs, so ensuring the index there
+    /// re-enters the index lock and the enumeration cache's own build lock
+    /// and deadlocks. Only the files' contents are needed, not their symbol
+    /// maps. Files that are open in the editor but not yet on disk are taken
+    /// from the already-parsed snapshot, without blocking on the index.
+    pub(crate) fn for_each_config_source(
+        &self,
+        mut visit: impl FnMut(&str, ConfigSourceKind, &str),
+    ) {
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        let mut config_uris: Vec<String> = Vec::new();
+        if let Some(root) = &workspace_root {
+            let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
+            let filters = self.index_filters();
+            for path in crate::classmap_scanner::collect_php_files_gitignore(
+                root,
+                &vendor_dir_paths,
+                &filters,
+                Some(self.followed_links()),
+            ) {
+                let uri = crate::util::path_to_uri(&path);
+                if laravel_config_prefix_from_uri(&uri).is_some() {
+                    config_uris.push(uri);
+                }
+            }
+        }
+        for (uri, _) in self.user_file_symbol_maps_nonblocking() {
+            if laravel_config_prefix_from_uri(&uri).is_some() && !config_uris.contains(&uri) {
+                config_uris.push(uri);
+            }
+        }
+        // Deterministic order regardless of walk or map order.
+        config_uris.sort();
+        for file_uri in &config_uris {
+            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
+                continue;
+            };
+            if let Some(content) = self.get_file_content_arc(file_uri) {
+                visit(&prefix, ConfigSourceKind::Project, &content);
+            }
+        }
+
+        for res in &self.laravel_provider_resources.read().config_files {
+            if let Ok(content) = std::fs::read_to_string(&res.path) {
+                visit(&res.namespace, ConfigSourceKind::Package, &content);
+            }
+        }
+
+        let Some(root) = workspace_root else {
+            return;
+        };
+        let Ok(entries) = std::fs::read_dir(framework_config_dir(&root)) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.extension().is_some_and(|e| e == "php") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if let Ok(content) = std::fs::read_to_string(&path) {
+                visit(stem, ConfigSourceKind::Framework, &content);
+            }
+        }
     }
 
     /// Whether the workspace is an application rather than a library; see
@@ -310,6 +315,13 @@ pub(crate) fn find_config_references(
 /// Called from `resolve_from_symbol` when the symbol map contains a
 /// [`SymbolKind::LaravelStringKey`] span with `kind == Config` at the cursor —
 /// no file re-parse is needed for the usage side.
+///
+/// The files that can declare the key are tried in the order Laravel lets
+/// them win: the application's `config/` files, then the package files
+/// service providers merge beneath them, then the framework's defaults.
+/// The first that declares the key is the one whose value survives the
+/// merge.  When none does, the key's own file is still the best place to
+/// land.
 pub(crate) fn resolve_config_key_declaration(backend: &Backend, key: &str) -> Option<Location> {
     resolve_config_key_declaration_inner(backend, key, true)
 }
@@ -332,79 +344,40 @@ fn resolve_config_key_declaration_inner(
 ) -> Option<Location> {
     let parts: Vec<&str> = key.split('.').collect();
     let root = backend.workspace.workspace_root.read().clone()?;
+
+    let mut candidates: Vec<(String, std::path::PathBuf)> = Vec::new();
     let config_dir = root.join("config");
-
     for i in 1..=parts.len() {
-        let (file_parts, _) = parts.split_at(i);
-        let rel_path = file_parts.join("/");
-        let config_path = config_dir.join(format!("{}.php", rel_path));
-
-        if config_path.is_file() {
-            let target_uri = Url::from_file_path(&config_path).ok()?;
-            let target_uri_string = target_uri.to_string();
-            let target_content = backend
-                .get_file_content(&target_uri_string)
-                .or_else(|| std::fs::read_to_string(&config_path).ok())?;
-
-            let stem = file_parts.join(".");
-            let declarations = collect_laravel_config_declarations(&target_content, &stem);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                return Some(config_declaration_location(
-                    target_uri,
-                    &target_content,
-                    &decl,
-                ));
-            }
-
-            if allow_file_fallback {
-                return Some(crate::definition::point_location(
-                    target_uri,
-                    Position::new(0, 0),
-                ));
-            }
+        let file_parts = &parts[..i];
+        let path = config_dir.join(format!("{}.php", file_parts.join("/")));
+        if path.is_file() {
+            candidates.push((file_parts.join("."), path));
+        }
+    }
+    for res in &backend.laravel_provider_resources.read().config_files {
+        let covers = key
+            .strip_prefix(res.namespace.as_str())
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('.'));
+        if covers && res.path.is_file() {
+            candidates.push((res.namespace.clone(), res.path.clone()));
+        }
+    }
+    if let Some(first) = parts.first() {
+        let path = framework_config_dir(&root).join(format!("{first}.php"));
+        if path.is_file() {
+            candidates.push((first.to_string(), path));
         }
     }
 
-    let first_part = parts.first()?;
-    let provider_configs: Vec<_> = backend
-        .laravel_provider_resources
-        .read()
-        .config_files
-        .iter()
-        .filter(|resource| resource.namespace == *first_part)
-        .cloned()
-        .collect();
-    for res in &provider_configs {
-        if res.namespace == *first_part && res.path.is_file() {
-            let target_uri = Url::from_file_path(&res.path).ok()?;
-            let target_content = std::fs::read_to_string(&res.path).ok()?;
-            let declarations = collect_laravel_config_declarations(&target_content, &res.namespace);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                return Some(config_declaration_location(
-                    target_uri,
-                    &target_content,
-                    &decl,
-                ));
-            }
-            if allow_file_fallback {
-                return Some(crate::definition::point_location(
-                    target_uri,
-                    Position::new(0, 0),
-                ));
-            }
-        }
-    }
-
-    // Laravel's unpublished defaults are completion candidates, so an exact
-    // configured resource must navigate to the same framework declaration
-    // when the application and its providers do not override it.
-    let framework_path = root
-        .join("vendor/laravel/framework/config")
-        .join(format!("{first_part}.php"));
-    if framework_path.is_file() {
-        let target_uri = Url::from_file_path(&framework_path).ok()?;
-        let target_content = std::fs::read_to_string(&framework_path).ok()?;
-        let declarations = collect_laravel_config_declarations(&target_content, first_part);
+    let mut fallback = None;
+    for (prefix, path) in candidates {
+        let Ok(target_uri) = Url::from_file_path(&path) else {
+            continue;
+        };
+        let Some(target_content) = backend.get_file_content_arc(target_uri.as_str()) else {
+            continue;
+        };
+        let declarations = collect_laravel_config_declarations(&target_content, &prefix);
         if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
             return Some(config_declaration_location(
                 target_uri,
@@ -412,9 +385,12 @@ fn resolve_config_key_declaration_inner(
                 &decl,
             ));
         }
+        if allow_file_fallback {
+            fallback.get_or_insert(target_uri);
+        }
     }
 
-    None
+    fallback.map(|uri| crate::definition::point_location(uri, Position::new(0, 0)))
 }
 
 fn config_declaration_location(uri: Url, content: &str, declaration: &ConfigKeyMatch) -> Location {
@@ -451,15 +427,22 @@ pub(crate) fn find_all_config_references(
             Ok(u) => u,
             Err(_) => continue,
         };
-        let file_content = match backend.get_file_content_arc(file_uri) {
-            Some(c) => c,
-            None => continue,
-        };
+        // Read only once a span matches, and convert every match through
+        // one line table rather than rescanning the file per hit.
+        let file_content = std::cell::OnceCell::new();
+        let lines = std::cell::OnceCell::new();
         for span in &symbol_map.spans {
             if config_span_matches(span, target_kind, target_key) {
-                let start = offset_to_position(&file_content, span.start as usize);
-                let end = offset_to_position(&file_content, span.end as usize);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                let Some(content) = file_content
+                    .get_or_init(|| backend.get_file_content_arc(file_uri))
+                    .as_ref()
+                else {
+                    break;
+                };
+                let lines = lines.get_or_init(|| LineIndex::new(content));
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
+                push_location(&mut locations, &parsed_uri, start, end);
             }
         }
     }
@@ -470,7 +453,7 @@ pub(crate) fn find_all_config_references(
         if let Some(declaration) =
             resolve_config_key_declaration_exact(backend, canonical_key.as_ref())
         {
-            push_unique_location(
+            push_location(
                 &mut locations,
                 &declaration.uri,
                 declaration.range.start,
@@ -572,19 +555,38 @@ mod tests {
             ),
         );
         assert!(
-            backend
-                .runtime_config_keys()
-                .contains("filesystems.disks.ondemand"),
+            backend.runtime_config_key_covers("filesystems.disks.ondemand"),
             "the write should declare the disk it configures"
         );
         for key in ["filesystems.disks.scratch", "filesystems.disks.persistent"] {
-            assert!(backend.runtime_config_keys().contains(key));
+            assert!(backend.runtime_config_key_covers(key));
         }
 
         backend.update_ast(uri, &Arc::new("<?php\nclass FixtureTest {}\n".to_string()));
         assert!(
-            backend.runtime_config_keys().is_empty(),
+            !backend.runtime_config_key_covers("filesystems.disks.ondemand"),
             "removing the write should remove the key it declared"
+        );
+    }
+
+    /// A deleted file is never re-parsed, so the per-file eviction has to
+    /// forget its keys rather than leave them to the next refresh.
+    #[test]
+    fn a_deleted_file_takes_its_runtime_writes_with_it() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let uri = "file:///project/tests/FixtureTest.php";
+
+        backend.update_ast(
+            uri,
+            &Arc::new("<?php\nConfig::set('filesystems.disks.ondemand', []);\n".to_string()),
+        );
+        assert!(backend.runtime_config_key_covers("filesystems.disks.ondemand"));
+
+        backend.clear_file_maps(uri);
+        assert!(
+            !backend.runtime_config_key_covers("filesystems.disks.ondemand"),
+            "clearing the file's maps should drop the keys it declared"
         );
     }
 
@@ -615,8 +617,11 @@ mod tests {
             "the vendor write was parsed, but must not declare application configuration"
         );
         assert_eq!(
-            backend.runtime_config_keys(),
-            std::collections::HashSet::from(["filesystems.disks.application-only".to_string()])
+            *backend.laravel_runtime_config_keys.read(),
+            std::collections::HashMap::from([(
+                app_uri.to_string(),
+                vec!["filesystems.disks.application-only".to_string()],
+            )])
         );
         assert!(
             !backend

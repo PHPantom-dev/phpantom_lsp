@@ -240,28 +240,17 @@ fn read_out_type(
     name_offset: u32,
     param_name: &str,
 ) -> Option<PhpType> {
-    let content = backend.get_file_content(uri)?;
-    let body_end = with_parsed_program(&content, "out_param_body", |program, _| {
-        body_close_offset(program, name_offset)
-    })?;
-
-    let local_classes: Vec<Arc<ClassInfo>> = backend
-        .symbols
-        .uri_classes_index
-        .read()
-        .get(uri)
-        .cloned()
-        .unwrap_or_default();
-    let file_use_map = backend.file_use_map(uri);
-    let file_namespace = backend.first_file_namespace(uri);
-    let class_loader = backend.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-    let function_loader = backend.function_loader_with(None, &file_use_map, &file_namespace);
-
-    let enclosing_class = local_classes.iter().find(|c| {
-        !c.name.starts_with("__anonymous@")
-            && body_end >= c.start_offset
-            && body_end <= c.end_offset
-    });
+    let content = backend.get_file_content_arc(uri)?;
+    let file_ctx = backend.file_context(uri);
+    // A file may declare several `namespace` blocks; the callee's names
+    // resolve against the one its declaration sits in.
+    let namespace = file_ctx.namespace_at(name_offset);
+    let class_loader = backend.class_loader_with(&file_ctx.classes, &file_ctx.use_map, namespace);
+    let function_loader = backend.function_loader_with(
+        file_ctx.resolved_names.as_deref(),
+        &file_ctx.use_map,
+        namespace,
+    );
 
     // The scope cache and the chain cache both key on offsets alone, and
     // the offsets below belong to another file. Neither may answer, nor
@@ -271,16 +260,38 @@ fn read_out_type(
         crate::type_engine::resolver::with_isolated_chain_cache(),
     );
 
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
-        param_name,
-        &content,
-        body_end,
-        enclosing_class.map(Arc::as_ref),
-        &local_classes,
-        &class_loader,
-        Some(backend),
-        Loaders::with_function(Some(&function_loader)),
-    )
+    // The request's parse cache holds only the request's own file, so this
+    // one parse serves both finding the body and walking it.
+    let types = with_parsed_program(&content, "out_param_body", |program, content| {
+        let Some(body_end) = body_close_offset(program, name_offset) else {
+            return Vec::new();
+        };
+        let enclosing_class = file_ctx.classes.iter().find(|c| {
+            !c.name.starts_with("__anonymous@")
+                && body_end >= c.start_offset
+                && body_end <= c.end_offset
+        });
+        let placeholder;
+        let current_class = match enclosing_class {
+            Some(cls) => cls.as_ref(),
+            None => {
+                placeholder = crate::class_lookup::class_context_placeholder(content, body_end);
+                &placeholder
+            }
+        };
+        crate::type_engine::variable::resolution::resolve_variable_types_in_program(
+            program,
+            param_name,
+            current_class,
+            &file_ctx.classes,
+            content,
+            body_end,
+            &class_loader,
+            Some(backend),
+            Loaders::with_function(Some(&function_loader)),
+        )
+    });
+    (!types.is_empty()).then(|| crate::types::ResolvedType::types_joined(&types))
 }
 
 /// The offset of the closing brace of the function or method whose name

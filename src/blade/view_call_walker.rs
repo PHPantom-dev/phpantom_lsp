@@ -15,6 +15,7 @@ use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::VarResolutionCtx;
 use crate::types::ClassInfo;
+use crate::virtual_members::laravel::is_view_facade;
 
 use super::call_site_inference::ByteRange;
 
@@ -571,17 +572,6 @@ fn is_view_render_static_call(class: &Expression<'_>, method: &str) -> bool {
             && method.eq_ignore_ascii_case("view"))
         || (is_facade("Response", "Illuminate\\Support\\Facades\\Response")
             && method.eq_ignore_ascii_case("view"))
-}
-
-/// Whether a static call's subject is the `View` facade, which proxies the
-/// view factory.
-fn is_view_facade(class: &Expression<'_>) -> bool {
-    let Expression::Identifier(ident) = class else {
-        return false;
-    };
-    let subject = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
-    subject.eq_ignore_ascii_case("View")
-        || subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
 }
 
 /// Whether a method is the view factory's `renderEach()`.

@@ -146,13 +146,15 @@ pub(crate) fn composer_class_vars(content: &str, file_path: &Path) -> Vec<Shared
     vars
 }
 
-/// Whether a static call's class expression names the `View` facade.
-fn is_view_facade(class: &Expression<'_>) -> bool {
+/// Whether a static call's class expression names the `View` facade,
+/// either by its short name or fully qualified.
+pub(crate) fn is_view_facade(class: &Expression<'_>) -> bool {
     let Expression::Identifier(ident) = class else {
         return false;
     };
     let subject = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
     subject.eq_ignore_ascii_case("View")
+        || subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
 }
 
 /// Whether an expression hands back Laravel's view factory: the container

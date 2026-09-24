@@ -677,3 +677,35 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
         "Foo&MockInterface"
     );
 }
+
+/// A failed search up a single-`extends` interface chain loads each
+/// interface once, even though the parser records the parent both in
+/// `interfaces` and in `parent_class`.
+#[test]
+fn find_declaring_ancestor_loads_each_interface_once() {
+    use std::cell::Cell;
+
+    const DEPTH: usize = 12;
+    let classes: Vec<Arc<ClassInfo>> = (0..DEPTH)
+        .map(|i| {
+            let mut iface = crate::test_fixtures::make_class(&format!("I{i}"));
+            iface.kind = ClassLikeKind::Interface;
+            if i + 1 < DEPTH {
+                let parent = atom(&format!("I{}", i + 1));
+                iface.parent_class = Some(parent);
+                iface.interfaces = vec![parent];
+            }
+            Arc::new(iface)
+        })
+        .collect();
+    let loads = Cell::new(0usize);
+    let loader = |name: &str| {
+        loads.set(loads.get() + 1);
+        classes.iter().find(|c| c.name == name).cloned()
+    };
+
+    let mut class = crate::test_fixtures::make_class("C");
+    class.interfaces = vec![atom("I0")];
+    assert!(find_declaring_ancestor(&class, &loader, &|_| false).is_none());
+    assert_eq!(loads.get(), DEPTH);
+}

@@ -18,7 +18,7 @@ use crate::util::build_fqn;
 
 use super::RenameOutcome;
 use super::namespace::find_namespace_segment_at_offset;
-use super::validate::span_spells_its_name;
+use super::validate::{is_valid_new_name, span_spells_its_name};
 
 /// The text a single function or constant reference should be replaced
 /// with, or `None` when it must be left exactly as it is.
@@ -188,6 +188,10 @@ impl Backend {
 
         if self.is_vendor_symbol(uri, content, position) {
             return Ok(None);
+        }
+
+        if !is_valid_new_name(&span.kind, new_name) {
+            return Err(format!("`{new_name}` is not a valid PHP name"));
         }
 
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {

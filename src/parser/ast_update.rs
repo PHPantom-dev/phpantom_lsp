@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::ParseErrorEntry;
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::blade::call_site_inference::BladeScope;
 use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
@@ -60,7 +61,7 @@ fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
 }
 
 pub(crate) enum AstIndexParseResult {
-    Update(AstIndexUpdate),
+    Update(Box<AstIndexUpdate>),
     ParseFailed {
         uri: String,
         errors: Vec<ParseErrorEntry>,
@@ -77,6 +78,21 @@ pub(crate) struct AstIndexUpdate {
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
     symbol_map: Arc<SymbolMap>,
+    /// The lowering a template was parsed as, published together with
+    /// `symbol_map` because the map's offsets index its virtual PHP.
+    blade: Option<BladeLowering>,
+}
+
+/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// with the source map that carries positions back to the template.
+pub(crate) struct BladeLowering {
+    virtual_php: Arc<String>,
+    source_map: crate::blade::source_map::BladeSourceMap,
+    /// The scope this lowering was seeded from, so a batch that outlives a
+    /// newer scope written by call-site re-inference can be told apart from
+    /// one still describing the current scope (see
+    /// [`Backend::apply_ast_index_parse_results_batch`]).
+    scope: BladeScope,
 }
 
 fn class_info_fqn(class: &ClassInfo) -> String {
@@ -280,9 +296,11 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
-        let content_to_parse = self
-            .record_blade_virtual_php(uri, content)
-            .unwrap_or_else(|| Arc::new(content.to_string()));
+        let blade = self.lower_blade_template(uri, content);
+        let content_to_parse = blade.as_ref().map_or_else(
+            || Arc::new(content.to_string()),
+            |lowering| Arc::clone(&lowering.virtual_php),
+        );
 
         self.laravel_string_key_cache
             .write()
@@ -303,12 +321,16 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, &content_owned)
+            self.update_ast_inner(&uri_owned, &content_owned, blade)
         });
+
+        // The refreshes below that rebuild from the registered provider list
+        // share one read of it.
+        let providers = crate::backend::laravel::ProvidersOnce::new(self);
 
         // Keep the Laravel macro index coherent with edits to files that
         // register macros.  Cheap no-op for files without a `macro(` call.
-        self.refresh_laravel_macros(uri, content);
+        self.refresh_laravel_macros(uri, content, &providers);
 
         // Keep the filesystem disk type coherent with edits to `config/` and
         // to files that register a `Storage::extend()` driver.
@@ -335,7 +357,7 @@ impl Backend {
         // translation directories, route files, and component namespaces
         // coherent with edits to the providers that register them.  Cheap
         // no-op for every file that is not a registered service provider.
-        self.refresh_laravel_provider_resources(uri, content);
+        self.refresh_laravel_provider_resources(uri, content, &providers);
 
         match result {
             Some(changed) => changed,
@@ -353,8 +375,9 @@ impl Backend {
 
     /// Inner implementation of [`update_ast`] that performs the actual parse
     /// and publishes the resulting single-file update.
-    fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
-        let update = self.build_ast_index_update(uri, content);
+    fn update_ast_inner(&self, uri: &str, content: &str, blade: Option<BladeLowering>) -> bool {
+        let mut update = self.build_ast_index_update(uri, content);
+        update.blade = blade;
         self.apply_ast_index_updates_batch(vec![update])
     }
 
@@ -385,8 +408,12 @@ impl Backend {
     }
 
     /// Preprocess a Blade template into the virtual PHP everything else
-    /// reads it as, publishing the source map and the virtual content the
-    /// position translation rides on.
+    /// reads it as, and the source map the position translation rides on.
+    ///
+    /// Nothing is published here: the lowering travels with the parse of
+    /// its virtual PHP and is published alongside the symbol map in
+    /// [`Self::apply_ast_index_updates_batch`], so the two always describe
+    /// the same text.
     ///
     /// Returns `None` for a file that is not a template, which is parsed
     /// as it stands.
@@ -403,7 +430,7 @@ impl Backend {
     /// parsed yet) and resolving their expression types from many threads
     /// at once has deadlocked against the batch-publish locks.  The serial
     /// refresh passes own the cache; this path only reads it.
-    pub(crate) fn record_blade_virtual_php(&self, uri: &str, content: &str) -> Option<Arc<String>> {
+    pub(crate) fn lower_blade_template(&self, uri: &str, content: &str) -> Option<BladeLowering> {
         if !self.is_blade_file(uri) {
             return None;
         }
@@ -427,14 +454,11 @@ impl Backend {
             Some(&components),
             &custom_directives,
         );
-        self.blade_source_maps
-            .write()
-            .insert(uri.to_string(), source_map);
-        let virtual_php = Arc::new(virtual_php);
-        self.blade_virtual_content
-            .write()
-            .insert(uri.to_string(), Arc::clone(&virtual_php));
-        Some(virtual_php)
+        Some(BladeLowering {
+            virtual_php: Arc::new(virtual_php),
+            source_map,
+            scope: injected,
+        })
     }
 
     pub(crate) fn parse_ast_index_update_for_index(
@@ -455,17 +479,22 @@ impl Backend {
         // would leave it describing different text than the symbol map
         // `did_change` published, which is exactly what the rename's
         // `matches_source` check refuses to plan against.
-        let preprocessed = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
-            self.record_blade_virtual_php(uri, content)
+        let blade = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
+            self.lower_blade_template(uri, content)
         } else {
             None
         };
-        let content = preprocessed.as_ref().map_or(content, |php| php.as_str());
+        let content = blade
+            .as_ref()
+            .map_or(content, |lowering| lowering.virtual_php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
         }) {
-            Some(update) => AstIndexParseResult::Update(update),
+            Some(mut update) => {
+                update.blade = blade;
+                AstIndexParseResult::Update(Box::new(update))
+            }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
                 errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
@@ -491,6 +520,17 @@ impl Backend {
         // buffers are always kept fresh by `did_change`, so skipping them
         // here loses nothing.
         let open_uris = self.open_files.read();
+        // A template's lowering carries the scope it was built from. If
+        // call-site re-inference has since written a newer scope for the
+        // same uri (`reinfer_and_reparse_blade_with`, which re-lowers and
+        // re-parses against it right away), this batch result is describing
+        // variables the template no longer has -- drop it rather than
+        // publish a lowering that is internally consistent but pinned to a
+        // scope nothing points at anymore. The template stays on whatever
+        // was last published (the fresh re-inference pass, if one already
+        // landed) until its own next parse computes a lowering against the
+        // current scope.
+        let injected_vars = self.blade_injected_vars.read();
 
         let mut updates = Vec::new();
         let mut failures = Vec::new();
@@ -500,7 +540,17 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    updates.push(update);
+                    if let Some(blade) = &update.blade {
+                        let current = injected_vars.get(&update.uri);
+                        let stale = match current {
+                            Some(current) => *current != blade.scope,
+                            None => blade.scope != BladeScope::default(),
+                        };
+                        if stale {
+                            continue;
+                        }
+                    }
+                    updates.push(*update);
                 }
                 AstIndexParseResult::ParseFailed { uri, errors } => {
                     if open_uris.contains_key(&uri) {
@@ -511,6 +561,7 @@ impl Backend {
             }
         }
         drop(open_uris);
+        drop(injected_vars);
 
         if !failures.is_empty() {
             let mut parse_errors = self.parse_errors.write();
@@ -533,6 +584,7 @@ impl Backend {
         {
             self.laravel_pivots_dirty
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.clear_resolved_member_files();
         }
 
         self.apply_ast_index_updates_batch(updates)
@@ -894,7 +946,7 @@ impl Backend {
                 .map(|(c, ns)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
-                    cls.cache_fqn();
+                    cls.cache_fqn_in_uri(uri);
                     // Keyed by FQN, so this has to wait until the class
                     // carries one.
                     crate::stub_patches::apply_third_party_class_patches(&mut cls);
@@ -931,6 +983,7 @@ impl Backend {
                 functions,
                 defines,
                 symbol_map,
+                blade: None,
             }
         })
     }
@@ -946,6 +999,12 @@ impl Backend {
             old_classes: Vec<ClassInfo>,
             old_fqns: Vec<String>,
             new_fqns: Vec<String>,
+            /// The anonymous classes this file declared on its *previous*
+            /// parse, which `old_fqns` deliberately leaves out because they
+            /// never reach the declaration index.  They do occupy the
+            /// resolved-class cache, so they still have to be evicted from it.
+            /// Empty on a first parse, where nothing can be cached yet.
+            old_anon_fqns: Vec<String>,
             classes: Vec<Arc<ClassInfo>>,
             use_map: HashMap<String, String>,
             resolved_names: Arc<OwnedResolvedNames>,
@@ -953,6 +1012,7 @@ impl Backend {
             functions: Vec<FunctionInfo>,
             defines: Vec<(String, DefineInfo)>,
             symbol_map: Arc<SymbolMap>,
+            blade: Option<BladeLowering>,
             old_function_fqns: Vec<String>,
             old_define_names: Vec<String>,
             new_function_fqns: Vec<String>,
@@ -1012,6 +1072,11 @@ impl Backend {
                 .filter(|class| !class.name.starts_with("__anonymous@"))
                 .map(|class| class.fqn().to_string())
                 .collect();
+            let old_anon_fqns: Vec<String> = old_classes
+                .iter()
+                .filter(|class| class.name.starts_with("__anonymous@"))
+                .map(|class| class.fqn().to_string())
+                .collect();
 
             all_old_fqns.extend(old_fqns.iter().cloned());
             all_new_fqns.extend(new_fqns.iter().cloned());
@@ -1023,6 +1088,7 @@ impl Backend {
                 old_classes,
                 old_fqns,
                 new_fqns,
+                old_anon_fqns,
                 classes,
                 use_map: update.use_map,
                 resolved_names: update.resolved_names,
@@ -1030,6 +1096,7 @@ impl Backend {
                 functions: update.functions,
                 defines: update.defines,
                 symbol_map: update.symbol_map,
+                blade: update.blade,
                 old_function_fqns,
                 old_define_names,
                 new_function_fqns: Vec::new(),
@@ -1115,6 +1182,9 @@ impl Backend {
         // The common case — a class file with no standalone functions that
         // never had any — skips the snapshot scan below entirely.
         let mut any_function_changed = false;
+        // The names behind `any_function_changed`, for the caches that can
+        // be invalidated by dependency rather than wholesale.
+        let mut changed_names: Vec<crate::atom::Atom> = Vec::new();
         {
             let mut fmap = self.symbols.global_functions.write();
             let mut dupes = self.symbols.duplicate_functions.write();
@@ -1190,20 +1260,18 @@ impl Backend {
                     // empty the file has never been parsed before.  New
                     // functions appearing on first parse are not changes
                     // — they mirror the class first-parse fast path.
-                    if !any_function_changed && !old_functions.is_empty() {
-                        match old_functions
+                    if !old_functions.is_empty() {
+                        let changed = match old_functions
                             .iter()
                             .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
                         {
-                            Some((_, old_info)) => {
-                                if !old_info.signature_eq(&func_info) {
-                                    any_function_changed = true;
-                                }
-                            }
-                            None => {
-                                // New function — may affect callers.
-                                any_function_changed = true;
-                            }
+                            Some((_, old_info)) => !old_info.signature_eq(&func_info),
+                            // New function — may affect callers.
+                            None => true,
+                        };
+                        if changed {
+                            any_function_changed = true;
+                            changed_names.push(crate::resolution_deps::dep_key(&fqn));
                         }
                     }
 
@@ -1219,11 +1287,15 @@ impl Backend {
 
                 // A function was removed from this file — callers may
                 // now reference an unknown function.
-                if !any_function_changed
-                    && !old_functions.is_empty()
-                    && update.new_function_fqns.len() != old_functions.len()
-                {
-                    any_function_changed = true;
+                for (old_fqn, _) in &old_functions {
+                    if !update
+                        .new_function_fqns
+                        .iter()
+                        .any(|fqn| fqn.eq_ignore_ascii_case(old_fqn))
+                    {
+                        any_function_changed = true;
+                        changed_names.push(crate::resolution_deps::dep_key(old_fqn));
+                    }
                 }
             }
         }
@@ -1328,6 +1400,18 @@ impl Backend {
         {
             let mut cache = self.resolved_class_cache.write();
             for update in &prepared {
+                // An anonymous class keeps its FQN across an edit that leaves
+                // its opening brace where it was, so a cache entry from the
+                // previous parse would keep answering for a body that has
+                // since changed.  Comparing signatures is not worth it here:
+                // the name is already offset-specific, so an edit that reaches
+                // one at all has almost certainly changed it.
+                for fqn in &update.old_anon_fqns {
+                    changed_names.push(crate::resolution_deps::dep_key(fqn));
+                    evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
+                    any_signature_changed = true;
+                }
+
                 if update.old_fqns.is_empty() {
                     continue;
                 }
@@ -1345,6 +1429,7 @@ impl Backend {
                     match (old_cls, new_cls) {
                         (Some(old), Some(new)) if old.signature_eq(new) => {}
                         _ => {
+                            changed_names.push(crate::resolution_deps::dep_key(fqn));
                             evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                             any_signature_changed = true;
                         }
@@ -1353,6 +1438,7 @@ impl Backend {
 
                 for fqn in &update.new_fqns {
                     if !update.old_fqns.contains(fqn) {
+                        changed_names.push(crate::resolution_deps::dep_key(fqn));
                         evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                         any_signature_changed = true;
                     }
@@ -1361,6 +1447,19 @@ impl Backend {
         }
         evicted_fqns.sort();
         evicted_fqns.dedup();
+        // A class whose own resolution was cached read its parents, traits,
+        // and mixins from that cache rather than loading them, so it records
+        // no dependency on the one that just changed.  The eviction above
+        // already walked the cache's reverse-dependency graph to find every
+        // such class; carrying its result into the changed set is what makes
+        // the dependency-keyed invalidation below sound for inheritance.
+        changed_names.extend(
+            evicted_fqns
+                .iter()
+                .map(|fqn| crate::resolution_deps::dep_key(fqn)),
+        );
+        changed_names.sort_unstable();
+        changed_names.dedup();
 
         {
             let mut uri_classes = self.symbols.uri_classes_index.write();
@@ -1410,9 +1509,19 @@ impl Backend {
         if structural_changed {
             self.member_completion_cache.lock().clear();
             // Exact member targets in other files may depend on the return or
-            // property type that changed here. Rebuild those files lazily;
-            // the edited file itself is evicted by reference reindexing below.
-            self.clear_resolved_member_files();
+            // property type that changed here, but only in the files whose
+            // resolution consulted one of the names this parse changed.  A
+            // signature keystroke in a controller would otherwise throw away
+            // the receiver layer for every candidate file in the workspace
+            // and make the next search rebuild all of it.  The edited file
+            // itself is evicted by reference reindexing below.
+            self.retain_resolved_member_files(&changed_names);
+            // For the same reason an access in a file nothing touched can
+            // start belonging to a different declaration, which the
+            // per-file invalidation the reindex does cannot see.
+            if !self.member_ref_counts.is_empty() {
+                self.member_ref_counts.invalidate_locations_all();
+            }
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
@@ -1499,6 +1608,21 @@ impl Backend {
                 ),
         );
 
+        // A template's lowering and its symbol map go out under one hold of
+        // the publish lock, so that of two parses of the same template racing
+        // each other, one publishes all three maps before the other starts.
+        let has_blade = prepared.iter().any(|update| update.blade.is_some());
+        let _blade_publish_guard = has_blade.then(|| self.blade_publish_lock.lock());
+        if has_blade {
+            let mut virtual_content = self.blade_virtual_content.write();
+            let mut source_maps = self.blade_source_maps.write();
+            for update in &mut prepared {
+                if let Some(blade) = update.blade.take() {
+                    virtual_content.insert(update.uri.clone(), blade.virtual_php);
+                    source_maps.insert(update.uri.clone(), blade.source_map);
+                }
+            }
+        }
         {
             let mut symbol_maps = self.symbol_maps.write();
             for (uri, map) in refreshed_existing {
@@ -1658,50 +1782,42 @@ impl Backend {
             // classes like `DecimalCast` (imported via `use`) are
             // loadable cross-file when `cast_type_to_php_type` calls
             // the class loader.
-            {
-                let casts: Vec<(String, String)> = class
-                    .laravel()
-                    .map(|l| l.casts_definitions.clone())
-                    .unwrap_or_default();
-                if !casts.is_empty() {
-                    let resolved: Vec<(String, String)> = casts
-                        .into_iter()
-                        .map(|(col, cast_type)| {
-                            // Only resolve class-like cast types (not
-                            // built-in strings like "boolean", "datetime",
-                            // etc.).  A simple heuristic: if the value
-                            // contains an uppercase letter and is not a
-                            // known built-in, treat it as a class name.
-                            //
-                            // Skip names that already contain a `\` — they
-                            // are already qualified (e.g. the string literal
-                            // `'App\Casts\HtmlCast'`).  Passing them through
-                            // `resolve_name` would prepend the file's
-                            // namespace, producing a broken FQN like
-                            // `App\Models\App\Casts\HtmlCast`.
-                            let first_segment = cast_type.split(':').next().unwrap_or(&cast_type);
-                            if first_segment.contains('\\') || first_segment.starts_with('\\') {
-                                // Already qualified — strip leading `\` if present to produce canonical FQN.
-                                let canonical = cast_type
-                                    .strip_prefix('\\')
-                                    .map_or(cast_type.clone(), |s| s.to_string());
-                                (col, canonical)
-                            } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
-                                let resolved_class =
-                                    Self::resolve_name(first_segment, use_map, namespace);
-                                if resolved_class != first_segment {
-                                    // Re-attach any `:argument` suffix.
-                                    let suffix = &cast_type[first_segment.len()..];
-                                    (col, format!("{resolved_class}{suffix}"))
-                                } else {
-                                    (col, cast_type)
-                                }
-                            } else {
-                                (col, cast_type)
-                            }
-                        })
-                        .collect();
-                    class.laravel_mut().casts_definitions = resolved;
+            if let Some(laravel) = class.laravel.as_deref_mut() {
+                let resolve_cast = |cast_type: &mut String| {
+                    // Only resolve class-like cast types (not built-in
+                    // strings like "boolean", "datetime", etc.).  A simple
+                    // heuristic: if the value contains an uppercase letter
+                    // and is not a known built-in, treat it as a class name.
+                    //
+                    // Skip names that already contain a `\` — they are
+                    // already qualified (e.g. the string literal
+                    // `'App\Casts\HtmlCast'`).  Passing them through
+                    // `resolve_name` would prepend the file's namespace,
+                    // producing a broken FQN like
+                    // `App\Models\App\Casts\HtmlCast`.
+                    let first_segment = cast_type.split(':').next().unwrap_or(cast_type);
+                    if first_segment.contains('\\') {
+                        // Already qualified — strip leading `\` if present
+                        // to produce canonical FQN.
+                        if let Some(stripped) = cast_type.strip_prefix('\\') {
+                            *cast_type = stripped.to_string();
+                        }
+                    } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
+                        let resolved_class = Self::resolve_name(first_segment, use_map, namespace);
+                        if resolved_class != first_segment {
+                            // Re-attach any `:argument` suffix.
+                            let suffix = &cast_type[first_segment.len()..];
+                            *cast_type = format!("{resolved_class}{suffix}");
+                        }
+                    }
+                };
+                let sources = laravel.cast_sources.as_deref_mut().into_iter();
+                for (_, cast_type) in laravel
+                    .casts_definitions
+                    .iter_mut()
+                    .chain(sources.flat_map(|s| s.property.iter_mut().chain(s.method.iter_mut())))
+                {
+                    resolve_cast(cast_type);
                 }
             }
 
@@ -2357,12 +2473,12 @@ mod tests {
         backend.apply_ast_index_parse_results_batch(vec![reader, writer]);
 
         assert_eq!(
-            backend.runtime_config_keys(),
-            HashSet::from([
-                "cache.stores.scratch".to_string(),
-                "filesystems.disks.temporary".to_string(),
-                "filesystems.disks.persistent".to_string(),
-            ])
+            backend.laravel_runtime_config_keys.read()[writer_uri],
+            [
+                "cache.stores.scratch",
+                "filesystems.disks.persistent",
+                "filesystems.disks.temporary",
+            ]
         );
         let writes = backend.laravel_runtime_config_keys.read();
         assert_eq!(
@@ -2392,17 +2508,17 @@ mod tests {
             let writer_uri = "file:///project/tests/FixtureTest.php";
             let shadow_uri = "file:///project/app/LocalFacade.php";
             backend.update_ast(writer_uri, &format!("<?php\n{call};\n"));
-            assert!(backend.runtime_config_keys().contains(key), "{facade}");
+            assert!(backend.runtime_config_key_covers(key), "{facade}");
 
             backend.update_ast(shadow_uri, &format!("<?php\nclass {facade} {{}}\n"));
             assert!(
-                backend.runtime_config_keys().is_empty(),
+                backend.laravel_runtime_config_keys.read().is_empty(),
                 "a global {facade} class must withdraw the unedited file's write"
             );
 
             backend.update_ast(shadow_uri, "<?php\nclass Other {}\n");
             assert!(
-                backend.runtime_config_keys().contains(key),
+                backend.runtime_config_key_covers(key),
                 "removing the {facade} shadow must restore the unedited file's write"
             );
         }
@@ -2416,19 +2532,19 @@ mod tests {
         let shadow_uri = "file:///project/app/Storage.php";
         let key = "filesystems.disks.scratch";
         backend.update_ast(writer_uri, "<?php\nStorage::fake('scratch');\n");
-        assert!(backend.runtime_config_keys().contains(key));
+        assert!(backend.runtime_config_key_covers(key));
 
         backend.symbols.with_class_declarations(|declarations| {
             declarations.note_discovered("Storage", shadow_uri.to_string());
         });
         assert!(backend.refresh_all_published_laravel_candidates());
-        assert!(backend.runtime_config_keys().is_empty());
+        assert!(backend.laravel_runtime_config_keys.read().is_empty());
 
         backend.symbols.with_class_declarations(|declarations| {
             declarations.withdraw_uris(&HashSet::from([shadow_uri.to_string()]));
         });
         assert!(backend.refresh_all_published_laravel_candidates());
-        assert!(backend.runtime_config_keys().contains(key));
+        assert!(backend.runtime_config_key_covers(key));
         assert!(!backend.refresh_all_published_laravel_candidates());
     }
 
@@ -2541,6 +2657,93 @@ mod tests {
         let v2 = "<?php\nfunction foo(): void {}\n";
         let changed = backend.update_ast(uri, v2);
         assert!(changed, "Removing a function must be detected");
+    }
+
+    /// Two parses of one template can race: an index worker lowers it with
+    /// the scope it had, while call-site inference re-parses it with a
+    /// larger one.  Whichever lands last, the virtual PHP, the source map
+    /// and the symbol map must all come from the same parse, or every
+    /// offset in the map points at the wrong text and every position
+    /// translated back to the template is off by the prologue difference.
+    #[test]
+    fn racing_template_parses_leave_one_consistent_lowering() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![
+                    ("a".to_string(), "int".to_string()),
+                    ("b".to_string(), "string".to_string()),
+                ],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+        let symbol_map = backend.symbol_maps.read().get(uri).cloned().unwrap();
+        assert!(
+            symbol_map.matches_source(&virtual_php),
+            "the symbol map must index the virtual PHP that was published with it"
+        );
+
+        let item = symbol_map
+            .spans
+            .iter()
+            .find(|span| matches!(&span.kind, crate::symbol_map::SymbolKind::ClassReference { name, .. } if name.ends_with("Item")))
+            .expect("the template names App\\Item");
+        let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
+        assert_eq!(
+            backend
+                .try_translate_php_to_blade(uri, position)
+                .map(|p| p.line),
+            Some(1),
+            "App\\Item is on the template's second line"
+        );
+    }
+
+    /// A stale index parse must not pin a template back to the scope it
+    /// started with. If call-site re-inference computes a new scope and
+    /// re-parses the template before the index worker's older-scoped batch
+    /// applies, the batch's lowering describes variables the template no
+    /// longer has and must be dropped rather than published over the fresh
+    /// state.
+    #[test]
+    fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        // An index worker lowers the template while the scope is still
+        // empty (nothing has been cached for this uri yet).
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+
+        // Call-site re-inference computes the real scope and re-parses
+        // against it before the index worker's batch is applied.
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![("a".to_string(), "int".to_string())],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+
+        // The index worker's batch, built from the empty scope, lands last.
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        assert_eq!(
+            backend.blade_virtual_php_arc(uri).unwrap(),
+            fresh_virtual_php,
+            "a batch built from a scope the template has moved past must not \
+             overwrite the lowering built from the current scope"
+        );
     }
 
     /// Adding a parameter to a function should be detected.
@@ -2872,5 +3075,31 @@ class User extends Model {
                 .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
             "the withdrawn declaration's parent must not still list it"
         );
+    }
+
+    /// An inheritance edge is deduplicated through the class's own list of
+    /// parents rather than through the parent's list of children, so a
+    /// re-parse that leaves the edge unchanged must still leave exactly one
+    /// entry for it.
+    #[test]
+    fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
+        let backend = Backend::new_test();
+        let src =
+            "<?php namespace Vendor; class Child extends Base implements Contract { use Helper; }";
+
+        backend.update_ast("file:///child.php", src);
+        backend.update_ast("file:///child.php", src);
+
+        let gti = backend.symbols.gti_index.read();
+        for parent in ["Vendor\\Base", "Vendor\\Contract", "Vendor\\Helper"] {
+            let kids = gti
+                .get(parent)
+                .unwrap_or_else(|| panic!("{parent} should list Child as an implementor"));
+            assert_eq!(
+                kids.iter().filter(|k| *k == "Vendor\\Child").count(),
+                1,
+                "{parent} should list Child exactly once, got {kids:?}"
+            );
+        }
     }
 }

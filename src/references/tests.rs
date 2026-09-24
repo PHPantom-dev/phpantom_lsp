@@ -862,3 +862,546 @@ async fn laravel_string_key_references_gated_on_is_laravel() {
          references, got {plain_locs:?}"
     );
 }
+
+// ─── Interior symlinks: collect_php_files_gitignore (issue #383) ──
+// The Find References / rename / preload walker is a *serial* `ignore`
+// walk (`.build()` + `flatten()`).  The same symlink contract as
+// `walk_roots` applies, and a symlink cycle must terminate instead of
+// panicking: `flatten()` silently drops `Err` entries, which is where
+// the loop error lands.
+
+#[test]
+fn collect_php_files_gitignore_follows_interior_symlink() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let real = dir.path().join("real");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&real).unwrap();
+    std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+    let link = root.join("link");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
+    let linked = files
+        .iter()
+        .find(|p| p.ends_with("Hidden.php"))
+        .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+    assert!(
+        linked.starts_with(&link),
+        "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+    );
+}
+
+#[test]
+fn collect_php_files_gitignore_walks_a_link_target_once() {
+    // The serial walk is a different `ignore` code path from the parallel
+    // one, and gets the same one-visit-per-target rule: two links to the
+    // same tree must not report its files twice, or find-references
+    // reports every hit once per spelling.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    let ext = dir.path().join("ext");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&ext).unwrap();
+    std::fs::write(ext.join("Dup.php"), "<?php\n").unwrap();
+
+    for name in ["a", "b"] {
+        let link = root.join(name);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&ext, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&ext, &link).unwrap();
+    }
+
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
+    assert_eq!(
+        files.len(),
+        1,
+        "the linked tree must be reported once, not once per link: {files:?}"
+    );
+}
+
+#[test]
+fn collect_php_files_gitignore_follows_symlink_cycle_safely() {
+    // The serial walker's cycle guard reports the loop as an `Err`
+    // entry; `flatten()` drops it instead of panicking, so the walk
+    // terminates and still finds the workspace files.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("ws");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("App.php"), "<?php\n").unwrap();
+
+    let link = root.join("loop");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(&root, &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&root, &link).unwrap();
+
+    let files = crate::classmap_scanner::collect_php_files_gitignore(
+        &root,
+        &[],
+        &crate::classmap_scanner::IndexFilters::empty(),
+        None,
+    );
+    assert!(
+        files.iter().any(|p| p.ends_with("App.php")),
+        "workspace files must still be found next to a cycle: {files:?}"
+    );
+}
+
+// ─── Candidate narrowing by settled receivers ───────────────────────────────
+
+/// Index `text` as a workspace file the scanners can reach.
+fn parse_file(backend: &Backend, uri: &str, text: &str) {
+    backend
+        .open_files
+        .write()
+        .insert(uri.to_string(), std::sync::Arc::new(text.to_string()));
+    backend.update_ast(uri, text);
+    backend.workspace_indexed.store(true, Ordering::Release);
+}
+
+fn symbol_map_of(backend: &Backend, uri: &str) -> std::sync::Arc<crate::symbol_map::SymbolMap> {
+    backend
+        .symbol_maps
+        .read()
+        .get(uri)
+        .cloned()
+        .expect("the file was parsed")
+}
+
+/// A file selected as a candidate only because it accesses the same *name*
+/// on a class of its own is ruled out from the symbol map, so the search
+/// never opens it.  The receiver the file cannot settle by itself is still
+/// resolved the long way.
+#[test]
+fn a_file_whose_accesses_are_all_on_its_own_class_is_never_walked() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const UNRELATED_URI: &str = "file:///Unrelated.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const UNRELATED: &str = r#"<?php
+class Unrelated {
+    public function save(): void {}
+    public function run(): void {
+        $this->save();
+    }
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function persist(Service $service): void {
+    $service->save();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, UNRELATED_URI, UNRELATED);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    assert_eq!(
+        locations.len(),
+        1,
+        "only the consumer calls Service::save: {locations:?}"
+    );
+    assert!(locations[0].uri.as_str().ends_with("Consumer.php"));
+    assert!(
+        backend
+            .resolved_member_file(UNRELATED_URI, &symbol_map_of(&backend, UNRELATED_URI))
+            .is_none(),
+        "a file whose `$this->save()` settles to another class is ruled out unread"
+    );
+    assert!(
+        backend
+            .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
+            .is_some(),
+        "a variable receiver is not settled by the file, so it is still walked"
+    );
+}
+
+/// The narrowing drops only the receivers that settle *outside* the
+/// hierarchy: `$this` in a subclass and `parent::` both stay references.
+#[test]
+fn settled_receivers_inside_the_hierarchy_are_still_references() {
+    const BASE_URI: &str = "file:///Base.php";
+    const CHILD_URI: &str = "file:///Child.php";
+    const BASE: &str = r#"<?php
+class Base {
+    public function save(): void {}
+    public function persist(): void {
+        $this->save();
+    }
+}
+"#;
+    const CHILD: &str = r#"<?php
+class Child extends Base {
+    public function store(): void {
+        $this->save();
+        parent::save();
+    }
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, BASE_URI, BASE);
+    parse_file(&backend, CHILD_URI, CHILD);
+
+    let save_offset = BASE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(BASE_URI, save_offset, "save", false);
+
+    assert_eq!(
+        locations.len(),
+        3,
+        "the own call, the inherited call, and the parent call: {locations:?}"
+    );
+}
+
+/// A static access names its receiver outright, so a call on a namesake
+/// class is ruled out while the one on the searched class is kept.
+#[test]
+fn a_static_access_on_a_namesake_class_is_ruled_out() {
+    const REGISTRY_URI: &str = "file:///Registry.php";
+    const OTHER_URI: &str = "file:///Other.php";
+    const CALLER_URI: &str = "file:///Caller.php";
+    const REGISTRY: &str =
+        "<?php\nclass Registry {\n    public static function flush(): void {}\n}\n";
+    const OTHER: &str = concat!(
+        "<?php\n",
+        "class Other {\n",
+        "    public static function flush(): void {}\n",
+        "}\n",
+        "Other::flush();\n",
+    );
+    const CALLER: &str = "<?php\nRegistry::flush();\n";
+
+    let backend = Backend::new_test();
+    parse_file(&backend, REGISTRY_URI, REGISTRY);
+    parse_file(&backend, OTHER_URI, OTHER);
+    parse_file(&backend, CALLER_URI, CALLER);
+
+    let flush_offset = REGISTRY.find("flush").unwrap() as u32;
+    let locations =
+        backend.member_declaration_references(REGISTRY_URI, flush_offset, "flush", true);
+
+    assert_eq!(
+        locations.len(),
+        1,
+        "only the caller names Registry: {locations:?}"
+    );
+    assert!(locations[0].uri.as_str().ends_with("Caller.php"));
+    assert!(
+        backend
+            .resolved_member_file(OTHER_URI, &symbol_map_of(&backend, OTHER_URI))
+            .is_none(),
+        "`Other::flush()` names its own class, so the file is ruled out unread"
+    );
+}
+
+/// A file is a candidate for declaring the member as much as for accessing
+/// it, and the access narrowing must not take the declaration with it.
+#[tokio::test]
+async fn find_references_still_reports_a_declaration_in_a_file_that_accesses_nothing() {
+    let backend = Backend::new_test();
+    let base_uri = Url::parse("file:///Base.php").unwrap();
+    let child_uri = Url::parse("file:///Child.php").unwrap();
+
+    let base_text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    public function save(): void {}\n",
+        "}\n",
+    );
+    let child_text = concat!(
+        "<?php\n",
+        "class Child extends Base {\n",
+        "    public function store(): void {\n",
+        "        $this->save();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    open_file(&backend, &base_uri, base_text).await;
+    open_file(&backend, &child_uri, child_text).await;
+
+    let (line, character) = line_char_of(child_text, "save();");
+    let locs = find_references(&backend, &child_uri, line, character, true).await;
+
+    assert!(
+        locs.iter().any(|loc| loc.uri == base_uri),
+        "the declaration in Base.php has to be reported: {locs:?}"
+    );
+    assert!(
+        locs.iter().any(|loc| loc.uri == child_uri),
+        "the call in Child.php has to be reported: {locs:?}"
+    );
+}
+
+/// A docblock reference names its class outright too, so a `@see` on an
+/// unrelated class is ruled out the same way a static call is.
+#[test]
+fn a_docblock_reference_to_another_class_is_ruled_out() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const UNRELATED_URI: &str = "file:///Unrelated.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const UNRELATED: &str = r#"<?php
+class Unrelated {
+    public function save(): void {}
+    /** @see Unrelated::save() */
+    public function run(): void {}
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, UNRELATED_URI, UNRELATED);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    assert!(
+        locations.is_empty(),
+        "nothing calls Service::save: {locations:?}"
+    );
+    assert!(
+        backend
+            .resolved_member_file(UNRELATED_URI, &symbol_map_of(&backend, UNRELATED_URI))
+            .is_none(),
+        "the docblock names the class it refers to, so the file is ruled out unread"
+    );
+}
+
+/// Walking a body is the expensive half of resolving a receiver, and the body
+/// answers for every access inside it.  A search records those too, so the
+/// file's entry grows past the name that pulled the walk in.
+#[test]
+fn a_walked_body_records_the_other_member_names_it_answers_for() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+    public function cancel(): void {}
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+    $service->cancel();
+}
+function elsewhere(Service $service): void {
+    $service->purge();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+
+    let entry = backend
+        .resolved_member_file(CONSUMER_URI, &symbol_map_of(&backend, CONSUMER_URI))
+        .expect("the candidate file was walked for `save`");
+    assert!(
+        entry.covers([crate::atom::atom("cancel")]),
+        "`cancel` sits in the body the walk already entered"
+    );
+    assert!(
+        !entry.covers([crate::atom::atom("purge")]),
+        "`purge` sits in a body the walk never entered, so nothing resolved it"
+    );
+}
+
+/// What a walk recorded is what the next search filters on: a file whose
+/// accesses the layer already resolved to another class is dropped before
+/// anything opens it, even though its receivers are variables the file's own
+/// text cannot settle.
+#[test]
+fn a_file_the_layer_has_already_resolved_is_ruled_out_unread() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const OTHER_URI: &str = "file:///Other.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = "<?php\nclass Service {\n    public function save(): void {}\n}\n";
+    const OTHER: &str = "<?php\nclass Other {\n    public function save(): void {}\n}\n";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, OTHER_URI, OTHER);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    let consumer_map = symbol_map_of(&backend, CONSUMER_URI);
+    let save = crate::atom::atom("save");
+    let other_hierarchy = crate::references::member_scope::MemberScope::exact(
+        std::iter::once("Other".to_string()).collect(),
+    );
+
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(save, &other_hierarchy)]
+        ),
+        "with nothing resolved yet the variable receiver keeps the file"
+    );
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let locations = backend.member_declaration_references(SERVICE_URI, save_offset, "save", false);
+    assert_eq!(locations.len(), 1, "the consumer calls Service::save");
+
+    assert!(
+        backend.member_accesses_ruled_out(CONSUMER_URI, &consumer_map, &[(save, &other_hierarchy)]),
+        "the entry says the only `save` here is on Service, so a search for \
+         Other::save can drop the file without reading it"
+    );
+    let service_hierarchy = crate::references::member_scope::MemberScope::exact(
+        std::iter::once("Service".to_string()).collect(),
+    );
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(save, &service_hierarchy)]
+        ),
+        "the same entry keeps the file for the class it did resolve to"
+    );
+}
+
+/// A warm-up walks every body, not just the ones holding the accesses a
+/// search asked about, so the entry it leaves answers for names nothing has
+/// searched for yet.  That is what lets the *first* search for one of them
+/// rule the file out without opening it.
+#[test]
+fn warming_a_file_records_the_receiver_of_every_access_in_it() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+    public function cancel(): void {}
+}
+"#;
+    const CONSUMER: &str = r#"<?php
+function run(Service $service): void {
+    $service->save();
+    $service->cancel();
+}
+function elsewhere(Service $service): void {
+    $service->purge();
+}
+"#;
+
+    let backend = Backend::new_test();
+    parse_file(&backend, SERVICE_URI, SERVICE);
+    parse_file(&backend, CONSUMER_URI, CONSUMER);
+
+    assert!(
+        backend.warm_member_receivers(CONSUMER_URI),
+        "the file has accesses nothing has resolved yet"
+    );
+
+    let consumer_map = symbol_map_of(&backend, CONSUMER_URI);
+    let entry = backend
+        .resolved_member_file(CONSUMER_URI, &consumer_map)
+        .expect("the warm-up left an entry");
+    for name in ["save", "cancel", "purge"] {
+        assert!(
+            entry.covers([crate::atom::atom(name)]),
+            "the whole-file walk reached the body holding `{name}`"
+        );
+    }
+
+    let purge = crate::atom::atom("purge");
+    let other_hierarchy = crate::references::member_scope::MemberScope::exact(
+        std::iter::once("Other".to_string()).collect(),
+    );
+    let service_hierarchy = crate::references::member_scope::MemberScope::exact(
+        std::iter::once("Service".to_string()).collect(),
+    );
+    assert!(
+        backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(purge, &other_hierarchy)]
+        ),
+        "the recorded receiver is a Service, so a search for Other::purge \
+         drops the file unread"
+    );
+    assert!(
+        !backend.member_accesses_ruled_out(
+            CONSUMER_URI,
+            &consumer_map,
+            &[(purge, &service_hierarchy)]
+        ),
+        "the same entry keeps the file for the class it did resolve to"
+    );
+
+    assert!(
+        !backend.warm_member_receivers(CONSUMER_URI),
+        "a file whose every access is already recorded is not walked again"
+    );
+}
+
+/// What the warm-up records is what the search would have computed itself,
+/// so a session that warmed the layer finds exactly the references a session
+/// that did not would.
+#[test]
+fn a_warmed_layer_finds_the_same_references_as_an_unwarmed_one() {
+    const SERVICE_URI: &str = "file:///Service.php";
+    const CONSUMER_URI: &str = "file:///Consumer.php";
+    const SERVICE: &str = r#"<?php
+class Service {
+    public function save(): void {}
+}
+"#;
+    const OTHER: &str = r#"<?php
+class Other {
+    public function save(): void {}
+}
+"#;
+    const OTHER_URI: &str = "file:///Other.php";
+    const CONSUMER: &str = r#"<?php
+function run(Service $service, Other $other): void {
+    $service->save();
+    $other->save();
+}
+"#;
+
+    let save_offset = SERVICE.find("save").unwrap() as u32;
+    let references = |warm: bool| {
+        let backend = Backend::new_test();
+        parse_file(&backend, SERVICE_URI, SERVICE);
+        parse_file(&backend, OTHER_URI, OTHER);
+        parse_file(&backend, CONSUMER_URI, CONSUMER);
+        if warm {
+            backend.warm_member_receivers(CONSUMER_URI);
+        }
+        backend.member_declaration_references(SERVICE_URI, save_offset, "save", false)
+    };
+
+    let cold = references(false);
+    assert_eq!(cold.len(), 1, "only the Service receiver is a reference");
+    assert_eq!(references(true), cold);
+}

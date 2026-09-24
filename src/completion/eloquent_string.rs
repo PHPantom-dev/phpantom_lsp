@@ -24,10 +24,12 @@ use crate::Backend;
 use crate::completion::source::code_context::{CodeContext, Operator};
 use crate::php_type::{PhpType, TypeKind};
 use crate::text_position::position_to_offset;
-use crate::types::{ClassInfo, FileContext};
+use crate::text_scan::collapse_continuation_lines;
+use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
+use crate::type_engine::subject_extraction::detect_access_operator;
+use crate::types::{AccessKind, ClassInfo, FileContext};
 use crate::virtual_members::laravel::{
-    ELOQUENT_BUILDER_FQN, classify_relationship_typed, extends_eloquent_model,
-    resolve_relation_chain,
+    classify_relationship_typed, extends_eloquent_model, resolve_relation_chain,
 };
 
 /// Relationship-building method names on the Model base class.
@@ -163,10 +165,7 @@ pub(crate) fn detect_string_call_context(
     // rather than this recovering it from the text after the fact, so a
     // comment between the receiver and the operator cannot hide it.
     let (is_static, subject) = match &call.callee_operator {
-        Some(op) => (
-            op.is_static,
-            extract_subject_backwards(content.get(..op.code_before)?),
-        ),
+        Some(op) => (op.is_static, extract_receiver_subject(content, op)),
         None => (false, None),
     };
 
@@ -251,30 +250,22 @@ fn extract_identifier_backwards(text: &str) -> Option<(String, &str)> {
     Some((ident.to_string(), &trimmed[..end]))
 }
 
-/// Extract a subject (class name or $variable) scanning backwards.
-fn extract_subject_backwards(text: &str) -> Option<String> {
-    let trimmed = text.trim_end();
-    let bytes = trimmed.as_bytes();
-    if bytes.is_empty() {
-        return None;
-    }
-
-    let mut end = bytes.len();
-    // Walk backwards collecting identifier chars and backslashes (for FQNs).
-    while end > 0
-        && (bytes[end - 1].is_ascii_alphanumeric()
-            || bytes[end - 1] == b'_'
-            || bytes[end - 1] == b'\\'
-            || bytes[end - 1] == b'$')
-    {
-        end -= 1;
-    }
-
-    let subject = &trimmed[end..];
-    if subject.is_empty() {
-        return None;
-    }
-    Some(subject.to_string())
+/// The receiver expression in front of the callee's operator, e.g.
+/// `$user->posts()` in `$user->posts()->where('|')`.
+///
+/// The text runs up to where the scan says the receiver ends, so a comment
+/// between the receiver and the operator is already cut off, and the
+/// operator is put back right after it.  That hands the member-completion
+/// subject extractor the same shape it sees after a typed `->`, chains and
+/// multi-line continuations included.
+fn extract_receiver_subject(content: &str, op: &Operator) -> Option<String> {
+    let mut lines: Vec<&str> = content.get(..op.code_before)?.lines().collect();
+    let receiver_line = format!("{}{}", lines.pop()?, if op.is_static { "::" } else { "->" });
+    lines.push(&receiver_line);
+    let (line, col) =
+        collapse_continuation_lines(&lines, lines.len() - 1, receiver_line.chars().count());
+    let chars: Vec<char> = line.chars().collect();
+    detect_access_operator(&chars, col).map(|(subject, _)| subject)
 }
 
 impl Backend {
@@ -292,26 +283,26 @@ impl Backend {
         let cursor_offset = position_to_offset(content, position) as usize;
         let es_ctx = detect_eloquent_string_context(content, cursor_offset, code)?;
 
-        // Resolve the model class.
         let class_loader = self.class_loader(ctx);
         let model_class = self.resolve_eloquent_model_from_subject(
-            &es_ctx.subject,
-            es_ctx.is_static,
+            &es_ctx,
             content,
-            position,
+            cursor_offset as u32,
             ctx,
             &class_loader,
         )?;
-
-        if !extends_eloquent_model(&model_class, &class_loader) {
-            return None;
-        }
 
         let items = match es_ctx.kind {
             EloquentStringKind::Relation => {
                 self.build_relation_completions(&model_class, &es_ctx, &class_loader)
             }
-            EloquentStringKind::Column => self.build_column_completions(&model_class, &es_ctx),
+            EloquentStringKind::Column => {
+                // Base resolution folds in the `$fillable`/`$casts` a
+                // parent model declares.
+                let model_class =
+                    crate::virtual_members::resolve_class_base_cached(&model_class, &class_loader);
+                self.build_column_completions(&model_class, &es_ctx)
+            }
         };
 
         if items.is_empty() {
@@ -321,87 +312,54 @@ impl Backend {
         }
     }
 
-    /// Resolve the model class from the subject of the method call.
+    /// Resolve the model the method call's receiver queries or holds.
+    ///
+    /// The receiver goes through the shared subject resolver, so a chain
+    /// like `$user->posts()` or `$user->posts` resolves the same way member
+    /// completion after it would.  The model is then the receiver itself, or
+    /// the first model among its generic arguments: `Builder<Post>`,
+    /// `HasMany<Post, User>` (the related model comes first) and
+    /// `Collection<int, Post>` all name it there.
     fn resolve_eloquent_model_from_subject(
         &self,
-        subject: &str,
-        is_static: bool,
+        es_ctx: &EloquentStringContext,
         content: &str,
-        position: Position,
+        cursor_offset: u32,
         ctx: &FileContext,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Arc<ClassInfo>> {
-        if is_static {
-            // Static call: `User::with(...)` — subject is the class name.
-            let fqn = self.resolve_class_name_to_fqn(subject, ctx)?;
-            class_loader(&fqn)
-        } else if crate::class_lookup::is_self_or_static(subject) {
-            // Inside the model class itself.
-            let cursor_offset = position_to_offset(content, position);
-            let current_class =
-                crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset)?;
-            Some(Arc::new(current_class.clone()))
-        } else if subject.starts_with('$') {
-            // Variable — resolve its type, then check both `Builder<Model>`
-            // results (from query builder chains) and direct model instances.
-            let cursor_offset = position_to_offset(content, position);
-            let default_class;
-            let current_class =
-                match crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset) {
-                    Some(cc) => cc,
-                    None => {
-                        default_class =
-                            crate::class_lookup::class_context_placeholder(content, cursor_offset);
-                        &default_class
-                    }
-                };
-            let results = crate::type_engine::variable::resolution::resolve_variable_types(
-                subject,
-                current_class,
-                &ctx.classes,
-                content,
-                cursor_offset,
-                class_loader,
-                Some(self),
-                crate::type_engine::resolver::Loaders::default(),
-            );
-            for rt in &results {
-                if let Some(model_fqn) = extract_model_from_builder_type(&rt.type_string)
-                    && let Some(cls) = class_loader(&model_fqn)
-                {
-                    return Some(cls);
-                }
-                if let Some(base) = rt.type_string.base_name()
-                    && let Some(cls) = class_loader(base)
-                    && extends_eloquent_model(&cls, class_loader)
-                {
-                    return Some(cls);
-                }
-            }
-            None
+        let current_class = crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
+        let function_loader = self.function_loader(ctx);
+        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(class_loader);
+        let rctx = self.resolution_ctx_at(
+            current_class,
+            &ctx.classes,
+            content,
+            cursor_offset,
+            CtxLoaders::new(class_loader, &function_loader, &laravel_macro_this_resolver),
+        );
+        let access_kind = if es_ctx.is_static {
+            AccessKind::DoubleColon
         } else {
-            let fqn = self.resolve_class_name_to_fqn(subject, ctx)?;
-            class_loader(&fqn)
-        }
-    }
+            AccessKind::Arrow
+        };
 
-    /// Resolve a short/relative class name to FQN using use statements.
-    fn resolve_class_name_to_fqn(&self, name: &str, ctx: &FileContext) -> Option<String> {
-        let clean = name.trim_start_matches('\\');
-        if let Some(fqn) = ctx.use_map.get(clean) {
-            return Some(fqn.clone());
-        }
-        if clean.contains('\\') {
-            return Some(clean.to_string());
-        }
-        if let Some(ref ns) = ctx.namespace {
-            let fqn = format!("{}\\{}", ns, clean);
-            if self.find_or_load_class(&fqn).is_some() {
-                return Some(fqn);
+        let is_model = |cls: &ClassInfo| extends_eloquent_model(cls, class_loader);
+        for rt in resolve_target_classes(&es_ctx.subject, access_kind, &rctx) {
+            if let Some(cls) = &rt.class_info
+                && is_model(cls)
+            {
+                return class_loader(&cls.fqn());
             }
-        }
-        if self.find_or_load_class(clean).is_some() {
-            return Some(clean.to_string());
+            if let TypeKind::Generic(g) = rt.type_string.kind() {
+                let model = g
+                    .args
+                    .iter()
+                    .find_map(|arg| class_loader(arg.base_name()?).filter(|cls| is_model(cls)));
+                if model.is_some() {
+                    return model;
+                }
+            }
         }
         None
     }
@@ -496,7 +454,7 @@ impl Backend {
         es_ctx: &EloquentStringContext,
     ) -> Vec<CompletionItem> {
         let partial = &es_ctx.partial;
-        let columns = collect_model_columns(model);
+        let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
 
         let mut items = Vec::new();
         for col in &columns {
@@ -609,78 +567,6 @@ fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
         }
     }
     None
-}
-
-/// Extract the model FQN from a `Builder<Model>` type.
-fn extract_model_from_builder_type(ty: &PhpType) -> Option<String> {
-    if let TypeKind::Generic(g) = ty.kind()
-        && (g.name.ends_with("Builder") || g.name == ELOQUENT_BUILDER_FQN)
-        && let Some(first) = g.args.first()
-    {
-        return first.base_name().map(|s| s.to_string());
-    }
-    None
-}
-
-/// Collect all column/attribute names from a model class.
-///
-/// Uses the same sources as `where_property::collect_column_names` but
-/// we call it here to avoid coupling to internal module functions.
-fn collect_model_columns(class: &ClassInfo) -> Vec<String> {
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::new();
-    let mut columns = Vec::new();
-
-    let mut push = |name: &str| {
-        if seen.insert(name.to_string()) {
-            columns.push(name.to_string());
-        }
-    };
-
-    if let Some(laravel) = class.laravel() {
-        for (col, _) in &laravel.casts_definitions {
-            push(col);
-        }
-        for col in &laravel.dates_definitions {
-            push(col);
-        }
-        for (col, _) in &laravel.attributes_definitions {
-            push(col);
-        }
-        for col in &laravel.column_names {
-            push(col);
-        }
-        // Timestamps.
-        let timestamps_enabled = laravel.timestamps.unwrap_or(true);
-        if timestamps_enabled {
-            let created_col = match &laravel.created_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("created_at"),
-            };
-            let updated_col = match &laravel.updated_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("updated_at"),
-            };
-            for col in [created_col, updated_col].into_iter().flatten() {
-                push(col);
-            }
-        }
-    }
-
-    // Properties on the class (including virtual @property tags).
-    for prop in class.properties.iter() {
-        push(&prop.name);
-    }
-
-    // @property tags from docblock.
-    for (name, _type) in class.doc_properties() {
-        push(name);
-    }
-
-    columns
 }
 
 #[cfg(test)]

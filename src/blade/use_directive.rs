@@ -11,30 +11,40 @@
 //! reads the raw template text with the functions here instead of going
 //! through the lowered PHP.
 
+use super::directives::{DirectiveHead, directive_head};
+use super::signature;
+
 /// Every `@use(...)` directive in `content`, as the byte offset of its
 /// argument list and the text of it (the parentheses excluded).
+///
+/// Scans the [`signature::inert_regions`]-masked text so a `@use` inside a
+/// Blade comment or a `@php` block reads as inert text rather than a real
+/// directive, and requires [`directives::directive_head`]'s word-boundary
+/// check so a name merely ending in `use` (or `@@use`, its escape) is not
+/// mistaken for the directive either.
 pub(crate) fn use_directive_arguments(content: &str) -> impl Iterator<Item = (usize, &str)> {
+    let masked = signature::mask_inert_regions(content, true);
     let mut searched = 0;
     std::iter::from_fn(move || {
         loop {
-            let at = searched + content[searched..].find("@use")?;
-            searched = at + "@use".len();
-            // `@@use` is an escaped directive Blade prints verbatim, and
-            // `@used` is a different word entirely.
-            if content[..at].ends_with('@') {
-                continue;
-            }
-            let rest = &content[searched..];
-            let trimmed = rest.trim_start();
-            if !trimmed.starts_with('(') {
-                continue;
-            }
-            let open = searched + (rest.len() - trimmed.len());
-            let Some(close) = content[open..].find(')') else {
+            let at = searched + masked[searched..].find('@')?;
+            let bytes = masked.as_bytes();
+            let DirectiveHead::Named {
+                name, open, args, ..
+            } = directive_head(&masked, bytes, at, bytes.len())
+            else {
+                searched = at + 1;
                 continue;
             };
-            searched = open + close;
-            return Some((open + 1, &content[open + 1..open + close]));
+            let Some(args) = args else {
+                searched = at + 1;
+                continue;
+            };
+            searched = args.end;
+            if name != "use" {
+                continue;
+            }
+            return Some((open + 1, &content[open + 1..args.end - 1]));
         }
     })
 }
@@ -113,6 +123,18 @@ mod tests {
         let found: Vec<(usize, &str)> = use_directive_arguments(template).collect();
         assert_eq!(found, vec![(33, "'C', 'D'")]);
         assert_eq!(&template[33..33 + "'C', 'D'".len()], "'C', 'D'");
+    }
+
+    /// A `@use` inside a Blade comment is inert text, not an import, the
+    /// same as it is inside a `@php` block.
+    #[test]
+    fn a_commented_out_or_php_block_use_directive_is_not_an_import() {
+        let template =
+            "{{-- @use('App\\Foo') --}}\n@php\n@use('App\\Bar')\n@endphp\n@use('App\\Baz')\n";
+        let found: Vec<&str> = use_directive_arguments(template)
+            .map(|(_, args)| args)
+            .collect();
+        assert_eq!(found, vec!["'App\\Baz'"]);
     }
 
     /// The modifier and an inline alias are not part of the name, and the

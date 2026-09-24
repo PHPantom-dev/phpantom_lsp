@@ -150,6 +150,13 @@ impl Backend {
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
     }
 
+    /// The classes `uri` declares, sharing the index's `Arc`s instead of
+    /// copying each body the way [`get_classes_for_uri`](Self::get_classes_for_uri)
+    /// does.  For the scanners that ask this of every candidate file.
+    pub(crate) fn shared_classes_for_uri(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        self.symbols.uri_classes_index.read().get(uri).cloned()
+    }
+
     /// The short names of the classes `uri` declares, for asking whether a
     /// name is one of the file's own classes without cloning their bodies.
     pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {
@@ -363,7 +370,8 @@ impl Backend {
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
     /// reference index.
     ///
-    /// Called from `did_close` to clean up state when a file is closed.
+    /// Called from `did_close` to clean up state when a file the workspace
+    /// index does not cover is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
@@ -389,11 +397,42 @@ impl Backend {
         self.blade_source_maps.write().remove(uri);
         self.blade_uris.write().remove(uri);
         self.blade_injected_vars.write().remove(uri);
+        // The config keys a file declares at runtime (`Config::set(...)`)
+        // are otherwise only refreshed when the file is re-parsed, which a
+        // deleted file never is.
+        self.laravel_runtime_config_keys.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+
+    /// The on-disk path of `uri` when it is a PHP file the workspace index
+    /// covers: inside the workspace root, outside the vendor directories,
+    /// not excluded by `[indexing] exclude`, and with a PHP extension.
+    ///
+    /// Such a file has to stay indexed after the editor closes it, since
+    /// the reference index and the reference-count lenses read it whether
+    /// or not it is open, and the completed workspace index is never walked
+    /// again to put it back.
+    pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
+        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let root = self.workspace.workspace_root.read().clone()?;
+        if !path.starts_with(&root) {
+            return None;
+        }
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+        {
+            return None;
+        }
+        let filters = self.index_filters();
+        (filters.is_php_file(&path) && !filters.is_excluded_path(&path, false)).then_some(path)
     }
 }
 

@@ -11,6 +11,24 @@ use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
 use crate::types::{ClassInfo, ResolvedType};
 
+#[cfg(test)]
+thread_local! {
+    /// How many function bodies a scope walk has seeded and walked, so a
+    /// test can assert a targeted walk skipped the ones nothing asked
+    /// about.
+    static TEST_BODY_WALKS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_body_walks() {
+    TEST_BODY_WALKS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_body_walks() -> usize {
+    TEST_BODY_WALKS.with(Cell::get)
+}
+
 /// Walk a sequence of statements for diagnostic scope building.
 ///
 /// Unlike [`walk_body_forward`] (which stops at the cursor), this walks
@@ -832,15 +850,101 @@ pub(crate) fn build_diagnostic_scopes(
         return;
     }
 
-    // Skip if the scope cache is already populated (prevents double
-    // walk when both the analyze loop and collect_slow_diagnostics
-    // call this function).
-    let already_populated =
-        DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().as_ref().is_some_and(|m| !m.is_empty()));
-    if already_populated {
+    // Skip if the scope cache is already populated by an earlier
+    // whole-file walk (prevents double walk when both the analyze loop
+    // and collect_slow_diagnostics call this function).  Snapshots left
+    // by a targeted walk cover only part of the file, so they do not
+    // stand in for the whole-file walk a caller asked for here.
+    if scopes_populated() && scope_coverage_is_whole() {
+        return;
+    }
+    set_whole_scope_coverage();
+
+    walk_file_for_scopes(
+        content,
+        local_classes,
+        class_loader,
+        backend,
+        loaders,
+        resolved_class_cache,
+        &[],
+    );
+}
+
+/// Build diagnostic scope snapshots for just the bodies that enclose
+/// `offsets`.
+///
+/// A member-reference search asks about one or two accesses in a
+/// candidate file; walking the file's other few dozen bodies to answer
+/// costs a pass of the type engine each and answers nothing.  This walks
+/// only the function, method, property hook, or top-level region holding
+/// each offset, into the same [`DIAGNOSTIC_SCOPE`] cache the whole-file
+/// walk populates, so the two consumers cannot disagree about a type.
+///
+/// Offsets a previous walk already covered are not walked again, so a
+/// second access in a body the first one walked is free.
+///
+/// The caller must have activated the cache via
+/// [`with_diagnostic_scope_cache`] before calling this function.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_diagnostic_scopes_for_offsets(
+    content: &str,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
+    loaders: Loaders<'_>,
+    resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
+    offsets: &[u32],
+) {
+    if !is_diagnostic_scope_active() || offsets.is_empty() {
         return;
     }
 
+    // A whole-file walk already answers for every offset.
+    if scopes_populated() && scope_coverage_is_whole() {
+        return;
+    }
+    begin_targeted_coverage();
+
+    let mut targets: Vec<u32> = offsets
+        .iter()
+        .copied()
+        .filter(|offset| !scope_snapshots_cover(*offset))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    targets.sort_unstable();
+    targets.dedup();
+
+    walk_file_for_scopes(
+        content,
+        local_classes,
+        class_loader,
+        backend,
+        loaders,
+        resolved_class_cache,
+        &targets,
+    );
+}
+
+/// Whether the active scope cache holds any snapshots.
+fn scopes_populated() -> bool {
+    DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().as_ref().is_some_and(|m| !m.is_empty()))
+}
+
+/// Parse `content` and walk it for scope snapshots, restricted to the
+/// bodies enclosing `targets` when that slice is non-empty.
+#[allow(clippy::too_many_arguments)]
+fn walk_file_for_scopes(
+    content: &str,
+    local_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    backend: Option<&crate::Backend>,
+    loaders: Loaders<'_>,
+    resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
+    targets: &[u32],
+) {
     // Mark that we are building the scope cache so that nested
     // resolution calls (e.g. resolve_variable_types) do not read
     // from the partially-populated cache.
@@ -855,6 +959,7 @@ pub(crate) fn build_diagnostic_scopes(
         backend,
         loaders,
         resolved_class_cache,
+        targets,
     };
 
     with_parsed_program(content, "build_diagnostic_scopes", |program, _content| {
@@ -896,6 +1001,8 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
     // Seed superglobals for top-level code.
     seed_superglobals(&mut top_level_scope);
 
+    let last_target = diag_ctx.last_target();
+
     for stmt in statements {
         match stmt {
             Statement::Namespace(ns) => {
@@ -909,6 +1016,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 walk_top_level_statements(ns.statements().iter(), &ns_class, diag_ctx);
             }
             Statement::Class(class) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     class.left_brace.start.offset,
@@ -919,6 +1029,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Interface(iface) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     iface.left_brace.start.offset,
@@ -929,6 +1042,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Trait(trait_def) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     trait_def.left_brace.start.offset,
@@ -939,6 +1055,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Enum(enum_def) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     enum_def.left_brace.start.offset,
@@ -949,6 +1068,10 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Function(func) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
+                diag_ctx.mark_walked(stmt.span());
                 analyze_function_body(
                     func.parameter_list.parameters.iter(),
                     func.body.statements.iter(),
@@ -963,18 +1086,31 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
             // `if (!function_exists('name')) { function name() {} }`)
             // must be analyzed the same way as top-level functions.
             Statement::If(if_stmt) => {
-                record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
-                let pre_stmt_scope = top_level_scope.clone();
-                process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
-                record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
-                walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+                if stmt.span().start.offset <= last_target {
+                    diag_ctx.mark_walked(stmt.span());
+                    record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                    let pre_stmt_scope = top_level_scope.clone();
+                    process_statement(stmt, &mut top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
+                    record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                }
+                if diag_ctx.wants(stmt.span()) {
+                    walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+                }
             }
             // Top-level code: walk it with the shared scope so that
             // variable assignments accumulate and subsequent accesses
             // can be served from the scope cache instead of remaining
-            // unresolved.
+            // unresolved.  A targeted walk still has to carry the scope
+            // through every statement before the last offset it was
+            // asked about, since any of them can be what gives a
+            // variable its type; past that point nothing it learns can
+            // change an answer.
             _ => {
+                if stmt.span().start.offset > last_target {
+                    continue;
+                }
+                diag_ctx.mark_walked(stmt.span());
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
@@ -1001,6 +1137,10 @@ pub(crate) fn walk_functions_in_if_body<'b>(
             if let Statement::Block(block) = stmt_body.statement {
                 block.statements.as_slice()
             } else if let Statement::Function(func) = stmt_body.statement {
+                if !diag_ctx.wants(func.span()) {
+                    return;
+                }
+                diag_ctx.mark_walked(func.span());
                 analyze_function_body(
                     func.parameter_list.parameters.iter(),
                     func.body.statements.iter(),
@@ -1020,6 +1160,10 @@ pub(crate) fn walk_functions_in_if_body<'b>(
 
     for inner_stmt in statements.iter() {
         if let Statement::Function(func) = inner_stmt {
+            if !diag_ctx.wants(func.span()) {
+                continue;
+            }
+            diag_ctx.mark_walked(func.span());
             analyze_function_body(
                 func.parameter_list.parameters.iter(),
                 func.body.statements.iter(),
@@ -1042,6 +1186,10 @@ pub(crate) fn walk_class_member_body<'b>(
     use mago_syntax::cst::class_like::member::ClassLikeMember;
     use mago_syntax::cst::class_like::method::MethodBody;
 
+    if !diag_ctx.wants(member.span()) {
+        return;
+    }
+
     match member {
         ClassLikeMember::Method(method) => {
             // A constructor-promoted property carries its hooks in the
@@ -1063,6 +1211,7 @@ pub(crate) fn walk_class_member_body<'b>(
             };
             let method_name = bytes_to_str(method.name.value).to_string();
             let is_static = method.modifiers.contains_static();
+            diag_ctx.mark_walked(method.span());
             analyze_function_body(
                 method.parameter_list.parameters.iter(),
                 block.statements.iter(),
@@ -1103,8 +1252,12 @@ fn walk_property_hook_bodies(
         let PropertyHookBody::Concrete(body) = &hook.body else {
             continue;
         };
+        if !diag_ctx.wants(hook.span()) {
+            continue;
+        }
 
         let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
+        diag_ctx.mark_walked(hook.span());
         record_scope_snapshot(hook.span().start.offset, &scope);
 
         match body {
@@ -1132,9 +1285,39 @@ pub(crate) struct DiagnosticWalkCtx<'a> {
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+    /// Sorted byte offsets the caller needs scopes for, or empty to walk
+    /// the whole file.
+    targets: &'a [u32],
 }
 
 impl<'a> DiagnosticWalkCtx<'a> {
+    /// Whether a body spanning `span` holds one of the offsets this walk
+    /// was asked about.  Always true for a whole-file walk.
+    fn wants(&self, span: mago_span::Span) -> bool {
+        if self.targets.is_empty() {
+            return true;
+        }
+        let start = self.targets.partition_point(|&o| o < span.start.offset);
+        let end = self.targets.partition_point(|&o| o <= span.end.offset);
+        start < end
+    }
+
+    /// The last offset this walk was asked about, or `u32::MAX` for a
+    /// whole-file walk.  Statements that begin past it cannot affect any
+    /// answer, so a targeted walk stops carrying the file-level scope
+    /// through them.
+    fn last_target(&self) -> u32 {
+        self.targets.last().copied().unwrap_or(u32::MAX)
+    }
+
+    /// Record that this walk produced snapshots for every offset in
+    /// `span`, so lookups inside it may be answered from them.
+    fn mark_walked(&self, span: mago_span::Span) {
+        if !self.targets.is_empty() {
+            record_covered_region(span.start.offset, span.end.offset);
+        }
+    }
+
     /// Build the forward-walk context for a body belonging to
     /// `current_class`.  The diagnostic pass walks the whole file, so the
     /// cursor is past the end of every body it visits.
@@ -1198,6 +1381,9 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     is_static: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    #[cfg(test)]
+    TEST_BODY_WALKS.with(|count| count.set(count.get() + 1));
+
     let mut scope = ScopeState::new();
 
     // Seed `$this` for non-static class methods so that expressions

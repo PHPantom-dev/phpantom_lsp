@@ -667,7 +667,6 @@ pub fn find_var_raw_type_in_source(
     // in the same class) and all further annotations are foreign.
     let mut brace_depth = 0i32;
     let mut min_depth = 0i32;
-    let mut seen_sibling_scope = false;
 
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
@@ -689,17 +688,15 @@ pub fn find_var_raw_type_in_source(
 
         // Once we have exited our containing scope (min_depth < 0) and
         // re-entered a block close to that level, we are inside a
-        // sibling scope (e.g. a different method in the same class).
-        // From that point on every annotation belongs to a foreign
-        // scope.  The threshold is `min_depth + 1` rather than `>= 0`
+        // sibling scope (e.g. a different method in the same class) and
+        // every remaining line is foreign, so stop rather than
+        // brace-counting the rest of the file for an answer we would
+        // discard.  The threshold is `min_depth` rather than `>= 0`
         // because the cursor may be inside a nested block (foreach,
         // if, etc.) whose extra depth prevents brace_depth from ever
         // reaching 0 when traversing sibling classes.
         if min_depth < 0 && brace_depth > min_depth {
-            seen_sibling_scope = true;
-        }
-        if seen_sibling_scope {
-            continue;
+            break;
         }
 
         // Skip annotations that belong to a deeper (inner) scope.
@@ -1119,12 +1116,16 @@ pub fn find_iterable_raw_type_in_source(
     let mut brace_depth = 0i32;
     let mut min_depth = 0i32;
     let mut max_depth = 0i32;
-    let mut seen_sibling_scope = false;
 
     // Track the previous non-empty line we saw while scanning backward.
     // This lets us match `/** @var Type */` (no variable name) when the
     // *next* line is an assignment to our variable.
     let mut prev_non_empty_line: Option<&str> = None;
+
+    // A `|Type`/`&Type` union or intersection continuation collected from
+    // a line below, waiting to be joined onto the `@param`/`@var` tag
+    // that starts the type (see the continuation handling below).
+    let mut pending_continuation: Option<String> = None;
 
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
@@ -1149,19 +1150,20 @@ pub fn find_iterable_raw_type_in_source(
 
         // Once we have exited our containing scope (min_depth < 0) and
         // re-entered a block close to that level, we are inside a
-        // sibling scope (e.g. a different method in the same class).
-        // From that point on every annotation belongs to a foreign
-        // scope.
+        // sibling scope (e.g. a different method in the same class) and
+        // every remaining line is foreign, so stop rather than
+        // brace-counting the rest of the file for an answer we would
+        // discard.
         //
-        // The threshold is `min_depth + 1` rather than `>= 0` because
+        // The threshold is `min_depth` rather than `>= 0` because
         // the cursor may be inside a nested block (foreach, if, etc.)
         // that adds extra depth.  When starting inside a foreach in a
         // class method, min_depth reaches -3 (foreach { + method { +
         // class {), so a sibling method body at depth -1 would never
-        // reach 0.  Using `min_depth + 1` catches the first rise back
-        // toward our exit point.
+        // reach 0.  Comparing against `min_depth` catches the first rise
+        // back toward our exit point.
         if min_depth < 0 && brace_depth > min_depth {
-            seen_sibling_scope = true;
+            break;
         }
 
         // Detect sibling function/method boundaries at the same class
@@ -1198,10 +1200,7 @@ pub fn find_iterable_raw_type_in_source(
         let at_established_floor =
             min_depth < 0 && brace_depth == min_depth && min_depth == prev_min_depth;
 
-        if !seen_sibling_scope
-            && !is_comment_line
-            && ((brace_depth == 0 && max_depth > 0) || at_established_floor)
-        {
+        if !is_comment_line && ((brace_depth == 0 && max_depth > 0) || at_established_floor) {
             // Check for a function/method keyword.  This covers:
             //   `public function foo(...)`, `private static function bar(...)`,
             //   `function baz(...)`, `public static function qux(): array`
@@ -1211,17 +1210,10 @@ pub fn find_iterable_raw_type_in_source(
                 || lower.contains("function(")
                 || lower.ends_with("function")
             {
-                // We've hit a sibling function signature.  Any
-                // docblock above this point belongs to that function.
-                seen_sibling_scope = true;
+                // We've hit a sibling function signature.  Any docblock
+                // above this point belongs to that function, so stop.
+                break;
             }
-        }
-
-        if seen_sibling_scope {
-            if !trimmed.is_empty() {
-                prev_non_empty_line = Some(trimmed);
-            }
-            continue;
         }
 
         // Skip annotations that belong to a deeper (inner) scope.
@@ -1230,6 +1222,55 @@ pub fn find_iterable_raw_type_in_source(
                 prev_non_empty_line = Some(trimmed);
             }
             continue;
+        }
+
+        // ── Union/intersection continued on the next docblock line ──
+        // `@param array<int, Widget>` followed by a line starting
+        // `|Widget $items` is one type. The continuation carries no
+        // `@param`/`@var` keyword of its own, so fold it into a pending
+        // tail instead of matching it as a tag; once the scanner reaches
+        // the tag line above it, join the two back into one type string.
+        if is_comment_line {
+            let inner = strip_docblock_line_delimiters(trimmed);
+            let is_continuation = inner.starts_with('|') || inner.starts_with('&');
+
+            if is_continuation && pending_continuation.is_some() {
+                let existing = pending_continuation.take().unwrap();
+                pending_continuation = Some(format!("{inner} {existing}"));
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
+
+            if let Some(tail) = pending_continuation.take() {
+                let rest = inner
+                    .strip_prefix("@var")
+                    .or_else(|| inner.strip_prefix("@param"));
+                if let Some(rest) = rest {
+                    let rest = rest.trim_start();
+                    if !rest.is_empty() {
+                        let combined = format!("{rest} {tail}");
+                        let (type_token, remainder) = split_type_token(&combined);
+                        if let Some(name) = remainder.split_whitespace().next()
+                            && name == var_name
+                        {
+                            return Some(PhpType::parse(type_token));
+                        }
+                    }
+                }
+                // Not the tag after all — the continuation is discarded
+                // and this line falls through to the ordinary checks
+                // below.
+            }
+
+            if is_continuation && inner.contains(var_name) {
+                pending_continuation = Some(inner.to_string());
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
         }
 
         // ── Named annotation: line mentions the variable name ───────

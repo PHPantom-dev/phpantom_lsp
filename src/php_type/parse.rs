@@ -627,10 +627,10 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
                 .filter_map(|e| e.key.as_ref())
                 .map(PhpType::literal_string_value)
                 .collect();
-            match keys.len() {
-                0 => PhpType::named(atom("never")),
-                1 => keys.into_iter().next().unwrap(),
-                _ => PhpType::union(keys),
+            if keys.is_empty() {
+                PhpType::named(atom("never"))
+            } else {
+                PhpType::union(keys)
             }
         }
         TypeKind::Generic(g) => {
@@ -659,10 +659,10 @@ pub(crate) fn evaluate_value_of(resolved: &PhpType) -> PhpType {
             // Deduplicate the whole value set (not just adjacent duplicates),
             // so `array{a: int, b: string, c: int}` yields `int|string`.
             dedup_types(&mut values);
-            match values.len() {
-                0 => PhpType::named(atom("never")),
-                1 => values.into_iter().next().unwrap(),
-                _ => PhpType::union(values),
+            if values.is_empty() {
+                PhpType::named(atom("never"))
+            } else {
+                PhpType::union(values)
             }
         }
         TypeKind::Generic(g) => {
@@ -710,10 +710,7 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
                 }
             }
             if !values.is_empty() {
-                return match values.len() {
-                    1 => values.into_iter().next().unwrap(),
-                    _ => PhpType::union(values),
-                };
+                return PhpType::union(values);
             }
         }
     }

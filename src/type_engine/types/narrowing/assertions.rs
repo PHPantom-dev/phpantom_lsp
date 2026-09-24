@@ -717,23 +717,17 @@ pub(in crate::type_engine) fn unwrap_condition_negation<'b>(
 pub(in crate::type_engine) fn fold_negation_pairs<'b>(
     expr: &'b Expression<'b>,
 ) -> &'b Expression<'b> {
-    fn strip_parens<'b>(expr: &'b Expression<'b>) -> &'b Expression<'b> {
-        match expr {
-            Expression::Parenthesized(inner) => strip_parens(inner.expression),
-            other => other,
-        }
-    }
     /// The operand of `expr` when it is a logical `!`.
     fn not_operand<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
         match expr {
             Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-                Some(strip_parens(prefix.operand))
+                Some(crate::parser::unwrap_parens(prefix.operand))
             }
             _ => None,
         }
     }
 
-    let mut current = strip_parens(expr);
+    let mut current = crate::parser::unwrap_parens(expr);
     while let Some(once) = not_operand(current) {
         match not_operand(once) {
             Some(twice) => current = twice,

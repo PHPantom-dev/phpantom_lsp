@@ -24,8 +24,8 @@ use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use super::classify_relationship_typed;
 use super::helpers::{snake_to_pascal, walks_parent_chain};
+use super::{classify_relationship_typed, is_soft_deletes_trait};
 
 use super::super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
 
@@ -46,9 +46,6 @@ pub(crate) fn is_factory_class(class_name: &str) -> bool {
 
 /// The fully-qualified name of the `Factory` base class.
 const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
-
-/// The fully-qualified name of Laravel's `SoftDeletes` trait.
-const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
 
 /// Derive the conventional factory FQN from a model FQN.
 ///
@@ -287,15 +284,8 @@ fn relationship_param(name: &str, type_str: &str) -> ParameterInfo {
 }
 
 /// Whether `class` uses Laravel's `SoftDeletes` trait directly.
-///
-/// `used_traits` may hold the FQN or the imported short name, so we match
-/// all three forms — mirroring the established `class_uses_conditionable`
-/// detector.
 fn class_uses_soft_deletes_trait(class: &ClassInfo) -> bool {
-    class
-        .used_traits
-        .iter()
-        .any(|t| t == SOFT_DELETES_FQN || t == "SoftDeletes" || t.ends_with("\\SoftDeletes"))
+    class.used_traits.iter().any(|t| is_soft_deletes_trait(t))
 }
 
 /// Whether `class` or any ancestor uses the `SoftDeletes` trait.

@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 use crate::Backend;
 use crate::type_engine::resolver::CtxLoaders;
+use crate::types::FileContext;
 
 impl Backend {
     /// Build the Laravel macro index by scanning the project's own source
@@ -23,7 +24,7 @@ impl Backend {
     /// `Storage::extend('driver', closure)` registrations are collected in the
     /// same pass: they live in exactly these files, and reading each one twice
     /// to build two indexes would double the scan for no gain.
-    pub(crate) fn build_laravel_macro_index(&self) {
+    pub(crate) fn build_laravel_macro_index(&self, providers: &super::LaravelProviders) {
         let php_version = Some(*self.workspace.php_version.lock());
 
         let mut index = crate::virtual_members::laravel::LaravelMacroIndex::default();
@@ -46,7 +47,6 @@ impl Backend {
                 let uri = crate::util::path_to_uri(&path);
                 let refs = self
                     .get_file_content(&uri)
-                    .or_else(|| std::fs::read_to_string(&path).ok())
                     .map(|c| crate::virtual_members::laravel::parse_provider_class_list(&c))
                     .unwrap_or_default();
                 seeds.insert(uri, refs);
@@ -106,8 +106,8 @@ impl Backend {
             };
 
         // Vendor- and app-registered service providers seed macro discovery.
-        for fqn in self.laravel_provider_fqns() {
-            let Some(uri) = self.resolve_class_uri(&fqn) else {
+        for fqn in providers.fqns() {
+            let Some(uri) = self.resolve_class_uri(fqn) else {
                 continue;
             };
             if candidate_uris.insert(uri.clone()) {
@@ -170,6 +170,10 @@ impl Backend {
                 crate::virtual_members::evict_fqn(&mut cache, fqn);
             }
         }
+        // A macro is attached without a class lookup naming the provider that
+        // registered it, so a cached receiver resolution records no
+        // dependency on this table.
+        self.clear_resolved_member_files();
 
         tracing::info!(
             "PHPantom: scanned {} Laravel macro candidates ({} providers, {} imported classes), indexed {} macro targets",
@@ -201,13 +205,7 @@ impl Backend {
             let Some(uri) = self.resolve_class_uri(&mixin.mixin_fqn) else {
                 continue;
             };
-            let Some(mixin_source) = self.get_file_content(&uri).or_else(|| {
-                let path = tower_lsp::lsp_types::Url::parse(&uri)
-                    .ok()?
-                    .to_file_path()
-                    .ok()?;
-                std::fs::read_to_string(path).ok()
-            }) else {
+            let Some(mixin_source) = self.get_file_content(&uri) else {
                 continue;
             };
             out.extend(crate::virtual_members::laravel::synthesize_mixin_macros(
@@ -226,7 +224,12 @@ impl Backend {
     ///
     /// A cheap no-op unless the file currently contributes macros or its new
     /// content contains a `macro(` call.  Only runs for Laravel projects.
-    pub(crate) fn refresh_laravel_macros(&self, uri: &str, content: &str) {
+    pub(crate) fn refresh_laravel_macros(
+        &self,
+        uri: &str,
+        content: &str,
+        providers: &super::ProvidersOnce<'_>,
+    ) {
         if !self.resolved_class_cache.read().is_laravel() {
             return;
         }
@@ -238,7 +241,7 @@ impl Backend {
         // to an unrelated file can neither override the configured class nor
         // leave a stale one behind.
         if self.laravel_date_seed_uris.read().contains(uri) {
-            self.build_laravel_date_class();
+            self.build_laravel_date_class(providers.get());
         }
         // A `Macroable::mixin()` registration pulls its macros from another
         // file and records that file as a dependency.  Because those macros are
@@ -251,7 +254,7 @@ impl Backend {
         if memchr::memmem::find(content.as_bytes(), b"mixin(").is_some()
             || self.laravel_macro_mixin_uris.read().contains(uri)
         {
-            self.build_laravel_macro_index();
+            self.build_laravel_macro_index(providers.get());
             return;
         }
         // An edit to a seed file (a service provider or the app's provider
@@ -267,7 +270,7 @@ impl Backend {
                 crate::virtual_members::laravel::parse_provider_referenced_classes(content)
             };
             if refs != prev_refs {
-                self.build_laravel_macro_index();
+                self.build_laravel_macro_index(providers.get());
                 return;
             }
         }
@@ -300,10 +303,15 @@ impl Backend {
 
         // Evict every class a macro attaches to so the next resolution picks
         // up the change instead of a stale cached merge.
-        let mut cache = self.resolved_class_cache.write();
-        for fqn in targets {
-            crate::virtual_members::evict_fqn(&mut cache, &fqn);
+        {
+            let mut cache = self.resolved_class_cache.write();
+            for fqn in targets {
+                crate::virtual_members::evict_fqn(&mut cache, &fqn);
+            }
         }
+        // See the rebuild path above: the receiver layer cannot name this
+        // table as a dependency, so it goes wholesale.
+        self.clear_resolved_member_files();
     }
 
     fn infer_laravel_macro_return_types(
@@ -332,28 +340,16 @@ impl Backend {
                 self.infer_mixin_macro_return_type(reg, &def_uri);
                 continue;
             }
-            let closure_text = reg.closure_text.as_deref().unwrap_or_default();
-            let Some(target_class) = self.find_or_load_class(&reg.target) else {
-                continue;
-            };
-            let rctx = crate::type_engine::resolver::ResolutionCtx {
-                preserve_static: true,
-                ..self.resolution_ctx_at(
-                    Some(target_class.as_ref()),
-                    &file_ctx.classes,
-                    content,
-                    reg.name_offset,
-                    CtxLoaders::new(
-                        &class_loader,
-                        &function_loader,
-                        &laravel_macro_this_resolver,
-                    ),
-                )
-            };
-            if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
-                reg.method.return_type = Some(ty);
-                reg.method.is_inferred_return = true;
-            }
+            self.infer_macro_return_type(
+                reg,
+                content,
+                &file_ctx,
+                CtxLoaders::new(
+                    &class_loader,
+                    &function_loader,
+                    &laravel_macro_this_resolver,
+                ),
+            );
         }
     }
 
@@ -361,48 +357,63 @@ impl Backend {
     /// method returns, resolving against the mixin class file (where the closure
     /// actually lives) rather than the `::mixin(...)` registration site.
     ///
-    /// A no-op when the mixin file cannot be read or the target class cannot be
-    /// resolved.  `reg.name_offset` is an offset into `def_uri`'s content, so
-    /// the file context and content must both come from that file.
+    /// A no-op when the mixin file cannot be read.  `reg.name_offset` is an
+    /// offset into `def_uri`'s content, so the file context and content must
+    /// both come from that file.
     fn infer_mixin_macro_return_type(
         &self,
         reg: &mut crate::virtual_members::laravel::MacroRegistration,
         def_uri: &str,
     ) {
-        let Some(content) = self.get_file_content(def_uri).or_else(|| {
-            let path = tower_lsp::lsp_types::Url::parse(def_uri)
-                .ok()?
-                .to_file_path()
-                .ok()?;
-            std::fs::read_to_string(path).ok()
-        }) else {
-            return;
-        };
-        let Some(closure_text) = reg.closure_text.clone() else {
-            return;
-        };
-        let Some(target_class) = self.find_or_load_class(&reg.target) else {
+        let Some(content) = self.get_file_content(def_uri) else {
             return;
         };
         let file_ctx = self.file_context(def_uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        self.infer_macro_return_type(
+            reg,
+            &content,
+            &file_ctx,
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
+    }
+
+    /// Type `reg`'s macro from the closure it registers, read as the body of
+    /// a method on the target class.  `content` is the file the closure is
+    /// written in, and `file_ctx` and `loaders` describe that same file.
+    ///
+    /// A no-op when the registration has no closure or the target class
+    /// cannot be resolved.
+    fn infer_macro_return_type(
+        &self,
+        reg: &mut crate::virtual_members::laravel::MacroRegistration,
+        content: &str,
+        file_ctx: &FileContext,
+        loaders: CtxLoaders<'_>,
+    ) {
+        let Some(closure_text) = reg.closure_text.as_deref() else {
+            return;
+        };
+        let Some(target_class) = self.find_or_load_class(&reg.target) else {
+            return;
+        };
         let rctx = crate::type_engine::resolver::ResolutionCtx {
             preserve_static: true,
             ..self.resolution_ctx_at(
                 Some(target_class.as_ref()),
                 &file_ctx.classes,
-                &content,
+                content,
                 reg.name_offset,
-                CtxLoaders::new(
-                    &class_loader,
-                    &function_loader,
-                    &laravel_macro_this_resolver,
-                ),
+                loaders,
             )
         };
-        if let Some(ty) = Self::infer_closure_return_type(&closure_text, &rctx) {
+        if let Some(ty) = Self::infer_closure_return_type(closure_text, &rctx) {
             reg.method.return_type = Some(ty);
             reg.method.is_inferred_return = true;
         }

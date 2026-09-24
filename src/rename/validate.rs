@@ -211,6 +211,30 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
     }
 }
 
+/// Whether `new_name` is something a symbol of `kind` can be renamed to.
+///
+/// Only PHP names are checked.  A Laravel string key is free text (it may
+/// hold dots, dashes, or slashes), so it is left to its own rename path.
+pub(super) fn is_valid_new_name(kind: &SymbolKind, new_name: &str) -> bool {
+    match kind {
+        SymbolKind::Variable { .. }
+        | SymbolKind::CompactVariable { .. }
+        | SymbolKind::MemberAccess { .. }
+        | SymbolKind::MemberDeclaration { .. } => {
+            let bare = new_name.strip_prefix('$').unwrap_or(new_name);
+            !bare.contains('\\') && bare != "this" && is_name_token(bare)
+        }
+        SymbolKind::ClassReference { .. }
+        | SymbolKind::ClassDeclaration { .. }
+        | SymbolKind::FunctionCall { .. }
+        | SymbolKind::ConstantReference { .. }
+        | SymbolKind::NamespaceDeclaration { .. } => {
+            !new_name.starts_with('$') && is_name_token(new_name)
+        }
+        _ => true,
+    }
+}
+
 /// Whether `text` is one complete PHP name: `$var`, `Foo`, `Ns\Foo`, or
 /// `\Ns\Foo`.
 fn is_name_token(text: &str) -> bool {

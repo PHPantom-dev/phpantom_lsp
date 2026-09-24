@@ -2,24 +2,24 @@
 //!
 //! Handles `textDocument/rename` on a namespace segment: rewriting
 //! `namespace` declarations, `use` statements, and inline FQN references
-//! across every workspace file, and emitting `RenameFile` operations for
-//! the PSR-4 directory move.
+//! across every workspace file.  The PSR-4 directory move that goes with
+//! it is planned in [`layout`].
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
-use crate::composer;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::text_position::{line_start_byte_offset, offset_to_position, ranges_overlap};
 use crate::types::FileContext;
 use crate::util::{resolve_to_fqn, short_name, strip_fqn_prefix};
 
 use super::RenameOutcome;
+
+mod layout;
 
 impl Backend {
     /// Plan a namespace-prefix move without requiring an LSP cursor position.
@@ -94,35 +94,24 @@ impl Backend {
         // Include those URIs too so namespace rename updates references in
         // unopened workspace files.
         let all_uris: Vec<String> = {
-            let nmap = self.file_namespaces.read();
-            let umap = self.file_imports.read();
-            let smap = self.symbol_maps.read();
-            let cmap = self.symbols.uri_classes_index.read();
-            let ofiles = self.open_files.read();
+            // The maps are read and released before the disk walk below:
+            // holding them for the walk would block every parse of an edit
+            // for as long as the workspace takes to list.
+            let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
+            uris.extend(self.file_namespaces.read().keys().cloned());
+            uris.extend(self.file_imports.read().keys().cloned());
+            uris.extend(self.symbol_maps.read().keys().cloned());
+            uris.extend(self.symbols.uri_classes_index.read().keys().cloned());
+            uris.extend(self.open_files.read().keys().cloned());
             let workspace_root = self.workspace.workspace_root.read().clone();
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-            let mut uris: std::collections::HashSet<String> = std::collections::HashSet::new();
-            for uri in nmap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in umap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in smap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in cmap.keys() {
-                uris.insert(uri.clone());
-            }
-            for uri in ofiles.keys() {
-                uris.insert(uri.clone());
-            }
 
             if let Some(root) = workspace_root {
-                for path in crate::references::collect_php_files_gitignore(
+                for path in crate::classmap_scanner::collect_php_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
+                    Some(self.followed_links()),
                 ) {
                     if let Ok(uri) = Url::from_file_path(&path) {
                         uris.insert(uri.to_string());
@@ -269,7 +258,6 @@ impl Backend {
         new_prefix: &str,
         edits: &mut Vec<TextEdit>,
     ) {
-        let old_prefix_lower = old_prefix.to_lowercase();
         for (line_idx, line) in content.lines().enumerate() {
             let trimmed = line.trim();
             let Some(rest) = trimmed.strip_prefix("namespace ") else {
@@ -282,32 +270,11 @@ impl Backend {
                 continue;
             }
 
-            let ns_lower = ns_name.to_lowercase();
-            // The namespace must equal old_prefix or start with old_prefix + `\`.
-            if ns_lower != old_prefix_lower
-                && !ns_lower.starts_with(&format!("{}\\", old_prefix_lower))
-            {
-                continue;
-            }
-
-            let new_ns = if ns_name.len() == old_prefix.len() {
-                new_prefix.to_string()
-            } else {
-                format!("{}{}", new_prefix, &ns_name[old_prefix.len()..])
-            };
-
-            let line_start_byte = line_start_byte_offset(content, line_idx);
-            let ns_offset_in_line = line.find(ns_name).unwrap_or(0);
-            let ns_start = line_start_byte + ns_offset_in_line;
-            let ns_end = ns_start + ns_name.len();
-
-            edits.push(TextEdit {
-                range: Range {
-                    start: offset_to_position(content, ns_start),
-                    end: offset_to_position(content, ns_end),
-                },
-                new_text: new_ns,
-            });
+            let ns_start =
+                line_start_byte_offset(content, line_idx) + line.find(ns_name).unwrap_or(0);
+            edits.extend(prefix_rename_edit(
+                content, ns_start, ns_name, old_prefix, new_prefix,
+            ));
         }
     }
 
@@ -329,7 +296,6 @@ impl Backend {
     ) {
         use crate::diagnostics::use_statements::{scan_use_statements, use_statement_body};
 
-        let old_prefix_lower = old_prefix.to_lowercase();
         for stmt in scan_use_statements(content) {
             let decl = &content[stmt.keyword_start..stmt.end];
             let Some(body) = use_statement_body(decl) else {
@@ -337,61 +303,21 @@ impl Backend {
             };
             let body_start = stmt.keyword_start + (decl.len() - body.len());
 
-            // Handle group use: `use App\Old\{Foo, Bar};`
-            if let Some(brace_pos) = body.find('{') {
-                let group_prefix = body[..brace_pos].trim_end_matches('\\').trim();
-                let group_lower = group_prefix.to_lowercase();
-
-                if group_lower == old_prefix_lower
-                    || group_lower.starts_with(&format!("{}\\", old_prefix_lower))
-                {
-                    let new_group_prefix = if group_prefix.len() == old_prefix.len() {
-                        new_prefix.to_string()
-                    } else {
-                        format!("{}{}", new_prefix, &group_prefix[old_prefix.len()..])
-                    };
-
-                    let prefix_start = body_start + body.find(group_prefix).unwrap_or(0);
-                    let prefix_end = prefix_start + group_prefix.len();
-
-                    edits.push(TextEdit {
-                        range: Range {
-                            start: offset_to_position(content, prefix_start),
-                            end: offset_to_position(content, prefix_end),
-                        },
-                        new_text: new_group_prefix,
-                    });
+            // A group use (`use App\Old\{Foo, Bar};`) moves by its shared
+            // prefix; a plain one (`use App\Old\Foo;`, `use App\Old\Foo as
+            // Bar;`) by the name it imports.
+            let name = match body.find('{') {
+                Some(brace_pos) => body[..brace_pos].trim_end_matches('\\').trim(),
+                None => {
+                    let rest = body.strip_suffix(';').unwrap_or(body).trim();
+                    rest.find(" as ")
+                        .map_or(rest, |as_pos| rest[..as_pos].trim())
                 }
-                continue;
-            }
-
-            // Simple use: `use App\Old\Foo;` or `use App\Old\Foo as Bar;`
-            let rest = body.strip_suffix(';').unwrap_or(body).trim();
-            let fqn_part = rest
-                .find(" as ")
-                .map_or(rest, |as_pos| rest[..as_pos].trim());
-
-            let fqn_lower = fqn_part.to_lowercase();
-            if fqn_lower == old_prefix_lower
-                || fqn_lower.starts_with(&format!("{}\\", old_prefix_lower))
-            {
-                let new_fqn = if fqn_part.len() == old_prefix.len() {
-                    new_prefix.to_string()
-                } else {
-                    format!("{}{}", new_prefix, &fqn_part[old_prefix.len()..])
-                };
-
-                let fqn_start = body_start + body.find(fqn_part).unwrap_or(0);
-                let fqn_end = fqn_start + fqn_part.len();
-
-                edits.push(TextEdit {
-                    range: Range {
-                        start: offset_to_position(content, fqn_start),
-                        end: offset_to_position(content, fqn_end),
-                    },
-                    new_text: new_fqn,
-                });
-            }
+            };
+            let start = body_start + body.find(name).unwrap_or(0);
+            edits.extend(prefix_rename_edit(
+                content, start, name, old_prefix, new_prefix,
+            ));
         }
     }
 
@@ -511,218 +437,26 @@ impl Backend {
 
         true
     }
-
-    /// Why a namespace cannot be renamed onto `new_prefix`, or `None`
-    /// when every name it carries lands somewhere free.
-    ///
-    /// Renaming `App\Internal` to an `App\Support` that already exists
-    /// is a merge, and the merge is only well-defined while the two
-    /// namespaces share no name.  Where they do, there is no answer the
-    /// rename can pick: moving the rest and leaving the clash behind
-    /// still rewrites every `App\Internal\Helper` reference to
-    /// `App\Support\Helper`, which is a different class.
-    fn namespace_merge_conflict(&self, old_prefix: &str, new_prefix: &str) -> Option<String> {
-        if old_prefix.eq_ignore_ascii_case(new_prefix) {
-            return None;
-        }
-
-        let mut clashes: Vec<String> = {
-            let index = self.symbols.fqn_uri_index.read();
-            index
-                .iter()
-                .filter_map(|(fqn, uri)| {
-                    // The tail of a name the rename carries over, e.g.
-                    // `Nested\Deep` of `App\Internal\Nested\Deep`.
-                    let tail = fqn
-                        .get(..old_prefix.len())
-                        .filter(|head| head.eq_ignore_ascii_case(old_prefix))
-                        .and_then(|_| fqn.get(old_prefix.len()..))
-                        .and_then(|rest| rest.strip_prefix('\\'))?;
-                    let (declared, at_uri) =
-                        index.get_key_value(&format!("{}\\{}", new_prefix, tail))?;
-                    // A name the move itself produces is not a clash.
-                    (at_uri != uri).then(|| declared.to_string())
-                })
-                .collect()
-        };
-        clashes.sort();
-        clashes.dedup();
-
-        if clashes.is_empty() {
-            return None;
-        }
-
-        let listed: Vec<&str> = clashes.iter().take(5).map(String::as_str).collect();
-        let extra = clashes.len().saturating_sub(listed.len());
-        let suffix = if extra > 0 {
-            format!(" (and {} more)", extra)
-        } else {
-            String::new()
-        };
-
-        Some(format!(
-            "Cannot rename `{}` to `{}`: {} already declares {}{}. \
-             Rename or move the clashing {} first, then retry.",
-            old_prefix,
-            new_prefix,
-            new_prefix,
-            listed.join(", "),
-            suffix,
-            if clashes.len() == 1 {
-                "class"
-            } else {
-                "classes"
-            },
-        ))
-    }
-
-    /// Determine PSR-4 file/directory rename operations for a namespace
-    /// rename.
-    ///
-    /// Returns pairs of `(old_uri, new_uri)`, or `None` if no PSR-4
-    /// mapping applies.  Where the destination directory does not exist
-    /// the whole directory is moved in one operation; where it does, the
-    /// move is a merge and each file is moved individually so the
-    /// contents already there survive.
-    fn build_namespace_psr4_rename_ops(
-        &self,
-        old_prefix: &str,
-        new_prefix: &str,
-    ) -> Option<Vec<(Url, Url)>> {
-        let psr4 = self.workspace.psr4_mappings.read();
-        let workspace_root = self.workspace.workspace_root.read().clone()?;
-
-        // The destination directory has to come from whichever mapping
-        // covers the *new* namespace, which need not be the one covering
-        // the old one: a namespace can move between mappings, or out of
-        // the autoload map entirely.  Deriving it from the old mapping
-        // instead builds a path around a prefix the new name never had.
-        // No mapping covers the destination means no file can be placed
-        // there, so nothing moves and the declarations are rewritten in
-        // place.
-        let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
-
-        let mut ops: Vec<(Url, Url)> = Vec::new();
-
-        for (_, old_dir) in namespace_source_dirs(&psr4, &workspace_root, old_prefix, &new_dir) {
-            if new_dir.exists() {
-                collect_merge_move_ops(&old_dir, &old_dir, &new_dir, &mut ops);
-            } else {
-                let old_url = Url::from_file_path(&old_dir).ok()?;
-                let new_url = Url::from_file_path(&new_dir).ok()?;
-                ops.push((old_url, new_url));
-            }
-        }
-
-        if ops.is_empty() { None } else { Some(ops) }
-    }
-
-    /// Why a namespace cannot be moved out of its PSR-4 roots, or `None`
-    /// when it has just the one to move.
-    ///
-    /// Composer accepts an array of directories per prefix, and every one
-    /// of them holds part of the same namespace.  There is no single
-    /// directory to move, and each root's files would land on the same
-    /// destination, so the plan would carry classes the caller never
-    /// named (and collide with itself doing so).  Moving only the root
-    /// the caller meant needs a rewriter that can split a namespace by
-    /// the directory its classes are declared in, which is not what this
-    /// one does, so the move is refused instead.
-    fn namespace_psr4_root_conflict(&self, old_prefix: &str, new_prefix: &str) -> Option<String> {
-        let psr4 = self.workspace.psr4_mappings.read();
-        let workspace_root = self.workspace.workspace_root.read().clone()?;
-        let new_dir = composer::psr4_directory_for_namespace(&psr4, &workspace_root, new_prefix)?;
-
-        let roots = namespace_source_dirs(&psr4, &workspace_root, old_prefix, &new_dir);
-        if roots.len() < 2 {
-            return None;
-        }
-
-        let listed: Vec<String> = roots
-            .iter()
-            .map(|(mapping, _)| format!("`{}`", mapping.base_path))
-            .collect();
-
-        Some(format!(
-            "Cannot move `{}` to `{}`: PSR-4 spreads `{}` over more than one root ({}), \
-             so there is no single directory to move and the classes under every root \
-             would move together. Give `{}` a single root in `composer.json`, or move \
-             the classes one at a time.",
-            old_prefix,
-            new_prefix,
-            old_prefix,
-            listed.join(", "),
-            old_prefix,
-        ))
-    }
 }
 
-/// The directories holding the files a namespace move takes along, each
-/// paired with the PSR-4 mapping that places it there.
-///
-/// A mapping Composer lists but the project never created holds nothing
-/// to move, and a directory that already is the destination is not a
-/// move at all, so both are left out. Nested prefixes can also name one
-/// directory twice (`Tests\` at `tests/` and `Tests\Unit\` at
-/// `tests/Unit/` both place `Tests\Unit` in `tests/Unit`), so each
-/// directory is kept once. What remains is what the move has to carry,
-/// which is also what tells the caller whether the namespace sits in
-/// more than one root.
-fn namespace_source_dirs<'a>(
-    psr4: &'a [composer::Psr4Mapping],
-    workspace_root: &'a Path,
-    old_prefix: &'a str,
-    new_dir: &Path,
-) -> Vec<(&'a composer::Psr4Mapping, PathBuf)> {
-    let mut dirs: Vec<(&composer::Psr4Mapping, PathBuf)> = Vec::new();
-    for (mapping, old_dir) in
-        composer::psr4_directories_for_namespace(psr4, workspace_root, old_prefix)
-    {
-        if old_dir == new_dir || !old_dir.is_dir() {
-            continue;
-        }
-        if dirs.iter().any(|(_, seen)| seen == &old_dir) {
-            continue;
-        }
-        dirs.push((mapping, old_dir));
-    }
-    dirs
-}
-
-/// Collect one move operation per file under `dir`, rebasing each onto
-/// `new_root` at the same relative path.
-///
-/// This is the merge case: `new_root` already exists, so moving the
-/// source directory on top of it would clobber or fail depending on the
-/// editor.  A destination that is already occupied is left out entirely
-/// — the file stays where it is rather than overwriting what is there.
-fn collect_merge_move_ops(dir: &Path, old_root: &Path, new_root: &Path, ops: &mut Vec<(Url, Url)>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.is_dir() {
-            collect_merge_move_ops(&path, old_root, new_root, ops);
-            continue;
-        }
-
-        let Ok(relative) = path.strip_prefix(old_root) else {
-            continue;
-        };
-        let destination = new_root.join(relative);
-        if destination.exists() {
-            continue;
-        }
-
-        if let (Ok(old_url), Ok(new_url)) = (
-            Url::from_file_path(&path),
-            Url::from_file_path(&destination),
-        ) {
-            ops.push((old_url, new_url));
-        }
-    }
+/// The edit that rewrites `name`, written at byte offset `start` of
+/// `content`, onto the moved namespace prefix, or `None` when the move
+/// does not carry it.
+fn prefix_rename_edit(
+    content: &str,
+    start: usize,
+    name: &str,
+    old_prefix: &str,
+    new_prefix: &str,
+) -> Option<TextEdit> {
+    let new_text = moved_name(name, old_prefix, new_prefix)?;
+    Some(TextEdit {
+        range: Range {
+            start: offset_to_position(content, start),
+            end: offset_to_position(content, start + name.len()),
+        },
+        new_text,
+    })
 }
 
 /// `name` with the moved namespace prefix substituted, or `None` when

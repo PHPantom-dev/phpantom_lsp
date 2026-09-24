@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use crate::common::{
     apply_edits, create_test_backend, extract_edit_text, extract_edits, find_actions,
-    get_code_actions_at, inject_phpstan_diag_with_data, lsp_pos_to_offset, resolve_action,
+    find_actions_containing, get_code_actions_at, inject_phpstan_diag_with_data, lsp_pos_to_offset,
+    resolve_action,
 };
 use tower_lsp::lsp_types::*;
 
@@ -943,13 +944,7 @@ class Child extends Base {
     );
 
     // But there should NOT be an "Ignore" action (because ignorable: false).
-    let ignore_actions: Vec<_> = actions
-        .iter()
-        .filter_map(|a| match a {
-            CodeActionOrCommand::CodeAction(ca) if ca.title.contains("@phpstan-ignore") => Some(ca),
-            _ => None,
-        })
-        .collect();
+    let ignore_actions = find_actions_containing(&actions, "@phpstan-ignore");
     assert!(
         ignore_actions.is_empty(),
         "should not offer ignore action for non-ignorable error"

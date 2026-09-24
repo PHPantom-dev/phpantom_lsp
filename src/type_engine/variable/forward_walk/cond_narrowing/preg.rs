@@ -112,18 +112,7 @@ fn preg_outcome_alias(expr: &Expression<'_>, scope: &ScopeState) -> Option<(Preg
         return None;
     }
 
-    let mut negated = false;
-    let mut inner = expr;
-    loop {
-        match inner {
-            Expression::Parenthesized(p) => inner = p.expression,
-            Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-                negated = !negated;
-                inner = prefix.operand;
-            }
-            _ => break,
-        }
-    }
+    let (inner, negated) = crate::parser::unwrap_negation(expr);
 
     let Expression::Variable(Variable::Direct(dv)) = inner else {
         return None;

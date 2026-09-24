@@ -9,6 +9,8 @@
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
 //! - `env('|')` / `Env::get('|')` → environment variables
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -59,10 +61,10 @@ impl Backend {
         kind: &LaravelStringKind,
         config_sub_prefix: Option<&str>,
         typed_prefix: &str,
-    ) -> Vec<String> {
+    ) -> Arc<[String]> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
-            LaravelStringKind::Config => self.cached_config_keys().as_ref().clone(),
+            LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::ConfigResource(resource) => {
                 let prefix = config_sub_prefix.expect("config resources always have a prefix");
                 // Runtime writes can contain the half-typed name under the
@@ -98,24 +100,26 @@ impl Backend {
                             variants.push(variant);
                         }
                     }
-                    variants
+                    variants.into()
                 } else {
-                    names
+                    names.into()
                 }
             }
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
-            LaravelStringKind::Command => self.laravel_commands.read().all_names(),
+            LaravelStringKind::Command => self.laravel_commands.read().all_names().into(),
             LaravelStringKind::MorphAlias => {
                 let mut aliases = self.laravel_morph_map.read().all_aliases();
                 aliases.sort();
-                aliases
+                aliases.into()
             }
             LaravelStringKind::GateAbility => self.cached_gate_abilities(),
-            LaravelStringKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self),
+            LaravelStringKind::Env => {
+                crate::virtual_members::laravel::enumerate_env_keys(self).into()
+            }
             LaravelStringKind::Section
             | LaravelStringKind::Stack
-            | LaravelStringKind::ContainerBinding => Vec::new(),
+            | LaravelStringKind::ContainerBinding => Arc::new([]),
         }
     }
 
@@ -182,12 +186,13 @@ impl Backend {
         let prefix = ctx.prefix.as_bytes();
         let item_kind = string_key_item_kind(&ctx.kind);
         let items: Vec<CompletionItem> = candidates
-            .into_iter()
+            .iter()
             .filter(|name| {
                 name.as_bytes()
                     .get(..prefix.len())
                     .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
             })
+            .cloned()
             .enumerate()
             .map(|(i, name)| CompletionItem {
                 label: name.clone(),

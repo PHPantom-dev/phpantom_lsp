@@ -2,7 +2,8 @@
 //! them, and the guards that refuse a rename outright.
 
 use crate::common::{
-    apply_edits, create_test_backend, edits_for_uri, line_char_of, open_php, prepare_rename, rename,
+    apply_edits, create_initialized_psr4_workspace, create_test_backend, edits_for_uri,
+    line_char_of, open_php, prepare_rename, rename, rename_result,
 };
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
@@ -1058,4 +1059,137 @@ async fn rename_namespace_returns_none_when_a_file_is_stale() {
     let result = apply_edits(&usage_after, &edits_for_uri(&edit, &usage_uri));
     assert!(result.contains("App\\New\\Foo"), "{result}");
     assert!(!result.contains("App\\Old"), "{result}");
+}
+
+// ─── New-name validation ────────────────────────────────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite.
+
+/// The refusal a rename at `needle` in `text` to `new_name` answers with.
+async fn rename_refusal(text: &str, needle: &str, new_name: &str) -> String {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, text).await;
+    let (line, character) = line_char_of(text, needle);
+    match rename_result(&backend, &uri, line, character + 1, new_name).await {
+        Err(message) => message,
+        Ok(edit) => panic!("renaming to {new_name:?} should be refused, got {edit:?}"),
+    }
+}
+
+#[tokio::test]
+async fn rename_variable_to_an_invalid_name_is_refused() {
+    let text = "<?php\nfunction f($x) {\n    return $x;\n}\n";
+    for bad in [
+        "1bad",
+        "$1bad",
+        "$",
+        "foo-bar",
+        "has space",
+        "$a\\b",
+        "$this",
+        "this",
+    ] {
+        let message = rename_refusal(text, "$x;", bad).await;
+        assert!(
+            message.contains("not a valid PHP name"),
+            "{bad:?}: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rename_class_to_an_invalid_name_is_refused() {
+    let text = "<?php\nclass Widget {}\nfunction f(Widget $w) {}\n";
+    for bad in [
+        "Foo Bar",
+        "1Widget",
+        "$Widget",
+        "Widget-2",
+        "App\\\\Widget",
+        "",
+    ] {
+        let message = rename_refusal(text, "Widget {", bad).await;
+        assert!(
+            message.contains("not a valid PHP name"),
+            "{bad:?}: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn rename_method_to_an_invalid_name_is_refused() {
+    let text = "<?php\nclass Widget {\n    public function render() {}\n}\n";
+    let message = rename_refusal(text, "render", "re-render").await;
+    assert!(message.contains("not a valid PHP name"), "{message}");
+}
+
+#[tokio::test]
+async fn rename_accepts_a_multibyte_identifier() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = "<?php\nfunction f($x) {\n    return $x;\n}\n";
+    open_php(&backend, &uri, text).await;
+    let (line, character) = line_char_of(text, "$x;");
+    let edit = rename(&backend, &uri, line, character + 1, "$größe")
+        .await
+        .expect("a multibyte identifier is a valid PHP name");
+    assert_eq!(
+        apply_edits(text, &edits_for_uri(&edit, &uri)),
+        "<?php\nfunction f($größe) {\n    return $größe;\n}\n"
+    );
+}
+
+// ─── Vendor symbols ─────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_class_declared_in_a_dependency_cannot_be_renamed() {
+    let installed_json = r#"{"packages": [{
+        "name": "acme/services",
+        "version": "1.0.0",
+        "install-path": "../acme/services",
+        "autoload": {"psr-4": {"Acme\\": ""}}
+    }]}"#;
+    let consumer = "<?php
+namespace App;
+
+use Acme\\PackageService;
+
+class Consumer
+{
+    public function run(PackageService $service): void
+    {
+        $service->handle();
+    }
+}
+";
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("vendor/composer/installed.json", installed_json),
+            (
+                "vendor/acme/services/PackageService.php",
+                "<?php\nnamespace Acme;\nclass PackageService\n{\n    public function handle(): void {}\n}\n",
+            ),
+            ("src/Consumer.php", consumer),
+        ],
+        "src/Consumer.php",
+    )
+    .await;
+
+    for needle in ["PackageService $service", "handle()"] {
+        let (line, character) = line_char_of(consumer, needle);
+        assert!(
+            prepare_rename(&backend, &uri, line, character + 1)
+                .await
+                .is_none(),
+            "prepareRename should refuse {needle:?}"
+        );
+        assert!(
+            rename(&backend, &uri, line, character + 1, "Renamed")
+                .await
+                .is_none(),
+            "rename should refuse {needle:?}"
+        );
+    }
 }

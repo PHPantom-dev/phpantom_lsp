@@ -33,12 +33,13 @@ mod classes;
 mod covers;
 mod dispatch;
 mod functions;
+mod member_scope;
 mod members;
+mod receivers;
 mod variables;
 
 pub(crate) use members::MemberDeclarationReferenceQuery;
 use std::collections::HashSet;
-use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
@@ -129,7 +130,7 @@ impl Backend {
             .map(|content| String::clone(&content))
     }
 
-    pub(super) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
+    pub(crate) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
         if self.is_blade_file(uri)
             && let Some(content) = self.blade_virtual_php_arc(uri)
         {
@@ -153,6 +154,128 @@ impl Backend {
         if let Some(state) = self.request_progress.as_deref() {
             state.add_done(1);
         }
+    }
+
+    /// Run one Find References search over the files the reference index
+    /// names as candidates for `candidate_keys`, and return what it found
+    /// in reporting order.
+    ///
+    /// This owns what every per-kind search shares: the candidate snapshot,
+    /// the progress window, one [`CandidateFile`] per file, and the final
+    /// sort.  `scan` reports the matches in one file.  Beyond two files the
+    /// scan runs on a worker pool, the way the reference-count lens batch
+    /// does, since resolving a member access's receiver or a `new`
+    /// expression's class walks the type engine over the file.
+    pub(super) fn scan_reference_candidates(
+        &self,
+        candidate_keys: &[ReferenceIndexKey],
+        progress_label: &str,
+        scan: impl Fn(&CandidateFile<'_>, &Arc<SymbolMap>, &mut Vec<Location>) + Sync,
+    ) -> Vec<Location> {
+        let snapshot = self.user_file_symbol_maps_for_reference_keys(candidate_keys);
+        let mut locations =
+            self.scan_candidate_snapshot(snapshot, progress_label, |file, symbol_map| {
+                let mut found = Vec::new();
+                scan(file, symbol_map, &mut found);
+                found
+            });
+        sort_locations_for_references(&mut locations);
+        locations
+    }
+
+    /// Run `scan` over every file of a candidate snapshot and concatenate
+    /// what it reports.
+    ///
+    /// The loop under every search: one progress window, one
+    /// [`CandidateFile`] per file, serial for two files or fewer and a
+    /// worker pool beyond that.  A search that needs more than a flat
+    /// location list (the lens batch attributes each hit to one of several
+    /// queries) builds its own snapshot and folds the results itself.
+    pub(super) fn scan_candidate_snapshot<T: Send>(
+        &self,
+        snapshot: Vec<(String, Arc<SymbolMap>)>,
+        progress_label: &str,
+        scan: impl Fn(&CandidateFile<'_>, &Arc<SymbolMap>) -> Vec<T> + Sync,
+    ) -> Vec<T> {
+        self.begin_request_scan_window(snapshot.len(), progress_label);
+
+        let scan_file = |(uri, symbol_map): &(String, Arc<SymbolMap>)| {
+            self.request_scan_file_done();
+            let file = CandidateFile::new(self, uri);
+            scan(&file, symbol_map)
+        };
+        let mut results = Vec::new();
+        if snapshot.len() <= 2 {
+            for entry in &snapshot {
+                results.extend(scan_file(entry));
+            }
+        } else {
+            let found =
+                crate::parallel::map_indexed("reference-scan", snapshot.len(), |_, index| {
+                    let found = scan_file(&snapshot[index]);
+                    (!found.is_empty()).then_some(found)
+                });
+            for (_, found) in found {
+                results.extend(found);
+            }
+        }
+        results
+    }
+}
+
+/// What one file needs to turn a class, function or constant reference
+/// span into a fully-qualified name.
+///
+/// The `use` map is loaded on the first span that needs it: most spans
+/// are answered by the name resolver alone, and most files carry no span
+/// the search is interested in at all.
+pub(super) struct SpanFqnResolver<'a> {
+    backend: &'a Backend,
+    file_uri: &'a str,
+    /// The file's first namespace, which a name the resolver does not
+    /// track is resolved against.
+    pub(super) namespace: Option<String>,
+    resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
+    use_map: std::cell::OnceCell<std::collections::HashMap<String, String>>,
+}
+
+impl<'a> SpanFqnResolver<'a> {
+    pub(super) fn new(backend: &'a Backend, file_uri: &'a str) -> Self {
+        Self {
+            backend,
+            file_uri,
+            namespace: backend.first_file_namespace(file_uri),
+            resolved_names: backend.resolved_names.read().get(file_uri).cloned(),
+            use_map: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The fully-qualified name the span at `span_start` refers to.
+    ///
+    /// A name written fully qualified already is one; otherwise the name
+    /// resolver's answer for that offset wins, and failing that (a
+    /// docblock-sourced reference, which the resolver does not track) the
+    /// file's `use` map and namespace decide.
+    pub(super) fn fqn(&self, name: &str, is_fqn: bool, span_start: u32) -> String {
+        if is_fqn {
+            return name.to_string();
+        }
+        if let Some(fqn) = self
+            .resolved_names
+            .as_deref()
+            .and_then(|rn| rn.get(span_start))
+        {
+            return fqn.to_string();
+        }
+        let use_map = self.use_map.get_or_init(|| {
+            self.backend
+                .file_imports
+                .read()
+                .get(self.file_uri)
+                .cloned()
+                .unwrap_or_default()
+        });
+        Backend::resolve_to_fqn(name, use_map, &self.namespace)
     }
 }
 
@@ -213,9 +336,13 @@ pub(super) fn is_constructor_name(name: &str) -> bool {
 }
 
 /// Put the locations a Find References answer carries into the order an
-/// editor lists them: by file, then by position within it, with exact
-/// duplicates collapsed.
-pub(super) fn sort_locations_for_references(locations: &mut Vec<Location>) {
+/// editor lists them: by file, then by position within it, with the
+/// locations that start at the same place collapsed to the first one found.
+///
+/// This is the one place a search de-duplicates. Checking every hit
+/// against every location found so far is quadratic in the hit count, and
+/// a widely used name has thousands of them.
+pub(crate) fn sort_locations_for_references(locations: &mut Vec<Location>) {
     locations.sort_by(|a, b| {
         a.uri
             .as_str()
@@ -223,7 +350,9 @@ pub(super) fn sort_locations_for_references(locations: &mut Vec<Location>) {
             .then(a.range.start.line.cmp(&b.range.start.line))
             .then(a.range.start.character.cmp(&b.range.start.character))
     });
-    locations.dedup();
+    locations.dedup_by(|later, earlier| {
+        later.uri == earlier.uri && later.range.start == earlier.range.start
+    });
 }
 
 /// Check whether a resolved class name matches the target FQN.
@@ -290,7 +419,7 @@ fn symbol_candidate_names(target: &str, target_short: &str) -> Vec<String> {
 pub(super) fn member_candidate_keys(
     target_member: &str,
     target_is_static: bool,
-    hierarchy: Option<&HashSet<String>>,
+    hierarchy: Option<&member_scope::MemberScope>,
 ) -> Vec<ReferenceIndexKey> {
     let mut keys = vec![ReferenceIndexKey::Member {
         name: target_member.to_string(),
@@ -305,115 +434,94 @@ pub(super) fn member_candidate_keys(
     keys
 }
 
-/// Recursively collect all `.php` files under a workspace root,
-/// respecting `.gitignore` rules (including nested and global
-/// gitignore files).
+/// A candidate file of a reference search, read only once a hit in it
+/// needs the text.
 ///
-/// Used by Find References which walks the entire workspace root.
-/// Unlike `classmap_scanner`'s PSR-4 walkers, this uses the `ignore`
-/// crate's [`ignore::WalkBuilder`] so that generated/cached directories
-/// listed in `.gitignore` (e.g. `storage/framework/views/`,
-/// `var/cache/`, `node_modules/`) are automatically skipped.
+/// Most candidate files turn out to hold nothing, so reading one up front
+/// is wasted. Once one is read, every hit in it shares one line table:
+/// converting each hit with [`offset_to_position`] rescans the file from
+/// the top, which makes a busy file quadratic in its own size.
 ///
-/// All known vendor directories are always skipped regardless of
-/// `.gitignore` content, since some projects commit their vendor
-/// directory.  `vendor_dir_paths` contains absolute paths of all
-/// known vendor directories (one per subproject in monorepo mode).
-///
-/// Hidden files and directories are skipped by default (handled by
-/// the `ignore` crate).
-pub(crate) fn collect_php_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-) -> Vec<PathBuf> {
-    let mut result = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
-        if filters.is_php_file(path) {
-            result.push(path.to_path_buf());
-        }
-    });
-    result
+/// [`offset_to_position`]: crate::text_position::offset_to_position
+pub(super) struct CandidateFile<'a> {
+    backend: &'a Backend,
+    uri: &'a str,
+    url: std::cell::OnceCell<Option<Url>>,
+    content: std::cell::OnceCell<Option<Arc<String>>>,
+    line_starts: std::cell::OnceCell<Vec<usize>>,
 }
 
-/// Collect the PHP and schema-free YAML/XML inputs used by the full workspace
-/// index in one `.gitignore`-aware walk.
-pub(crate) fn collect_workspace_index_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let mut php_files = Vec::new();
-    let mut resource_files = Vec::new();
-    visit_workspace_files_gitignore(root, vendor_dir_paths, filters, |path| {
-        if filters.is_php_file(path) {
-            php_files.push(path.to_path_buf());
-        } else if crate::resource_navigation::is_resource_path(path) {
-            resource_files.push(path.to_path_buf());
+impl<'a> CandidateFile<'a> {
+    pub(super) fn new(backend: &'a Backend, uri: &'a str) -> Self {
+        Self {
+            backend,
+            uri,
+            url: std::cell::OnceCell::new(),
+            content: std::cell::OnceCell::new(),
+            line_starts: std::cell::OnceCell::new(),
         }
-    });
-    (php_files, resource_files)
-}
+    }
 
-fn visit_workspace_files_gitignore(
-    root: &Path,
-    vendor_dir_paths: &[PathBuf],
-    filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
-    mut visit: impl FnMut(&Path),
-) {
-    use ignore::WalkBuilder;
+    /// The URI the symbol map is keyed by.
+    pub(super) fn uri(&self) -> &'a str {
+        self.uri
+    }
 
-    let vendor_paths_owned: Vec<PathBuf> = vendor_dir_paths.to_vec();
-    let filter_excludes = std::sync::Arc::clone(filters);
+    /// The file's URI as a location carries it, or `None` when it does not
+    /// parse.
+    pub(super) fn url(&self) -> Option<Url> {
+        self.url.get_or_init(|| Url::parse(self.uri).ok()).clone()
+    }
 
-    let walker = WalkBuilder::new(root)
-        // Respect .gitignore, .git/info/exclude, global gitignore
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        // Skip hidden files/dirs (.git, .idea, etc.)
-        .hidden(true)
-        // Read parent .gitignore files
-        .parents(true)
-        // Also respect .ignore files (ripgrep convention)
-        .ignore(true)
-        // Always skip vendor directories (even if not gitignored) and
-        // `[indexing] exclude` matches
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir && vendor_paths_owned.iter().any(|vp| vp == entry.path()) {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
+    /// The location between two byte offsets in [`Self::content`], or
+    /// `None` when the file cannot be read or its URI does not parse.
+    pub(super) fn location(&self, start: u32, end: u32) -> Option<Location> {
+        let range = self.range(start, end)?;
+        Some(Location {
+            uri: self.url()?,
+            range,
         })
-        .build();
+    }
 
-    for entry in walker.flatten() {
-        let path = entry.path();
-        if path.is_file() {
-            visit(path);
-        }
+    /// The text Find References reads the file as (the virtual PHP of a
+    /// Blade template), or `None` when it cannot be read.
+    pub(super) fn content(&self) -> Option<&Arc<String>> {
+        self.content
+            .get_or_init(|| self.backend.reference_file_content_arc(self.uri))
+            .as_ref()
+    }
+
+    /// The position of a byte offset in [`Self::content`].
+    pub(super) fn position(&self, offset: u32) -> Option<Position> {
+        let content = self.content()?;
+        let line_starts = self
+            .line_starts
+            .get_or_init(|| crate::text_position::line_starts(content));
+        Some(crate::text_position::position_in(
+            content,
+            line_starts,
+            offset as usize,
+        ))
+    }
+
+    /// The range between two byte offsets in [`Self::content`].
+    pub(super) fn range(&self, start: u32, end: u32) -> Option<Range> {
+        Some(Range::new(self.position(start)?, self.position(end)?))
     }
 }
 
-/// Push a location only if it is not already present (deduplication).
-pub(crate) fn push_unique_location(
+/// Record a location. Duplicates are collapsed once, by
+/// [`sort_locations_for_references`], when the search is done.
+pub(crate) fn push_location(
     locations: &mut Vec<Location>,
     uri: &Url,
     start: Position,
     end: Position,
 ) {
-    let already_present = locations.iter().any(|l| {
-        l.uri == *uri
-            && l.range.start.line == start.line
-            && l.range.start.character == start.character
+    locations.push(Location {
+        uri: uri.clone(),
+        range: Range { start, end },
     });
-    if !already_present {
-        locations.push(Location {
-            uri: uri.clone(),
-            range: Range { start, end },
-        });
-    }
 }
 
 #[cfg(test)]

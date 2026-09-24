@@ -32,6 +32,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::php_type::PhpType;
+use crate::text_scan::{ScanStep, find_matching_forward_bytes, scan_top_level};
 
 use super::call_site_inference::string_literal_contents;
 
@@ -286,6 +287,22 @@ pub(crate) enum InertOpener {
     PhpBlock,
     /// `@php(…)`, which closes on its own parenthesis.
     PhpStatement,
+}
+
+/// Whether an echo (`{{ … }}`, `{{{ … }}}`, or `{!! … !!}`) opens at `at`.
+pub(crate) fn is_echo_start(bytes: &[u8], at: usize) -> bool {
+    bytes[at..].starts_with(b"{{") || bytes[at..].starts_with(b"{!!")
+}
+
+/// The opening and closing delimiters of the echo at `at`.
+pub(crate) fn echo_delimiters(bytes: &[u8], at: usize) -> (&'static str, &'static str) {
+    if bytes[at..].starts_with(b"{{{") {
+        ("{{{", "}}}")
+    } else if bytes[at..].starts_with(b"{!!") {
+        ("{!!", "!!}")
+    } else {
+        ("{{", "}}")
+    }
 }
 
 /// Every region Blade excludes from directive processing: `{{-- … --}}`
@@ -598,76 +615,19 @@ fn find_directive_args(masked: &str, directive: &str) -> Option<std::ops::Range<
     None
 }
 
-/// The offset just past the PHP comment opening at `at`, or `None` when
-/// no comment opens there.
-///
-/// `//` and `#` run to the end of the line, `/* … */` to its terminator,
-/// and an unterminated block comment to the end of the input. `#[` opens
-/// a PHP attribute rather than a comment.
-pub(crate) fn skip_php_comment(bytes: &[u8], at: usize) -> Option<usize> {
-    let end_of_line = |from: usize| {
-        bytes[from..]
-            .iter()
-            .position(|byte| *byte == b'\n')
-            .map_or(bytes.len(), |at| from + at)
-    };
-    match (bytes.get(at)?, bytes.get(at + 1)) {
-        (b'#', Some(b'[')) => None,
-        (b'#', _) => Some(end_of_line(at + 1)),
-        (b'/', Some(b'/')) => Some(end_of_line(at + 2)),
-        (b'/', Some(b'*')) => Some(
-            bytes[at + 2..]
-                .windows(2)
-                .position(|pair| pair == b"*/")
-                .map_or(bytes.len(), |close| at + 2 + close + 2),
-        ),
-        _ => None,
-    }
-}
-
-/// The offset of the `)` matching the `(` at `open`, or `None` when the
-/// argument list is unterminated.
+/// The offset of the `)` (or `]`) matching the `(` (or `[`) at `open`, or
+/// `None` when the argument list is unterminated.
 ///
 /// String literals and PHP comments are skipped whole, so a bracket
 /// written inside either (`@props(['a' => 1, // trailing )`) closes
 /// nothing.
 pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
-    let mut i = open;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => {
-                if let Some(past) = skip_php_comment(bytes, i) {
-                    i = past;
-                    continue;
-                }
-                match byte {
-                    b'\'' | b'"' => quote = Some(byte),
-                    b'(' | b'[' => depth += 1,
-                    b')' | b']' => {
-                        depth -= 1;
-                        if depth == 0 {
-                            return Some(i);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        i += 1;
-    }
-    None
+    let close = match bytes.get(open)? {
+        b'(' => b')',
+        b'[' => b']',
+        _ => return None,
+    };
+    find_matching_forward_bytes(bytes, open, bytes[open], close)
 }
 
 /// Split a directive's argument text at its top-level commas, ignoring the
@@ -675,40 +635,18 @@ pub(crate) fn matching_paren(bytes: &[u8], open: usize) -> Option<usize> {
 pub(crate) fn split_top_level_args(args: &str) -> Vec<&str> {
     let bytes = args.as_bytes();
     let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut quote: Option<u8> = None;
     let mut start = 0;
-    let mut i = 0;
-    while i < bytes.len() {
-        let byte = bytes[i];
-        match quote {
-            Some(q) => {
-                if byte == b'\\' {
-                    i += 2;
-                    continue;
-                }
-                if byte == q {
-                    quote = None;
-                }
-            }
-            None => {
-                if let Some(past) = skip_php_comment(bytes, i) {
-                    i = past;
-                    continue;
-                }
-                match byte {
-                    b'\'' | b'"' => quote = Some(byte),
-                    b'(' | b'[' | b'{' => depth += 1,
-                    b')' | b']' | b'}' => depth -= 1,
-                    b',' if depth == 0 => {
-                        parts.push(&args[start..i]);
-                        start = i + 1;
-                    }
-                    _ => {}
-                }
-            }
+    // Each pass restarts at depth zero just past a top-level comma, which
+    // is outside every string, comment and bracket by construction.
+    while let Some(at) = scan_top_level(&bytes[start..], |bytes, i| {
+        if bytes[i] == b',' {
+            ScanStep::Stop
+        } else {
+            ScanStep::Skip(1)
         }
-        i += 1;
+    }) {
+        parts.push(&args[start..start + at]);
+        start += at + 1;
     }
     parts.push(&args[start..]);
     parts

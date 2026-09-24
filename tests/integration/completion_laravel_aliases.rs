@@ -2,8 +2,7 @@
 //! (`resolve('blade.compiler')`) and global facade class aliases (`\App`),
 //! both sourced by parsing the installed framework's own declarations.
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
-use tower_lsp::lsp_types::*;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
 
 const COMPOSER_JSON: &str = r#"{
     "autoload": {
@@ -116,8 +115,7 @@ async fn complete_labels(
     character: u32,
 ) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    open_php(&backend, &uri, content).await;
+    let uri = open_php_at(&backend, &dir, open_path, content).await;
     complete_labels_at_opened(&backend, &uri, line, character).await
 }
 

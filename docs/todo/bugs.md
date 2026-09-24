@@ -52,6 +52,29 @@ No outstanding items.
 
 No outstanding items.
 
+## Laravel
+
+## B360. References, reference lenses, and rename miss an Eloquent magic member's uses
+
+**Impact: Medium · Complexity: Medium-High**
+
+A scope, accessor, or mutator is declared under one name and used under
+another: `scopeActive()` is called as `active()`, `getFullNameAttribute()`
+and an `Attribute`-returning `fullName()` are read as `->full_name`,
+`setLogoAttribute()` is written as `->logo = …`. Go-to-definition follows
+a use back to its declaration (`src/definition/member/`), but nothing under
+`src/references/` maps the declaration forward, so find-references on the
+declaring method finds only direct calls to it. The member reference
+lens (`indexed_member_reference_count` in `src/code_lens.rs`) counts the
+same way, so live scopes and accessors read "0 references", and a
+rename of the declaration strands every use. Relationship methods have
+the same shape through their `->posts` property reads. Pinned by the
+four ignored `definition_laravel::references_on_*` tests.
+
+## Blade
+
+No outstanding items.
+
 ## Miscellaneous
 
 No outstanding items.

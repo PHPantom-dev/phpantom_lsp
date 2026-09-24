@@ -533,6 +533,37 @@ impl Backend {
         file_ctx: &FileContext,
         call_args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
+        self.resolve_callable_target_inner(
+            expr,
+            content,
+            cursor_offset,
+            file_ctx,
+            call_args_text,
+            &mut Vec::new(),
+        )
+    }
+
+    /// The body of
+    /// [`resolve_callable_target_with_args_at_offset`](Self::resolve_callable_target_with_args_at_offset),
+    /// carrying the variables whose first-class callable assignment is
+    /// already being followed further up the recursion.
+    ///
+    /// A variable used as a callable resolves to whatever its first-class
+    /// callable assignment names, and that name can lead back to a variable
+    /// already on the way in: `$fn = $fn(...)` names itself, and
+    /// `$a = $b(...); $b = $a(...)` closes the same loop across two names.
+    /// Re-entry on a name already being followed yields no target, which
+    /// ends the walk at the point the cycle closes and leaves every chain
+    /// that does terminate resolving as before.
+    fn resolve_callable_target_inner(
+        &self,
+        expr: &str,
+        content: &str,
+        cursor_offset: u32,
+        file_ctx: &FileContext,
+        call_args_text: Option<&str>,
+        visited_vars: &mut Vec<String>,
+    ) -> Option<ResolvedCallableTarget> {
         // A file may declare several `namespace` blocks, so the namespace
         // every name here resolves against is the one covering this call
         // site, not the file's first one.
@@ -619,16 +650,20 @@ impl Backend {
 
             // ── Variable used as a callable target: `$fn(…)` ────────
             // Check for a first-class callable assignment and recurse.
-            SubjectExpr::Variable(var_name) => {
+            SubjectExpr::Variable(var_name) if !visited_vars.iter().any(|v| v == var_name) => {
                 let callable_target =
                     Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
-                self.resolve_callable_target_with_args_at_offset(
+                visited_vars.push(var_name.clone());
+                let resolved = self.resolve_callable_target_inner(
                     &callable_target,
                     content,
                     cursor_offset,
                     file_ctx,
                     call_args_text,
-                )
+                    visited_vars,
+                );
+                visited_vars.pop();
+                resolved
             }
 
             // ── Bare class name used as a function name ─────────────

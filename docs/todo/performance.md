@@ -953,8 +953,8 @@ exit that would make the fold linear in the common case:
    drop the repeated hashing.
 
 **Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
-in `php_type/mod.rs`, and the shape-folding branch of `merge_scopes` in
-`type_engine/variable/forward_walk/scope_state.rs`. Hand-written code
+in `php_type/mod.rs`, and the shape-folding branch of `merge_branch` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`. Hand-written code
 does not reach the sizes where this shows; generated code and long
 procedural report builders do.
 
@@ -1130,59 +1130,180 @@ path) and `narrowed_by_rewalk` in
 
 ---
 
-## P55. Every edit re-reads every member-reference candidate file
+## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
 
-**Impact: Medium-High · Complexity: Medium-High**
+**Impact: Medium · Complexity: Medium-High**
 
-`reindex_references_for_symbol_maps_batch` and
-`evict_reference_index_uri` both call
-`MemberRefCounts::invalidate_locations_all`, so any reparse marks the
-exact locations of *every* cached member declaration stale, not just the
-ones the edited file contributed to. The count side is invalidated far
-more selectively: `member_contributions` compares each file's old and
-new per-member contribution and only the members whose contribution
-actually changed become `count_stale`, which is what lets an edit that
-touches no access recompute nothing.
+A `ClassInfo`'s members are `SharedVec`s, so the struct is often called
+cheap to clone, but it still owns a `method_index` with one entry per
+method plus a dozen other `Vec`/`AtomMap` fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.
 
-Locations are blanket-invalidated because a receiver's type can change
-without changing any indexed member name or count (the
-`Order $value` → `Buyer $value` case), and a clickable lens must never
-point at a range the edit moved. But the consequence is that the
-declaration CodeLens path re-queues every public member of the open file
-on every keystroke, and `member_declaration_references_batch` then calls
-`reference_file_content_arc` for each candidate file. That falls through
-to `get_file_content_arc`, which is an uncached
-`std::fs::read_to_string` for any file not open in the editor. On a
-large application a common member name (`handle`, `get`, `name`) is a
-candidate in thousands of files, so a typing pause costs thousands of
-file reads even though the expensive part, the per-file
-`ResolvedMemberFile` semantic layer, is still warm and reused.
+The narrowing layer pays that on every crossing, in both directions:
 
-### Fix
+- `ResolvedType::apply_narrowing` collects `arc.as_ref().clone()` for
+  every candidate on the way in, and pushes survivors back through
+  `from_class`, which wraps each copy in a *fresh* `Arc`. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every `instanceof`,
+  `assert`, `in_array`, and identity guard the forward walk sees.
+- `apply_property_narrowing` unwraps the whole vector with
+  `Arc::unwrap_or_clone` and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  `Vec<ClassInfo>`. The `Arc`s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.
+- `resolved_type_with_lookup` clones a class out of the index only to
+  hand it to `from_both`, which allocates a new `Arc` around the copy.
+  Fifteen call sites, essentially every method-call return type.
+- `narrowing/resolve.rs`, `narrowing/instanceof.rs`, and
+  `narrowing/assertions.rs` repeat the pattern, the last one deep-copying
+  a `MethodInfo` out of its `Arc`.
 
-Two independent halves, either of which helps on its own:
+`ResolvedType::from_arc` and `from_both_arc` already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+`Vec<ClassInfo>` to `Vec<Arc<ClassInfo>>` — `apply_narrowing`'s closure,
+the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
+`resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
+is only allocated where one is genuinely constructed.
+`apply_property_narrowing`'s unwrap/rewrap then disappears.
 
-1. **Narrow the invalidation.** Split the blanket call into the two
-   causes it currently conflates. Offsets only shift in the files that
-   were reparsed, so a location cache entry needs invalidating when one
-   of its own locations names a rebuilt URI. The receiver-type case
-   belongs where the type change is already detected: `update_ast`
-   clears `resolved_members` when `any_signature_changed ||
-   any_function_changed`, and the location cache should be invalidated
-   from the same branch. Check what that flag covers before relying on
-   it — a docblock-only `@return` edit changes receiver types too, and
-   serving a stale clickable location is worse than the current cost.
+This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
+on a different path, and it is worth measuring the two together.
 
-2. **Make the warm semantic layer self-sufficient.** `ResolvedMemberFile`
-   already packs the resolved receiver atoms per symbol-span index; it
-   does not carry the LSP `Range` for the access, which is the only
-   other thing `scan_file` needs the file's text for. Storing the range
-   alongside the targets (16 bytes per access) would let a warm
-   candidate file be filtered without reading it at all.
+**Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
+`from_both`, and `from_both_arc` in `types/resolved_type.rs`;
+`apply_property_narrowing` in `type_engine/resolver/property_narrowing.rs`;
+`resolved_type_with_lookup` in
+`type_engine/variable/rhs_resolution/mod.rs`;
+`type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.
 
-**Where to look:** `invalidate_locations_all` and
-`member_declaration_references` in `reference_counts.rs`,
-`reindex_references_for_symbol_maps_batch` and `ResolvedMemberFile` in
-`reference_index.rs`, `member_declaration_references_batch` in
-`references/members.rs`, and `get_file_content_arc` in
-`backend/file_access.rs`.
+## P58. A member-completion cache hit copies the whole item list
+
+**Impact: Low · Complexity: Low**
+
+The member-completion cache exists so that each keystroke in
+`$model->wh…` reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached `Vec<CompletionItem>` wholesale, which for an
+Eloquent model is several hundred items each carrying several `String`s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.
+
+Store an `Arc<Vec<CompletionItem>>` and have the filter take a slice,
+cloning only the items that survive.
+
+**Where to look:** `member_completion_cache` and
+`filter_member_completion_items` in
+`completion/handler/member_access.rs`.
+
+## P63. Every diagnostic converts its offsets by counting from the top of the file
+
+**Impact: High · Complexity: Low**
+
+`offset_range_to_lsp_range` (`diagnostics/mod.rs`) turns a diagnostic's
+byte span into an LSP range through `byte_range_to_lsp_range`, which
+calls `offset_to_position` twice, and that walks `content.char_indices()`
+from byte 0 every time. There are around fifty call sites building
+diagnostic ranges this way, so a file reports each of its diagnostics at
+a cost proportional to how far down the file it sits, and a pass over one
+file costs O(size × diagnostics).
+
+`vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php` (2,927 lines,
+150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
+there puts 69% of the stacks in `byte_range_to_lsp_range` alone, ahead of
+the whole type engine.
+
+`text_position::LineIndex` already exists for exactly this and documents
+the quadratic it avoids; semantic tokens, code lenses, and inlay hints
+were moved onto it. The diagnostic collectors were not, and they produce
+far more positions per file than any of those. Build one index per file
+per pass and answer every collector's range from it.
+
+**Where to look:** the free `offset_range_to_lsp_range` and
+`Backend::offset_range_to_lsp_range` in `diagnostics/mod.rs`,
+`offset_to_position`/`LineIndex` in `text_position.rs`, and the
+collectors under `diagnostics/` that call them.
+
+## P64. A file with one very large scope copies it at every branch
+
+**Impact: Medium · Complexity: Medium-High**
+
+`ScopeState::merge_branch` joins two paths by comparing and then unioning
+their whole locals map, and a branch entered from a scope keeps a copy of
+it to merge back. That is proportional to how many variables the enclosing
+scope holds, which is fine inside a method and not fine at the top level of
+a long procedural file, where every statement so far has left its variable
+behind and each `if`/`foreach`/`switch` therefore copies and compares all
+of them. The cost of walking the file grows with the square of its length.
+
+A generated model, N repetitions of `/** @var … */ $vN = []; foreach ($vN
+as $eN) { $zN = $eN->prop; }` at the top level of one file, measured on a
+release build:
+
+| lines | analyse wall clock |
+| ----- | ------------------ |
+| 2,000 | 0.45s              |
+| 4,000 | 1.5s               |
+| 8,000 | 5.8s               |
+| 16,000| 24.8s              |
+
+Each doubling costs roughly four times as much. Sampling the 8,000-line
+run puts about 38% of the diagnostic worker's stacks in
+`merge_branch` and in cloning and dropping the `Ustr → Vec<ResolvedType>`
+map underneath it, ahead of any single resolution step. The same shape
+inside a method body does not show it, because a method's scope is
+bounded by its own body.
+
+The generated model is not far-fetched: a legacy procedural script, a
+generated routing or configuration file, and a long report builder all
+have the same shape, one scope holding thousands of live variables.
+
+A branch reads far fewer variables than the scope holds, so the copy is
+mostly of entries neither path touches. Recording what a branch actually
+wrote and merging only those entries, or sharing the untouched part
+rather than cloning it, would make a merge proportional to the branch
+instead of to the file.
+
+**Where to look:** `merge_branch`, `merge_local` and
+`describes_same_state_as` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`, the proof joins in
+`scope_state/proofs.rs`, and the branch forks: `fork_if_branches` and
+`merge_if_branches` in `forward_walk/if_else.rs` (both `if` spellings go
+through them), the loop bodies in `forward_walk/while_for.rs` and
+`forward_walk/foreach.rs`, and `process_try` / `process_switch` in
+`forward_walk/control_flow.rs`. `scope_state/tests.rs` pins what the join
+does to one variable at a time.
+
+The branch clones are not the only place the walk pays for the size of
+the scope. Measure these too before deciding what the join has to fix:
+
+- `record_scope_snapshot` (`forward_walk/diagnostic_cache.rs`) copies the
+  whole locals map at the start and again at the end of every statement
+  in a diagnostic pass (`walk_body_forward` in `forward_walk/mod.rs`, which
+  also clones a `pre_stmt_scope` per statement). That is
+  O(statements × locals) on its own, the same shape as the branch clones.
+- `ScopeState::snapshot_resolver` clones the map once per call and is
+  called once per condition narrowing (`cond_narrowing/apply.rs`,
+  `cond_narrowing/instanceof.rs`).
+- Condition narrowing turns every local into a `String` per condition
+  (the `var_names` lists in `cond_narrowing/apply.rs`) and runs its
+  extractors per local.
+- `forward_walk/by_ref.rs` re-resolves every local in scope on every call
+  statement to see whether the call rebinds it by reference.
+- The proof joins in `scope_state/proofs.rs` walk every key of one side,
+  `simplify_class_hierarchy_unions` runs after every multi-way join, and
+  `invalidate_dependent_keys` / `invalidate_receiver_state` in
+  `scope_state/mod.rs` `retain` over the whole map on every reassignment
+  or impure call.
+
+Full-scope clones at fork points, for the join rewrite: the then, per
+`elseif`, and `else` copies in `fork_if_branches` plus the implicit-else
+copy in `merge_if_branches`; `pre_loop_scope` and the post-loop join in
+each loop of `while_for.rs` and `foreach.rs`; `loops.rs` once per
+re-walk; `process_try` per `catch` and `process_switch` per arm and at
+the join; `closures.rs` on the first return; `loop_control.rs` per
+`break`/`continue`; `cond_narrowing/apply.rs` per `&&` operand. Narrowing
+writes into branch scopes too, and exit and return edges are recorded at
+arbitrary nesting depth and merged at an outer fork, so a "keys the branch
+wrote" set has to be carried through nested forks.

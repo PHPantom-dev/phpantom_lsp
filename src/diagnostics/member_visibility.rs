@@ -69,48 +69,14 @@
 
 use std::sync::Arc;
 
+use super::member_lookup::{MemberKind, declared_member, display_class_name};
+use crate::atom::Atom;
 use crate::class_lookup::is_subtype_of;
+use crate::inheritance::ancestors;
 use crate::types::{ClassInfo, ClassLikeKind, Visibility};
 
 /// Diagnostic code for an access to a member the calling scope may not see.
 pub(crate) const INVALID_MEMBER_ACCESS_CODE: &str = "invalid_member_access";
-
-/// Guard against a cycle in a malformed or mid-edit hierarchy.  Matches
-/// the depth cap the other hierarchy walks in the codebase use.
-const MAX_HIERARCHY_DEPTH: u32 = 20;
-
-/// Which kind of member a lookup turned out to be, so the message can
-/// name it without re-deriving it from the access syntax.
-#[derive(Clone, Copy)]
-enum MemberKind {
-    Method,
-    Property,
-    StaticProperty,
-    Constant,
-}
-
-impl MemberKind {
-    fn label(self) -> &'static str {
-        match self {
-            MemberKind::Method => "method",
-            MemberKind::Property => "property",
-            MemberKind::StaticProperty => "static property",
-            MemberKind::Constant => "constant",
-        }
-    }
-
-    /// Spell the member the way PHP's own error message does.
-    fn qualify(self, owner: &str, member_name: &str) -> String {
-        match self {
-            MemberKind::Method => format!("{}::{}()", owner, member_name),
-            MemberKind::Property => format!("{}::${}", owner, member_name),
-            // Extraction strips the `$` from `Foo::$bar`, so it is put
-            // back here rather than being taken from the member name.
-            MemberKind::StaticProperty => format!("{}::${}", owner, member_name),
-            MemberKind::Constant => format!("{}::{}", owner, member_name),
-        }
-    }
-}
 
 /// What one branch of a union type says about the access.
 enum BranchVerdict {
@@ -380,15 +346,17 @@ fn declaring_class(
             {
                 return Some(raw);
             }
-            ancestors(&raw, class_loader).find(|ancestor| {
-                declares_through_own_traits(
-                    ancestor,
-                    member_name,
-                    is_static,
-                    is_method_call,
-                    class_loader,
-                )
-            })
+            ancestors(&raw, class_loader)
+                .map(|(_, ancestor)| ancestor)
+                .find(|ancestor| {
+                    declares_through_own_traits(
+                        ancestor,
+                        member_name,
+                        is_static,
+                        is_method_call,
+                        class_loader,
+                    )
+                })
         }
         // A protected member is visible to everything below the class
         // that introduced it, so the owner is the *furthest* level that
@@ -400,7 +368,7 @@ fn declaring_class(
             if declares_non_privately(&raw, member_name, is_static, is_method_call, class_loader) {
                 owner = Some(Arc::clone(&raw));
             }
-            for ancestor in ancestors(&raw, class_loader) {
+            for (_, ancestor) in ancestors(&raw, class_loader) {
                 if declares_non_privately(
                     &ancestor,
                     member_name,
@@ -432,7 +400,6 @@ fn declares_through_own_traits(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some()
     })
@@ -457,7 +424,6 @@ fn declares_non_privately(
             is_static,
             is_method_call,
             class_loader,
-            0,
         )
         .is_some_and(|visibility| visibility != Visibility::Private)
     })
@@ -478,30 +444,22 @@ fn declares_non_privately(
 /// from, so such a member is simply not found here — which costs a
 /// report rather than inventing one.
 fn trait_declares(
-    trait_name: &str,
+    trait_name: &Atom,
     member_name: &str,
     is_static: bool,
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    depth: u32,
 ) -> Option<Visibility> {
-    if depth > MAX_HIERARCHY_DEPTH {
-        return None;
-    }
-    let used = class_loader(trait_name)?;
-    if let Some((visibility, _)) = declared_member(&used, member_name, is_static, is_method_call) {
-        return Some(visibility);
-    }
-    used.used_traits.iter().find_map(|nested| {
-        trait_declares(
-            nested,
-            member_name,
-            is_static,
-            is_method_call,
-            class_loader,
-            depth + 1,
-        )
-    })
+    let declares = |class: &ClassInfo| {
+        declared_member(class, member_name, is_static, is_method_call).is_some()
+    };
+    let (_, declaring) = crate::inheritance::ancestry::find_declaring_trait(
+        std::slice::from_ref(trait_name),
+        class_loader,
+        &declares,
+    )?;
+    declared_member(&declaring, member_name, is_static, is_method_call)
+        .map(|(visibility, _)| visibility)
 }
 
 /// Find a private member on an ancestor, which the inheritance merge
@@ -516,7 +474,7 @@ fn private_ancestor_declaration(
     is_method_call: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Rejection> {
-    for ancestor in ancestors(merged, class_loader) {
+    for (_, ancestor) in ancestors(merged, class_loader) {
         let Some((visibility, kind)) =
             declared_member(&ancestor, member_name, is_static, is_method_call)
         else {
@@ -535,72 +493,6 @@ fn private_ancestor_declaration(
         });
     }
     None
-}
-
-/// The raw ancestors of a class, nearest first.
-///
-/// Lazy on purpose.  The caller that looks for a private ancestor member
-/// stops at the first level that has one, and this runs on every member
-/// the assembled class does not carry — the ordinary state of code being
-/// typed — so materialising the whole chain would allocate a vector per
-/// access to read one entry of it.
-fn ancestors<'a>(
-    class: &Arc<ClassInfo>,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> impl Iterator<Item = Arc<ClassInfo>> + 'a {
-    let mut next = class.parent_class;
-    let mut depth = 0u32;
-    std::iter::from_fn(move || {
-        let name = next?;
-        depth += 1;
-        if depth > MAX_HIERARCHY_DEPTH {
-            return None;
-        }
-        let ancestor = class_loader(&name)?;
-        next = ancestor.parent_class;
-        Some(ancestor)
-    })
-}
-
-/// The visibility and kind `class` declares `member_name` with, matching
-/// the member kind the access syntax asks for.
-///
-/// Method names are compared case-insensitively and property and
-/// constant names case-sensitively, which is how PHP compares them.
-fn declared_member(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> Option<(Visibility, MemberKind)> {
-    if is_method_call {
-        return class
-            .methods
-            .iter()
-            .find(|m| m.name.eq_ignore_ascii_case(member_name))
-            .map(|m| (m.visibility, MemberKind::Method));
-    }
-
-    if is_static {
-        if let Some(constant) = class.constants.iter().find(|c| c.name == member_name) {
-            return Some((constant.visibility, MemberKind::Constant));
-        }
-        // A static property is written `Foo::$bar`, and the stored name
-        // may or may not carry the `$`.
-        return class
-            .properties
-            .iter()
-            .find(|p| {
-                p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
-            })
-            .map(|p| (p.visibility, MemberKind::StaticProperty));
-    }
-
-    class
-        .properties
-        .iter()
-        .find(|p| p.name == member_name)
-        .map(|p| (p.visibility, MemberKind::Property))
 }
 
 /// Whether the scope the access is written in may see the declaration.
@@ -697,12 +589,4 @@ fn build_message(rejection: &Rejection, member_name: &str) -> String {
         rejection.kind.qualify(&owner, member_name),
         scope,
     )
-}
-
-/// Name the class for the message, preferring the FQN.
-fn display_class_name(owner: &ClassInfo) -> String {
-    if owner.name.starts_with("__anonymous@") {
-        return "anonymous class".to_string();
-    }
-    owner.fqn().to_string()
 }

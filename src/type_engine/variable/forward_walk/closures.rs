@@ -38,15 +38,41 @@ thread_local! {
     static RETURN_EDGES: RefCell<Vec<ReturnFrame>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Open a frame for a closure body about to be walked for its by-reference
-/// captures.
-pub(crate) fn push_return_frame() {
-    RETURN_EDGES.with(|frames| frames.borrow_mut().push(ReturnFrame::Open(None)));
+/// Closes the frame [`push_return_frame`] opened.
+///
+/// Dropping the guard without calling [`Self::finish`] (a panic in the
+/// walk, which the request handler catches while the thread lives on)
+/// still pops the frame, so later `return`s on the thread do not feed a
+/// leaked one.
+pub(crate) struct ReturnFrameGuard {
+    open: bool,
 }
 
-/// Close the innermost frame and return the state its `return`s carried
-/// out, or `None` when the body has no reachable `return`.
-pub(crate) fn pop_return_frame() -> Option<ScopeState> {
+impl ReturnFrameGuard {
+    /// Close the frame and return the state its `return`s carried out, or
+    /// `None` when the body has no reachable `return`.
+    pub(crate) fn finish(mut self) -> Option<ScopeState> {
+        self.open = false;
+        pop_return_frame()
+    }
+}
+
+impl Drop for ReturnFrameGuard {
+    fn drop(&mut self) {
+        if self.open {
+            pop_return_frame();
+        }
+    }
+}
+
+/// Open a frame for a closure body about to be walked for its by-reference
+/// captures.
+pub(crate) fn push_return_frame() -> ReturnFrameGuard {
+    RETURN_EDGES.with(|frames| frames.borrow_mut().push(ReturnFrame::Open(None)));
+    ReturnFrameGuard { open: true }
+}
+
+fn pop_return_frame() -> Option<ScopeState> {
     RETURN_EDGES.with(|frames| match frames.borrow_mut().pop() {
         Some(ReturnFrame::Open(state)) => state.map(|s| *s),
         _ => None,
