@@ -176,6 +176,48 @@ pub(crate) fn get_bin_dir(package: &ComposerPackage) -> String {
     }
 }
 
+/// The package list from `vendor/composer/installed.json`, together with
+/// the directory the file was read from.
+pub(crate) struct InstalledPackages {
+    /// Every entry of the package list, in `installed.json` order.
+    pub(crate) packages: Vec<serde_json::Value>,
+    /// `<vendor>/composer`, the directory each `install-path` is relative
+    /// to.
+    pub(crate) composer_dir: PathBuf,
+}
+
+/// Parse the package list out of `installed.json` text.
+///
+/// The file has two formats: Composer 1 writes a top-level array of
+/// packages, Composer 2 writes `{ "packages": [...] }`. Returns an empty
+/// list for anything else, including unparseable JSON.
+pub(crate) fn parse_installed_packages(content: &str) -> Vec<serde_json::Value> {
+    match serde_json::from_str::<serde_json::Value>(content) {
+        Ok(serde_json::Value::Array(packages)) => packages,
+        Ok(serde_json::Value::Object(mut root)) => match root.remove("packages") {
+            Some(serde_json::Value::Array(packages)) => packages,
+            _ => Vec::new(),
+        },
+        _ => Vec::new(),
+    }
+}
+
+/// Read and parse `<workspace_root>/<vendor_dir>/composer/installed.json`.
+///
+/// Returns `None` when the file is missing or unreadable; see
+/// [`parse_installed_packages`] for the formats it accepts.
+pub(crate) fn read_installed_packages(
+    workspace_root: &Path,
+    vendor_dir: &str,
+) -> Option<InstalledPackages> {
+    let composer_dir = workspace_root.join(vendor_dir).join("composer");
+    let content = fs::read_to_string(composer_dir.join("installed.json")).ok()?;
+    Some(InstalledPackages {
+        packages: parse_installed_packages(&content),
+        composer_dir,
+    })
+}
+
 /// Extract PSR-4 mappings from path-repository packages in `installed.json`.
 ///
 /// Path-repository packages (Composer `"type": "path"` repositories) are
@@ -209,26 +251,15 @@ pub fn extract_path_repo_psr4_mappings(
     vendor_dir: &str,
 ) -> Vec<Psr4Mapping> {
     let vendor_path = workspace_root.join(vendor_dir);
-    let installed_path = vendor_path.join("composer").join("installed.json");
 
-    let Ok(content) = fs::read_to_string(&installed_path) else {
+    let Some(installed) = read_installed_packages(workspace_root, vendor_dir) else {
         return Vec::new();
     };
+    let InstalledPackages {
+        packages,
+        composer_dir,
+    } = installed;
 
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-        return Vec::new();
-    };
-
-    // installed.json: Composer 1 = top-level array, Composer 2 = { "packages": [...] }
-    let packages = if let Some(arr) = json.as_array() {
-        arr.as_slice()
-    } else if let Some(pkgs) = json.get("packages").and_then(|p| p.as_array()) {
-        pkgs.as_slice()
-    } else {
-        return Vec::new();
-    };
-
-    let composer_dir = vendor_path.join("composer");
     let canonical_root = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
@@ -237,7 +268,7 @@ pub fn extract_path_repo_psr4_mappings(
         .unwrap_or_else(|_| vendor_path.clone());
     let mut mappings = Vec::new();
 
-    for package in packages {
+    for package in &packages {
         // Condition 1: dist.type must be "path".
         let is_path_repo = package
             .get("dist")
@@ -604,6 +635,40 @@ pub fn normalise_path(path: &str) -> String {
     }
 }
 
+/// The file each PSR-4 mapping that covers `class_name` would place it
+/// at, in mapping order (longest prefix first).
+///
+/// An empty prefix is the root fallback mapping and covers every class.
+fn psr4_candidate_paths<'a>(
+    mappings: &'a [Psr4Mapping],
+    workspace_root: &'a Path,
+    class_name: &'a str,
+) -> impl Iterator<Item = PathBuf> + 'a {
+    let class_name = class_name.strip_prefix('\\').unwrap_or(class_name);
+    mappings.iter().filter_map(move |mapping| {
+        let relative = if mapping.prefix.is_empty() {
+            class_name
+        } else {
+            class_name.strip_prefix(&mapping.prefix)?
+        };
+        Some(
+            workspace_root
+                .join(&mapping.base_path)
+                .join(format!("{}.php", relative.replace('\\', "/"))),
+        )
+    })
+}
+
+/// Where PSR-4 places `class_name`, whether or not the file exists yet:
+/// the path a class moved or created under that name has to take.
+pub(crate) fn psr4_path_for_class(
+    mappings: &[Psr4Mapping],
+    workspace_root: &Path,
+    class_name: &str,
+) -> Option<PathBuf> {
+    psr4_candidate_paths(mappings, workspace_root, class_name).next()
+}
+
 /// Resolve a fully-qualified PHP class name to a file path using PSR-4 mappings.
 ///
 /// The `class_name` should be the namespace-qualified name (e.g.
@@ -617,35 +682,11 @@ pub fn resolve_class_path(
     workspace_root: &Path,
     class_name: &str,
 ) -> Option<PathBuf> {
-    let name = class_name;
-
     // Skip built-in type keywords that are never real classes
-    if crate::php_type::is_keyword_type(name) {
+    if crate::php_type::is_keyword_type(class_name) {
         return None;
     }
-
-    // Try each mapping (already sorted longest-prefix-first)
-    for mapping in mappings {
-        let relative = if mapping.prefix.is_empty() {
-            // Empty prefix matches everything (root namespace fallback)
-            Some(name)
-        } else {
-            name.strip_prefix(&mapping.prefix)
-        };
-
-        if let Some(relative_class) = relative {
-            let relative_path = relative_class.replace('\\', "/");
-            let file_path = workspace_root
-                .join(&mapping.base_path)
-                .join(format!("{}.php", relative_path));
-
-            if file_path.is_file() {
-                return Some(file_path);
-            }
-        }
-    }
-
-    None
+    psr4_candidate_paths(mappings, workspace_root, class_name).find(|path| path.is_file())
 }
 
 /// The part of `namespace` that lies below a PSR-4 mapping's prefix, or
@@ -1018,7 +1059,13 @@ fn scan_directory_for_classes(dir: &Path, classmap: &mut HashMap<String, PathBuf
 
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Recurse only into real directories: following a link back up the
+        // tree would re-enter it until the kernel's symlink limit stops the
+        // walk.  A linked file is still read, through the link.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             scan_directory_for_classes(&path, classmap);
         } else if path.extension().is_some_and(|ext| ext == "php")
             && let Ok(content) = fs::read(&path)

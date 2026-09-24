@@ -4,6 +4,7 @@
 
 use crate::Backend;
 use crate::type_engine::resolver::CtxLoaders;
+use crate::virtual_members::laravel::file_contributions::refresh_file;
 
 impl Backend {
     /// Publish a freshly built storage-driver index, invalidating the memoized
@@ -27,13 +28,19 @@ impl Backend {
     /// baked into, so the next load of either recomputes it.
     fn invalidate_storage_disk_type(&self) {
         *self.storage_disk_type_cache.write() = None;
-        let mut cache = self.resolved_class_cache.write();
-        for fqn in [
-            crate::virtual_members::laravel::FILESYSTEM_MANAGER_FQN,
-            crate::virtual_members::laravel::STORAGE_FACADE_FQN,
-        ] {
-            crate::virtual_members::evict_fqn(&mut cache, fqn);
+        {
+            let mut cache = self.resolved_class_cache.write();
+            for fqn in [
+                crate::virtual_members::laravel::FILESYSTEM_MANAGER_FQN,
+                crate::virtual_members::laravel::STORAGE_FACADE_FQN,
+            ] {
+                crate::virtual_members::evict_fqn(&mut cache, fqn);
+            }
         }
+        // The disk type is baked in without a class lookup naming the config
+        // file that decides it, so a cached receiver resolution records no
+        // dependency on this.
+        self.clear_resolved_member_files();
     }
 
     /// Keep the storage-driver index and the memoized disk type coherent with
@@ -49,19 +56,15 @@ impl Backend {
             return;
         }
         let config_changed = uri.contains("/config/");
-        let had = self.laravel_storage_drivers.read().files.has_uri(uri);
-        let mut regs =
-            crate::virtual_members::laravel::extract_storage_driver_registrations(content);
-        if !config_changed && !had && regs.is_empty() {
-            return;
-        }
-        if had || !regs.is_empty() {
+        let touched = refresh_file(&self.laravel_storage_drivers, uri, true, || {
+            let mut regs =
+                crate::virtual_members::laravel::extract_storage_driver_registrations(content);
             self.infer_storage_driver_return_types(&mut regs, uri, content);
-            let mut index = self.laravel_storage_drivers.write();
-            index.files.set_file(uri.to_string(), regs);
-            index.rebuild();
+            regs
+        });
+        if config_changed || touched {
+            self.invalidate_storage_disk_type();
         }
-        self.invalidate_storage_disk_type();
     }
 
     /// Fill in the type each `Storage::extend()` closure builds when it does

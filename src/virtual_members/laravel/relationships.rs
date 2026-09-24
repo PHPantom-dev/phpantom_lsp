@@ -86,6 +86,14 @@ const RELATIONSHIP_METHOD_FQN_MAP: &[(&str, &str)] = &[
     ),
 ];
 
+/// Whether `short` is the short name of a relationship class that
+/// [`infer_relationship_from_body`] can produce.
+pub(crate) fn is_inferable_relationship_short_name(short: &str) -> bool {
+    RELATIONSHIP_METHOD_FQN_MAP
+        .iter()
+        .any(|(_, fqn)| short_name(fqn) == short)
+}
+
 /// Known Eloquent relationship class short names that yield a single
 /// (nullable) related model instance when accessed as a property.
 const SINGULAR_RELATIONSHIPS: &[&str] = &["HasOne", "MorphOne", "BelongsTo", "HasOneThrough"];
@@ -197,6 +205,14 @@ pub(crate) fn is_pivot_relationship(return_type: &PhpType) -> bool {
         return false;
     }
     PIVOT_RELATIONSHIPS.contains(&short_name(base))
+}
+
+/// Cheap byte pre-filter: whether PHP `source` could declare a many-to-many
+/// relationship, either through a `BelongsToMany`/`MorphToMany` return type
+/// or a `belongsToMany`/`morphToMany`/`morphedByMany` builder call.
+pub(crate) fn source_may_declare_pivot_relationship(source: &[u8]) -> bool {
+    memchr::memmem::find(source, b"ToMany").is_some()
+        || memchr::memmem::find(source, b"edByMany").is_some()
 }
 
 /// Whether `class` declares at least one many-to-many relationship method,

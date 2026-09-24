@@ -4,9 +4,10 @@
 //! autoload preloading and the `ensure_workspace_indexed*` pipeline with
 //! its parallel parse workers.
 //!
-//! Several methods spawn OS threads sized with
-//! [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE); see the
-//! "Performance Anti-Patterns" note in the contributor guide.
+//! The parallel passes run on [`crate::parallel::map_indexed`], whose
+//! workers carry [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE)
+//! stacks; see the "Performance Anti-Patterns" note in the contributor
+//! guide.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -57,37 +58,16 @@ impl Backend {
             p.add_total(file_count as u64);
         }
 
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(file_count);
-        let next_idx = std::sync::atomic::AtomicUsize::new(0);
-        let pending = &pending;
-        let next_idx = &next_idx;
-
-        std::thread::scope(|s| {
-            for _ in 0..n_threads {
-                std::thread::Builder::new()
-                    .name("autoload-preload".into())
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        loop {
-                            let i = next_idx.fetch_add(1, Ordering::Relaxed);
-                            if i >= file_count {
-                                break;
-                            }
-                            if let Some(p) = progress {
-                                p.add_done(1);
-                            }
-                            let path = pending[i];
-                            if let Ok(content) = std::fs::read_to_string(path) {
-                                let uri = crate::util::path_to_uri(path);
-                                self.update_ast(&uri, &content);
-                            }
-                        }
-                    })
-                    .expect("failed to spawn autoload-preload thread");
+        crate::parallel::map_indexed("autoload-preload", file_count, |_, i| {
+            if let Some(p) = progress {
+                p.add_done(1);
             }
+            let path = pending[i];
+            if let Ok(content) = std::fs::read_to_string(path) {
+                let uri = crate::util::path_to_uri(path);
+                self.update_ast(&uri, &content);
+            }
+            None::<()>
         });
     }
 
@@ -126,10 +106,12 @@ impl Backend {
     /// completed index without refreshing the filesystem.
     ///
     /// Internal consumers such as declaration CodeLens and cached reference
-    /// counts call this once per symbol. Explicit Find References requests use
+    /// counts call this once per symbol. Explicit Find References and rename
+    /// requests use
     /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request)
-    /// once at their entry point so they retain the existing on-demand refresh
-    /// that discovers files created without a watcher notification.
+    /// once at their entry point, before reading the file the request is
+    /// about, so they retain the existing on-demand refresh that discovers
+    /// files created without a watcher notification.
     pub(crate) fn ensure_workspace_index_ready_for_request(&self) {
         match self.request_progress.as_deref() {
             Some(state) => {
@@ -288,10 +270,11 @@ impl Backend {
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
             let (php_files, resource_files) =
-                crate::references::collect_workspace_index_files_gitignore(
+                crate::classmap_scanner::collect_workspace_index_files_gitignore(
                     &root,
                     &vendor_dir_paths,
                     &self.index_filters(),
+                    Some(self.followed_links()),
                 );
             tracing::info!(
                 "ensure_workspace_indexed: Phase 2 disk walk found {} PHP and {} resource files in {:?}",
@@ -433,9 +416,9 @@ impl Backend {
     /// the file is loaded via [`get_file_content`].  Workers parse files into
     /// owned index updates, then a single merge publishes the whole batch.
     ///
-    /// Uses [`std::thread::scope`] for structured concurrency so that all
-    /// spawned threads are guaranteed to finish before this method returns.
-    /// The thread count is capped at the number of available CPU cores.
+    /// Runs on [`crate::parallel::map_indexed`], so every worker has
+    /// finished before this method returns and the thread count is capped
+    /// at the number of available CPU cores.
     pub(crate) fn parse_files_parallel_with_progress(
         &self,
         files: Vec<(String, Option<String>)>,
@@ -516,74 +499,32 @@ impl Backend {
             return;
         }
 
-        let n_threads = std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(4)
-            .min(total);
-        let next = AtomicUsize::new(0);
+        // Workers claim positions in the largest-first order, so the index
+        // the pool reports is a position in that order, not the item's own.
         let work_order = largest_first_work_order(&weights);
-
-        let weights_ref = &weights;
-        let work_order_ref = &work_order;
-        let uri_of = &uri_of;
-        let content_of = &content_of;
-        let mut results = std::thread::scope(|s| {
-            let mut handles = Vec::with_capacity(n_threads);
-            for _ in 0..n_threads {
-                let parsed = &parsed;
-                let parsed_units = &parsed_units;
-                let next = &next;
-                let weights = weights_ref;
-                let work_order = work_order_ref;
-                match std::thread::Builder::new()
-                    .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                    .spawn_scoped(s, move || {
-                        let mut local_results = Vec::new();
-                        loop {
-                            let work_idx = next.fetch_add(1, Ordering::Relaxed);
-                            let Some(&idx) = work_order.get(work_idx) else {
-                                break;
-                            };
-                            let Some(item) = items.get(idx) else {
-                                break;
-                            };
-
-                            if let Some(content) = content_of(item) {
-                                local_results.push((
-                                    idx,
-                                    self.parse_ast_index_update_for_index(uri_of(item), &content),
-                                ));
-                            }
-                            report_weighted_parse_progress(
-                                progress,
-                                parsed,
-                                parsed_units,
-                                weights[idx],
-                                total,
-                                total_units,
-                            );
-                        }
-                        local_results
-                    }) {
-                    Ok(handle) => handles.push(handle),
-                    Err(e) => tracing::error!("failed to spawn parse thread: {e}"),
-                }
-            }
-
-            handles
-                .into_iter()
-                .flat_map(|handle| {
-                    handle.join().unwrap_or_else(|_| {
-                        tracing::error!("parse thread panicked during workspace indexing");
-                        Vec::new()
-                    })
-                })
-                .collect::<Vec<_>>()
+        let mut results = crate::parallel::map_indexed("workspace-parse", total, |_, work_idx| {
+            let idx = work_order[work_idx];
+            let item = &items[idx];
+            let result = content_of(item).map(|content| {
+                (
+                    idx,
+                    self.parse_ast_index_update_for_index(uri_of(item), &content),
+                )
+            });
+            report_weighted_parse_progress(
+                progress,
+                &parsed,
+                &parsed_units,
+                weights[idx],
+                total,
+                total_units,
+            );
+            result
         });
-        results.sort_by_key(|(idx, _)| *idx);
+        results.sort_by_key(|(_, (idx, _))| *idx);
         report_weighted_merge_progress(progress, total, total_units);
         self.apply_ast_index_parse_results_batch(
-            results.into_iter().map(|(_, result)| result).collect(),
+            results.into_iter().map(|(_, (_, result))| result).collect(),
         );
     }
 

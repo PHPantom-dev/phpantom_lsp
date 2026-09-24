@@ -168,6 +168,17 @@ impl Backend {
     ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        self.find_or_load_class_with_aliases(class_name, true)
+    }
+
+    /// [`find_or_load_class`](Self::find_or_load_class), with Laravel's
+    /// facade class-alias table consulted only when `facade_aliases` is set.
+    /// The container string-binding table is always consulted.
+    fn find_or_load_class_with_aliases(
+        &self,
+        class_name: &str,
+        facade_aliases: bool,
+    ) -> Option<Arc<ClassInfo>> {
         if class_name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN {
             let configured = self.laravel_date_class.read().clone()?;
             let configured = configured
@@ -197,13 +208,24 @@ impl Backend {
         // real project class of the same name always wins, and non-class
         // strings like `blade.compiler` still resolve to their bound concrete
         // class.
-        self.resolve_laravel_alias(class_name)
+        if facade_aliases {
+            self.resolve_laravel_alias(class_name)
+        } else {
+            self.resolve_laravel_container_alias(class_name)
+        }
     }
 
     /// Like [`find_or_load_class`], but accepts a pre-parsed `PhpType`,
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
+        // Report the lookup to whoever is recording what a resolution
+        // depends on, before the memo below can answer it without touching
+        // the class index.  A name that finds nothing is reported too: it
+        // gains a declaration as readily as an existing one changes.
+        if let Some(base) = ty.base_name() {
+            crate::resolution_deps::record(base);
+        }
         // The name search is memoised per thread on the interned type
         // handle: the diagnostic pass asks for the same types millions of
         // times, and every miss costs two case-insensitive hash lookups
@@ -292,19 +314,40 @@ impl Backend {
     }
 
     /// Mark the reverse pivot index stale when `content` (at `uri`) affects
-    /// many-to-many relationships — either it now contains a `belongsToMany`/
-    /// `morphToMany` call, or it previously contributed one (an edit may have
+    /// many-to-many relationships — either it now looks like it declares
+    /// one, or it previously contributed one (an edit may have
     /// removed the last such relation). A no-op for unrelated edits.
     pub(crate) fn refresh_laravel_pivots(&self, uri: &str, content: &str) {
         use std::sync::atomic::Ordering;
         if self.laravel_pivots_dirty.load(Ordering::Relaxed) {
             return;
         }
-        let has_m2m = memchr::memmem::find(content.as_bytes(), b"belongsToMany").is_some()
-            || memchr::memmem::find(content.as_bytes(), b"morphToMany").is_some();
+        let has_m2m = crate::virtual_members::laravel::source_may_declare_pivot_relationship(
+            content.as_bytes(),
+        );
         if has_m2m || self.laravel_pivots.read().contributes(uri) {
             self.laravel_pivots_dirty.store(true, Ordering::Relaxed);
+            // A pivot accessor is attached to the *target* model, which the
+            // file declaring the relation never has to be looked up for, so a
+            // cached receiver resolution records no dependency on this index.
+            self.clear_resolved_member_files();
         }
+    }
+
+    /// Empty the resolved-class cache, and the caches whose entries were
+    /// derived from it.
+    ///
+    /// The cached receiver resolutions a reference search leaves behind are
+    /// kept across an edit by intersecting what each one consulted with what
+    /// the edit changed, and the *unconsulted* half of that, a parent read
+    /// out of this cache rather than loaded, is recovered from this cache's
+    /// reverse-dependency graph.  Emptying the cache discards that graph, so
+    /// there is no longer anything to recover it from and the resolutions go
+    /// with it.  Prefer `evict_fqn` over this wherever the changed classes
+    /// can be named.
+    pub(crate) fn clear_resolved_class_cache(&self) {
+        self.resolved_class_cache.write().clear();
+        self.clear_resolved_member_files();
     }
 
     /// Rebuild the reverse pivot index from every parsed class.
@@ -764,7 +807,7 @@ impl Backend {
                 }
                 .map(crate::atom::atom);
             }
-            cls.cache_fqn();
+            cls.cache_fqn_in_uri(uri);
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies
@@ -989,6 +1032,11 @@ impl Backend {
     /// FQN via use-map, the namespace-qualified name).  The first match
     /// wins.
     pub fn find_or_load_function(&self, candidates: &[&str]) -> Option<FunctionInfo> {
+        // Every spelling tried is a name this resolution depends on, whether
+        // or not it is the one that answers: a function declared under one
+        // of the others later would win instead.
+        crate::resolution_deps::record_all(candidates);
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();
@@ -1083,7 +1131,7 @@ impl Backend {
 
                 // Apply stub patches for phpstorm-stubs deficiencies
                 // (e.g. array_reduce returning `mixed` instead of a
-                // template-based type).  See stub_patches.rs.
+                // template-based type).  See `stub_patches`.
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }
@@ -1206,9 +1254,20 @@ impl Backend {
                 if let Some(cls) = self.find_or_load_class(&ns_qualified) {
                     return Some(cls);
                 }
+                // The facade alias table must not be reached from here:
+                // it is populated by a runtime `class_alias()` call that
+                // only ever lands the alias in the *global* namespace,
+                // so a bare `Cache` inside `App\Http` can never actually
+                // be the facade. The container table is exempt from that
+                // rule: its keys (`'sentry'`, `'blade.compiler'`) are
+                // arbitrary runtime strings a provider binds, never real
+                // class-name syntax, so no namespace ever applies to
+                // them in the first place.
+                return self.find_or_load_class_with_aliases(name, false);
             }
-            // Global scope: either no namespace context, or the
-            // namespace-qualified lookup above did not find a match.
+            // Global scope: no namespace context at all, so the alias
+            // fallback is exactly where PHP's own `class_alias()` would
+            // have put it.
             return self.find_or_load_class(name);
         }
 

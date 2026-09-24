@@ -18,6 +18,7 @@ use std::sync::Arc;
 use super::component_tags::kebab_case;
 use super::preprocessor::{ComponentBinding, ComponentParameter, ComponentTarget};
 use crate::Backend;
+use crate::composer::psr4_directories_for_namespace;
 
 /// The namespace tail Laravel looks for class-based components under when no
 /// provider registers a namespace of its own.
@@ -117,17 +118,29 @@ impl Backend {
             if !uri.ends_with(".blade.php") && !uri.contains("/views/") {
                 return;
             }
-            let cache = self.laravel_string_key_cache.read();
             // Nothing built yet means nothing to drop.
-            let Some(discovery) = cache.blade_discovery.as_ref() else {
+            if self
+                .laravel_string_key_cache
+                .read()
+                .blade_discovery
+                .is_none()
+            {
                 return;
-            };
+            }
+            // Worked out before the cache guard is taken: the view roots are
+            // cached in the same lock, and a second read taken while a writer
+            // is queued parks behind that writer, which in turn waits on the
+            // first read.
             let names = self.view_names_for_blade_uri(uri);
             // A template outside every view root contributes no name at
             // all, so the index is as correct without it as with it.
-            let known =
-                names.is_empty() || names.iter().all(|name| discovery.views.contains_key(name));
-            drop(cache);
+            let known = names.is_empty() || {
+                let cache = self.laravel_string_key_cache.read();
+                let Some(discovery) = cache.blade_discovery.as_ref() else {
+                    return;
+                };
+                names.iter().all(|name| discovery.views.contains_key(name))
+            };
             if known {
                 return;
             }
@@ -322,8 +335,8 @@ impl Backend {
     /// scanned into dot-notation names.
     fn scan_view_names(&self) -> HashMap<String, PathBuf> {
         let mut views = HashMap::new();
-        for root in self.laravel_view_roots() {
-            merge_view_root(&root, "", &mut views);
+        for root in self.laravel_view_roots().iter() {
+            merge_view_root(&root.path, "", &mut views);
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
             merge_view_root(&res.path, &res.namespace, &mut views);
@@ -397,7 +410,7 @@ impl Backend {
         classes
     }
 
-    /// The classes in the directory a PSR-4 mapping puts `namespace` in.
+    /// The classes in the directories a PSR-4 mapping puts `namespace` in.
     ///
     /// Empty when no mapping covers it, which is the normal case for a
     /// vendor package's namespace: the class index picks those up instead.
@@ -405,46 +418,34 @@ impl Backend {
         let Some(root) = self.workspace_root().read().clone() else {
             return Vec::new();
         };
-        let Some(dir) = self.namespace_directory(&root, namespace) else {
-            return Vec::new();
-        };
         let mut classes = Vec::new();
-        collect_class_files(&dir, &dir, namespace, &mut classes);
+        for dir in self.namespace_directories(&root, namespace) {
+            collect_class_files(&dir, &dir, namespace, &mut classes);
+        }
         classes
     }
 
-    /// Resolve `namespace` to the directory the project's own PSR-4
+    /// Resolve `namespace` to every directory the project's own PSR-4
     /// mappings put it in, taking the longest matching prefix so a nested
-    /// mapping wins over a root one.
-    fn namespace_directory(&self, root: &Path, namespace: &str) -> Option<PathBuf> {
+    /// mapping wins over a root one, and every directory of an array
+    /// mapping (`"App\\": ["app/", "src/"]`) at that prefix length.
+    fn namespace_directories(&self, root: &Path, namespace: &str) -> Vec<PathBuf> {
         let namespace = namespace.trim_matches('\\');
         let mappings = self.psr4_mappings().read();
-        let mut best: Option<(usize, PathBuf)> = None;
-        for mapping in mappings.iter() {
-            let prefix = mapping.prefix.trim_matches('\\');
-            let rest = if prefix.is_empty() {
-                Some(namespace)
-            } else if namespace.eq_ignore_ascii_case(prefix) {
-                Some("")
-            } else {
-                namespace
-                    .get(..prefix.len())
-                    .filter(|head| head.eq_ignore_ascii_case(prefix))
-                    .and_then(|_| namespace[prefix.len()..].strip_prefix('\\'))
-            };
-            let Some(rest) = rest else {
-                continue;
-            };
-            if best.as_ref().is_some_and(|(len, _)| *len >= prefix.len()) {
-                continue;
+        let mut best_len: Option<usize> = None;
+        let mut dirs = Vec::new();
+        for (mapping, dir) in psr4_directories_for_namespace(&mappings, root, namespace) {
+            let prefix_len = mapping.prefix.trim_matches('\\').len();
+            match best_len {
+                Some(len) if prefix_len < len => break,
+                _ => {}
             }
-            let mut dir = root.join(mapping.base_path.trim_start_matches("./"));
-            for segment in rest.split('\\').filter(|s| !s.is_empty()) {
-                dir.push(segment);
+            best_len = Some(prefix_len);
+            if dir.is_dir() {
+                dirs.push(dir);
             }
-            best = Some((prefix.len(), dir));
         }
-        best.map(|(_, dir)| dir).filter(|dir| dir.is_dir())
+        dirs
     }
 }
 
@@ -580,7 +581,13 @@ fn walk_files(base: &Path, dir: &Path, visit: &mut dyn FnMut(&Path, &str)) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Recurse only into real directories: following a link back up the
+        // tree would re-enter it until the kernel's symlink limit stops the
+        // walk.  A linked file is still visited, through the link.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             walk_files(base, &path, visit);
             continue;
         }
@@ -782,6 +789,44 @@ mod tests {
         // So does a component class, wherever its namespace is rooted.
         backend.refresh_blade_discovery(&uri_of("app/View/Components/Alert.php"));
         assert!(!cached(&backend));
+    }
+
+    /// Working out a template's view names can build the cached view roots,
+    /// which writes into the same cache the index sits in, so the refresh
+    /// must not be holding that cache while it does.
+    #[test]
+    fn refreshing_a_template_can_rebuild_the_view_roots() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        write(&root, "composer.json", "{}");
+        write(&root, "resources/views/welcome.blade.php", "");
+
+        let backend = backend_at(&root);
+        backend.blade_discovery();
+        backend.laravel_string_key_cache.write().view_roots = None;
+        write(&root, "resources/views/about.blade.php", "");
+        let uri =
+            tower_lsp::lsp_types::Url::from_file_path(root.join("resources/views/about.blade.php"))
+                .unwrap()
+                .to_string();
+
+        let (done, finished) = std::sync::mpsc::channel();
+        let refresh = backend.clone_for_blocking();
+        std::thread::spawn(move || {
+            refresh.refresh_blade_discovery(&uri);
+            let _ = done.send(());
+        });
+        finished
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the refresh must not wait on its own hold of the cache");
+        assert!(
+            backend
+                .laravel_string_key_cache
+                .read()
+                .blade_discovery
+                .is_none(),
+            "a template the index has never seen drops it"
+        );
     }
 
     #[test]

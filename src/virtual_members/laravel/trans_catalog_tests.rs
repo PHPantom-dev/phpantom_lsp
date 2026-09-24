@@ -192,7 +192,7 @@ fn translation_catalog_handles_invalid_and_removed_paths() {
     let backend = make_backend();
     let dir = tempfile::tempdir().unwrap();
     let mut catalog = TranslationCatalog::default();
-    catalog.insert_file(&backend, Path::new("relative.php"), "en", "");
+    catalog.insert_file(&backend, Path::new("relative.php"), "en", "", None);
     assert!(catalog.files.is_empty());
     let invalid = dir.path().join(std::ffi::OsString::from_vec(vec![0xff]));
     catalog.insert_locale(&backend, &invalid, "");
@@ -206,7 +206,7 @@ fn translation_catalog_handles_invalid_and_removed_paths() {
         .open_files
         .write()
         .insert(uri.to_string(), Arc::new("<?php return [];".to_string()));
-    catalog.insert_file(&backend, &invalid_file, "en", "");
+    catalog.insert_file(&backend, &invalid_file, "en", "", None);
     assert!(catalog.files.is_empty());
     catalog.insert_locale(&backend, &dir.path().join("removed"), "");
     assert!(catalog.entries.is_empty());

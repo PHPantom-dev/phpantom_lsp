@@ -11,9 +11,9 @@
 //! then the base `Pivot`).
 //!
 //! The index is consulted at class-load time via [`inject_pivot`], mirroring
-//! the `inject_macros` path. Like the macro index it is an LSP-time structure;
-//! `analyze` leaves pivot accessors unmodelled, where model `__get` leniency
-//! keeps them quiet.
+//! the `inject_macros` path. It is built from the parsed classes, so the
+//! project files that may declare a many-to-many relationship are parsed up
+//! front (`Backend::load_laravel_pivot_sources`).
 
 use std::collections::HashSet;
 use std::sync::Arc;

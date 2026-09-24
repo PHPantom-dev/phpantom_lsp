@@ -179,16 +179,12 @@ pub(crate) fn discover_user_files(
     source_dirs.sort();
     source_dirs.dedup();
 
-    // The walker compares canonical entry paths below.  Canonicalize the
-    // registered roots once as well so path aliases such as macOS's `/var`
-    // -> `/private/var` do not let vendor files through.
-    let vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
-    let mut vendor_dirs: Vec<PathBuf> = vendor_dirs
-        .into_iter()
-        .map(|path| path.canonicalize().unwrap_or(path))
-        .collect();
+    // Spelled the way the source directories are (both are joined onto the
+    // workspace root), which is what the shared walker compares against.
+    let mut vendor_dirs = backend.workspace.vendor_dir_paths.lock().clone();
     vendor_dirs.sort_unstable();
     vendor_dirs.dedup();
+    let vendor_dirs = std::sync::Arc::new(vendor_dirs);
 
     // A directory filter that points outside every PSR-4 source directory
     // (e.g. into vendor/) is walked directly instead of being skipped.
@@ -225,7 +221,7 @@ pub(crate) fn discover_user_files(
     // line too.  Naming a file outright bypasses it (those never reach this
     // walk), which is the escape hatch for analysing an excluded path.
     for dir in &external_filters {
-        collect_php_files(dir, &[], &[], &filters, &mut files);
+        collect_php_files(dir, &std::sync::Arc::default(), &[], &filters, &mut files);
     }
 
     files.sort();
@@ -233,42 +229,27 @@ pub(crate) fn discover_user_files(
     files
 }
 
-/// Walk `dir` for PHP files, skipping anything under `skip_vendor` and
-/// keeping only files under one of the `crop` paths (all of them when
-/// `crop` is empty).
+/// Walk `dir` for PHP files through the shared workspace walker, skipping
+/// the `skip_vendor` trees and keeping only files under one of the `crop`
+/// paths (all of them when `crop` is empty).
 ///
 /// `filters` decides which extensions count as PHP source and which
 /// paths `[indexing] exclude` prunes.
 fn collect_php_files(
     dir: &Path,
-    skip_vendor: &[PathBuf],
+    skip_vendor: &std::sync::Arc<Vec<PathBuf>>,
     crop: &[&Path],
     filters: &std::sync::Arc<crate::classmap_scanner::IndexFilters>,
     out: &mut Vec<PathBuf>,
 ) {
-    use ignore::WalkBuilder;
-
-    let skip_vendor = skip_vendor.to_vec();
-    let filter_excludes = std::sync::Arc::clone(filters);
-    let walker = WalkBuilder::new(dir)
-        .git_ignore(true)
-        .git_global(true)
-        .git_exclude(true)
-        .hidden(true)
-        .parents(true)
-        .ignore(true)
-        .filter_entry(move |entry| {
-            let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
-            if is_dir
-                && !skip_vendor.is_empty()
-                && let Ok(canonical) = entry.path().canonicalize()
-                && skip_vendor.iter().any(|v| canonical.starts_with(v))
-            {
-                return false;
-            }
-            !filter_excludes.is_excluded_entry(entry.path(), is_dir)
-        })
-        .build();
+    let walker = crate::classmap_scanner::workspace_walk_builder(
+        dir,
+        std::sync::Arc::clone(skip_vendor),
+        std::sync::Arc::clone(filters),
+        false,
+        crate::classmap_scanner::LinkClaims::new([dir.to_path_buf()], None),
+    )
+    .build();
 
     for entry in walker.flatten() {
         let path = entry.into_path();
@@ -487,5 +468,62 @@ mod tests {
         );
 
         assert_eq!(files, vec![root.join("src/A.php"), root.join("src/B.php")]);
+    }
+
+    #[test]
+    fn discover_user_files_follows_interior_symlink_when_enabled() {
+        // CLI analyse's user-file walker keeps the same symlink
+        // contract as the workspace walkers (issue #383).
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Hidden.php"), "<?php\n").unwrap();
+
+        let link = root.join("link");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, &[]);
+        let linked = files
+            .iter()
+            .find(|p| p.ends_with("Hidden.php"))
+            .unwrap_or_else(|| panic!("linked file must be indexed: {files:?}"));
+        assert!(
+            linked.starts_with(&link),
+            "paths must keep the symlink spelling: {linked:?} vs {link:?}"
+        );
+    }
+
+    #[test]
+    fn discover_user_files_walks_a_link_target_once() {
+        // Two links to one tree must not make `analyze` report the same
+        // file, and so the same diagnostics, twice.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Dup.php"), "<?php\n").unwrap();
+
+        for name in ["a", "b"] {
+            let link = root.join(name);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            #[cfg(windows)]
+            std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+        }
+
+        let backend = Backend::new_headless();
+        let files = discover_user_files(&backend, &root, &[]);
+        assert_eq!(
+            files.len(),
+            1,
+            "the linked tree must be reported once, not once per link: {files:?}"
+        );
     }
 }

@@ -159,6 +159,10 @@ pub fn preprocess_with_vars(
     let mut paren_depth = 0;
     let mut in_string: Option<char> = None;
     let mut is_escaped = false;
+    // A `/* ... */` comment can span lines, so it is tracked like
+    // `in_string` above; a `//`/`#` comment always ends at the newline, so
+    // it is tracked per-line instead (declared inside the line loop below).
+    let mut in_block_comment = false;
     let mut html = HtmlPos {
         in_tag: false,
         attr_string: None,
@@ -206,6 +210,7 @@ pub fn preprocess_with_vars(
         let following = &lines[line_idx + 1..];
 
         echo_closes_at_eol = false;
+        let mut in_line_comment = false;
 
         if mode == Mode::Html && in_php_directive_block {
             mode = Mode::Php(false);
@@ -240,8 +245,27 @@ pub fn preprocess_with_vars(
                 continue;
             }
 
-            if !matches!(mode, Mode::Html | Mode::EscapedEcho(_) | Mode::Comment) {
-                if let Some(quote) = in_string {
+            if !matches!(
+                mode,
+                Mode::Html | Mode::EscapedEcho(_) | Mode::Comment | Mode::Verbatim
+            ) {
+                if in_line_comment {
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += ch.len_utf16() as u32;
+                    continue;
+                } else if in_block_comment {
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += ch.len_utf16() as u32;
+                    if ch == '*' && line_chars.get(char_idx) == Some(&'/') {
+                        buffer.push('/');
+                        char_idx += 1;
+                        current_utf16_col += 1;
+                        in_block_comment = false;
+                    }
+                    continue;
+                } else if let Some(quote) = in_string {
                     if is_escaped {
                         is_escaped = false;
                     } else if ch == '\\' {
@@ -258,6 +282,22 @@ pub fn preprocess_with_vars(
                     buffer.push(ch);
                     char_idx += 1;
                     current_utf16_col += ch.len_utf16() as u32;
+                    continue;
+                } else if ch == '/' && line_chars.get(char_idx + 1) == Some(&'*') {
+                    in_block_comment = true;
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += 1;
+                    continue;
+                } else if (ch == '/' && line_chars.get(char_idx + 1) == Some(&'/'))
+                    || (ch == '#' && line_chars.get(char_idx + 1) != Some(&'['))
+                {
+                    // A bare `#` starts a shell-style comment, but `#[` opens a
+                    // PHP attribute instead.
+                    in_line_comment = true;
+                    buffer.push(ch);
+                    char_idx += 1;
+                    current_utf16_col += 1;
                     continue;
                 }
             }
@@ -299,12 +339,20 @@ pub fn preprocess_with_vars(
                     echo::open_escaped(remaining, line_idx, &echo_closes, &mut echo_closes_at_eol)
                 {
                     lowering = matched;
-                } else if let Some(matched) = directive::open(
-                    remaining,
-                    custom_directives,
-                    &mut paren_depth,
-                    &mut in_php_directive_block,
-                ) {
+                } else if let Some(matched) = (char_idx == 0
+                    || !is_word_char(line_chars[char_idx - 1]))
+                .then(|| {
+                    // Blade anchors directives with `\B`, so the `@` in
+                    // `support@foreach.example` is text, not a loop.
+                    directive::open(
+                        remaining,
+                        custom_directives,
+                        &mut paren_depth,
+                        &mut in_php_directive_block,
+                    )
+                })
+                .flatten()
+                {
                     lowering = matched;
                 } else if let Some(matched) = tag::bound_attr(
                     remaining,
@@ -559,4 +607,9 @@ pub fn preprocess_with_vars(
     }
 
     (virtual_php, source_map)
+}
+
+/// A `\w` character in the byte-oriented sense Blade's compiler regexes use.
+fn is_word_char(ch: char) -> bool {
+    ch.is_ascii_alphanumeric() || ch == '_'
 }

@@ -71,7 +71,7 @@ impl Backend {
         // Anonymous classes don't have a meaningful keyword_offset for
         // go-to-definition purposes — use 0 ("not available").
         let keyword_offset = 0;
-        let name = atom(&format!("__anonymous@{}", start_offset));
+        let name = atom(&format!("{ANONYMOUS_CLASS_PREFIX}{start_offset}"));
 
         ClassInfo {
             kind: ClassLikeKind::Class,

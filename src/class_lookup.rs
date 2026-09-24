@@ -258,6 +258,28 @@ pub(crate) fn load_ancestor(
     }
 }
 
+/// Check whether `child` is a subclass (direct or transitive) of
+/// `parent`, including implemented interfaces.
+///
+/// Returns `false` if `child` cannot be loaded or if there is no
+/// inheritance relationship.  Delegates to the shared nominal subtype
+/// walk ([`is_subtype_of`]), which handles
+/// transitive interface extension, FQN normalisation, and cycle
+/// detection.
+pub(crate) fn is_subclass_of(
+    child: &str,
+    parent: &str,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    if child.eq_ignore_ascii_case(parent) {
+        return false; // same class, not a subclass
+    }
+    match class_loader(child) {
+        Some(child_class) => is_subtype_of(&child_class, parent, class_loader),
+        None => false,
+    }
+}
+
 /// Check whether `class` is a subtype of the class identified by
 /// `ancestor_name`.  Returns `true` when:
 ///
@@ -701,9 +723,11 @@ pub(crate) fn is_subtype_of_typed(
                 crate::virtual_members::active_resolved_class_cache(),
             );
             return resolved.properties.iter().any(|p| *p.name == *prop_name)
-                || crate::virtual_members::laravel::where_property::collect_column_names(&cls)
-                    .iter()
-                    .any(|col| *col == *prop_name);
+                || crate::virtual_members::laravel::where_property::collect_column_names(
+                    &resolved,
+                )
+                .iter()
+                .any(|col| *col == *prop_name);
         }
         return true;
     }

@@ -1770,3 +1770,130 @@ async fn test_implementation_excludes_loaded_vendor_implementor() {
         "Vendor implementor AcmeCache must be excluded once the index is ready, got: {uris:?}"
     );
 }
+
+// ─── Traits and stale edges ─────────────────────────────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite.
+
+const SLUGGABLE_PHP: &str = "\
+<?php
+namespace App\\Concerns;
+trait Sluggable {
+    abstract public function slug(): string;
+}
+";
+
+const POST_PHP: &str = "\
+<?php
+namespace App\\Models;
+use App\\Concerns\\Sluggable;
+class Post {
+    use Sluggable;
+    public function slug(): string { return ''; }
+}
+";
+
+/// The `(file name, line)` of each location, sorted.
+fn sites(locations: &[Location]) -> Vec<(String, u32)> {
+    let mut sites: Vec<(String, u32)> = locations
+        .iter()
+        .map(|l| {
+            let path = l.uri.path();
+            (
+                path.rsplit('/').next().unwrap_or(path).to_string(),
+                l.range.start.line,
+            )
+        })
+        .collect();
+    sites.sort();
+    sites
+}
+
+/// A workspace holding the trait and its user, with only the trait open
+/// unless `open_user` is set.
+async fn sluggable_workspace(open_user: bool) -> (Backend, tempfile::TempDir, Url) {
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("src/Concerns/Sluggable.php", SLUGGABLE_PHP),
+            ("src/Models/Post.php", POST_PHP),
+        ],
+    );
+    if open_user {
+        let post_uri = Url::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
+        open_php(&backend, &post_uri, POST_PHP).await;
+    }
+    let trait_uri = Url::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
+    open_php(&backend, &trait_uri, SLUGGABLE_PHP).await;
+    (backend, dir, trait_uri)
+}
+
+#[tokio::test]
+async fn implementation_of_a_trait_reaches_the_classes_that_use_it() {
+    for open_user in [true, false] {
+        let (backend, _dir, uri) = sluggable_workspace(open_user).await;
+        let found = implementation_at(&backend, &uri, 2, 8).await;
+        assert_eq!(
+            sites(&found),
+            vec![("Post.php".to_string(), 3)],
+            "user open: {open_user}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn implementation_of_a_trait_abstract_method_reaches_the_users_method() {
+    for open_user in [true, false] {
+        let (backend, _dir, uri) = sluggable_workspace(open_user).await;
+        let found = implementation_at(&backend, &uri, 3, 30).await;
+        assert_eq!(
+            sites(&found),
+            vec![("Post.php".to_string(), 5)],
+            "user open: {open_user}"
+        );
+    }
+}
+
+/// An edit that drops `implements` drops the class from the interface's
+/// implementations.
+#[tokio::test]
+async fn implementation_forgets_a_class_edited_out_of_the_interface() {
+    let interface = "<?php\nnamespace App;\ninterface HasAvatar {}\n";
+    let user = "<?php\nnamespace App;\nclass User implements HasAvatar {}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[("src/HasAvatar.php", interface), ("src/User.php", user)],
+    );
+    let user_uri = Url::from_file_path(dir.path().join("src/User.php")).unwrap();
+    open_php(&backend, &user_uri, user).await;
+    let interface_uri = Url::from_file_path(dir.path().join("src/HasAvatar.php")).unwrap();
+    open_php(&backend, &interface_uri, interface).await;
+
+    assert_eq!(
+        sites(&implementation_at(&backend, &interface_uri, 2, 12).await),
+        vec![("User.php".to_string(), 2)]
+    );
+
+    let edited = "<?php\nnamespace App;\nclass User {}\n";
+    std::fs::write(dir.path().join("src/User.php"), edited).unwrap();
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: user_uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: edited.to_string(),
+            }],
+        })
+        .await;
+    backend.update_ast(user_uri.as_str(), edited);
+
+    assert!(
+        implementation_at(&backend, &interface_uri, 2, 12)
+            .await
+            .is_empty()
+    );
+}

@@ -29,8 +29,8 @@ use std::collections::HashSet;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::text_position::offset_to_position;
-use crate::types::{ClassLikeKind, DefineInfo, FunctionInfo};
+use crate::text_position::LineIndex;
+use crate::types::{ClassLikeKind, FunctionInfo};
 
 /// Maximum number of symbols returned for a single workspace/symbol request.
 ///
@@ -55,6 +55,46 @@ enum MatchTier {
 struct RankedSymbol {
     symbol: SymbolInformation,
     tier: MatchTier,
+}
+
+/// Where a matched symbol sits in its file, before the file has been read.
+enum Placement {
+    /// At a byte offset; the symbol is dropped when the file cannot be read.
+    Offset(u32),
+    /// At a byte offset, or at the start of the file when it cannot be read.
+    OffsetOrFileStart(u32),
+    /// At the start of the file; nothing is read for it.
+    FileStart,
+}
+
+/// A symbol the query matched, with its position still a byte offset.
+///
+/// Matching runs under the symbol indexes' read locks and records offsets
+/// only; the files are read and the offsets converted once every lock is
+/// released, so a query never blocks a parse of an edit on its disk reads.
+struct PendingSymbol {
+    name: String,
+    kind: SymbolKind,
+    tags: Option<Vec<SymbolTag>>,
+    container_name: Option<String>,
+    file_uri: String,
+    placement: Placement,
+    tier: MatchTier,
+}
+
+/// A class-like's symbol kind and deprecation tag.
+fn class_kind_and_tags(class: &crate::types::ClassInfo) -> (SymbolKind, Option<Vec<SymbolTag>>) {
+    let kind = match class.kind {
+        ClassLikeKind::Class => SymbolKind::CLASS,
+        ClassLikeKind::Interface => SymbolKind::INTERFACE,
+        ClassLikeKind::Trait => SymbolKind::CLASS,
+        ClassLikeKind::Enum => SymbolKind::ENUM,
+    };
+    let tags = class
+        .deprecation_message
+        .as_ref()
+        .map(|_| vec![SymbolTag::DEPRECATED]);
+    (kind, tags)
 }
 
 /// Determine the match tier of `name` against `query_lower`.
@@ -122,6 +162,21 @@ fn ascii_contains_ignore_case(s: &str, needle_lower: &str) -> bool {
         .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
+/// Match tier for a property name, which the user may search for with or
+/// without its leading `$`.
+fn property_match_tier(name: &str, query_lower: &str) -> Option<MatchTier> {
+    match_tier(name, query_lower).or_else(|| {
+        // The `$`-prefixed form can only match where the bare name does not
+        // when the query itself contains a `$`, so the rest of the time the
+        // formatting is skipped.
+        if query_lower.contains('$') {
+            match_tier(&format!("${name}"), query_lower)
+        } else {
+            None
+        }
+    })
+}
+
 /// Extract the short name from a symbol name for relevance ranking.
 ///
 /// For namespaced names like `"App\\Models\\User"`, returns `"User"`.
@@ -157,7 +212,7 @@ impl Backend {
     #[allow(deprecated)] // SymbolInformation::deprecated is deprecated in the LSP types crate
     pub fn handle_workspace_symbol(&self, query: &str) -> Option<Vec<SymbolInformation>> {
         let query_lower = query.to_lowercase();
-        let mut ranked: Vec<RankedSymbol> = Vec::new();
+        let mut pending: Vec<PendingSymbol> = Vec::new();
 
         // Track FQNs already emitted so that fqn_uri_index doesn't
         // produce duplicates for classes already in the uri_classes_index.
@@ -175,12 +230,7 @@ impl Backend {
                         continue;
                     }
 
-                    let fqn = class.fqn().to_string();
-
-                    let content = match self.get_file_content_arc(file_uri) {
-                        Some(c) => c,
-                        None => continue,
-                    };
+                    let fqn = class.fqn();
 
                     // ── The class itself ─────────────────────────────
                     // Match against both the FQN and the short class name.
@@ -190,30 +240,15 @@ impl Backend {
                     if let Some(tier) = class_tier
                         && class.keyword_offset != 0
                     {
-                        let pos = offset_to_position(&content, class.keyword_offset as usize);
-                        let kind = match class.kind {
-                            ClassLikeKind::Class => SymbolKind::CLASS,
-                            ClassLikeKind::Interface => SymbolKind::INTERFACE,
-                            ClassLikeKind::Trait => SymbolKind::CLASS,
-                            ClassLikeKind::Enum => SymbolKind::ENUM,
-                        };
-
-                        let tags = class
-                            .deprecation_message
-                            .as_ref()
-                            .map(|_| vec![SymbolTag::DEPRECATED]);
-
-                        seen_fqns.insert(fqn.clone());
-
-                        ranked.push(RankedSymbol {
-                            symbol: make_symbol(
-                                fqn.clone(),
-                                kind,
-                                tags,
-                                file_uri,
-                                pos,
-                                class.file_namespace.map(|a| a.to_string()),
-                            ),
+                        let (kind, tags) = class_kind_and_tags(class);
+                        seen_fqns.insert(fqn.to_string());
+                        pending.push(PendingSymbol {
+                            name: fqn.to_string(),
+                            kind,
+                            tags,
+                            container_name: class.file_namespace.map(|a| a.to_string()),
+                            file_uri: file_uri.clone(),
+                            placement: Placement::Offset(class.keyword_offset),
                             tier,
                         });
                     }
@@ -221,113 +256,72 @@ impl Backend {
                     // ── Methods ──────────────────────────────────────
                     for method in &class.methods {
                         // Skip virtual methods — they have no real source position.
-                        if method.is_virtual {
+                        if method.is_virtual || method.name_offset == 0 {
                             continue;
                         }
-                        if method.name_offset == 0 {
+                        let Some(tier) = match_tier(&method.name, &query_lower) else {
                             continue;
-                        }
-
-                        let tier = match match_tier(&method.name, &query_lower) {
-                            Some(t) => t,
-                            None => continue,
                         };
-
-                        let pos = offset_to_position(&content, method.name_offset as usize);
-
-                        let tags = method
-                            .deprecation_message
-                            .as_ref()
-                            .map(|_| vec![SymbolTag::DEPRECATED]);
-
-                        ranked.push(RankedSymbol {
-                            symbol: make_symbol(
-                                format!("{}::{}", fqn, method.name),
-                                SymbolKind::METHOD,
-                                tags,
-                                file_uri,
-                                pos,
-                                Some(fqn.clone()),
-                            ),
+                        pending.push(PendingSymbol {
+                            name: format!("{}::{}", fqn, method.name),
+                            kind: SymbolKind::METHOD,
+                            tags: method
+                                .deprecation_message
+                                .as_ref()
+                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                            container_name: Some(fqn.to_string()),
+                            file_uri: file_uri.clone(),
+                            placement: Placement::Offset(method.name_offset),
                             tier,
                         });
                     }
 
                     // ── Properties ───────────────────────────────────
                     for prop in &class.properties {
-                        if prop.is_virtual {
+                        if prop.is_virtual || prop.name_offset == 0 {
                             continue;
                         }
-                        if prop.name_offset == 0 {
+                        let Some(tier) = property_match_tier(&prop.name, &query_lower) else {
                             continue;
-                        }
-
-                        // Match against the property name (without $).
-                        let match_name = format!("${}", prop.name);
-                        let tier = match_tier(&prop.name, &query_lower)
-                            .or_else(|| match_tier(&match_name, &query_lower));
-                        let tier = match tier {
-                            Some(t) => t,
-                            None => continue,
                         };
-
-                        let pos = offset_to_position(&content, prop.name_offset as usize);
-
-                        let tags = prop
-                            .deprecation_message
-                            .as_ref()
-                            .map(|_| vec![SymbolTag::DEPRECATED]);
-
-                        ranked.push(RankedSymbol {
-                            symbol: make_symbol(
-                                format!("{}::${}", fqn, prop.name),
-                                SymbolKind::PROPERTY,
-                                tags,
-                                file_uri,
-                                pos,
-                                Some(fqn.clone()),
-                            ),
+                        pending.push(PendingSymbol {
+                            name: format!("{}::${}", fqn, prop.name),
+                            kind: SymbolKind::PROPERTY,
+                            tags: prop
+                                .deprecation_message
+                                .as_ref()
+                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                            container_name: Some(fqn.to_string()),
+                            file_uri: file_uri.clone(),
+                            placement: Placement::Offset(prop.name_offset),
                             tier,
                         });
                     }
 
                     // ── Class constants ──────────────────────────────
                     for constant in &class.constants {
-                        if constant.is_virtual {
+                        if constant.is_virtual || constant.name_offset == 0 {
                             continue;
                         }
-                        if constant.name_offset == 0 {
+                        let Some(tier) = match_tier(&constant.name, &query_lower) else {
                             continue;
-                        }
-
-                        let tier = match match_tier(&constant.name, &query_lower) {
-                            Some(t) => t,
-                            None => continue,
                         };
-
-                        let pos = offset_to_position(&content, constant.name_offset as usize);
-
-                        let tags = constant
-                            .deprecation_message
-                            .as_ref()
-                            .map(|_| vec![SymbolTag::DEPRECATED]);
-
                         // Use ENUM_MEMBER for enum cases, CONSTANT for class constants.
                         let kind = if constant.is_enum_case {
                             SymbolKind::ENUM_MEMBER
                         } else {
                             SymbolKind::CONSTANT
                         };
-
-                        ranked.push(RankedSymbol {
-                            symbol: make_symbol(
-                                format!("{}::{}", fqn, constant.name),
-                                kind,
-                                tags,
-                                file_uri,
-                                pos,
-                                Some(fqn.clone()),
-                            ),
+                        pending.push(PendingSymbol {
+                            name: format!("{}::{}", fqn, constant.name),
+                            kind,
+                            tags: constant
+                                .deprecation_message
+                                .as_ref()
+                                .map(|_| vec![SymbolTag::DEPRECATED]),
+                            container_name: Some(fqn.to_string()),
+                            file_uri: file_uri.clone(),
+                            placement: Placement::Offset(constant.name_offset),
                             tier,
                         });
                     }
@@ -349,11 +343,10 @@ impl Backend {
                 let display_name = function_display_name(func);
 
                 let func_short = short_name(&display_name);
-                let tier = match match_tier(&display_name, &query_lower)
+                let Some(tier) = match_tier(&display_name, &query_lower)
                     .or_else(|| match_tier(func_short, &query_lower))
-                {
-                    Some(t) => t,
-                    None => continue,
+                else {
+                    continue;
                 };
 
                 // Skip functions with no usable offset.
@@ -361,27 +354,16 @@ impl Backend {
                     continue;
                 }
 
-                let content = match self.get_file_content_arc(file_uri) {
-                    Some(c) => c,
-                    None => continue,
-                };
-
-                let pos = offset_to_position(&content, func.name_offset as usize);
-
-                let tags = func
-                    .deprecation_message
-                    .as_ref()
-                    .map(|_| vec![SymbolTag::DEPRECATED]);
-
-                ranked.push(RankedSymbol {
-                    symbol: make_symbol(
-                        display_name,
-                        SymbolKind::FUNCTION,
-                        tags,
-                        file_uri,
-                        pos,
-                        func.namespace.clone(),
-                    ),
+                pending.push(PendingSymbol {
+                    name: display_name,
+                    kind: SymbolKind::FUNCTION,
+                    tags: func
+                        .deprecation_message
+                        .as_ref()
+                        .map(|_| vec![SymbolTag::DEPRECATED]),
+                    container_name: func.namespace.clone(),
+                    file_uri: file_uri.clone(),
+                    placement: Placement::Offset(func.name_offset),
                     tier,
                 });
             }
@@ -394,11 +376,10 @@ impl Backend {
                 // A namespaced `const` is indexed fully-qualified, so the
                 // query has to be matched against its last segment too —
                 // users search for `GRADES`, not `App\Config\GRADES`.
-                let tier = match match_tier(name, &query_lower)
+                let Some(tier) = match_tier(name, &query_lower)
                     .or_else(|| match_tier(short_name(name), &query_lower))
-                {
-                    Some(t) => t,
-                    None => continue,
+                else {
+                    continue;
                 };
 
                 // Skip constants with no usable offset.
@@ -406,15 +387,13 @@ impl Backend {
                     continue;
                 }
 
-                let content = match self.get_file_content_arc(&info.file_uri) {
-                    Some(c) => c,
-                    None => continue,
-                };
-
-                let pos = offset_to_position(&content, info.name_offset as usize);
-
-                ranked.push(RankedSymbol {
-                    symbol: make_constant_symbol(name, info, pos),
+                pending.push(PendingSymbol {
+                    name: name.to_string(),
+                    kind: SymbolKind::CONSTANT,
+                    tags: None,
+                    container_name: namespace_from_fqn(name),
+                    file_uri: info.file_uri.clone(),
+                    placement: Placement::Offset(info.name_offset),
                     tier,
                 });
             }
@@ -438,106 +417,65 @@ impl Backend {
                 }
 
                 let fqn_short = short_name(fqn);
-                let tier = match match_tier(fqn, &query_lower)
-                    .or_else(|| match_tier(fqn_short, &query_lower))
-                {
-                    Some(t) => t,
-                    None => continue,
+                let Some(tier) =
+                    match_tier(fqn, &query_lower).or_else(|| match_tier(fqn_short, &query_lower))
+                else {
+                    continue;
                 };
 
-                let (kind, tags, container_name) = if let Some(class_info) = fqn_idx.get(fqn) {
-                    let k = match class_info.kind {
-                        ClassLikeKind::Class => SymbolKind::CLASS,
-                        ClassLikeKind::Interface => SymbolKind::INTERFACE,
-                        ClassLikeKind::Trait => SymbolKind::CLASS,
-                        ClassLikeKind::Enum => SymbolKind::ENUM,
-                    };
-                    let t = class_info
-                        .deprecation_message
-                        .as_ref()
-                        .map(|_| vec![SymbolTag::DEPRECATED]);
-                    (k, t, class_info.file_namespace.map(|a| a.to_string()))
-                } else {
-                    (SymbolKind::CLASS, None, namespace_from_fqn(fqn))
-                };
-
-                // Try to compute a precise position from file content.
-                let pos = if let Some(class_info) = fqn_idx.get(fqn) {
-                    if class_info.keyword_offset > 0 {
-                        if let Some(content) = self.get_file_content_arc(file_uri) {
-                            offset_to_position(&content, class_info.keyword_offset as usize)
+                // A class the parser has seen carries its kind, deprecation
+                // and declaration offset; one known only from the Composer
+                // classmap has not been parsed, so the file's start is all
+                // the position there is to offer.
+                let (kind, tags, container_name, placement) = match fqn_idx.get(fqn) {
+                    Some(class_info) => {
+                        let (kind, tags) = class_kind_and_tags(class_info);
+                        let placement = if class_info.keyword_offset > 0 {
+                            Placement::OffsetOrFileStart(class_info.keyword_offset)
                         } else {
-                            Position::new(0, 0)
-                        }
-                    } else {
-                        Position::new(0, 0)
+                            Placement::FileStart
+                        };
+                        (
+                            kind,
+                            tags,
+                            class_info.file_namespace.map(|a| a.to_string()),
+                            placement,
+                        )
                     }
-                } else {
-                    Position::new(0, 0)
-                };
-
-                seen_fqns.insert(fqn.to_owned());
-
-                ranked.push(RankedSymbol {
-                    symbol: make_symbol(fqn.to_owned(), kind, tags, file_uri, pos, container_name),
-                    tier,
-                });
-            }
-        }
-
-        // ── class index (Composer vendor classes) ───────────────────
-        // Only searched when the user has typed a query, same rationale
-        // as above.
-        if !query_lower.is_empty() {
-            let cmap = self.symbols.fqn_uri_index.read();
-            for (fqn, file_uri) in cmap.iter() {
-                if seen_fqns.contains(fqn) {
-                    continue;
-                }
-
-                let fqn_short = short_name(fqn);
-                let tier = match match_tier(fqn, &query_lower)
-                    .or_else(|| match_tier(fqn_short, &query_lower))
-                {
-                    Some(t) => t,
-                    None => continue,
-                };
-
-                // A classmap entry whose path will not parse as a URI
-                // names nothing an editor could open, so it is dropped
-                // rather than listed at a placeholder location.
-                if Url::parse(file_uri).is_err() {
-                    continue;
-                }
-
-                seen_fqns.insert(fqn.to_owned());
-
-                // A class known only from the Composer classmap has not
-                // been parsed, so the file's start is all the position
-                // there is to offer.
-                ranked.push(RankedSymbol {
-                    symbol: make_symbol(
-                        fqn.to_owned(),
+                    None => (
                         SymbolKind::CLASS,
                         None,
-                        file_uri,
-                        Position::new(0, 0),
                         namespace_from_fqn(fqn),
+                        Placement::FileStart,
                     ),
+                };
+
+                seen_fqns.insert(fqn.to_owned());
+
+                pending.push(PendingSymbol {
+                    name: fqn.to_owned(),
+                    kind,
+                    tags,
+                    container_name,
+                    file_uri: file_uri.clone(),
+                    placement,
                     tier,
                 });
             }
         }
 
-        // ── Sort by relevance then alphabetically ───────────────────
+        // ── Sort by relevance then alphabetically, cap at MAX_RESULTS ──
+        // Sorting before the files are read keeps the disk reads to the
+        // symbols that will be answered.
+        pending.sort_by(|a, b| a.tier.cmp(&b.tier).then_with(|| a.name.cmp(&b.name)));
+        pending.truncate(MAX_RESULTS);
+
+        let mut ranked = self.locate_symbols(pending);
         ranked.sort_by(|a, b| {
             a.tier
                 .cmp(&b.tier)
                 .then_with(|| a.symbol.name.cmp(&b.symbol.name))
         });
-
-        // ── Cap at MAX_RESULTS ──────────────────────────────────────
-        ranked.truncate(MAX_RESULTS);
 
         let symbols: Vec<SymbolInformation> = ranked.into_iter().map(|r| r.symbol).collect();
 
@@ -546,6 +484,49 @@ impl Backend {
         } else {
             Some(symbols)
         }
+    }
+
+    /// Turn each pending symbol's byte offset into an LSP position.
+    ///
+    /// A file that is not open in the editor is read from disk, so it is
+    /// read once for every symbol in it, and one line table serves them
+    /// all: a fresh `offset_to_position` scan per symbol is quadratic in
+    /// the file size.
+    fn locate_symbols(&self, mut pending: Vec<PendingSymbol>) -> Vec<RankedSymbol> {
+        pending.sort_by(|a, b| a.file_uri.cmp(&b.file_uri));
+        let mut ranked = Vec::with_capacity(pending.len());
+        for group in pending.chunk_by(|a, b| a.file_uri == b.file_uri) {
+            let needs_content = group
+                .iter()
+                .any(|symbol| !matches!(symbol.placement, Placement::FileStart));
+            let content = needs_content
+                .then(|| self.get_file_content_arc(&group[0].file_uri))
+                .flatten();
+            let index = content.as_deref().map(|c| LineIndex::new(c));
+            for symbol in group {
+                let pos = match (&symbol.placement, &index) {
+                    (Placement::FileStart, _) => Position::new(0, 0),
+                    (
+                        Placement::Offset(offset) | Placement::OffsetOrFileStart(offset),
+                        Some(index),
+                    ) => index.position(*offset as usize),
+                    (Placement::OffsetOrFileStart(_), None) => Position::new(0, 0),
+                    (Placement::Offset(_), None) => continue,
+                };
+                ranked.push(RankedSymbol {
+                    symbol: make_symbol(
+                        symbol.name.clone(),
+                        symbol.kind,
+                        symbol.tags.clone(),
+                        &symbol.file_uri,
+                        pos,
+                        symbol.container_name.clone(),
+                    ),
+                    tier: symbol.tier,
+                });
+            }
+        }
+        ranked
     }
 }
 
@@ -593,18 +574,6 @@ fn make_symbol(
         },
         container_name,
     }
-}
-
-/// Build a `SymbolInformation` for a global constant.
-fn make_constant_symbol(name: &str, info: &DefineInfo, pos: Position) -> SymbolInformation {
-    make_symbol(
-        name.to_string(),
-        SymbolKind::CONSTANT,
-        None,
-        &info.file_uri,
-        pos,
-        namespace_from_fqn(name),
-    )
 }
 
 #[cfg(test)]

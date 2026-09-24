@@ -244,6 +244,86 @@ async fn test_psalm_type_alias_works() {
     }
 }
 
+// ─── Chained named @psalm-type aliases ──────────────────────────────────────
+
+/// Ported from Mago issue_1116.php: three separately *named* `@psalm-type`
+/// aliases (not one inline nested shape) chain into each other by name —
+/// `Bar` references `Baz`, `Baz` references `Qux` — and one leaf alias is
+/// `@psalm-import-type`'d from an unrelated class. Array key completion
+/// must resolve each named hop in turn: `$val['baz']` through the `Bar`
+/// alias to find `Baz`, then `['qux']` through `Baz` to find `Qux`.
+#[tokio::test]
+async fn test_psalm_type_chained_named_aliases_nested_key_completion() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///chained_named_aliases.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @psalm-type FooValueType = int\n",
+        " */\n",
+        "final class Foo {\n",
+        "}\n",
+        "/**\n",
+        " * @psalm-type Bar = array{'baz': Baz}\n",
+        " * @psalm-type Baz = array{'qux': Qux}\n",
+        " * @psalm-type Qux = array{'foo': FooValueType}\n",
+        " *\n",
+        " * @psalm-import-type FooValueType from Foo\n",
+        " */\n",
+        "class BarService {\n",
+        "    /** @param Bar $val */\n",
+        "    public function run(mixed $val): void {\n",
+        "        $val['baz']['qux']['\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // `$val['baz']['qux']['` on line 16
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 16,
+                    character: 28,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return array key completions through chained named aliases"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let keys = labels_by_kind(&items, CompletionItemKind::FIELD);
+            assert!(
+                keys.contains(&"foo"),
+                "Should include 'foo' from the Qux alias at the end of the chain, got: {:?}",
+                keys
+            );
+        }
+        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+    }
+}
+
 // ─── @phpstan-type with `=` separator ───────────────────────────────────────
 
 /// Both `@phpstan-type Name Definition` and `@phpstan-type Name = Definition`
@@ -620,6 +700,96 @@ async fn test_phpstan_import_type_same_file() {
                 methods.contains(&"getCity"),
                 "Should include Address::getCity() via imported Location alias, got: {:?}",
                 methods
+            );
+        }
+        other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
+    }
+}
+
+// ─── @phpstan-import-type combined with @template-implements ───────────────
+
+/// Ported from Mago issue_1040.php: a generic interface's method parameter
+/// is typed by the interface's own template (`TConfiguration`); the
+/// implementing class satisfies that template via `@template-implements`
+/// with an alias imported (`@phpstan-import-type`) from a third class,
+/// and does not redeclare the shape on its own override. Array key
+/// completion on the parameter inside the *implementing* method's body
+/// must chase: template-implements substitution -> imported alias ->
+/// array shape, none of which is written on the override itself.
+#[tokio::test]
+async fn test_phpstan_import_type_via_template_implements() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///import_type_template_implements.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TConfiguration of array<array-key, mixed>\n",
+        " */\n",
+        "interface ContainerInterface {\n",
+        "    /** @param TConfiguration $configuration */\n",
+        "    public function get(array $configuration): string;\n",
+        "}\n",
+        "/**\n",
+        " * @phpstan-type MyConfiguration array{name: string, value: int}\n",
+        " */\n",
+        "class Calculator {\n",
+        "}\n",
+        "/**\n",
+        " * @phpstan-import-type MyConfiguration from Calculator\n",
+        " * @template-implements ContainerInterface<MyConfiguration>\n",
+        " */\n",
+        "class MyContainer implements ContainerInterface {\n",
+        "    public function get(array $configuration): string {\n",
+        "        return $configuration['\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // `$configuration['` on line 19
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 19,
+                    character: 31,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(
+        result.is_some(),
+        "Should return array key completions through template-implements + imported alias"
+    );
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let keys = labels_by_kind(&items, CompletionItemKind::FIELD);
+            assert!(
+                keys.contains(&"name"),
+                "Should include 'name' from the imported MyConfiguration shape, got: {:?}",
+                keys
+            );
+            assert!(
+                keys.contains(&"value"),
+                "Should include 'value' from the imported MyConfiguration shape, got: {:?}",
+                keys
             );
         }
         other => panic!("Expected CompletionResponse::Array, got: {:?}", other),

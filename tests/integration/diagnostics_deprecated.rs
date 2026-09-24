@@ -1,6 +1,6 @@
 use crate::common::{
     create_test_backend, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs,
+    create_test_backend_with_function_stubs, find_actions_containing,
 };
 use phpantom_lsp::atom::atom;
 use phpantom_lsp::php_type::PhpType;
@@ -2326,15 +2326,7 @@ fn replace_deprecated_function_call_action_offered() {
 
     let actions = backend.handle_code_action(uri, text, &params);
 
-    let replace_actions: Vec<_> = actions
-        .iter()
-        .filter(|a| match a {
-            tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(ca) => {
-                ca.title.contains("Replace")
-            }
-            _ => false,
-        })
-        .collect();
+    let replace_actions = find_actions_containing(&actions, "Replace");
 
     assert!(
         !replace_actions.is_empty(),
@@ -2349,25 +2341,26 @@ fn replace_deprecated_function_call_action_offered() {
     );
 
     // Verify the replacement text includes the expanded template.
-    if let tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(ca) = &replace_actions[0] {
-        let edit = ca.edit.as_ref().expect("code action should have an edit");
-        let changes = edit.changes.as_ref().expect("edit should have changes");
-        let edits = changes
-            .values()
-            .next()
-            .expect("should have at least one file edit");
-        let text_edit = &edits[0];
-        assert!(
-            text_edit.new_text.contains("exif_read_data"),
-            "Replacement should contain 'exif_read_data', got: {}",
-            text_edit.new_text
-        );
-        assert!(
-            text_edit.new_text.contains("'photo.jpg'"),
-            "Replacement should contain the original argument, got: {}",
-            text_edit.new_text
-        );
-    }
+    let edit = replace_actions[0]
+        .edit
+        .as_ref()
+        .expect("code action should have an edit");
+    let changes = edit.changes.as_ref().expect("edit should have changes");
+    let edits = changes
+        .values()
+        .next()
+        .expect("should have at least one file edit");
+    let text_edit = &edits[0];
+    assert!(
+        text_edit.new_text.contains("exif_read_data"),
+        "Replacement should contain 'exif_read_data', got: {}",
+        text_edit.new_text
+    );
+    assert!(
+        text_edit.new_text.contains("'photo.jpg'"),
+        "Replacement should contain the original argument, got: {}",
+        text_edit.new_text
+    );
 }
 
 // ─── No replacement action when no replacement template ─────────────────────
@@ -2411,15 +2404,7 @@ fn no_replace_action_when_no_replacement_template() {
 
     let actions = backend.handle_code_action(uri, text, &params);
 
-    let replace_actions: Vec<_> = actions
-        .iter()
-        .filter(|a| match a {
-            tower_lsp::lsp_types::CodeActionOrCommand::CodeAction(ca) => {
-                ca.title.contains("Replace")
-            }
-            _ => false,
-        })
-        .collect();
+    let replace_actions = find_actions_containing(&actions, "Replace");
 
     assert!(
         replace_actions.is_empty(),

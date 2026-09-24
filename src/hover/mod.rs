@@ -121,7 +121,63 @@ impl Backend {
             return Some(hover);
         }
 
+        // ── dropped trailing statement ──────────────────────────
+        // An incomplete construct at the end of a file (`$obj->` or
+        // `Foo::` with nothing typed after it yet) is a parse error mago's
+        // recovery drops entirely rather than keeping as an error node, so
+        // the symbol map has no span there at all — not just a gap between
+        // spans, but nothing past the last one it could build. Recover the
+        // bare `$variable` or class name touching the cursor from the raw
+        // text and feed it into the same variable/class hover paths a
+        // symbol-map hit would have used.
+        if let Some(hover) = self.hover_dropped_tail_identifier(uri, content, offset) {
+            return Some(hover);
+        }
+
         None
+    }
+
+    /// Fallback for [`handle_hover`] when the symbol map has nothing at or
+    /// after `offset`: read the `$variable` or bare identifier touching the
+    /// cursor directly from `content` and hover it through the normal
+    /// variable/class paths.
+    ///
+    /// Only consulted when nothing in the map extends this far, so it never
+    /// second-guesses successfully parsed code — string literals, comments,
+    /// and ordinary whitespace gaps all sit before the map's last span and
+    /// are left alone.
+    fn hover_dropped_tail_identifier(
+        &self,
+        uri: &str,
+        content: &str,
+        offset: u32,
+    ) -> Option<Hover> {
+        let past_every_span = self
+            .symbol_maps
+            .read()
+            .get(uri)
+            .is_some_and(|map| map.spans.iter().all(|s| s.end <= offset));
+        if !past_every_span {
+            return None;
+        }
+
+        let (is_variable, name, token_start) = identifier_token_at(content, offset as usize)?;
+
+        let ctx = self.file_context_at(uri, offset);
+        let current_class = find_class_at_offset(&ctx.classes, offset);
+
+        let mut hover = if is_variable {
+            self.hover_variable(&name, uri, content, offset, current_class, &ctx)?
+        } else {
+            let class_loader = self.class_loader(&ctx);
+            self.hover_class_reference(&name, uri, content, &class_loader, offset)?
+        };
+        let token_end = token_start + name.len() as u32 + u32::from(is_variable);
+        hover.range = Some(Range {
+            start: crate::text_position::offset_to_position(content, token_start as usize),
+            end: crate::text_position::offset_to_position(content, token_end as usize),
+        });
+        Some(hover)
     }
 
     /// Dispatch a symbol-map hit to the appropriate hover path.
@@ -564,16 +620,44 @@ impl Backend {
         uri: &str,
         dir: &str,
     ) -> Option<(Url, String)> {
-        let location =
-            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri)
-                .into_iter()
-                .next()?;
+        let locations =
+            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri);
+        let location = if matches!(kind, crate::symbol_map::LaravelStringKind::Trans) {
+            self.in_translation_locale(locations)?
+        } else {
+            locations.into_iter().next()?
+        };
         let path = location.uri.path();
         let short_path = match path.rsplit_once(&format!("/{dir}/")) {
             Some((_, rest)) => format!("{dir}/{rest}"),
             None => path.to_string(),
         };
         Some((location.uri, short_path))
+    }
+
+    /// The translation among `locations` the application reads: the one in
+    /// `app.locale`, else in `app.fallback_locale` (both `en` unless
+    /// configured, as in Laravel), else the first.
+    fn in_translation_locale(&self, locations: Vec<Location>) -> Option<Location> {
+        let trees = self.cached_config_trees();
+        let app = trees.iter().find(|(prefix, _)| prefix == "app");
+        let configured = |key: &str| -> String {
+            app.and_then(|(_, tree)| tree.value_at(&[key]))
+                .map(|value| value.as_strings().0)
+                .and_then(|values| values.into_iter().next())
+                .unwrap_or_else(|| "en".to_string())
+        };
+        for locale in [configured("locale"), configured("fallback_locale")] {
+            let dir = format!("/{locale}/");
+            let json = format!("/{locale}.json");
+            if let Some(found) = locations.iter().find(|l| {
+                let path = l.uri.path();
+                path.contains(&dir) || path.ends_with(&json)
+            }) {
+                return Some(found.clone());
+            }
+        }
+        locations.into_iter().next()
     }
 
     /// Build hover content for a Laravel string key (route name, config
@@ -915,6 +999,68 @@ impl Backend {
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }
+}
+
+/// Whether `c` can appear inside a PHP identifier.  PHP allows every byte
+/// from `0x80` up, which is why this is not just `is_alphanumeric`.
+fn is_php_identifier_char(c: char) -> bool {
+    c == '_' || c.is_ascii_alphanumeric() || (c as u32) >= 0x80
+}
+
+/// Find the `$variable` or bare identifier touching byte offset `offset`
+/// in `content`, for cursor positions no AST node covers.
+///
+/// Returns `(is_variable, name, token_start)`: `name` excludes the `$`
+/// sigil, and `token_start` is the byte offset of the `$` for a variable
+/// or of the identifier's first byte otherwise. `None` when the offset
+/// (or the byte just before it, for end-of-token cursors) does not sit on
+/// an identifier character.
+fn identifier_token_at(content: &str, offset: usize) -> Option<(bool, String, u32)> {
+    let anchor = if content
+        .get(offset..)
+        .and_then(|s| s.chars().next())
+        .is_some_and(is_php_identifier_char)
+    {
+        offset
+    } else {
+        let prev = content.get(..offset).and_then(|s| s.chars().next_back())?;
+        if !is_php_identifier_char(prev) {
+            return None;
+        }
+        offset - prev.len_utf8()
+    };
+
+    let mut start = anchor;
+    while start > 0 {
+        let Some(prev) = content[..start].chars().next_back() else {
+            break;
+        };
+        if !is_php_identifier_char(prev) {
+            break;
+        }
+        start -= prev.len_utf8();
+    }
+
+    let mut end = anchor;
+    if let Some(c) = content[anchor..].chars().next()
+        && is_php_identifier_char(c)
+    {
+        end += c.len_utf8();
+    }
+    while end < content.len() {
+        let Some(c) = content[end..].chars().next() else {
+            break;
+        };
+        if !is_php_identifier_char(c) {
+            break;
+        }
+        end += c.len_utf8();
+    }
+
+    let is_variable = start > 0 && content.as_bytes()[start - 1] == b'$';
+    let name = content[start..end].to_string();
+    let token_start = if is_variable { start - 1 } else { start };
+    Some((is_variable, name, token_start as u32))
 }
 
 /// Hover for `$this->argument('user')` / `$this->option('queue')`: resolve

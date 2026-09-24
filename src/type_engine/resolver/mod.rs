@@ -323,8 +323,6 @@ fn resolve_target_classes_expr_inner(
     match expr {
         // ── Keywords that always mean "current class" ────────────
         SubjectExpr::This => {
-            use crate::type_engine::variable::forward_walk;
-
             // `$this` is not available inside static methods.
             if current_class.is_some() && ctx.is_in_static_method {
                 return vec![];
@@ -359,7 +357,7 @@ fn resolve_target_classes_expr_inner(
                     !types.is_empty()
                         && types.iter().all(|rt| {
                             rt.class_info.as_ref().is_some_and(|ci| {
-                                forward_walk::is_subclass_of(
+                                crate::class_lookup::is_subclass_of(
                                     &ci.fqn(),
                                     &override_cls.fqn(),
                                     class_loader,
@@ -655,12 +653,27 @@ fn resolve_target_classes_expr_inner(
                 receiver.unwrap_or_else(|| resolve_target_classes_expr(base, access_kind, ctx)),
             );
             let mut arc_results: Vec<Arc<ClassInfo>> = Vec::new();
+            // The generic members of the property's hint, e.g.
+            // `Collection<int, Post>`.  The classes resolved from it carry
+            // only its base name, so each is given its generic spelling
+            // back once narrowing has settled which classes remain.
+            let mut generic_hints: Vec<PhpType> = Vec::new();
             for cls in &base_arcs {
-                let resolved = super::type_resolution::resolve_property_types(
-                    property,
-                    cls,
+                let Some(hint) = resolve_property_type_hint(cls, property, class_loader) else {
+                    continue;
+                };
+                let resolved = super::type_resolution::type_hint_to_classes_typed(
+                    &hint,
+                    &cls.fqn(),
                     all_classes,
                     class_loader,
+                );
+                generic_hints.extend(
+                    hint.unwrap_nullable()
+                        .union_members()
+                        .into_iter()
+                        .filter(|member| matches!(member.kind(), TypeKind::Generic(_)))
+                        .cloned(),
                 );
 
                 ClassInfo::extend_unique_arc(&mut arc_results, resolved);
@@ -722,6 +735,20 @@ fn resolve_target_classes_expr_inner(
                 let mut narrowed = ResolvedType::from_classes(arc_results);
                 if is_intersection {
                     ResolvedType::tag_as_intersection(&mut narrowed);
+                } else if !generic_hints.is_empty() {
+                    for rt in &mut narrowed {
+                        let Some(class) = &rt.class_info else {
+                            continue;
+                        };
+                        let fqn = class.fqn();
+                        if let Some(hint) = generic_hints.iter().find(|hint| {
+                            hint.base_name().is_some_and(|base| {
+                                base == fqn.as_str() || crate::util::short_name(&fqn) == base
+                            })
+                        }) {
+                            rt.type_string = hint.clone();
+                        }
+                    }
                 }
                 narrowed
             }
@@ -1420,11 +1447,16 @@ fn resolve_this_from_scope(ctx: &ResolutionCtx<'_>) -> Option<Vec<ResolvedType>>
         return (!from_scope.is_empty()).then_some(from_scope);
     }
 
-    if forward_walk::is_diagnostic_scope_active() && !forward_walk::is_building_scopes() {
+    if forward_walk::is_diagnostic_scope_active()
+        && !forward_walk::is_building_scopes()
+        && forward_walk::scope_snapshots_cover(ctx.cursor_offset)
+    {
         // The snapshot is authoritative here: the walker records `$this`
         // exactly when something narrowed or seeded it, so a miss means
         // there is no proof to find and re-walking would only repeat the
-        // pass that built the snapshot, once per `$this->` site.
+        // pass that built the snapshot, once per `$this->` site.  That
+        // only holds where the walk actually went, which a targeted walk
+        // limits to the bodies it was asked about.
         return forward_walk::lookup_diagnostic_scope("$this", ctx.cursor_offset)
             .filter(|types| !types.is_empty());
     }

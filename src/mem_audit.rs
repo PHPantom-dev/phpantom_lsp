@@ -160,7 +160,7 @@ fn s(o: &Option<String>) -> Sz {
     z
 }
 
-fn vs(v: &Vec<String>) -> Sz {
+fn vs(v: &[String]) -> Sz {
     let mut z = Sz::default();
     z.add(v.capacity() * size_of::<String>());
     for x in v {
@@ -466,10 +466,20 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     z += opt_ty(&l.factory_model);
     z += opt_ty(&l.custom_collection);
     z += opt_ty(&l.custom_builder);
-    z.add(l.casts_definitions.capacity() * size_of::<(String, String)>());
-    for (a, b) in &l.casts_definitions {
-        z.add(a.capacity());
-        z.add(b.capacity());
+    let cast_sources = l.cast_sources.as_deref();
+    if cast_sources.is_some() {
+        z.add(size_of::<crate::types::CastSources>());
+    }
+    for casts in std::iter::once(&l.casts_definitions).chain(
+        cast_sources
+            .into_iter()
+            .flat_map(|c| [&c.property, &c.method]),
+    ) {
+        z.add(casts.capacity() * size_of::<(String, String)>());
+        for (a, b) in casts {
+            z.add(a.capacity());
+            z.add(b.capacity());
+        }
     }
     z += vs(&l.dates_definitions);
     z.add(l.attributes_definitions.capacity() * size_of::<(String, PhpType)>());
@@ -483,6 +493,10 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
         z.add(b.capacity());
     }
     z += vs(&l.column_names);
+    z.add(l.column_sources.capacity() * size_of::<u16>());
+    if let Some(ids) = &l.unique_ids {
+        z += vs(ids);
+    }
     for o in [
         &l.connection_name,
         &l.table_name,
@@ -497,6 +511,7 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     if let Some(Some(x)) = &l.updated_at_name {
         z.add(x.capacity());
     }
+    z += s(&l.deleted_at_name);
     z.add(l.belongs_to_many_pivots.capacity() * size_of::<crate::types::PivotRelation>());
     for p in &l.belongs_to_many_pivots {
         z.add(p.method.capacity());
@@ -1712,7 +1727,8 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.symbols.global_defines.write().clear()
     });
     probe("gti_index", &mut || {
-        backend.symbols.gti_index.write().clear()
+        backend.symbols.gti_index.write().clear();
+        backend.symbols.gti_parents_index.write().clear();
     });
     probe("uri_globals_index", &mut || {
         backend.symbols.uri_globals_index.write().clear()
@@ -1746,7 +1762,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
     probe("laravel_aliases", &mut || {
-        *backend.laravel_aliases.write() = None
+        backend.laravel_aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
         backend.laravel_macro_seeds.write().clear();

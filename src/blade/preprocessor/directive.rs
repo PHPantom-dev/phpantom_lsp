@@ -76,7 +76,7 @@ pub(super) fn open(
             } else if matches!(directive, "foreach" | "forelse") {
                 replacement = format!(" {} ", translate_directive(directive));
                 next_mode = Mode::DirectiveArgs(
-                    ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object} $loop */ $loop = (object)[];",
+                    ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object}} $loop */ $loop = (object)[];",
                 );
                 *paren_depth = 0;
             } else if matches!(

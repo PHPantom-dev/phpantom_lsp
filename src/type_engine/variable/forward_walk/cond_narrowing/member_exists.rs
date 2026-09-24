@@ -31,9 +31,7 @@ pub(crate) fn condition_proves_null_or_truthy(condition: &Expression<'_>) -> boo
             || !extract_not_isset_vars(operand).is_empty()
             || extract_null_equality_check_var(operand).is_some()
             || extract_not_empty_var(operand).is_some()
-            || expr_to_var_name(operand)
-                .or_else(|| narrowing::expr_to_subject_key(operand))
-                .is_some()
+            || expr_to_subject(operand).is_some()
     })
 }
 

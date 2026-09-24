@@ -208,10 +208,10 @@ fn join_key_types(key_types: Vec<PhpType>) -> PhpType {
     // Unlike a value union, the alternatives here are worth keeping as
     // written: a `Foo::class` key is a `class-string<Foo>`, and widening it
     // to `string` costs a `array<class-string, …>` parameter its match.
-    match key_types.len() {
-        0 => array_key_type(),
-        1 => key_types.into_iter().next().unwrap(),
-        _ => PhpType::union(key_types),
+    if key_types.is_empty() {
+        array_key_type()
+    } else {
+        PhpType::union(key_types)
     }
 }
 
@@ -277,7 +277,7 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> Option<String> {
 /// because a value arriving after construction says the array is being
 /// built up rather than written out.
 ///
-/// [`merge_push_type`]: super::resolution::merge_push_type
+/// [`merge_push_type`]: super::array_shape_writes::merge_push_type
 fn infer_element_type<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
@@ -631,21 +631,18 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
-        var_name: "",
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: body_offset,
-        class_loader: ctx.class_loader,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        branch_aware: false,
-        match_arm_narrowing: std::collections::HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            "",
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            body_offset,
+            ctx.class_loader,
+        )
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)

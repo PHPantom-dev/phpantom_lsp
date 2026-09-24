@@ -760,15 +760,18 @@ impl PhpType {
         TypeKind::Raw(text.into()).into()
     }
 
-    /// Union of two or more members.
+    /// Union of the members.
     ///
-    /// Repeated alternatives are dropped (and a union left with a single
-    /// alternative is unwrapped), because a union that names the same type
-    /// twice is never anything but noise in a hover or a diagnostic. No
-    /// other normalisation happens here — for `true|false` → `bool`,
-    /// subtype absorption, and nested-union flattening see
-    /// [`simplified`](PhpType::simplified).
+    /// A single member is returned as itself, and repeated alternatives
+    /// are dropped (unwrapping the union if one alternative is left),
+    /// because a union that names the same type twice is never anything
+    /// but noise in a hover or a diagnostic. No other normalisation
+    /// happens here — for `true|false` → `bool`, subtype absorption, and
+    /// nested-union flattening see [`simplified`](PhpType::simplified).
     pub fn union(mut members: Vec<PhpType>) -> PhpType {
+        if members.len() == 1 {
+            return members.pop().unwrap();
+        }
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
             return members.into_iter().next().unwrap();
         }

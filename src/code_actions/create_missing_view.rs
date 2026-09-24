@@ -43,7 +43,7 @@ impl Backend {
         };
         let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
 
-        let mut view_names: Option<std::collections::HashSet<String>> = None;
+        let mut view_names: Option<std::sync::Arc<[String]>> = None;
 
         for span in symbol_map.spans.iter().chain(extra.iter()) {
             let SymbolKind::LaravelStringKey {
@@ -65,9 +65,8 @@ impl Backend {
                 continue;
             }
 
-            let known =
-                view_names.get_or_insert_with(|| self.cached_view_names().into_iter().collect());
-            if known.contains(key) {
+            let known = view_names.get_or_insert_with(|| self.cached_view_names());
+            if known.binary_search(key).is_ok() {
                 continue;
             }
 
@@ -133,8 +132,8 @@ impl Backend {
                 .map(|res| res.path.clone());
         }
 
-        if let Some(root) = self.laravel_view_roots().into_iter().next() {
-            return Some(root);
+        if let Some(root) = self.laravel_view_roots().first() {
+            return Some(root.path.clone());
         }
 
         self.workspace

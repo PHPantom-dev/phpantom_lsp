@@ -49,6 +49,16 @@ function assertMethodReturnType(string $class, string $method, string $expected)
     check("$class::$method() returns $expected (got $actual)", $actual === $expected);
 }
 
+// ─── Model settings inherited from a base model ─────────────────────────────
+
+// Danish declares no $fillable or $casts of its own, so PHP hands it Pastry's.
+$danish = new \App\Models\Danish();
+check('Danish inherits $fillable from Pastry', $danish->getFillable() === ['sku']);
+check(
+    'Danish inherits $casts from Pastry',
+    ($danish->getCasts()['is_vegan'] ?? null) === 'boolean'
+);
+
 // ─── Scope vs Model method shadowing ────────────────────────────────────────
 
 // Model::fresh() is public — a subclass CANNOT define a #[Scope] named "fresh"
@@ -1487,6 +1497,28 @@ check(
         replace: ['name' => 'Ada'],
         key: 'Fresh bread for :name'
     ) === 'Du pain frais pour Ada'
+);
+
+// ─── UUID and ULID primary keys ─────────────────────────────────────────────
+
+$uuidOrder = new \App\Models\BakeryOrder();
+$ulidDelivery = new \App\Models\Delivery();
+$uuidOrder->setUniqueIds();
+$ulidDelivery->setUniqueIds();
+
+check('HasUuids generates a string id', is_string($uuidOrder->id));
+check('HasUuids generates a valid UUID', \Illuminate\Support\Str::isUuid($uuidOrder->id));
+check('HasUuids overrides the default key type', $uuidOrder->getKeyType() === 'string');
+check('HasUuids disables incrementing', $uuidOrder->getIncrementing() === false);
+check('HasUlids respects a custom primary key', $ulidDelivery->getKeyName() === 'tracking_id');
+check('HasUlids generates a string key', is_string($ulidDelivery->tracking_id));
+check('HasUlids generates a valid ULID', \Illuminate\Support\Str::isUlid($ulidDelivery->tracking_id));
+check('HasUlids overrides the default key type', $ulidDelivery->getKeyType() === 'string');
+check('HasUlids disables incrementing', $ulidDelivery->getIncrementing() === false);
+check(
+    'Unique identifier demo reads both string keys',
+    (new \App\Demo())->uniqueIdentifiers($uuidOrder, $ulidDelivery)
+        === $uuidOrder->id . ':' . $ulidDelivery->tracking_id
 );
 
 // ─── Summary ────────────────────────────────────────────────────────────────

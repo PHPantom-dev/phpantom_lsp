@@ -65,6 +65,7 @@ impl Backend {
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
+        let changes = self.spell_changes_as_indexed(&params.changes);
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
@@ -72,7 +73,7 @@ impl Backend {
             let laravel_config = self.config().laravel;
             let filters = self.index_filters();
             let translations = self.laravel_string_key_cache.read().translations.clone();
-            for change in &params.changes {
+            for change in changes.iter() {
                 let path_str = change.uri.path();
                 if path_str.ends_with("/composer.json") || path_str.ends_with("/composer.lock") {
                     composer_changed = true;
@@ -260,10 +261,10 @@ impl Backend {
             });
             if self.reindex_files_batch(&php_changes) || touches_config {
                 self.clear_class_not_found_cache();
-                self.resolved_class_cache.write().clear();
+                self.clear_resolved_class_cache();
                 self.auth_user_type_cache.write().clear();
                 *self.storage_disk_type_cache.write() = None;
-                *self.laravel_aliases.write() = None;
+                self.laravel_aliases.invalidate();
                 self.member_completion_cache.lock().clear();
             }
         }
@@ -330,7 +331,7 @@ impl Backend {
         // Resolved classes and completions may depend on config-driven
         // behaviour (e.g. `report-magic-properties`), so both must be
         // recomputed against the new settings rather than served stale.
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
 
         // Switching workspace diagnostics on or off is the one setting
@@ -351,68 +352,110 @@ impl Backend {
         self.reconcile_index_for_filter_change(&previous_filters);
     }
 
+    /// Rewrite the paths in a watched-file batch into the spellings the
+    /// index holds.
+    ///
+    /// A directory reached through a symlink is indexed under the link's
+    /// spelling, but the watcher asking for its events is based at the link
+    /// and a client is free to resolve that base before it starts watching.
+    /// Such a client reports `/opt/kdhelp/Help.php` where the index holds
+    /// `<root>/kdhelp/Help.php`, and every lookup below (open files, parsed
+    /// URIs, the symbol maps, the exclude filters) would miss. Clients that
+    /// do not resolve it report the link spelling already and pass through
+    /// untouched.
+    ///
+    /// Borrows the batch unchanged when the project has no followed links,
+    /// which is all but a handful of projects and every project before its
+    /// first walk.
+    fn spell_changes_as_indexed<'a>(
+        &self,
+        changes: &'a [FileEvent],
+    ) -> std::borrow::Cow<'a, [FileEvent]> {
+        let links = self.followed_links();
+        if links.is_empty() {
+            return std::borrow::Cow::Borrowed(changes);
+        }
+        let mut spelled = changes.to_vec();
+        for change in &mut spelled {
+            if let Ok(path) = change.uri.to_file_path()
+                && let Some(as_indexed) = links.to_link_spelling(&path)
+                && let Ok(uri) = Url::from_file_path(as_indexed)
+            {
+                change.uri = uri;
+            }
+        }
+        std::borrow::Cow::Owned(spelled)
+    }
+
     /// Build the `workspace/didChangeWatchedFiles` registration for the
-    /// current `[indexing] extensions` config and Laravel classification.
+    /// current `[indexing] extensions` config, Laravel classification, and
+    /// the directory symlinks the index has reached through.
     ///
     /// Shared by `initialized`'s first registration and
     /// [`Self::reregister_watched_files_if_changed`] so a live
-    /// `.phpantom.toml` reload advertises the same watcher set a fresh
-    /// session would have started with. Returns the registration
-    /// alongside the extension list and Laravel flag it was built from,
-    /// so the caller can record what was actually registered.
-    pub(crate) fn build_watched_file_registration(&self) -> (Registration, Vec<String>, bool) {
+    /// `.phpantom.toml` reload, or a walk that discovers a link, advertises
+    /// the same watcher set a fresh session would have started with.
+    /// Returns the registration alongside the inputs it was built from, so
+    /// the caller can record what was actually registered.
+    pub(crate) fn build_watched_file_registration(
+        &self,
+    ) -> (Registration, crate::WatchedFileInputs) {
         let index_filters = self.index_filters();
         let extra_extensions = index_filters.extra_extensions().to_vec();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
 
-        let mut watchers: Vec<FileSystemWatcher> = extra_extensions
+        // Create, change, and delete: what every watcher but the two
+        // Composer ones asks for.
+        let watch_all = WatchKind::Create | WatchKind::Change | WatchKind::Delete;
+
+        // Patterns the workspace folders are watched with. Each one is
+        // repeated per followed link below, based at the link, because a
+        // workspace-relative pattern never reaches through a symlink.
+        let mut patterns: Vec<(String, WatchKind)> = extra_extensions
             .iter()
-            .map(|ext| FileSystemWatcher {
-                glob_pattern: GlobPattern::String(format!("**/*.{ext}")),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            })
+            .map(|ext| (format!("**/*.{ext}"), watch_all))
             .collect();
-        watchers.extend([
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.php".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/*.{yaml,yml,xml}.dist".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.json".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/composer.lock".to_string()),
-                kind: Some(WatchKind::Change),
-            },
-            FileSystemWatcher {
-                glob_pattern: GlobPattern::String("**/.phpantom.toml".to_string()),
-                kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-            },
+        patterns.extend([
+            ("**/*.php".to_string(), watch_all),
+            ("**/*.{yaml,yml,xml}".to_string(), watch_all),
+            ("**/*.{yaml,yml,xml}.dist".to_string(), watch_all),
+            ("**/composer.json".to_string(), WatchKind::Change),
+            ("**/composer.lock".to_string(), WatchKind::Change),
+            ("**/.phpantom.toml".to_string(), watch_all),
         ]);
         if is_laravel {
-            watchers.extend([
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.json".to_string()),
-                    kind: None,
-                },
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/*.sql".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
-                FileSystemWatcher {
-                    glob_pattern: GlobPattern::String("**/config/database.php".to_string()),
-                    kind: Some(WatchKind::Create | WatchKind::Change | WatchKind::Delete),
-                },
+            patterns.extend([
+                ("**/*.json".to_string(), watch_all),
+                ("**/*.sql".to_string(), watch_all),
+                ("**/config/database.php".to_string(), watch_all),
             ]);
+        }
+
+        let mut watchers: Vec<FileSystemWatcher> = patterns
+            .iter()
+            .map(|(pattern, kind)| FileSystemWatcher {
+                glob_pattern: GlobPattern::String(pattern.clone()),
+                kind: Some(*kind),
+            })
+            .collect();
+
+        // A tree reached through a symlink is indexed under the link's
+        // spelling but sits outside every workspace folder on disk, so the
+        // patterns above never match a file in it. Asking for it by base
+        // URI is the only way to hear about a `git pull` into a linked
+        // framework, or a file created there by another tool.
+        let followed_links = self.watchable_followed_links();
+        for link in &followed_links {
+            let Ok(base) = Url::from_file_path(link) else {
+                continue;
+            };
+            watchers.extend(patterns.iter().map(|(pattern, kind)| FileSystemWatcher {
+                glob_pattern: GlobPattern::Relative(RelativePattern {
+                    base_uri: OneOf::Right(base.clone()),
+                    pattern: pattern.clone(),
+                }),
+                kind: Some(*kind),
+            }));
         }
 
         let registration = Registration {
@@ -424,29 +467,51 @@ impl Backend {
             ),
         };
 
-        (registration, extra_extensions, is_laravel)
+        (
+            registration,
+            crate::WatchedFileInputs {
+                extra_extensions,
+                is_laravel,
+                followed_links,
+            },
+        )
+    }
+
+    /// The followed links worth putting in a registration: none unless the
+    /// client said it can match a pattern against a base URI, since a
+    /// client that cannot would either ignore the watcher or fail to parse
+    /// the registration that carries it, taking the workspace watchers
+    /// down with it.
+    fn watchable_followed_links(&self) -> Vec<std::path::PathBuf> {
+        if !self
+            .supports_relative_pattern_watchers
+            .load(Ordering::Acquire)
+        {
+            return Vec::new();
+        }
+        self.followed_links().link_paths()
     }
 
     /// Re-push the `workspace/didChangeWatchedFiles` registration when
-    /// `[indexing] extensions` or the Laravel classification has changed
-    /// since the last registration.
+    /// `[indexing] extensions`, the Laravel classification, or the set of
+    /// followed symlinks has changed since the last registration.
     ///
     /// Guarded on an actual change so an unrelated config edit does not
     /// churn the client's watcher list. Before `initialized` performs the
     /// first registration, this only records the desired state instead of
     /// racing that initial `register_capability` call.
     pub(crate) fn reregister_watched_files_if_changed(&self) {
-        let (registration, extra_extensions, is_laravel) = self.build_watched_file_registration();
+        let (registration, inputs) = self.build_watched_file_registration();
 
         let mut state = self.registered_watcher_state.write();
         let Some(previous) = state.clone() else {
-            *state = Some((extra_extensions, is_laravel));
+            *state = Some(inputs);
             return;
         };
-        if previous == (extra_extensions.clone(), is_laravel) {
+        if previous == inputs {
             return;
         }
-        *state = Some((extra_extensions, is_laravel));
+        *state = Some(inputs);
         drop(state);
 
         if self.client.is_none() {
@@ -592,6 +657,59 @@ mod tests {
 
         assert!(!backend.blade_virtual_content.read().contains_key(&uri));
         assert!(!backend.blade_source_maps.read().contains_key(&uri));
+    }
+
+    /// The registrations a provider contributes are replaced when the file
+    /// is parsed, which a file deleted from disk never is again, so the
+    /// deletion itself has to take them away.
+    #[test]
+    fn deleting_a_provider_drops_its_gate_and_macro_registrations() {
+        let dir = tempfile::tempdir().unwrap();
+        let provider = dir.path().join("app/Providers/AuthServiceProvider.php");
+        let url = Url::from_file_path(&provider).unwrap();
+        let uri = url.to_string();
+
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        backend.update_ast(
+            &uri,
+            "<?php\n\
+             namespace App\\Providers;\n\
+             use Illuminate\\Support\\Facades\\Gate;\n\
+             use Illuminate\\Support\\Str;\n\
+             class AuthServiceProvider {\n\
+                 public function boot(): void {\n\
+                     Gate::define('edit-post', fn ($user) => true);\n\
+                     Str::macro('shout', fn (string $s): string => strtoupper($s));\n\
+                 }\n\
+             }\n",
+        );
+        assert!(
+            backend
+                .laravel_gates
+                .read()
+                .definition("edit-post")
+                .is_some()
+        );
+        assert!(backend.laravel_macros.read().files.has_uri(&uri));
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: url,
+                typ: FileChangeType::DELETED,
+            }],
+        };
+        backend.apply_watched_file_changes(&params, dir.path());
+
+        assert!(
+            backend
+                .laravel_gates
+                .read()
+                .definition("edit-post")
+                .is_none()
+        );
+        assert!(!backend.laravel_gates.read().files.has_uri(&uri));
+        assert!(!backend.laravel_macros.read().files.has_uri(&uri));
     }
 
     /// A running Laravel application compiles Blade templates into
@@ -962,8 +1080,12 @@ mod tests {
         // before any `.phpantom.toml` extensions were configured.
         backend.reregister_watched_files_if_changed();
         assert_eq!(
-            *backend.registered_watcher_state.read(),
-            Some((Vec::new(), true))
+            backend.registered_watcher_state.read().clone(),
+            Some(crate::WatchedFileInputs {
+                extra_extensions: Vec::new(),
+                is_laravel: true,
+                followed_links: Vec::new(),
+            })
         );
 
         std::fs::write(
@@ -974,8 +1096,12 @@ mod tests {
         backend.reload_config(dir.path());
 
         assert_eq!(
-            *backend.registered_watcher_state.read(),
-            Some((vec!["module".to_string()], true)),
+            backend.registered_watcher_state.read().clone(),
+            Some(crate::WatchedFileInputs {
+                extra_extensions: vec!["module".to_string()],
+                is_laravel: true,
+                followed_links: Vec::new(),
+            }),
             "a reload that adds an extension must update the registered watcher state"
         );
     }
@@ -998,8 +1124,142 @@ mod tests {
         backend.reload_config(dir.path());
 
         assert_eq!(
-            *backend.registered_watcher_state.read(),
-            Some((Vec::new(), true))
+            backend.registered_watcher_state.read().clone(),
+            Some(crate::WatchedFileInputs {
+                extra_extensions: Vec::new(),
+                is_laravel: true,
+                followed_links: Vec::new(),
+            })
+        );
+    }
+
+    /// A tree reached through a symlink sits outside every workspace
+    /// folder, so the plain `**/*.php` watchers never cover it. Without a
+    /// watcher based at the link, a file created in the linked tree by
+    /// another tool stays invisible until the window is reloaded.
+    #[test]
+    fn a_followed_link_gets_its_own_relative_pattern_watcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("framework");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Help.php"), "<?php\n").unwrap();
+
+        let link = root.join("kdhelp");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(root.clone());
+        backend
+            .supports_relative_pattern_watchers
+            .store(true, Ordering::Release);
+
+        // The walk is what discovers the link, exactly as it does at
+        // startup.
+        let files = crate::classmap_scanner::collect_php_files_gitignore(
+            &root,
+            &[],
+            &backend.index_filters(),
+            Some(backend.followed_links()),
+        );
+        assert!(
+            files.iter().any(|p| p.starts_with(&link)),
+            "the walk must index through the link first: {files:?}"
+        );
+
+        let (_, inputs) = backend.build_watched_file_registration();
+        assert_eq!(
+            inputs.followed_links,
+            vec![link],
+            "the link the index reached through must be watched"
+        );
+    }
+
+    /// The relative-pattern watchers are dropped for a client that never
+    /// said it could match one. A client that does not understand the
+    /// object form of a glob pattern can fail to parse the registration
+    /// carrying it, which would take the workspace watchers down with it.
+    #[test]
+    fn a_client_without_relative_patterns_gets_no_link_watchers() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("framework");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(&real).unwrap();
+        std::fs::write(real.join("Help.php"), "<?php\n").unwrap();
+
+        let link = root.join("kdhelp");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(root.clone());
+        crate::classmap_scanner::collect_php_files_gitignore(
+            &root,
+            &[],
+            &backend.index_filters(),
+            Some(backend.followed_links()),
+        );
+
+        let (_, inputs) = backend.build_watched_file_registration();
+        assert!(
+            inputs.followed_links.is_empty(),
+            "a client that cannot match a relative pattern must get none"
+        );
+    }
+
+    /// A client is free to resolve the base URI it was handed before it
+    /// starts watching, and then reports the real path behind the link.
+    /// The index holds the link spelling, so every lookup in the batch
+    /// handler would miss unless the path is spelled back first.
+    #[test]
+    fn a_real_path_event_is_respelled_through_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("ws");
+        let real = dir.path().join("framework");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::create_dir_all(real.join("src")).unwrap();
+        std::fs::write(real.join("src/Help.php"), "<?php\nclass Help {}").unwrap();
+
+        let link = root.join("kdhelp");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_dir(&real, &link).unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(root.clone());
+        crate::classmap_scanner::collect_php_files_gitignore(
+            &root,
+            &[],
+            &backend.index_filters(),
+            Some(backend.followed_links()),
+        );
+
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(real.join("src/Help.php").canonicalize().unwrap())
+                    .unwrap(),
+                typ: FileChangeType::CREATED,
+            }],
+        };
+        backend.apply_watched_file_changes(&params, &root);
+
+        let indexed = backend.symbols.fqn_uri_index.read();
+        let uri = indexed
+            .get("Help")
+            .unwrap_or_else(|| panic!("a created file must reach the index: {indexed:?}"))
+            .clone();
+        drop(indexed);
+        assert!(
+            uri.contains("/kdhelp/"),
+            "the index must keep the link spelling the walk produced, got {uri}"
         );
     }
 
@@ -1021,8 +1281,12 @@ mod tests {
         backend.reregister_watched_files_if_changed();
 
         assert_eq!(
-            *backend.registered_watcher_state.read(),
-            Some((vec!["module".to_string()], true)),
+            backend.registered_watcher_state.read().clone(),
+            Some(crate::WatchedFileInputs {
+                extra_extensions: vec!["module".to_string()],
+                is_laravel: true,
+                followed_links: Vec::new(),
+            }),
             "a client-forwarded extension must be watched"
         );
     }

@@ -1,5 +1,28 @@
 use super::*;
 
+/// The route file the helpers below pretend to be reading.
+fn test_uri() -> Url {
+    Url::parse("file:///app/routes/web.php").unwrap()
+}
+
+/// Resolve `target` against a single route file, as `resolve_route_definitions`
+/// does per file (without the workspace walk).
+fn definitions_of(
+    content: &str,
+    target: &str,
+    uri: &Url,
+    file_path: Option<&Path>,
+    workspace_root: Option<&Path>,
+    macros: &MacroScope,
+) -> Vec<Location> {
+    let mut sink = RouteDefinitions {
+        target,
+        out: Vec::new(),
+    };
+    walk_route_file(content, uri, file_path, workspace_root, macros, &mut sink);
+    sink.out
+}
+
 /// Collect the routes of a single route file, as `enumerate_all_routes` does
 /// per file (without the workspace walk).
 fn routes_of(content: &str) -> Vec<RouteEntry> {
@@ -15,12 +38,13 @@ fn routes_and_open_names(content: &str) -> (Vec<RouteEntry>, Vec<String>, Vec<St
     let mut out = Vec::new();
     let mut open_prefixes = Vec::new();
     let mut open_suffixes = Vec::new();
-    collect_all_names_from_file(
+    walk_route_file(
         content,
+        &test_uri(),
         None,
         None,
         &MacroScope::default(),
-        &mut RouteSink {
+        &mut RouteCollector {
             out: &mut out,
             open_prefixes: &mut open_prefixes,
             open_suffixes: &mut open_suffixes,
@@ -59,12 +83,13 @@ fn routes_with_macros(content: &str, macro_source: &str, names: &[&str]) -> Vec<
     let mut out = Vec::new();
     let mut open_prefixes = Vec::new();
     let mut open_suffixes = Vec::new();
-    collect_all_names_from_file(
+    walk_route_file(
         content,
+        &test_uri(),
         None,
         None,
         &scope,
-        &mut RouteSink {
+        &mut RouteCollector {
             out: &mut out,
             open_prefixes: &mut open_prefixes,
             open_suffixes: &mut open_suffixes,
@@ -703,7 +728,7 @@ fn definition_resolves_a_name_built_in_a_loop() {
     let uri = Url::parse("file:///app/routes/web.php").unwrap();
 
     let macros = MacroScope::default();
-    let found = scan_route_file(content, "pages.terms", &uri, None, None, None, &macros);
+    let found = definitions_of(content, "pages.terms", &uri, None, None, &macros);
     let line = content.lines().nth(2).unwrap();
     assert_eq!(found.len(), 1, "{found:?}");
     assert_eq!(found[0].range.start.line, 2);
@@ -712,7 +737,7 @@ fn definition_resolves_a_name_built_in_a_loop() {
         line.find("\"pages.").unwrap() as u32
     );
 
-    assert!(scan_route_file(content, "pages.missing", &uri, None, None, None, &macros).is_empty());
+    assert!(definitions_of(content, "pages.missing", &uri, None, None, &macros).is_empty());
 }
 
 #[test]
@@ -741,12 +766,13 @@ fn routes_of_file(path: &Path, workspace_root: &Path) -> Vec<RouteEntry> {
     let mut out = Vec::new();
     let mut open_prefixes = Vec::new();
     let mut open_suffixes = Vec::new();
-    collect_all_names_from_file(
+    walk_route_file(
         &content,
+        &Url::from_file_path(path).unwrap(),
         Some(path),
         Some(workspace_root),
         &MacroScope::default(),
-        &mut RouteSink {
+        &mut RouteCollector {
             out: &mut out,
             open_prefixes: &mut open_prefixes,
             open_suffixes: &mut open_suffixes,
@@ -804,12 +830,11 @@ fn definition_follows_a_require_target_held_in_a_variable() {
     let web = dir.path().join("routes/web.php");
     let content = std::fs::read_to_string(&web).unwrap();
 
-    let found = scan_route_file(
+    let found = definitions_of(
         &content,
         "users.index",
         &Url::from_file_path(&web).unwrap(),
         Some(&web),
-        web.parent(),
         Some(dir.path()),
         &MacroScope::default(),
     );

@@ -8,62 +8,14 @@
 use crate::Backend;
 
 impl Backend {
-    /// Enumerate all config keys by scanning `config/` files and
-    /// package config files discovered from service providers.
+    /// Enumerate all config keys the merged configuration holds: the
+    /// project's `config/` files with the package and framework defaults
+    /// merged beneath them, the way Laravel merges them.
     fn enumerate_all_config_keys(&self) -> Vec<String> {
-        use crate::virtual_members::laravel::{
-            collect_laravel_config_declarations, laravel_config_prefix_from_uri,
-        };
-
-        let snapshot = self.user_file_symbol_maps();
         let mut keys = Vec::new();
-
-        for (file_uri, _) in &snapshot {
-            let Some(prefix) = laravel_config_prefix_from_uri(file_uri) else {
-                continue;
-            };
-            let Some(content) = self.get_file_content(file_uri) else {
-                continue;
-            };
-            let decls = collect_laravel_config_declarations(&content, &prefix);
-            for d in decls {
-                keys.push(d.key);
-            }
+        for (prefix, tree) in self.cached_config_trees().iter() {
+            tree.collect_keys(prefix, &mut keys);
         }
-
-        for res in &self.laravel_provider_resources.read().config_files {
-            if let Ok(content) = std::fs::read_to_string(&res.path) {
-                let decls = collect_laravel_config_declarations(&content, &res.namespace);
-                for d in decls {
-                    keys.push(d.key);
-                }
-            }
-        }
-
-        if let Some(root) = self.workspace.workspace_root.read().clone() {
-            let framework_config = root.join("vendor/laravel/framework/config");
-            if framework_config.is_dir()
-                && let Ok(entries) = std::fs::read_dir(&framework_config)
-            {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if !path.extension().is_some_and(|e| e == "php") {
-                        continue;
-                    }
-                    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                        continue;
-                    };
-                    let prefix = stem.to_string();
-                    if let Ok(content) = std::fs::read_to_string(&path) {
-                        let decls = collect_laravel_config_declarations(&content, &prefix);
-                        for d in decls {
-                            keys.push(d.key);
-                        }
-                    }
-                }
-            }
-        }
-
         keys.sort();
         keys.dedup();
         keys
@@ -110,44 +62,44 @@ impl Backend {
         )
     }
 
-    pub(crate) fn cached_route_names(&self) -> Vec<String> {
-        self.cached_routes()
-            .routes
-            .iter()
-            .map(|route| route.name.clone())
-            .collect()
+    /// Every named route's name, sorted.
+    pub(crate) fn cached_route_names(&self) -> std::sync::Arc<[String]> {
+        std::sync::Arc::clone(&self.cached_routes().names)
     }
 
-    pub(crate) fn cached_config_keys(&self) -> Vec<String> {
+    /// Every config key `config/` declares, sorted.
+    pub(crate) fn cached_config_keys(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.config_keys,
             |cache| cache.config_keys.clone(),
             |cache, keys| cache.config_keys = Some(keys),
-            || self.enumerate_all_config_keys(),
+            || self.enumerate_all_config_keys().into(),
         )
     }
 
-    pub(crate) fn cached_view_names(&self) -> Vec<String> {
+    /// Every Blade view name the project ships, sorted.
+    pub(crate) fn cached_view_names(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.view_names,
             |cache| cache.view_names.clone(),
             |cache, names| cache.view_names = Some(names),
-            || self.blade_view_names(),
+            || self.blade_view_names().into(),
         )
     }
 
     /// Every authorization ability the project defines, from `Gate::define()`
-    /// registrations and policy class methods.
-    pub(crate) fn cached_gate_abilities(&self) -> Vec<String> {
+    /// registrations and policy class methods, sorted.
+    pub(crate) fn cached_gate_abilities(&self) -> std::sync::Arc<[String]> {
         self.cached_laravel_enumeration(
             &self.laravel_string_key_build_locks.gate_abilities,
             |cache| cache.gate_abilities.clone(),
             |cache, names| cache.gate_abilities = Some(names),
-            || crate::virtual_members::laravel::enumerate_gate_abilities(self),
+            || crate::virtual_members::laravel::enumerate_gate_abilities(self).into(),
         )
     }
 
-    pub(crate) fn cached_trans_keys(&self) -> Vec<String> {
-        self.cached_translations().entries.keys().cloned().collect()
+    /// Every translation key, sorted and shared with the translation catalog.
+    pub(crate) fn cached_trans_keys(&self) -> std::sync::Arc<[String]> {
+        std::sync::Arc::clone(&self.cached_translations().keys)
     }
 }

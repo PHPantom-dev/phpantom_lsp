@@ -14,8 +14,6 @@
 //! into the template). The tags themselves are read from the source by
 //! [`super::component_tags`].
 
-use std::path::PathBuf;
-
 use crate::Backend;
 
 /// One anonymous-component registration in effect: the tag prefix it is
@@ -49,14 +47,11 @@ impl Backend {
         if paths.is_empty() {
             return namespaces;
         }
-        let roots: Vec<PathBuf> = self
-            .laravel_view_roots()
-            .into_iter()
-            .map(|root| root.canonicalize().unwrap_or(root))
-            .collect();
+        let roots = self.laravel_view_roots();
         for (prefix, path) in paths {
             let path = path.canonicalize().unwrap_or(path);
             let directory = roots.iter().find_map(|root| {
+                let root = root.canonical.as_ref().unwrap_or(&root.path);
                 let rel = path.strip_prefix(root).ok()?;
                 Some(rel.to_string_lossy().replace(['/', '\\'], "."))
             });

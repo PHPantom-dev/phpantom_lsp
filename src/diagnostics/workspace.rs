@@ -1304,7 +1304,7 @@ impl Backend {
     }
 
     /// The single-file worker that shares a source's per-file cache.
-    fn external_tool_worker(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
+    fn external_tool_for_source(&self, source: &str) -> Option<&crate::ExternalToolWorker> {
         Some(match source {
             "phpstan" => &self.phpstan_tool,
             "phpcs" => &self.phpcs_tool,
@@ -1330,7 +1330,7 @@ impl Backend {
         results: HashMap<PathBuf, Vec<Diagnostic>>,
         generations: HashMap<String, u64>,
     ) {
-        let Some(worker) = self.external_tool_worker(source) else {
+        let Some(worker) = self.external_tool_for_source(source) else {
             return;
         };
         let cache = &worker.last_diags;

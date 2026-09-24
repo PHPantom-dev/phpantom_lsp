@@ -969,6 +969,60 @@ class User extends Model {
 }
 
 #[tokio::test]
+async fn test_pivot_attached_when_relation_file_was_never_opened() {
+    // `User.php` declares the relationship but is never opened or looked up:
+    // completing on a Role elsewhere must still find it.
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this, RoleUser> */
+    public function roles(): BelongsToMany { return $this->belongsToMany(Role::class)->using(RoleUser::class); }
+}
+";
+    let consumer_php = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function test(Role $role) {
+        $role->
+    }
+}
+";
+    // `initialized` re-reads `composer.json`, which must name the framework
+    // for the project to stay a Laravel one.
+    let composer =
+        COMPOSER_JSON.replacen("{", r#"{ "require": { "laravel/framework": "^11.0" },"#, 1);
+    let mut files = framework_stubs();
+    files.extend_from_slice(&[
+        ("src/Models/Role.php", ROLE_PHP),
+        ("src/Models/RoleUser.php", ROLE_USER_PIVOT_PHP),
+        ("src/Models/User.php", user_php),
+        ("src/Models/Consumer.php", consumer_php),
+    ]);
+    let (backend, dir) = create_psr4_workspace(&composer, &files);
+    backend.initialized(InitializedParams {}).await;
+
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Consumer.php",
+        consumer_php,
+        4,
+        15,
+    )
+    .await;
+    let props = property_names(&items);
+    assert!(
+        props.contains(&"pivot"),
+        "a target of a relation in an unopened file should expose 'pivot', got: {:?}",
+        props
+    );
+}
+
+#[tokio::test]
 async fn test_pivot_not_attached_to_non_target_model() {
     // User is never the target of a many-to-many relationship, so it gets
     // no `$pivot` attribute.
@@ -1969,6 +2023,7 @@ class User extends Model {
 
 // ─── Relationship without generics (singular) produces nothing ──────────────
 
+// Neither the declared type nor the body names the related model.
 #[tokio::test]
 async fn test_singular_relationship_without_generics_produces_nothing() {
     let user_php = "\
@@ -1977,7 +2032,7 @@ namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
 use Illuminate\\Database\\Eloquent\\Relations\\HasOne;
 class User extends Model {
-    public function profile(): HasOne { return $this->hasOne(Profile::class); }
+    public function profile(): HasOne { return $this->hasOne($this->profileClass()); }
     public function test() {
         $user = new User();
         $user->
@@ -1998,6 +2053,7 @@ class User extends Model {
 
 // ─── Collection relationship without generics falls back to Model ───────────
 
+// Neither the declared type nor the body names the related model.
 #[tokio::test]
 async fn test_collection_relationship_without_generics_uses_model_fallback() {
     let user_php = "\
@@ -2006,7 +2062,7 @@ namespace App\\Models;
 use Illuminate\\Database\\Eloquent\\Model;
 use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
 class User extends Model {
-    public function posts(): HasMany { return $this->hasMany(Post::class); }
+    public function posts(): HasMany { return $this->hasMany($this->postClass()); }
     public function test() {
         $user = new User();
         $user->

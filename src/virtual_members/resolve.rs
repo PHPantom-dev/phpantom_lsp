@@ -13,7 +13,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::atom;
 use crate::inheritance::{
@@ -76,10 +75,11 @@ impl Drop for InFlightGuard<'_> {
 /// (all files parsed into `uri_classes_index`) and again incrementally when files
 /// change.
 ///
-/// The list is consumed by a pool of scoped workers on
-/// [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE) stacks, so
-/// callers do not need to arrange either the parallelism or the stack
-/// size themselves; the call blocks until the whole list is populated.
+/// The list is consumed by [`crate::parallel::map_indexed_with_threads`]
+/// workers on [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE)
+/// stacks, so callers do not need to arrange either the parallelism or
+/// the stack size themselves; the call blocks until the whole list is
+/// populated.
 /// Workers pull indices off a shared counter, so the list is still
 /// consumed dependency-first overall and a class's dependencies are
 /// normally cached by the time it is claimed.  Immediate neighbours can
@@ -108,23 +108,18 @@ pub fn populate_from_sorted(
         .min(MAX_POPULATE_WORKERS);
     let workers = (sorted_fqns.len() / MIN_CLASSES_PER_WORKER).clamp(1, cap);
 
-    let next = AtomicUsize::new(0);
-    // Large stacks: class resolution walks parsed ASTs and can nest when
-    // the toposort misses dependencies (stubs, on-demand vendor loads).
-    std::thread::scope(|s| {
-        for _ in 0..workers {
-            let next = &next;
-            std::thread::Builder::new()
-                .name("eager-populate".into())
-                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                .spawn_scoped(s, move || {
-                    while let Some(fqn) = sorted_fqns.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        populate_one(fqn, cache, class_loader);
-                    }
-                })
-                .expect("failed to spawn eager-populate worker");
-        }
-    });
+    // The pool's parse-sized stacks matter here too: class resolution
+    // walks parsed ASTs and can nest when the toposort misses
+    // dependencies (stubs, on-demand vendor loads).
+    crate::parallel::map_indexed_with_threads(
+        "eager-populate",
+        sorted_fqns.len(),
+        Some(workers),
+        |_, i| {
+            populate_one(&sorted_fqns[i], cache, class_loader);
+            None::<()>
+        },
+    );
 }
 
 /// Classes per worker below which fanning the population out costs more

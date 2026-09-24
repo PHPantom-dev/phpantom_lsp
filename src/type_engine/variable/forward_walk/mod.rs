@@ -37,6 +37,10 @@
 ///   checks the cache first via [`lookup_diagnostic_scope`] and returns
 ///   the pre-computed types in O(log N) time instead of re-walking the
 ///   body for every span.
+/// - **Member-reference searches**, which ask about an access or two in
+///   a candidate file rather than all of them, populate the same cache
+///   through [`build_diagnostic_scopes_for_offsets`], which walks only
+///   the bodies holding the offsets it is given.
 use std::cell::{Cell, RefCell};
 
 use mago_span::HasSpan;
@@ -44,34 +48,52 @@ use mago_syntax::cst::*;
 
 use crate::types::ResolvedType;
 
+mod array_assignment;
 mod assignment;
+mod assignment_deps;
+mod by_ref;
 mod callable_inference;
 mod closures;
 mod cond_narrowing;
 mod control_flow;
 mod diagnostic_cache;
 mod diagnostic_walk;
+mod foreach;
+mod if_else;
 mod loop_control;
+mod loops;
 mod param_seeding;
 mod reachability;
+mod receiver_mutation;
 mod scope_state;
 mod snapshot_narrowing;
 mod static_locals;
+mod var_docblocks;
 mod walk_ctx;
+mod while_for;
 
+pub(crate) use array_assignment::*;
 pub(crate) use assignment::*;
+pub(crate) use assignment_deps::*;
+pub(crate) use by_ref::*;
 pub(crate) use callable_inference::*;
 pub(crate) use closures::*;
 pub(crate) use cond_narrowing::*;
 pub(crate) use control_flow::*;
 pub(crate) use diagnostic_cache::*;
 pub(crate) use diagnostic_walk::*;
+pub(crate) use foreach::*;
+pub(crate) use if_else::*;
 pub(crate) use loop_control::*;
+pub(crate) use loops::*;
 pub(crate) use param_seeding::*;
 pub(crate) use reachability::*;
+pub(crate) use receiver_mutation::*;
 pub(crate) use scope_state::*;
 pub(crate) use snapshot_narrowing::*;
+pub(crate) use var_docblocks::*;
 pub(crate) use walk_ctx::*;
+pub(crate) use while_for::*;
 
 /// Walk a sequence of statements top-to-bottom, updating `scope` at
 /// each step.  Stops when a statement's start offset reaches or exceeds

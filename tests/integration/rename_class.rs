@@ -982,3 +982,72 @@ async fn rename_class_declaration_updates_in_same_namespace() {
         result_b
     );
 }
+
+// ─── Reference kinds ────────────────────────────────────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite.
+
+const EVERY_KIND_OF_CLASS_REFERENCE: &str = "<?php
+namespace App;
+
+class User {}
+class UserException extends \\Exception {}
+
+#[User]
+class Consumer {
+    /**
+     * @param User $u
+     * @return User|null
+     * @throws UserException
+     */
+    public function f(User $u): ?User {
+        $found = User::find(1);
+        if ($u instanceof User) {}
+        try {} catch (UserException $e) {}
+        $u->User();
+        $name = $u->User;
+        $class = User::class;
+        return $found;
+    }
+}
+";
+
+/// Renames the class declared at `needle` in [`EVERY_KIND_OF_CLASS_REFERENCE`].
+async fn rename_class_in_every_kind_fixture(needle: &str, new_name: &str) -> String {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = EVERY_KIND_OF_CLASS_REFERENCE;
+    open_php(&backend, &uri, text).await;
+    let (line, character) = crate::common::line_char_of(text, needle);
+    let edit = rename(&backend, &uri, line, character + 7, new_name)
+        .await
+        .expect("expected a workspace edit");
+    apply_edits(text, &edits_for_uri(&edit, &uri))
+}
+
+#[tokio::test]
+async fn rename_class_reaches_every_kind_of_reference_but_not_same_named_members() {
+    assert_eq!(
+        rename_class_in_every_kind_fixture("class User {}", "Member").await,
+        EVERY_KIND_OF_CLASS_REFERENCE
+            .replace("class User {}", "class Member {}")
+            .replace("#[User]", "#[Member]")
+            .replace("@param User $u", "@param Member $u")
+            .replace("@return User|null", "@return Member|null")
+            .replace("f(User $u): ?User", "f(Member $u): ?Member")
+            .replace("User::find", "Member::find")
+            .replace("instanceof User", "instanceof Member")
+            .replace("User::class", "Member::class"),
+    );
+}
+
+#[tokio::test]
+async fn rename_exception_class_reaches_catch_and_throws() {
+    assert_eq!(
+        rename_class_in_every_kind_fixture("class UserException", "AccountException").await,
+        EVERY_KIND_OF_CLASS_REFERENCE
+            .replace("class UserException", "class AccountException")
+            .replace("@throws UserException", "@throws AccountException")
+            .replace("catch (UserException", "catch (AccountException"),
+    );
+}

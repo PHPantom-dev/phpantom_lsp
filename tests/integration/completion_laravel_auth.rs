@@ -1,7 +1,7 @@
 //! Integration tests for resolving the authenticated-user model from
 //! `config/auth.php` (`Request::user()` / `Guard::user()`).
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -200,11 +200,9 @@ async fn complete_labels_with_opens(
 ) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
     for (path, text) in pre_open {
-        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
-        open_php(&backend, &uri, text).await;
+        open_php_at(&backend, &dir, path, text).await;
     }
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    open_php(&backend, &uri, content).await;
+    let uri = open_php_at(&backend, &dir, open_path, content).await;
     complete_labels_at_opened(&backend, &uri, line, character).await
 }
 

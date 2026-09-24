@@ -377,6 +377,105 @@ two settings, then link the issue from that section so users can track
 it. When it lands, the forwarding itself is a small change in Zed's
 official PHP extension, and the manual step in the docs goes away.
 
+## X17. Index the workspace's other folders
+
+**Impact: Medium · Complexity: Medium**
+
+A multi-root workspace is the one case where the editor already knows
+about PHP source outside a server's root and can say so without the user
+configuring anything, the same way `files.exclude` and
+`files.associations` already reach the server. The VS Code extension
+starts one server per workspace folder, each scoped to that folder, so a
+project whose shared library sits in a sibling folder resolves nothing
+across the boundary: the library's classes are missing from completion,
+go-to-definition, and find-references in the project that uses them.
+Intelephense splits a multi-root workspace the same way and asks the user
+to name the sibling explicitly; the folder list is already in front of
+the extension, so nothing needs naming.
+
+Forwarded through `ClientIndexingOptions` beside `exclude` and
+`extensions`, as a list of absolute directories:
+
+```json
+{ "indexing": { "include_paths": ["/home/me/work/shared-lib"] } }
+```
+
+`collectIndexFilters` fills it from `vscode.workspace.workspaceFolders`,
+dropping the client's own folder, and the extension re-sends on
+`onDidChangeWorkspaceFolders` the way it already re-sends on a
+`files.exclude` change. Because it travels inside the block the extension
+builds in one place, it cannot collide with the `phpantom` section VS
+Code's `synchronize` pushes: that blob has no `indexing` key, so
+`ClientIndexingOptions::from_client_settings` ignores it and the
+whole-value replacement in `set_client_indexing_options` stays safe.
+
+The shape stays generic, so a Zed or Neovim user can hand-write the same
+block for a directory their editor has no concept of.
+
+**Not in scope: a PHPantom setting for arbitrary directories.** VS Code
+has no general setting that names extra source roots, so anything beyond
+the folder list means a `phpantom.*` setting the user types, which brings
+its own questions (variable and `~` expansion, a matching
+`.phpantom.toml` key so `analyze` sees what the editor sees, whether a
+named path overrides `exclude`, out-of-workspace watchers, and a document
+selector that covers a folder no client owns). A sibling folder needs
+none of that. File it separately if users ask for it.
+
+**Append to the existing roots slice.** `walk_roots` already takes a
+roots slice and puts every root in a single `ignore` walk, which is what
+compiles each shared ancestor `.gitignore` once instead of once per root.
+Include roots belong in that slice, not in a walk of their own. Its
+attribute-by-depth accounting holds for a root whose files were reached
+through a followed link, pinned by
+`walk_roots_attributes_a_followed_link_to_the_root_that_reached_it`.
+
+Putting them in that slice also gets the duplicate protection for free:
+`LinkClaims` claims every root up front, so a symlink pointing at an
+include folder loses to the include folder's own walk rather than
+indexing the tree a second time under the link's spelling.
+
+**Two folders can still overlap.** The guard above only sees symlinks,
+and VS Code lets a workspace hold both a folder and its parent. An
+include root that is a parent, child, or exact duplicate of another one
+(or of the server's own root) is walked twice, because nothing crossed a
+link to get there. Canonicalize the include roots when they are
+registered and drop the ones contained in another, the same containment
+test `LinkClaims::claim` already does.
+
+**Switch every walker together.** `collect_php_files_gitignore`,
+`util::collect_php_files`, and `analyse::collect_php_files` each take a
+single root, so only `walk_roots` is multi-root today. Leaving the serial
+three behind would index classes from an include folder while
+find-references, rename, and go-to-implementation never see them, which
+is the half-wired state the symlink change avoided by moving all four
+walkers at once.
+
+**Fold the "did the inputs widen?" check into one place.** Two entry
+points reconcile a live change, `reload_config` and
+`did_change_configuration`, and both compare the compiled filters.
+Include roots make a second input and a second bespoke comparison at each
+site. Replace them with one snapshot of everything that decides what a
+walk finds, so the next input is added once.
+
+**Confirm the watchers before building any.** VS Code limits a
+string-pattern watcher to paths inside the workspace, and a sibling
+folder is inside it, so the `**/*.php` watchers every session registers
+should already report a change written in one. Verify that and stop
+there. The relative-pattern-per-base machinery followed links need
+(`watchable_followed_links`, the per-base list in `WatchedFileInputs`)
+exists for trees that sit outside the workspace altogether, which these
+do not, and server-side registration for such a path is reported not to
+deliver events at all
+([vscode-languageserver-node#1783](https://github.com/microsoft/vscode-languageserver-node/issues/1783)).
+
+**Resolution only: no diagnostics, no edits.** The sibling folder has its
+own server publishing its own diagnostics, so a second pass from this one
+would duplicate every message the user sees on those files. Index an
+include root, resolve into it, and leave publishing and workspace-wide
+edits (rename, fix) to the server that owns the folder. That also keeps
+the extension's per-folder `documentSelector` as it is: a file opened
+from an include root is served by its own folder's client.
+
 ## X13. Decide how workspace-wide edits treat excluded files
 
 **Impact: Low-Medium · Complexity: Medium**

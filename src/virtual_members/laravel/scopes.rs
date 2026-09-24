@@ -115,6 +115,9 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
         parameters: parameters.clone().into(),
         deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type.clone()),
+        description: method.description.clone(),
+        links: method.links.clone(),
+        see_refs: method.see_refs.clone(),
         ..MethodInfo::virtual_method(&name, None)
     };
 
@@ -123,6 +126,9 @@ pub(super) fn build_scope_methods(method: &MethodInfo) -> [MethodInfo; 2] {
         is_static: true,
         deprecation_message: method.deprecation_message.clone(),
         return_type: Some(return_type),
+        description: method.description.clone(),
+        links: method.links.clone(),
+        see_refs: method.see_refs.clone(),
         ..MethodInfo::virtual_method(&name, None)
     };
 

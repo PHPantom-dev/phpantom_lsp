@@ -76,7 +76,9 @@
 //! - **Implicit primary key.** Every model exposes a primary key column
 //!   (`id` by default, respecting `$primaryKey`/`$keyType` overrides)
 //!   even when no schema or cast entry describes it, unless the model
-//!   overrides `getKeyName()`.
+//!   overrides `getKeyName()`. `HasUuids` and `HasUlids` make the key a
+//!   string, including when inherited or composed through other traits,
+//!   unless a `uniqueIds()` override leaves the key out.
 //!
 //! - **Timestamp properties.** `created_at`/`updated_at` (or their
 //!   configured names) are added as the configured Laravel date class,
@@ -101,6 +103,7 @@
 
 mod accessors;
 mod aliases;
+pub(crate) mod array_file;
 mod auth;
 mod builder;
 mod builder_injection;
@@ -137,6 +140,7 @@ mod string_keys;
 mod trans_catalog;
 mod trans_json;
 mod trans_keys;
+mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
 mod view_data;
@@ -146,14 +150,13 @@ pub(crate) mod where_property;
 pub(crate) use aliases::{LaravelAliasSlot, new_alias_slot};
 pub(crate) use auth::{GUARD_FQN, REQUEST_FQN, patch_auth_user_class, resolve_auth_user_type};
 pub(crate) use commands::{
-    LaravelCommandIndex, command_signature_at_offset, is_command_accessor,
-    is_command_directory_uri, resolve_accessor_type as resolve_command_accessor_type,
-    scan_command_file,
+    EnclosingCommand, LaravelCommandIndex, command_enclosing_signature,
+    command_signature_at_offset, is_command_accessor, is_command_directory_uri,
+    resolve_accessor_type as resolve_command_accessor_type, scan_command_file,
 };
 pub(crate) use config_keys::find_config_references;
 pub(crate) use config_keys::{
-    collect_laravel_config_declarations, find_all_config_references,
-    laravel_config_prefix_from_uri, resolve_config_key_declaration,
+    find_all_config_references, resolve_config_key_declaration,
     resolve_config_key_definition_fallback,
 };
 pub(crate) use const_eval::ClassContext;
@@ -168,7 +171,8 @@ pub(crate) use macros::{
     synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
-    extract_laravel_metadata, has_scope_attribute, infer_relationship_from_method,
+    extract_laravel_metadata, has_inheritable_model_metadata, has_scope_attribute,
+    inherit_model_metadata, relationship_return_type,
 };
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;
@@ -181,7 +185,8 @@ pub(crate) use provider_resources::{
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
-    RouteDiscovery, enumerate_all_routes, route_name_matches, route_uri_parameters,
+    RouteDiscovery, enumerate_all_routes, find_route_registration_references, route_name_matches,
+    route_uri_parameters,
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
@@ -192,7 +197,7 @@ pub(crate) use trans_catalog::TranslationCatalog;
 pub(crate) use trans_json::find_json_trans_references;
 pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
-pub(crate) use view_data::{SharedViewVar, composer_class_vars};
+pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
 
 pub(crate) use builder_injection::{try_inject_builder_scopes, try_inject_mixin_builder_scopes};
@@ -225,7 +230,7 @@ use relationships::{
 };
 pub(crate) use relationships::{
     class_declares_pivot_relationship, extract_pivot_accessor, extract_pivot_using,
-    extract_with_pivot_columns,
+    extract_with_pivot_columns, source_may_declare_pivot_relationship,
 };
 
 pub use scopes::build_scope_methods_for_builder;
@@ -235,9 +240,12 @@ use where_property::{build_where_property_methods_for_class, lowercase_method_na
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
+pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
+pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,
@@ -251,7 +259,7 @@ use crate::atom::{AtomSet, ascii_lowercase_atom};
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{
     AttributeDefaultSource, ClassInfo, DatabaseColumnSource, ELOQUENT_COLLECTION_FQN,
-    MAX_INHERITANCE_DEPTH, PivotAccessor, PropertyInfo, PropertySource,
+    PivotAccessor, PropertyInfo, PropertySource,
 };
 
 use super::resolve::resolve_class_base_cached;
@@ -260,6 +268,18 @@ use database_schema::SchemaTable;
 
 /// The fully-qualified name of the Eloquent base model.
 pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Model";
+
+/// The fully-qualified name of Laravel's `SoftDeletes` trait.
+const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
+
+/// Whether a `used_traits` entry names Laravel's `SoftDeletes` trait.
+///
+/// `used_traits` may hold the FQN or the imported short name, so all three
+/// forms match, mirroring the established `class_uses_conditionable`
+/// detector.
+pub(crate) fn is_soft_deletes_trait(name: &str) -> bool {
+    name == SOFT_DELETES_FQN || name == "SoftDeletes" || name.ends_with("\\SoftDeletes")
+}
 
 /// The fully-qualified name of the Eloquent Builder class.
 pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder";
@@ -482,14 +502,16 @@ fn custom_collection_for_model(
     model: &str,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
-    let mut current = class_loader(model)?;
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        if let Some(collection) = current.laravel().and_then(|l| l.custom_collection.as_ref()) {
-            return collection.base_name().map(str::to_owned);
-        }
-        current = class_loader(current.parent_class.as_ref()?)?;
-    }
-    None
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_collection.as_ref())
+            .and_then(|collection| collection.base_name())
+            .map(str::to_owned)
+    };
+    let model_class = class_loader(model)?;
+    declared(&model_class)
+        .or_else(|| ancestors(&model_class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
 /// Build the replacement type for a custom collection class, matching its
@@ -530,6 +552,14 @@ pub struct LaravelModelProvider;
 /// Laravel date type used for date-related virtual properties.
 fn carbon_type() -> PhpType {
     PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
+}
+
+/// The column `SoftDeletes` casts to a date, when the model uses the trait:
+/// `DELETED_AT`, defaulting to `deleted_at`.
+pub(crate) fn soft_delete_column(laravel: &crate::types::LaravelMetadata) -> Option<&str> {
+    laravel
+        .soft_deletes
+        .then(|| laravel.deleted_at_name.as_deref().unwrap_or("deleted_at"))
 }
 
 fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
@@ -790,6 +820,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             let timestamp_columns = timestamp_columns(laravel);
+            let soft_delete_column = soft_delete_column(laravel);
 
             if let Some(schema_table) = &schema_table {
                 for column in &schema_table.columns {
@@ -798,6 +829,8 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     }
                     let php_type = if timestamp_columns.contains(&column.name) {
                         carbon_type()
+                    } else if soft_delete_column == Some(column.name.as_str()) {
+                        PhpType::nullable(carbon_type())
                     } else {
                         column.php_type.clone()
                     };
@@ -831,7 +864,10 @@ impl VirtualMemberProvider for LaravelModelProvider {
             if !laravel.has_get_key_name_method {
                 let primary_key = laravel.primary_key.as_deref().unwrap_or("id");
                 if seen_props.insert(primary_key.to_string()) {
-                    let php_type = if laravel.key_type.as_deref() == Some("string") {
+                    let php_type = if laravel.key_type.as_deref() == Some("string")
+                        || (unique_ids::uses_unique_string_ids(class, class_loader)
+                            && unique_ids::unique_ids_include(class, primary_key, class_loader))
+                    {
                         PhpType::string()
                     } else {
                         PhpType::int()
@@ -855,6 +891,18 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         Some(&carbon_type()),
                     ));
                 }
+            }
+
+            // ── Soft-delete column ──────────────────────────────────
+            // `SoftDeletes` casts its column to a date, which is null
+            // until the model is trashed.
+            if let Some(column) = soft_delete_column
+                && seen_props.insert(column.to_string())
+            {
+                properties.push(PropertyInfo::virtual_property_typed(
+                    column,
+                    Some(&PhpType::nullable(carbon_type())),
+                ));
             }
 
             // ── Column name properties (last-resort fallback) ───────
@@ -909,6 +957,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(
                             &prop_name,
@@ -940,6 +989,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     &mut properties,
                     PropertyInfo {
                         deprecation_message: method.deprecation_message.clone(),
+                        description: method.description.clone(),
                         source: Some(source),
                         ..PropertyInfo::virtual_property_typed(&prop_name, Some(&accessor_type))
                     },
@@ -1015,6 +1065,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         pivot_using,
                         pivot_columns,
                     }),
+                    description: method.description.clone(),
                     ..PropertyInfo::virtual_property_typed(&method.name, Some(th))
                 });
             }

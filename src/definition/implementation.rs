@@ -219,9 +219,14 @@ impl Backend {
         member_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Option<Vec<Location>> {
-        // For interfaces and abstract classes, the forward direction
-        // applies: find concrete implementors that define the method.
-        if current_class.kind == ClassLikeKind::Interface || current_class.is_abstract {
+        // For interfaces, abstract classes, and traits, the forward
+        // direction applies: find concrete implementors that define the
+        // method.
+        if matches!(
+            current_class.kind,
+            ClassLikeKind::Interface | ClassLikeKind::Trait
+        ) || current_class.is_abstract
+        {
             return self.resolve_interface_member_implementations(
                 uri,
                 content,
@@ -234,31 +239,31 @@ impl Backend {
         let mut locations = Vec::new();
 
         // Check implemented interfaces for a method with the same name.
-        let all_ifaces = self.collect_all_interfaces(current_class, class_loader);
-        for iface_name in &all_ifaces {
-            if let Some(iface) = class_loader(iface_name) {
-                let has_member = iface.has_method(member_name)
-                    || iface.properties.iter().any(|p| p.name == member_name);
-                if has_member {
-                    let member_kind = if iface.has_method(member_name) {
-                        MemberKind::Method
-                    } else {
-                        MemberKind::Property
-                    };
-                    if let Some((class_uri, class_content)) =
-                        self.find_class_file_content(iface_name, uri, content)
-                        && let Some(member_pos) = Self::find_member_position_in_class(
-                            &class_content,
-                            member_name,
-                            member_kind,
-                            &iface,
-                        )
-                        && let Ok(parsed_uri) = Url::parse(&class_uri)
-                    {
-                        let loc = point_location(parsed_uri, member_pos);
-                        if !locations.contains(&loc) {
-                            locations.push(loc);
-                        }
+        let all_ifaces = crate::inheritance::ancestry::supertypes(current_class, class_loader)
+            .into_iter()
+            .filter(|(_, supertype)| supertype.kind == ClassLikeKind::Interface);
+        for (iface_name, iface) in all_ifaces {
+            let has_member = iface.has_method(member_name)
+                || iface.properties.iter().any(|p| p.name == member_name);
+            if has_member {
+                let member_kind = if iface.has_method(member_name) {
+                    MemberKind::Method
+                } else {
+                    MemberKind::Property
+                };
+                if let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&iface_name, uri, content)
+                    && let Some(member_pos) = Self::find_member_position_in_class(
+                        &class_content,
+                        member_name,
+                        member_kind,
+                        &iface,
+                    )
+                    && let Ok(parsed_uri) = Url::parse(&class_uri)
+                {
+                    let loc = point_location(parsed_uri, member_pos);
+                    if !locations.contains(&loc) {
+                        locations.push(loc);
                     }
                 }
             }
@@ -266,38 +271,27 @@ impl Backend {
 
         // Check parent abstract classes for an abstract method with the
         // same name.
-        let mut current = current_class.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
+        for (parent_name, parent_cls) in crate::inheritance::ancestors(current_class, class_loader)
+        {
+            // Only consider abstract methods on abstract parents.
+            if !(parent_cls.is_abstract || parent_cls.kind == ClassLikeKind::Interface) {
+                continue;
             }
-            depth += 1;
-
-            if let Some(parent_cls) = class_loader(&parent_name) {
-                // Only consider abstract methods on abstract parents.
-                if parent_cls.is_abstract || parent_cls.kind == ClassLikeKind::Interface {
-                    let has_method = parent_cls.has_method(member_name);
-                    if has_method
-                        && let Some((class_uri, class_content)) =
-                            self.find_class_file_content(&parent_name, uri, content)
-                        && let Some(member_pos) = Self::find_member_position_in_class(
-                            &class_content,
-                            member_name,
-                            MemberKind::Method,
-                            &parent_cls,
-                        )
-                        && let Ok(parsed_uri) = Url::parse(&class_uri)
-                    {
-                        let loc = point_location(parsed_uri, member_pos);
-                        if !locations.contains(&loc) {
-                            locations.push(loc);
-                        }
-                    }
+            if parent_cls.has_method(member_name)
+                && let Some((class_uri, class_content)) =
+                    self.find_class_file_content(&parent_name, uri, content)
+                && let Some(member_pos) = Self::find_member_position_in_class(
+                    &class_content,
+                    member_name,
+                    MemberKind::Method,
+                    &parent_cls,
+                )
+                && let Ok(parsed_uri) = Url::parse(&class_uri)
+            {
+                let loc = point_location(parsed_uri, member_pos);
+                if !locations.contains(&loc) {
+                    locations.push(loc);
                 }
-                current = parent_cls.parent_class;
-            } else {
-                break;
             }
         }
 
@@ -305,82 +299,6 @@ impl Backend {
             None
         } else {
             Some(locations)
-        }
-    }
-
-    /// Collect all interface names from a class and its parent chain.
-    ///
-    /// Walks the class's `interfaces` list and its parent class chain,
-    /// collecting all interface names (including those inherited from
-    /// parents).  Also walks interface-extends chains transitively.
-    fn collect_all_interfaces(
-        &self,
-        cls: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Vec<String> {
-        let mut result = Vec::new();
-        let mut seen = HashSet::new();
-
-        // Direct interfaces.
-        for iface in &cls.interfaces {
-            let s = iface.to_string();
-            if seen.insert(s.clone()) {
-                result.push(s.clone());
-                // Also collect interfaces that this interface extends.
-                self.collect_parent_interfaces(&s, class_loader, &mut result, &mut seen);
-            }
-        }
-
-        // Interfaces from parent classes.
-        let mut current = cls.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-            if let Some(parent_cls) = class_loader(&parent_name) {
-                for iface in &parent_cls.interfaces {
-                    let s = iface.to_string();
-                    if seen.insert(s.clone()) {
-                        result.push(s.clone());
-                        self.collect_parent_interfaces(&s, class_loader, &mut result, &mut seen);
-                    }
-                }
-                current = parent_cls.parent_class;
-            } else {
-                break;
-            }
-        }
-
-        result
-    }
-
-    /// Recursively collect interfaces that an interface extends.
-    fn collect_parent_interfaces(
-        &self,
-        iface_name: &str,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-        result: &mut Vec<String>,
-        seen: &mut HashSet<String>,
-    ) {
-        let Some(iface) = class_loader(iface_name) else {
-            return;
-        };
-        // Check parent_class (first extended interface).
-        if let Some(parent) = iface.parent_class
-            && seen.insert(parent.to_string())
-        {
-            result.push(parent.to_string());
-            self.collect_parent_interfaces(&parent, class_loader, result, seen);
-        }
-        // Check interfaces list (multi-extends).
-        for parent_iface in &iface.interfaces {
-            let s = parent_iface.to_string();
-            if seen.insert(s.clone()) {
-                result.push(s.clone());
-                self.collect_parent_interfaces(parent_iface, class_loader, result, seen);
-            }
         }
     }
 
@@ -480,23 +398,9 @@ impl Backend {
             return locate(imp);
         }
 
-        let mut current = imp.parent_class;
-        let mut depth = 0u32;
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-            let Some(parent_cls) = class_loader(&parent_name) else {
-                break;
-            };
-            if declares(&parent_cls) {
-                return locate(&parent_cls);
-            }
-            current = parent_cls.parent_class;
-        }
-
-        None
+        crate::inheritance::ancestors(imp, class_loader)
+            .find(|(_, parent_cls)| declares(parent_cls))
+            .and_then(|(_, parent_cls)| locate(&parent_cls))
     }
 
     /// The FQN to search implementors of `cls` by: the namespace the class
@@ -676,8 +580,8 @@ impl Backend {
         include_abstract: bool,
         direct_only: bool,
         project_only: bool,
-    ) -> Vec<ClassInfo> {
-        let mut result: Vec<ClassInfo> = Vec::new();
+    ) -> Vec<Arc<ClassInfo>> {
+        let mut result: Vec<Arc<ClassInfo>> = Vec::new();
         // Track by FQN to avoid short-name collisions across namespaces.
         let mut seen_fqns: HashSet<String> = HashSet::new();
         if self.config().indexing.strategy() == IndexingStrategy::Full
@@ -773,7 +677,7 @@ impl Backend {
                     }
                 }
                 seen_fqns.insert(child_fqn.clone());
-                result.push(Arc::unwrap_or_clone(cls));
+                result.push(cls);
             }
         }
 
@@ -992,7 +896,7 @@ impl Backend {
         include_abstract: bool,
         direct_only: bool,
         seen_fqns: &mut HashSet<String>,
-        result: &mut Vec<ClassInfo>,
+        result: &mut Vec<Arc<ClassInfo>>,
     ) {
         if seen_fqns.contains(fqn) {
             return;
@@ -1009,7 +913,7 @@ impl Backend {
         {
             let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
             if seen_fqns.insert(cls_fqn) {
-                result.push(Arc::unwrap_or_clone(cls));
+                result.push(cls);
             }
         }
     }
@@ -1029,7 +933,7 @@ impl Backend {
         include_abstract: bool,
         direct_only: bool,
         seen_fqns: &mut HashSet<String>,
-        result: &mut Vec<ClassInfo>,
+        result: &mut Vec<Arc<ClassInfo>>,
     ) {
         for cls in classes {
             let cls_fqn = crate::util::build_fqn(&cls.name, cls.file_namespace.as_deref());
@@ -1045,7 +949,7 @@ impl Backend {
                 direct_only,
             ) {
                 seen_fqns.insert(cls_fqn);
-                result.push(ClassInfo::clone(cls));
+                result.push(Arc::clone(cls));
             }
         }
     }
@@ -1138,44 +1042,30 @@ impl Backend {
         // ── Transitive check: walk the parent class chain ───────────────
         // A class might extend another class that implements the target
         // interface.  Walk up to a bounded depth to find it.
-        let mut current = cls.parent_class;
-        let mut depth = 0u32;
-
-        while let Some(parent_name) = current {
-            if depth >= MAX_INHERITANCE_DEPTH {
-                break;
-            }
-            depth += 1;
-
-            if let Some(parent_cls) = class_loader(&parent_name) {
-                // Check if the parent implements the target interface.
-                for iface in &parent_cls.interfaces {
-                    if *iface == target_fqn || (!has_fqn && short_name(iface) == target_short) {
-                        return true;
-                    }
-                    // Also walk the interface's own extends chain.
-                    if Self::interface_extends_target(
-                        iface,
-                        target_short,
-                        target_fqn,
-                        has_fqn,
-                        class_loader,
-                        0,
-                    ) {
-                        return true;
-                    }
-                }
-
-                // Check if the parent IS the target (for abstract class chains).
-                let parent_fqn =
-                    crate::util::build_fqn(&parent_cls.name, parent_cls.file_namespace.as_deref());
-                if parent_fqn == target_fqn {
+        for (_, parent_cls) in crate::inheritance::ancestors(cls, class_loader) {
+            // Check if the parent implements the target interface.
+            for iface in &parent_cls.interfaces {
+                if *iface == target_fqn || (!has_fqn && short_name(iface) == target_short) {
                     return true;
                 }
+                // Also walk the interface's own extends chain.
+                if Self::interface_extends_target(
+                    iface,
+                    target_short,
+                    target_fqn,
+                    has_fqn,
+                    class_loader,
+                    0,
+                ) {
+                    return true;
+                }
+            }
 
-                current = parent_cls.parent_class;
-            } else {
-                break;
+            // Check if the parent IS the target (for abstract class chains).
+            let parent_fqn =
+                crate::util::build_fqn(&parent_cls.name, parent_cls.file_namespace.as_deref());
+            if parent_fqn == target_fqn {
+                return true;
             }
         }
 

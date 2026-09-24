@@ -9,6 +9,8 @@
 //! - `__('|')` / `trans('|')` / `Lang::get('|')` → translation keys
 //! - `env('|')` / `Env::get('|')` → environment variables
 
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
@@ -51,7 +53,7 @@ impl Backend {
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
     /// when it is not.
-    fn string_key_candidates(&self, kind: &LaravelStringKind) -> Vec<String> {
+    fn string_key_candidates(&self, kind: &LaravelStringKind) -> Arc<[String]> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
             // Only the keys `config/` declares: a key written at runtime is
@@ -61,17 +63,19 @@ impl Backend {
             LaravelStringKind::Config => self.cached_config_keys(),
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
-            LaravelStringKind::Command => self.laravel_commands.read().all_names(),
+            LaravelStringKind::Command => self.laravel_commands.read().all_names().into(),
             LaravelStringKind::MorphAlias => {
                 let mut aliases = self.laravel_morph_map.read().all_aliases();
                 aliases.sort();
-                aliases
+                aliases.into()
             }
             LaravelStringKind::GateAbility => self.cached_gate_abilities(),
-            LaravelStringKind::Env => crate::virtual_members::laravel::enumerate_env_keys(self),
+            LaravelStringKind::Env => {
+                crate::virtual_members::laravel::enumerate_env_keys(self).into()
+            }
             LaravelStringKind::Section
             | LaravelStringKind::Stack
-            | LaravelStringKind::ContainerBinding => Vec::new(),
+            | LaravelStringKind::ContainerBinding => Arc::new([]),
         }
     }
 
@@ -86,28 +90,35 @@ impl Backend {
     ) -> Option<CompletionResponse> {
         let ctx = detect_laravel_string_key_context(content, position)?;
 
-        let mut candidates = self.string_key_candidates(&ctx.kind);
+        // The candidate lists are shared with every other consumer, so only
+        // the names the typed prefix keeps are copied out of them.
+        let candidates = self.string_key_candidates(&ctx.kind);
+        let prefix_lower = ctx.prefix.to_lowercase();
+        let matches_prefix =
+            |name: &str| prefix_lower.is_empty() || name.to_lowercase().starts_with(&prefix_lower);
 
-        // For config-backed attributes like #[Database('mysql')], filter
-        // to sub-keys under the relevant config prefix and strip it so
-        // the user sees just the connection/store/channel name.
-        if let Some(sub_prefix) = ctx.config_sub_prefix {
-            candidates = candidates
-                .into_iter()
-                .filter_map(|key| {
-                    key.strip_prefix(sub_prefix).and_then(|rest| {
-                        // Only show direct children (no dots = leaf key).
-                        if rest.contains('.') {
-                            None
-                        } else {
-                            Some(rest.to_string())
-                        }
-                    })
-                })
-                .collect();
-            candidates.sort();
-            candidates.dedup();
-        }
+        let names: Vec<String> = match ctx.config_sub_prefix {
+            // For config-backed attributes like #[Database('mysql')], filter
+            // to sub-keys under the relevant config prefix and strip it so
+            // the user sees just the connection/store/channel name.
+            Some(sub_prefix) => {
+                let mut names: Vec<String> = candidates
+                    .iter()
+                    .filter_map(|key| key.strip_prefix(sub_prefix))
+                    // Only show direct children (no dots = leaf key).
+                    .filter(|rest| !rest.contains('.') && matches_prefix(rest))
+                    .map(str::to_string)
+                    .collect();
+                names.sort();
+                names.dedup();
+                names
+            }
+            None => candidates
+                .iter()
+                .filter(|name| matches_prefix(name))
+                .cloned()
+                .collect(),
+        };
 
         // Build the TextEdit range: from the start of the string content
         // (right after the opening quote) to the current cursor position.
@@ -119,16 +130,8 @@ impl Backend {
             end: position,
         };
 
-        let prefix_lower = ctx.prefix.to_lowercase();
-        let items: Vec<CompletionItem> = candidates
+        let items: Vec<CompletionItem> = names
             .into_iter()
-            .filter(|name| {
-                if prefix_lower.is_empty() {
-                    true
-                } else {
-                    name.to_lowercase().starts_with(&prefix_lower)
-                }
-            })
             .enumerate()
             .map(|(i, name)| {
                 let kind = string_key_item_kind(&ctx.kind);

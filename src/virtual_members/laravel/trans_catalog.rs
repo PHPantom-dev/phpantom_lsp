@@ -11,7 +11,7 @@ use crate::text_position::LineIndex;
 
 use super::provider_resources::ProviderResource;
 use super::trans_json::collect_json_trans_declarations;
-use super::trans_keys::collect_trans_declarations;
+use super::trans_keys::{app_lang_group, collect_trans_declarations, published_trans_dirs};
 
 /// A language file shared by all the keys it declares.
 pub(crate) struct TranslationFile {
@@ -21,6 +21,7 @@ pub(crate) struct TranslationFile {
     pub locale: String,
     /// PHP group name, with its package namespace; JSON files have no group.
     pub group: Option<String>,
+    is_override: bool,
 }
 
 /// One locale's declaration of a translation key.
@@ -40,6 +41,8 @@ pub(crate) struct TranslationEntry {
 /// paths for every entry. The ordered maps also keep completion stable.
 #[derive(Default)]
 pub(crate) struct TranslationCatalog {
+    /// Sorted keys shared by completion and diagnostics without copying the catalog.
+    pub keys: Arc<[String]>,
     /// The definitions of each key, ordered by locale and file URI.
     pub entries: BTreeMap<String, Vec<TranslationEntry>>,
     /// All readable PHP and JSON language files, including empty groups.
@@ -55,7 +58,14 @@ impl TranslationCatalog {
         self.roots.iter().any(|root| uri.starts_with(root))
     }
 
-    fn insert_file(&mut self, backend: &Backend, path: &Path, locale: &str, namespace: &str) {
+    fn insert_file(
+        &mut self,
+        backend: &Backend,
+        path: &Path,
+        locale: &str,
+        namespace: &str,
+        group: Option<&str>,
+    ) {
         let Ok(uri) = Url::from_file_path(path) else {
             return;
         };
@@ -66,6 +76,7 @@ impl TranslationCatalog {
             let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
                 return;
             };
+            let stem = group.unwrap_or(stem);
             Some(if namespace.is_empty() {
                 stem.to_string()
             } else {
@@ -79,10 +90,19 @@ impl TranslationCatalog {
             None => collect_json_trans_declarations(&content),
         };
         let file = self.files.len();
+        let is_override = !namespace.is_empty()
+            && uri
+                .path()
+                .split_once("/lang/vendor/")
+                .is_some_and(|(_, path)| {
+                    path.strip_prefix(namespace)
+                        .is_some_and(|rest| rest.starts_with('/'))
+                });
         self.files.push(TranslationFile {
             uri,
             locale: locale.to_string(),
             group,
+            is_override,
         });
         let lines = LineIndex::new(&content);
         for declaration in declarations {
@@ -113,13 +133,42 @@ impl TranslationCatalog {
             return;
         }
         self.locales.insert(locale.to_string());
+        self.insert_locale_files(backend, path, locale, namespace, "");
+    }
+
+    fn insert_locale_files(
+        &mut self,
+        backend: &Backend,
+        path: &Path,
+        locale: &str,
+        namespace: &str,
+        subdir: &str,
+    ) {
         let Ok(files) = std::fs::read_dir(path) else {
             return;
         };
         for file in files.flatten() {
             let path = file.path();
-            if path.extension().is_some_and(|ext| ext == "php") {
-                self.insert_file(backend, &path, locale, namespace);
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            // Do not recurse through directory symlinks back into the locale tree.
+            if file.file_type().is_ok_and(|kind| kind.is_dir()) {
+                self.insert_locale_files(
+                    backend,
+                    &path,
+                    locale,
+                    namespace,
+                    &format!("{subdir}{name}/"),
+                );
+            } else if let Some(stem) = name.strip_suffix(".php") {
+                self.insert_file(
+                    backend,
+                    &path,
+                    locale,
+                    namespace,
+                    Some(&format!("{subdir}{stem}")),
+                );
             }
         }
     }
@@ -138,7 +187,19 @@ impl Backend {
 
     fn build_translation_catalog(&self) -> TranslationCatalog {
         let mut roots = self.laravel_provider_resources.read().trans_dirs.clone();
-        if let Some(root) = self.workspace.workspace_root.read().as_ref() {
+        let workspace_root = self.workspace.workspace_root.read().clone();
+        if let Some(root) = &workspace_root {
+            let overrides: Vec<_> = roots
+                .iter()
+                .filter(|resource| !resource.namespace.is_empty())
+                .flat_map(|resource| {
+                    published_trans_dirs(root, &resource.namespace).map(|path| ProviderResource {
+                        path,
+                        namespace: resource.namespace.clone(),
+                    })
+                })
+                .collect();
+            roots.extend(overrides);
             roots.extend(
                 ["lang", "resources/lang"].map(|directory| ProviderResource {
                     path: root.join(directory),
@@ -165,17 +226,49 @@ impl Backend {
                     && let Some(locale) = path.file_stem().and_then(|name| name.to_str())
                 {
                     catalog.locales.insert(locale.to_string());
-                    catalog.insert_file(self, &path, locale, "");
+                    catalog.insert_file(self, &path, locale, "", None);
                 }
+            }
+        }
+        // A new language file can be open before it exists on disk. The
+        // nonblocking snapshot is safe while the workspace index resolves types.
+        if let Some(root) = workspace_root {
+            let root_uri = crate::util::path_to_uri(&root);
+            for (uri, _) in self.user_file_symbol_maps_nonblocking() {
+                let Some(group) = app_lang_group(&root_uri, &uri) else {
+                    continue;
+                };
+                if catalog.files.iter().any(|file| file.uri.as_str() == uri) {
+                    continue;
+                }
+                let Ok(parsed_uri) = Url::parse(&uri) else {
+                    continue;
+                };
+                let Ok(path) = parsed_uri.to_file_path() else {
+                    continue;
+                };
+                let Some((_, locale)) =
+                    uri[..uri.len() - group.len() - ".php".len() - 1].rsplit_once('/')
+                else {
+                    continue;
+                };
+                catalog.locales.insert(locale.to_string());
+                catalog.insert_file(self, &path, locale, "", Some(group));
             }
         }
         for entries in catalog.entries.values_mut() {
             entries.sort_by(|a, b| {
                 let a = &catalog.files[a.file];
                 let b = &catalog.files[b.file];
-                (&a.locale, &a.uri).cmp(&(&b.locale, &b.uri))
+                (&a.locale, a.group.is_some(), !a.is_override, &a.uri).cmp(&(
+                    &b.locale,
+                    b.group.is_some(),
+                    !b.is_override,
+                    &b.uri,
+                ))
             });
         }
+        catalog.keys = catalog.entries.keys().cloned().collect();
         catalog
     }
 

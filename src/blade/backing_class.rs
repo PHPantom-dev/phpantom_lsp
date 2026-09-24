@@ -214,7 +214,7 @@ impl Backend {
             return None;
         }
         let loader = |name: &str| self.find_or_load_class(name);
-        if !crate::type_engine::variable::forward_walk::is_subclass_of(fqn, base, &loader) {
+        if !crate::class_lookup::is_subclass_of(fqn, base, &loader) {
             return None;
         }
         Some(class)
@@ -289,9 +289,7 @@ impl Backend {
     pub(crate) fn component_render_scope_names(&self, class: &ClassInfo) -> Option<Vec<String>> {
         let fqn = class.fqn();
         let loader = |name: &str| self.find_or_load_class(name);
-        let extends = |base: &str| {
-            crate::type_engine::variable::forward_walk::is_subclass_of(&fqn, base, &loader)
-        };
+        let extends = |base: &str| crate::class_lookup::is_subclass_of(&fqn, base, &loader);
         // Livewire renders the view with the component bound, so `$this` is
         // the component inside the template.  `livewire_scope_vars` covers
         // the other names the instance arrives under.

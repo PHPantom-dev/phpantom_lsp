@@ -22,12 +22,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // Check for `$x !== null` or `$x != null` or `null !== $x` etc.
     if let Some(var_name) = extract_non_null_check_var(condition) {
         // For array access keys, narrow the shape on the base variable.
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_element(&var_name, base, key, scope, ctx);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject(&var_name, scope, ctx);
     }
     // Check for `$x !== false` or `false !== $x` — the truthy branch
     // rules out `false` alone, which is what the `T|false` handle idiom
@@ -39,12 +34,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // `isset($x)` — truthy branch means $x is not null: strip null.
     // Handles multiple args: `isset($a, $b)` strips null from both.
     for var_name in extract_isset_vars(condition) {
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_element(&var_name, base, key, scope, ctx);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject(&var_name, scope, ctx);
     }
     // `!isset($x)` — truthy branch means $x is null: narrow to null.
     for var_name in extract_not_isset_vars(condition) {
@@ -103,9 +93,7 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     }
     // Bare truthy check: `if ($x) { ... }` — $x is truthy in the
     // then-body, so strip null and false from its type.
-    if let Some(var_name) =
-        expr_to_var_name(condition).or_else(|| narrowing::expr_to_subject_key(condition))
-    {
+    if let Some(var_name) = expr_to_subject(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_falsy_from_scope(&var_name, scope);
     }
@@ -137,12 +125,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         // shape on the base variable directly rather than using a
         // synthetic scope entry.  This ensures the narrowed shape
         // survives scope merges.
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_element(&var_name, base, key, scope, ctx);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject(&var_name, scope, ctx);
     }
     // When the condition is `$x !== null`, the inverse (else/guard)
     // means $x IS null — narrow to null only.
@@ -224,9 +207,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // key or the two sides of the `if` describe values that could be the
     // same one, and the join has nothing to key the branch's writes
     // against.
-    if let Some(var_name) =
-        expr_to_var_name(condition).or_else(|| narrowing::expr_to_subject_key(condition))
-    {
+    if let Some(var_name) = expr_to_subject(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_falsy_in_scope(&var_name, scope);
     }
@@ -238,12 +219,7 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // `!isset($x)` — inverse (guard after `!isset` return) means $x
     // is not null: strip null.
     for var_name in extract_not_isset_vars(condition) {
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_element(&var_name, base, key, scope, ctx);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject(&var_name, scope, ctx);
     }
 }
 
@@ -388,12 +364,7 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
     // When `if ($x === null) { return; }`, strip null from $x after.
     // When `if (!$x) { return; }`, strip null from $x after.
     if let Some(var_name) = extract_null_equality_check_var(if_stmt.condition) {
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject_shape(&var_name, scope, ctx);
     }
     if let Some(var_name) = extract_falsy_check_var(if_stmt.condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
@@ -408,12 +379,7 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
     }
     // `if (!isset($x)) { return; }` — after the guard, $x is not null.
     for var_name in extract_not_isset_vars(if_stmt.condition) {
-        if let Some((base, key)) = split_array_access_key(&var_name) {
-            strip_null_from_array_shape_key(base, key, scope);
-        } else {
-            seed_synthetic_key_if_needed(&var_name, scope, ctx);
-            strip_null_from_scope(&var_name, scope);
-        }
+        strip_null_from_subject_shape(&var_name, scope, ctx);
     }
     // `if ($x !== null)` with return doesn't narrow after — the
     // remaining code is the null path.  This is handled by the

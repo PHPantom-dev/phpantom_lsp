@@ -838,3 +838,148 @@ class Handler implements HandlerInterface {
         result
     );
 }
+
+// ── Two-phase resolve: Phase 1 defers the edit to Phase 2 ───────────────────
+
+#[test]
+fn offers_add_override_action() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Child extends Base {
+    public function foo(): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        2,
+        "Method Child::foo() overrides method Base::foo() but is missing the #[Override] attribute.",
+        "method.missingOverride",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 2, 4);
+    let override_action = find_action_containing(&actions, "#[Override]");
+
+    assert!(
+        override_action.is_some(),
+        "should offer Add #[Override] action"
+    );
+
+    let action = override_action.unwrap();
+    assert_eq!(action.kind, Some(CodeActionKind::QUICKFIX));
+    assert_eq!(action.is_preferred, Some(true));
+    assert!(
+        action.title.contains("foo"),
+        "title should mention method name: {}",
+        action.title
+    );
+
+    // Phase 1: edit should be None, data should be Some.
+    assert!(action.edit.is_none(), "Phase 1 should not compute the edit");
+    assert!(
+        action.data.is_some(),
+        "Phase 1 should set data for deferred resolve"
+    );
+
+    // Phase 2: resolve the action to get the edit.
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+    assert_eq!(edits.len(), 1);
+    assert!(edits[0].new_text.contains("#[Override]"));
+    assert!(
+        !edits[0].new_text.contains("#[\\Override]"),
+        "should use short form in non-namespaced file"
+    );
+}
+
+// ── Edit range starts on the attribute line, not the signature line ─────────
+
+#[test]
+fn insert_range_starts_at_existing_attribute_line() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Child extends Base {
+    #[Route('/foo')]
+    public function foo(): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        3,
+        "Method Child::foo() overrides method Base::foo() but is missing the #[Override] attribute.",
+        "method.missingOverride",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 3, 4);
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
+
+    // Phase 1: no edit yet.
+    assert!(action.edit.is_none(), "Phase 1 should not have edit");
+
+    // Phase 2: resolve to get the edit.
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+
+    // The insertion position should be before the `#[Route` line
+    // (line 2), not before the `public function` line (line 3).
+    assert_eq!(
+        edits[0].range.start.line, 2,
+        "should insert before existing attributes"
+    );
+}
+
+// ── Namespaced file — attribute edit plus exactly one import edit ───────────
+
+#[test]
+fn adds_use_import_in_namespaced_file() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace App\Http\Controllers;
+
+class Child extends Base {
+    public function foo(): void {}
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        4,
+        "Method App\\Http\\Controllers\\Child::foo() overrides method App\\Http\\Controllers\\Base::foo() but is missing the #[Override] attribute.",
+        "method.missingOverride",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 4, 4);
+    let action = find_action_containing(&actions, "#[Override]").expect("should offer action");
+
+    // Phase 1: no edit yet.
+    assert!(action.edit.is_none(), "Phase 1 should not have edit");
+
+    // Phase 2: resolve to get the edit.
+    let resolved = resolve_action(&backend, uri, content, action);
+    let edits = extract_edits(&resolved);
+
+    // Should have two edits: the attribute insertion and the use import.
+    assert_eq!(edits.len(), 2, "should have attribute + use import edits");
+
+    let has_attr = edits.iter().any(|e| e.new_text.contains("#[Override]"));
+    let has_import = edits.iter().any(|e| e.new_text.contains("use Override;"));
+
+    assert!(has_attr, "should insert #[Override] attribute");
+    assert!(has_import, "should add `use Override;` import");
+
+    // The attribute should use the short form, not FQN.
+    assert!(
+        !edits.iter().any(|e| e.new_text.contains("#[\\Override]")),
+        "should use short form #[Override], not FQN"
+    );
+}

@@ -14,6 +14,24 @@ use crate::types::{ClassInfo, FileContext};
 /// A byte range `[start, end)` in the source.
 pub(crate) type ByteRange = (usize, usize);
 
+/// PHP superglobals and auto-defined variables that are always in scope,
+/// so they are neither reported as undefined nor as unused.
+pub(crate) const SUPERGLOBALS: &[&str] = &[
+    "$_GET",
+    "$_POST",
+    "$_SERVER",
+    "$_REQUEST",
+    "$_SESSION",
+    "$_COOKIE",
+    "$_FILES",
+    "$_ENV",
+    "$GLOBALS",
+    "$argc",
+    "$argv",
+    "$http_response_header",
+    "$php_errormsg",
+];
+
 // ── Type-checking collectors ────────────────────────────────────────────────
 
 /// What a type-checking diagnostic collector reads from the file before

@@ -195,7 +195,7 @@ pub(in crate::type_engine) fn array_func_raw_type(
         }
         let key = raw
             .iterable_key_type()
-            .and_then(|key| super::resolution::normalize_array_key_type(&key));
+            .and_then(|key| super::array_shape_writes::normalize_array_key_type(&key));
         return match (key, val) {
             (Some(k), Some(v)) => Some(PhpType::generic_array(k, v)),
             (None, Some(v)) => Some(PhpType::list(v)),

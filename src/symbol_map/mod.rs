@@ -987,6 +987,25 @@ impl SymbolMap {
         }
     }
 
+    /// The span whose extent is exactly `[start, end)`, if the map holds
+    /// one.
+    ///
+    /// Unlike [`lookup`](Self::lookup), which answers "what is at this
+    /// offset", this answers "is this range a symbol of its own".  A
+    /// caller that holds the range of a sub-expression — the subject of a
+    /// member access, say — uses it to find the span that sub-expression
+    /// emitted for itself, and so learns what it is without the file's
+    /// text.  Several spans can start at the same offset (a chain and its
+    /// base both start where the base does), so the whole equal-start run
+    /// is checked.
+    pub(crate) fn span_covering_exactly(&self, start: u32, end: u32) -> Option<&SymbolSpan> {
+        let first = self.spans.partition_point(|span| span.start < start);
+        self.spans[first..]
+            .iter()
+            .take_while(|span| span.start == start)
+            .find(|span| span.end == end)
+    }
+
     /// Find the innermost scope that contains `offset`.
     ///
     /// Returns the `scope_start` (opening brace offset) of the innermost

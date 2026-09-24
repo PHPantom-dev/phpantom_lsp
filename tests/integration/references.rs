@@ -2019,8 +2019,8 @@ class Cart {
     assert_no_duplicates(&results, "one_file_method_refs");
 }
 
-#[test]
-fn workspace_index_refreshes_after_new_file_is_added() {
+#[tokio::test]
+async fn workspace_index_refreshes_after_new_file_is_added() {
     let (backend, dir) = crate::common::create_psr4_workspace(
         r#"{
             "autoload": {
@@ -2045,9 +2045,12 @@ class Item {}
 
     open_file(&backend, &item_uri, &item_content);
 
-    let initial_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find initial class references");
+    let item_url = Url::parse(&item_uri).unwrap();
+    let initial_results = references_at(&backend, &item_url, 3, 6, true).await;
+    assert!(
+        !initial_results.is_empty(),
+        "should find initial class references"
+    );
 
     assert_no_duplicates(&initial_results, "workspace_refresh_initial_refs");
 
@@ -2069,9 +2072,7 @@ class Service {
     .expect("failed to write newly added PHP file");
 
     let service_uri = format!("file://{}", service_path.display());
-    let refreshed_results = backend
-        .find_references(&item_uri, &item_content, Position::new(3, 6), true)
-        .expect("should find refreshed class references");
+    let refreshed_results = references_at(&backend, &item_url, 3, 6, true).await;
 
     assert_no_duplicates(&refreshed_results, "workspace_refresh_refs");
     assert!(
@@ -3761,6 +3762,74 @@ async fn test_unrelated_class_same_method_excluded_cross_file() {
 }
 
 #[tokio::test]
+async fn method_references_type_receivers_without_walking_unrelated_bodies() {
+    // A candidate file holds the searched access in one body among
+    // several.  Only that body gets its variable scopes built, so the
+    // bodies around it must neither contribute their own `$item` to the
+    // answer nor be needed for it.
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///a.php").unwrap();
+    let uri_b = Url::parse("file:///b.php").unwrap();
+
+    let text_a = concat!(
+        "<?php\n",                               // L0
+        "class Target {\n",                      // L1
+        "    public function save(): void {}\n", // L2
+        "}\n",                                   // L3
+        "class Decoy {\n",                       // L4
+        "    public function save(): void {}\n", // L5
+        "    public function run(): void {}\n",  // L6
+        "}\n",                                   // L7
+    );
+    let text_b = concat!(
+        "<?php\n",                          // L0
+        "class Holder {\n",                 // L1
+        "    public function before() {\n", // L2
+        "        $item = new Decoy();\n",   // L3
+        "        $item->run();\n",          // L4
+        "    }\n",                          // L5
+        "    public function middle() {\n", // L6
+        "        $item = new Target();\n",  // L7
+        "        $item->save();\n",         // L8
+        "        $item->save();\n",         // L9
+        "    }\n",                          // L10
+        "    public function after() {\n",  // L11
+        "        $item = new Decoy();\n",   // L12
+        "        $item->run();\n",          // L13
+        "    }\n",                          // L14
+        "}\n",                              // L15
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+
+    // Find references to Target::save() from its declaration.
+    let locs = references_at(&backend, &uri_a, 2, 21, false).await;
+
+    let b_lines: Vec<u32> = locs
+        .iter()
+        .filter(|l| l.uri == uri_b)
+        .map(|l| l.range.start.line)
+        .collect();
+    assert_eq!(
+        b_lines,
+        vec![8, 9],
+        "Both `save()` calls in middle() should resolve to Target; got: {:?}",
+        b_lines
+    );
+
+    // The same search for Decoy::save() finds nothing in b.php: the
+    // `$item` the skipped bodies hold is a Decoy, but neither body
+    // calls `save()` on it.
+    let decoy_locs = references_at(&backend, &uri_a, 5, 21, false).await;
+    assert!(
+        !decoy_locs.iter().any(|l| l.uri == uri_b),
+        "Decoy::save() has no call sites; got: {:?}",
+        decoy_locs
+    );
+}
+
+#[tokio::test]
 async fn test_inherited_method_references_included() {
     // A child class inherits a method from its parent.  Find References
     // on the parent's method should include calls via the child.
@@ -4755,5 +4824,113 @@ async fn function_references_from_a_use_function_import_reach_its_call_sites() {
         locs.iter()
             .any(|l| l.uri == uri_b && l.range.start.line == 4),
         "expected the shout() call site, got {locs:?}"
+    );
+}
+
+/// A package class that implements the interface is absent from the reverse
+/// inheritance index until something parses its file, so a search scoped to
+/// that index alone drops every access on it.  The scope has to settle a
+/// receiver by walking up from the receiver's own class, so the search
+/// answers the same whether or not the session happened to load the package
+/// before it ran.
+#[tokio::test]
+async fn member_references_reach_an_implementor_nothing_has_parsed() {
+    let installed_json = r#"{"packages": [{
+        "name": "acme/services",
+        "version": "1.0.0",
+        "install-path": "../acme/services",
+        "autoload": {"psr-4": {"Acme\\": ""}}
+    }]}"#;
+
+    let (backend, dir) = crate::common::create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("vendor/composer/installed.json", installed_json),
+            (
+                "vendor/acme/services/ServiceInterface.php",
+                r#"<?php
+
+namespace Acme;
+
+interface ServiceInterface
+{
+    public function handle(): void;
+}
+"#,
+            ),
+            (
+                "vendor/acme/services/PackageService.php",
+                r#"<?php
+
+namespace Acme;
+
+class PackageService implements ServiceInterface
+{
+    public function handle(): void {}
+}
+"#,
+            ),
+            (
+                "src/AppService.php",
+                r#"<?php
+
+namespace App;
+
+use Acme\ServiceInterface;
+
+class AppService implements ServiceInterface
+{
+    public function handle(): void {}
+}
+"#,
+            ),
+            (
+                "src/Consumer.php",
+                r#"<?php
+
+namespace App;
+
+use Acme\PackageService;
+
+class Consumer
+{
+    public function run(PackageService $service): void
+    {
+        $service->handle();
+    }
+}
+"#,
+            ),
+        ],
+    );
+
+    // The vendor scan files the package's classes under their paths without
+    // parsing them, the way a dependency is known before anything needs it.
+    backend
+        .initialized(tower_lsp::lsp_types::InitializedParams {})
+        .await;
+
+    let declaration_path = dir.path().join("src/AppService.php");
+    let declaration_uri = Url::from_file_path(&declaration_path).unwrap().to_string();
+    let declaration_content = std::fs::read_to_string(&declaration_path).unwrap();
+    open_file(&backend, &declaration_uri, &declaration_content);
+
+    let consumer_uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
+
+    // `handle` in `public function handle(): void {}`.
+    let results = backend
+        .find_references(
+            &declaration_uri,
+            &declaration_content,
+            Position::new(8, 20),
+            true,
+        )
+        .expect("should find method references");
+
+    assert!(
+        results
+            .iter()
+            .any(|loc| loc.uri == consumer_uri && loc.range.start.line == 10),
+        "expected the call on the package implementor, got {results:?}"
     );
 }

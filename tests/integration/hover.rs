@@ -8006,6 +8006,66 @@ namespace {
     );
 }
 
+/// Hovering the method name of a facade call shows the method the facade
+/// forwards to, not `__callStatic`.
+///
+/// Case adapted from laravel-lsp's MIT-licensed test suite.
+#[test]
+fn hover_on_a_facade_method_name_shows_the_forwarded_method() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+
+namespace Illuminate\Support\Facades {
+    abstract class Facade
+    {
+        public static function __callStatic(string $method, array $args): mixed
+        {
+            return false;
+        }
+    }
+}
+
+namespace {
+    use Illuminate\Support\Facades\Facade;
+
+    final class DriverDetails {}
+
+    final class DriverProvider
+    {
+        /** Get the driver details. */
+        public function details(string $driver): DriverDetails
+        {
+            return new DriverDetails();
+        }
+    }
+
+    final class Driver extends Facade
+    {
+        protected static function getFacadeAccessor(): string
+        {
+            return DriverProvider::class;
+        }
+    }
+
+    Driver::details('reverb');
+}
+"#;
+
+    let (line, character) = crate::common::line_char_of(content, "details('reverb')");
+    let hover = hover_at(&backend, uri, content, line, character + 2)
+        .expect("hover on the facade method name should resolve");
+    let text = hover_text(&hover);
+    for expected in [
+        "details(string $driver)",
+        "DriverDetails",
+        "Get the driver details.",
+    ] {
+        assert!(text.contains(expected), "expected {expected:?} in: {text}");
+    }
+    assert!(!text.contains("__callStatic"), "{text}");
+}
+
 #[test]
 fn hover_facade_concrete_target_scoped_to_own_class() {
     // Two facades declared in the same file: resolving a call on `Second`
@@ -12445,6 +12505,32 @@ for ($i = 0, $x = new Outer(); $i < 10; $i++, $x = $x->next()) {
     assert!(
         text.contains("Outer") && text.contains("Inner"),
         "In the body, $x should be Outer|Inner, got: {}",
+        text
+    );
+}
+
+/// The counter starts at a literal, but the `$i++` the loop runs before every
+/// later iteration widens it, so the body reads it as `int`.
+#[test]
+fn hover_for_loop_counter_is_widened_by_increment() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+for ($i = 0; $i < 10; $i++) {
+    echo $i;
+}
+"#;
+    let target_line = content
+        .lines()
+        .enumerate()
+        .find(|(_, l)| l.contains("echo $i"))
+        .map(|(i, _)| i as u32)
+        .unwrap();
+    let hover = hover_at(&backend, uri, content, target_line, 10).expect("expected hover on $i");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("int"),
+        "In the body, $i should be int, got: {}",
         text
     );
 }

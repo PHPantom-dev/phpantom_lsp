@@ -14,33 +14,76 @@ mod date_class;
 mod gates;
 mod macros;
 mod morph_map;
+mod pivots;
 mod provider_resources;
 mod schema;
 mod storage;
 
 use crate::Backend;
+use crate::virtual_members::laravel::file_contributions::{Contribution, FileContributions};
 
-impl Backend {
-    /// Collect the FQNs of every Laravel service provider that could register a
-    /// macro: those installed vendor packages auto-discover (via
-    /// `extra.laravel.providers` in each vendor's `installed.json`) plus those
-    /// the app lists in `bootstrap/providers.php` / `config/app.php`.
-    fn laravel_provider_fqns(&self) -> Vec<String> {
-        self.laravel_providers_with_origin()
-            .into_iter()
-            .map(|(fqn, _)| fqn)
-            .collect()
+/// The service providers a Laravel project registers, each tagged with how
+/// it was registered so a container key two of them bind can be settled the
+/// way the container settles it.
+///
+/// Reading the list means parsing every `vendor/composer/installed.json`
+/// (often megabytes of JSON) plus the app's own provider files, so a pass
+/// that builds several indexes reads it once and hands it to each one.
+pub(crate) struct LaravelProviders {
+    providers: Vec<(String, crate::virtual_members::laravel::ProviderOrigin)>,
+}
+
+impl LaravelProviders {
+    /// Every provider FQN, in registration order.
+    pub(crate) fn fqns(&self) -> impl Iterator<Item = &str> {
+        self.providers.iter().map(|(fqn, _)| fqn.as_str())
     }
 
-    /// The same providers, each tagged with how it was registered so a
-    /// container key two of them bind can be settled the way the container
-    /// settles it.
+    /// Every provider with the way it was registered, in registration
+    /// order.
+    pub(crate) fn with_origin(
+        &self,
+    ) -> &[(String, crate::virtual_members::laravel::ProviderOrigin)] {
+        &self.providers
+    }
+}
+
+/// The provider list for one refresh, read the first time a pass in that
+/// refresh asks for it and shared by every pass after.
+///
+/// An `update_ast` runs several refreshes, and an edit to a seed file (a
+/// service provider, or the app's provider-registration files) can make
+/// two or three of them rebuild from the list; without this each rebuild
+/// would parse every `installed.json` again.
+pub(crate) struct ProvidersOnce<'a> {
+    backend: &'a Backend,
+    providers: std::cell::OnceCell<LaravelProviders>,
+}
+
+impl<'a> ProvidersOnce<'a> {
+    pub(crate) fn new(backend: &'a Backend) -> Self {
+        Self {
+            backend,
+            providers: std::cell::OnceCell::new(),
+        }
+    }
+
+    /// The provider list, read on first use.
+    pub(crate) fn get(&self) -> &LaravelProviders {
+        self.providers
+            .get_or_init(|| self.backend.laravel_providers())
+    }
+}
+
+impl Backend {
+    /// Collect every Laravel service provider that could register a macro, a
+    /// resource, or a binding: those installed vendor packages auto-discover
+    /// (via `extra.laravel.providers` in each vendor's `installed.json`) plus
+    /// those the app lists in `bootstrap/providers.php` / `config/app.php`.
     ///
     /// A provider reached both ways keeps the origin it was first found under:
     /// the container registers it once, at the first point it is named.
-    fn laravel_providers_with_origin(
-        &self,
-    ) -> Vec<(String, crate::virtual_members::laravel::ProviderOrigin)> {
+    pub(crate) fn laravel_providers(&self) -> LaravelProviders {
         use crate::virtual_members::laravel::ProviderOrigin;
 
         let mut providers: Vec<(String, ProviderOrigin)> = Vec::new();
@@ -63,12 +106,8 @@ impl Backend {
 
         if let Some(root) = self.workspace.workspace_root.read().clone() {
             for rel in ["bootstrap/providers.php", "config/app.php"] {
-                let path = root.join(rel);
-                let uri = crate::util::path_to_uri(&path);
-                let content = self
-                    .get_file_content(&uri)
-                    .or_else(|| std::fs::read_to_string(&path).ok());
-                if let Some(content) = content {
+                let uri = crate::util::path_to_uri(&root.join(rel));
+                if let Some(content) = self.get_file_content(&uri) {
                     for fqn in crate::virtual_members::laravel::parse_provider_class_list(&content)
                     {
                         // The configured list is registered `Illuminate\*`
@@ -86,7 +125,49 @@ impl Backend {
             }
         }
 
-        providers
+        LaravelProviders { providers }
+    }
+
+    /// Build every index that is read out of the registered service
+    /// providers, reading the provider list once for all of them.
+    ///
+    /// The macro index is left out: startup builds it earlier, before the
+    /// schema index that reads its `Blueprint` macros.
+    pub(crate) fn build_laravel_provider_indexes(&self) {
+        let providers = self.laravel_providers();
+        self.build_laravel_date_class(&providers);
+        self.build_provider_resources(&providers);
+        self.build_laravel_morph_map_index(&providers);
+        self.build_laravel_gate_index(&providers);
+    }
+
+    /// Scan every registered service provider's file into `files`, one
+    /// contribution per file, and report how many files were read.
+    ///
+    /// A file two providers share is read once, and a scan that registers
+    /// nothing leaves no entry.  The caller rebuilds the registry's derived
+    /// lookups afterwards, so a bulk build rebuilds once.
+    fn scan_providers_into<C: Contribution>(
+        &self,
+        providers: &LaravelProviders,
+        files: &mut FileContributions<C>,
+        mut scan: impl FnMut(&str) -> C,
+    ) -> usize {
+        let mut scanned = 0usize;
+        for fqn in providers.fqns() {
+            let Some(uri) = self.resolve_class_uri(fqn) else {
+                continue;
+            };
+            if files.has_uri(&uri) {
+                continue;
+            }
+            let Some(content) = self.get_file_content(&uri) else {
+                continue;
+            };
+            scanned += 1;
+            files.set_file(uri, scan(&content));
+        }
+        scanned
     }
 
     /// Resolve a class FQN to the URI of the file that declares it, loading the
@@ -112,6 +193,26 @@ impl Backend {
         ["bootstrap/providers.php", "config/app.php"]
             .iter()
             .any(|rel| crate::util::path_to_uri(&root.join(rel)) == uri)
+    }
+
+    /// Drop what a file deleted from disk contributed to the Laravel
+    /// registries.
+    ///
+    /// Each registry keys a file's registrations by its URI and replaces
+    /// them whenever the file is parsed, which a deleted file never is
+    /// again.  Re-running the passes against empty content hands them what
+    /// the file now contributes and lets each keep its own downstream
+    /// invalidation (evicting the classes a macro attached to, dropping the
+    /// storage disk type, marking the pivot index dirty).
+    pub(crate) fn forget_laravel_file_contributions(&self, uri: &str) {
+        let providers = ProvidersOnce::new(self);
+        self.refresh_laravel_macros(uri, "", &providers);
+        self.refresh_laravel_storage_drivers(uri, "");
+        self.refresh_laravel_pivots(uri, "");
+        self.refresh_laravel_command_index(uri);
+        self.refresh_laravel_morph_map(uri, "");
+        self.refresh_laravel_gates(uri, "");
+        self.forget_laravel_provider_resources(uri);
     }
 
     fn is_in_vendor_dir(&self, path: &std::path::Path) -> bool {

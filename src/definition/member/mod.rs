@@ -39,9 +39,11 @@ use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::CtxLoaders;
 use crate::types::ResolvedType;
 use crate::types::*;
+use crate::virtual_members::ResolvedClassCache;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
-    extends_eloquent_model, is_accessor_or_mutator_method, where_property_method_to_column,
+    custom_builder_fqn, extends_eloquent_model, facade_concrete_class,
+    is_accessor_or_mutator_method, where_property_method_to_column,
 };
 
 /// Pre-extracted context for a member definition lookup.
@@ -205,7 +207,6 @@ impl Backend {
                         &target_class.used_traits,
                         &effective_name,
                         &class_loader,
-                        0,
                     )
                     .map(|(_, fqn)| fqn)
                 });
@@ -229,9 +230,12 @@ impl Backend {
             // ── Timestamp constant redirect ─────────────────────────
             // When the property name matches a timestamp column,
             // jump straight to the CREATED_AT / UPDATED_AT constant.
+            // Base resolution sees a `CREATED_AT` a parent model overrides.
             if extends_eloquent_model(lookup_class, &class_loader)
-                && let Some(const_name) =
-                    Self::timestamp_property_to_constant(lookup_class, &effective_name)
+                && let Some(const_name) = Self::timestamp_property_to_constant(
+                    &crate::virtual_members::resolve_class_base_cached(lookup_class, &class_loader),
+                    &effective_name,
+                )
                 && let Some((const_class, const_fqn)) =
                     Self::find_declaring_class(lookup_class, const_name, &class_loader)
                 && let Some(location) = self.member_position_location(
@@ -256,6 +260,7 @@ impl Backend {
                 lookup_class,
                 &effective_name,
                 &class_loader,
+                Some(&self.resolved_class_cache),
             )
             .unwrap_or_else(|| {
                 (
@@ -308,7 +313,10 @@ impl Backend {
             // synthesised from column names.  They have no real method
             // declaration; GTD should jump to the column's string literal
             // in the relevant Eloquent array ($fillable, $casts, etc.).
+            // A real method of that name, such as a `scopeWhereEmail`
+            // scope, is what Laravel calls instead, so it wins.
             if extends_eloquent_model(lookup_class, &class_loader)
+                && Self::classify_member(&declaring_class, &search_name, access_hint).is_none()
                 && let Some(column) = where_property_method_to_column(&effective_name)
                 && let Some(location) = self.eloquent_array_entry_location(
                     &declaring_fqn,
@@ -408,9 +416,13 @@ impl Backend {
         }
 
         // Try with scope mapping in the fallback path too.
-        let Some((search_name, declaring_class, declaring_fqn)) =
-            Self::resolve_search_name(target_class, fallback_class, &effective_name, &class_loader)
-        else {
+        let Some((search_name, declaring_class, declaring_fqn)) = Self::resolve_search_name(
+            target_class,
+            fallback_class,
+            &effective_name,
+            &class_loader,
+            Some(&self.resolved_class_cache),
+        ) else {
             // Last resort: Eloquent array entry (virtual properties) and
             // where{Property} method mapping.
             if extends_eloquent_model(fallback_class, &class_loader) {
@@ -542,6 +554,7 @@ impl Backend {
         lookup_class: &ClassInfo,
         effective_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        cache: Option<&ResolvedClassCache>,
     ) -> Option<(String, ClassInfo, String)> {
         if let Some((cls, fqn)) =
             Self::find_declaring_class(lookup_class, effective_name, class_loader)
@@ -602,7 +615,37 @@ impl Backend {
             return Some((effective_name.to_string(), cls, fqn));
         }
 
+        // Try facade-forwarded method: `Facade::__callStatic` hands the
+        // call to the instance its `getFacadeAccessor()` names.
+        if let Some((cls, fqn)) =
+            Self::find_facade_forwarded_method(lookup_class, effective_name, class_loader, cache)
+        {
+            return Some((effective_name.to_string(), cls, fqn));
+        }
+
         None
+    }
+
+    /// Find where a static call on a Laravel facade is declared on the
+    /// concrete class the facade forwards to (or on something that class
+    /// inherits or mixes in).
+    fn find_facade_forwarded_method(
+        class: &ClassInfo,
+        member_name: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        cache: Option<&ResolvedClassCache>,
+    ) -> Option<(ClassInfo, String)> {
+        let concrete = facade_concrete_class(class, class_loader, cache)?;
+        let (declaring_class, fqn) =
+            Self::find_declaring_class(&concrete, member_name, class_loader)?;
+
+        // A member declared on the concrete class itself comes back under
+        // its short name; use the FQN so the file lookup can disambiguate.
+        if !fqn.contains('\\') && fqn == concrete.name {
+            Some((declaring_class, concrete.fqn().to_string()))
+        } else {
+            Some((declaring_class, fqn))
+        }
     }
 
     /// Locate the `::macro('name', ...)` registration site for a Laravel macro
@@ -813,26 +856,8 @@ impl Backend {
             return None;
         }
 
-        // Walk the parent chain to find a custom builder definition.
-        // Laravel's #[UseEloquentBuilder] and HasBuilder are effectively inherited.
-        let mut builder_fqn = ELOQUENT_BUILDER_FQN.to_string();
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(curr) = current else { break };
-            if let Some(name) = curr
-                .laravel()
-                .and_then(|l| l.custom_builder.as_ref())
-                .and_then(|b| b.base_name())
-            {
-                builder_fqn = name.to_string();
-                break;
-            }
-            current = curr
-                .parent_class
-                .as_ref()
-                .and_then(|p| class_loader(p))
-                .map(Arc::unwrap_or_clone);
-        }
+        let builder_fqn = custom_builder_fqn(class, class_loader)
+            .unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
         let builder = class_loader(&builder_fqn)?;
         let (declaring_class, fqn) =

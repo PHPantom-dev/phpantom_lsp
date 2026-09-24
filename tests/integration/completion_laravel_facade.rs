@@ -9,8 +9,7 @@
 //! it directly (`Container::class`) or through a container binding key
 //! (`'thing.container'`) the alias table resolves.
 
-use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php};
-use tower_lsp::lsp_types::*;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
 
 const COMPOSER_JSON: &str = r#"{
     "require": { "laravel/framework": "^11.0" },
@@ -145,8 +144,7 @@ async fn complete_labels(consumer: &str, line: u32, character: u32) -> Vec<Strin
     files.push(("src/Consumer.php", consumer));
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, &files);
 
-    let uri = Url::from_file_path(dir.path().join("src/Consumer.php")).unwrap();
-    open_php(&backend, &uri, consumer).await;
+    let uri = open_php_at(&backend, &dir, "src/Consumer.php", consumer).await;
     complete_labels_at_opened(&backend, &uri, line, character).await
 }
 
