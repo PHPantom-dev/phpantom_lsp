@@ -1070,17 +1070,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b351-package-tools-hastranslations-registers-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B351. Package-tools <code>hasTranslations()</code> registers nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1812,17 +1801,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b351-package-tools-hastranslations-registers-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B351. Package-tools <code>hasTranslations()</code> registers nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2031,16 +2009,6 @@ common spelling in a package whose provider sits in <code>src/</code>, but
 handles a bare <code>__DIR__</code> on the left of the concatenation, so the namespace
 resolves nowhere. The same helper serves views, config, and routes.</p>
 <p><strong>Test:</strong> <code>laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves</code>.</p>
-<h2 id="b351-package-tools-hastranslations-registers-nothing">B351. Package-tools <code>hasTranslations()</code> registers nothing<a class="headerlink" href="#b351-package-tools-hastranslations-registers-nothing" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>A <code>spatie/laravel-package-tools</code> provider declares its resources through
-<code>configurePackage(Package $package)</code>:
-<code>$package-&gt;name('laravel-billing')-&gt;hasTranslations()</code> registers the
-package's <code>resources/lang</code> under the short name <code>billing</code> (the name with
-its <code>laravel-</code> prefix dropped). None of the <code>has*()</code> calls are modelled,
-so every such package's translation keys (and, by the same route, its
-views and config) are unknown.</p>
-<p><strong>Test:</strong> <code>laravel_translation_keys::a_package_tools_provider_registers_its_short_name</code>.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
