@@ -508,6 +508,7 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     if let Some(Some(x)) = &l.updated_at_name {
         z.add(x.capacity());
     }
+    z += s(&l.deleted_at_name);
     z.add(l.belongs_to_many_pivots.capacity() * size_of::<crate::types::PivotRelation>());
     for p in &l.belongs_to_many_pivots {
         z.add(p.method.capacity());

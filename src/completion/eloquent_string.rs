@@ -454,7 +454,7 @@ impl Backend {
         es_ctx: &EloquentStringContext,
     ) -> Vec<CompletionItem> {
         let partial = &es_ctx.partial;
-        let columns = collect_model_columns(model);
+        let columns = crate::virtual_members::laravel::where_property::collect_column_names(model);
 
         let mut items = Vec::new();
         for col in &columns {
@@ -567,67 +567,6 @@ fn extract_model_property_from_generic_args(ty: &PhpType) -> Option<String> {
         }
     }
     None
-}
-
-/// Collect all column/attribute names from a model class.
-///
-/// Uses the same sources as `where_property::collect_column_names` but
-/// we call it here to avoid coupling to internal module functions.
-fn collect_model_columns(class: &ClassInfo) -> Vec<String> {
-    use std::collections::HashSet;
-
-    let mut seen = HashSet::new();
-    let mut columns = Vec::new();
-
-    let mut push = |name: &str| {
-        if seen.insert(name.to_string()) {
-            columns.push(name.to_string());
-        }
-    };
-
-    if let Some(laravel) = class.laravel() {
-        for (col, _) in &laravel.casts_definitions {
-            push(col);
-        }
-        for col in &laravel.dates_definitions {
-            push(col);
-        }
-        for (col, _) in &laravel.attributes_definitions {
-            push(col);
-        }
-        for col in &laravel.column_names {
-            push(col);
-        }
-        // Timestamps.
-        let timestamps_enabled = laravel.timestamps.unwrap_or(true);
-        if timestamps_enabled {
-            let created_col = match &laravel.created_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("created_at"),
-            };
-            let updated_col = match &laravel.updated_at_name {
-                Some(Some(name)) => Some(name.as_str()),
-                Some(None) => None,
-                None => Some("updated_at"),
-            };
-            for col in [created_col, updated_col].into_iter().flatten() {
-                push(col);
-            }
-        }
-    }
-
-    // Properties on the class (including virtual @property tags).
-    for prop in class.properties.iter() {
-        push(&prop.name);
-    }
-
-    // @property tags from docblock.
-    for (name, _type) in class.doc_properties() {
-        push(name);
-    }
-
-    columns
 }
 
 #[cfg(test)]

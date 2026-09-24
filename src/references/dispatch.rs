@@ -124,15 +124,24 @@ impl Backend {
             }
         }
 
-        // Fallback for declaration sites in config/*.php
+        // Fallback for declaration sites in config/*.php and routes/*.php
         let start_laravel = std::time::Instant::now();
         if self.resolved_class_cache.read().is_laravel()
             && let Some(mut locations) =
                 laravel::find_config_references(self, uri, content, position, include_declaration)
+                    .or_else(|| {
+                        laravel::find_route_registration_references(
+                            self,
+                            uri,
+                            content,
+                            position,
+                            include_declaration,
+                        )
+                    })
         {
             sort_locations_for_references(&mut locations);
             tracing::info!(
-                "Find References: found Laravel config references in {:?}",
+                "Find References: found Laravel declaration-site references in {:?}",
                 start_laravel.elapsed()
             );
             tracing::info!(

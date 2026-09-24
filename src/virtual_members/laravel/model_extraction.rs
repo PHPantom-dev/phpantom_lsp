@@ -27,7 +27,7 @@ use crate::util::{short_name, strip_fqn_prefix};
 use super::relationships::is_inferable_relationship_short_name;
 use super::{
     extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
-    infer_relationship_from_body,
+    infer_relationship_from_body, is_soft_deletes_trait,
 };
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
@@ -636,22 +636,24 @@ fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
 
 /// Extract timestamp configuration from a model class.
 ///
-/// Reads three sources:
+/// Reads four sources:
 ///
 /// - `$timestamps` property — `true` (default) or `false`.
 /// - `CREATED_AT` constant — column name string or `null`.
 /// - `UPDATED_AT` constant — column name string or `null`.
+/// - `DELETED_AT` constant — the `SoftDeletes` column name string.
 ///
-/// Returns `(timestamps, created_at_name, updated_at_name)` using the
-/// same `Option` semantics as `LaravelMetadata`: outer `None` means
-/// "not declared", `Some(None)` means "explicitly `null`".
+/// Each field uses the same `Option` semantics as the `LaravelMetadata`
+/// field of that name: outer `None` means "not declared", `Some(None)`
+/// means "explicitly `null`".
 fn extract_timestamp_config<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
-) -> (Option<bool>, Option<Option<String>>, Option<Option<String>>) {
+) -> TimestampConfig {
     let mut timestamps: Option<bool> = None;
     let mut created_at: Option<Option<String>> = None;
     let mut updated_at: Option<Option<String>> = None;
+    let mut deleted_at: Option<String> = None;
 
     for member in members {
         match member {
@@ -682,7 +684,7 @@ fn extract_timestamp_config<'a>(
             class_like::member::ClassLikeMember::Constant(constant) => {
                 for item in constant.items.iter() {
                     let name = bytes_to_str(item.name.value).to_string();
-                    if name != "CREATED_AT" && name != "UPDATED_AT" {
+                    if name != "CREATED_AT" && name != "UPDATED_AT" && name != "DELETED_AT" {
                         continue;
                     }
                     let span = item.value.span();
@@ -695,10 +697,10 @@ fn extract_timestamp_config<'a>(
                         None => None,
                     };
                     if let Some(val) = parsed {
-                        if name == "CREATED_AT" {
-                            created_at = Some(val);
-                        } else {
-                            updated_at = Some(val);
+                        match name.as_str() {
+                            "CREATED_AT" => created_at = Some(val),
+                            "UPDATED_AT" => updated_at = Some(val),
+                            _ => deleted_at = val,
                         }
                     }
                 }
@@ -707,7 +709,20 @@ fn extract_timestamp_config<'a>(
         }
     }
 
-    (timestamps, created_at, updated_at)
+    TimestampConfig {
+        timestamps,
+        created_at_name: created_at,
+        updated_at_name: updated_at,
+        deleted_at_name: deleted_at,
+    }
+}
+
+/// The timestamp configuration [`extract_timestamp_config`] reads.
+struct TimestampConfig {
+    timestamps: Option<bool>,
+    created_at_name: Option<Option<String>>,
+    updated_at_name: Option<Option<String>>,
+    deleted_at_name: Option<String>,
 }
 
 /// Extract column names from `$fillable`, `$guarded`, `$hidden`, `$visible`,
@@ -1004,10 +1019,12 @@ fn extract_pivot_relations<'a>(
 /// (custom builder/collection, relationship-derived timestamps) key off
 /// already-resolved method return types. `use_generics` is the merged
 /// docblock + inline `@use` generics list, needed for
-/// `HasBuilder`/`HasCollection` detection.
+/// `HasBuilder`/`HasCollection` detection, and `used_traits` the traits
+/// the class body uses, needed for `SoftDeletes` detection.
 pub(crate) fn extract_laravel_metadata<'a>(
     class: &class_like::Class<'a>,
     methods: &[MethodInfo],
+    used_traits: &[Atom],
     use_generics: &[(Atom, Vec<PhpType>)],
     content: &str,
     doc_ctx: Option<&DocblockCtx<'a>>,
@@ -1076,8 +1093,13 @@ pub(crate) fn extract_laravel_metadata<'a>(
 
     let dates_definitions = extract_dates_definitions(class.members.iter(), content);
 
-    let (timestamps, created_at_name, updated_at_name) =
-        extract_timestamp_config(class.members.iter(), content);
+    let TimestampConfig {
+        timestamps,
+        created_at_name,
+        updated_at_name,
+        deleted_at_name,
+    } = extract_timestamp_config(class.members.iter(), content);
+    let soft_deletes = used_traits.iter().any(|t| is_soft_deletes_trait(t));
 
     // Gate the member walk on the already-extracted method list: all but
     // the handful of facades in a project declare no `getFacadeAccessor()`,
@@ -1109,6 +1131,8 @@ pub(crate) fn extract_laravel_metadata<'a>(
         timestamps,
         created_at_name,
         updated_at_name,
+        soft_deletes,
+        deleted_at_name,
         custom_builder,
         policy_class,
         belongs_to_many_pivots,
@@ -1162,6 +1186,8 @@ pub(crate) fn has_inheritable_model_metadata(meta: &LaravelMetadata) -> bool {
         || meta.timestamps.is_some()
         || meta.created_at_name.is_some()
         || meta.updated_at_name.is_some()
+        || meta.soft_deletes
+        || meta.deleted_at_name.is_some()
         || meta.connection_name.is_some()
         || meta.table_name.is_some()
         || meta.has_get_connection_name_method
@@ -1251,6 +1277,8 @@ pub(crate) fn inherit_model_metadata(child: &mut LaravelMetadata, parent: &Larav
     inherit(&mut child.timestamps, &parent.timestamps);
     inherit(&mut child.created_at_name, &parent.created_at_name);
     inherit(&mut child.updated_at_name, &parent.updated_at_name);
+    inherit(&mut child.deleted_at_name, &parent.deleted_at_name);
+    child.soft_deletes |= parent.soft_deletes;
     inherit(&mut child.connection_name, &parent.connection_name);
     inherit(&mut child.table_name, &parent.table_name);
     child.has_get_connection_name_method |= parent.has_get_connection_name_method;

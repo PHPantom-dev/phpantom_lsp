@@ -276,6 +276,7 @@ impl Backend {
                         crate::virtual_members::laravel::extract_laravel_metadata(
                             class,
                             &methods,
+                            &used_traits,
                             &use_generics,
                             content,
                             doc_ctx,

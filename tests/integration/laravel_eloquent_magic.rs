@@ -1532,7 +1532,6 @@ async fn where_method_follows_a_custom_primary_key() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: SoftDeletes does not contribute a deleted_at column"]
 async fn soft_deletes_contributes_a_deleted_at_column() {
     let soft_deletes = "<?php\nnamespace Illuminate\\Database\\Eloquent;\ntrait SoftDeletes {\n    public static function withTrashed() {}\n}\n";
     let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nuse Illuminate\\Database\\Eloquent\\SoftDeletes;\nclass User extends Model {\n    use SoftDeletes;\n}\n";
@@ -1672,7 +1671,6 @@ async fn a_models_own_static_method_wins_over_the_builder_method_of_that_name() 
 }
 
 #[tokio::test]
-#[ignore = "known gap: the base Model's own declared properties become where{Column} methods"]
 async fn the_base_models_own_properties_are_not_columns() {
     let items = complete_in(
         &[],

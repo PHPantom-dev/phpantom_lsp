@@ -15,8 +15,15 @@
 //! - `$attributes` defaults
 //! - `$fillable`/`$guarded`/`$hidden`/`$visible`/`$appends` column names
 //! - Timestamp columns (`created_at`, `updated_at` unless disabled)
+//! - The `SoftDeletes` column (`deleted_at` unless renamed)
 //! - `@property` / `@property-read` / `@property-write` docblock tags (parsed from raw docblock)
-//! - Declared (non-static, non-private) properties on the class itself
+//! - Virtual properties already on the class
+//!
+//! A declared property is never a column: Eloquent's `__get`/`__set` only
+//! run for names the class does not declare (or cannot access), so the
+//! `$table`/`$fillable`/`$perPage` configuration the base `Model` and its
+//! traits declare, and any property a user model declares itself, stay
+//! plain properties.
 //!
 //! Each column `foo_bar` produces a method `whereFooBar($value)` that
 //! accepts one parameter and returns `Builder<ConcreteModel>`.
@@ -33,7 +40,7 @@ use super::helpers::snake_to_pascal;
 /// Collect all known column names from a model class.
 ///
 /// This reads directly from `LaravelMetadata` fields and from the
-/// class's own declared/virtual properties, avoiding a full
+/// class's virtual properties, avoiding a full
 /// `resolve_class_fully` call (which would recurse through
 /// `LaravelModelProvider`).  Pass at least an inheritance-resolved class:
 /// a raw one lacks the `$fillable`/`$casts` it inherits from a parent
@@ -85,6 +92,10 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
             }
         }
 
+        if let Some(col) = super::soft_delete_column(laravel) {
+            push(col);
+        }
+
         // The primary key every model has, unless `getKeyName()` computes
         // its name at runtime.
         if !laravel.has_get_key_name_method {
@@ -92,10 +103,8 @@ pub(crate) fn collect_column_names(class: &ClassInfo) -> Vec<String> {
         }
     }
 
-    // ── Properties already on the class ─────────────────────────────
-    // This catches any explicitly declared properties and virtual
-    // properties that were already added to the class.
-    for prop in class.properties.iter() {
+    // ── Virtual properties already on the class ─────────────────────
+    for prop in class.properties.iter().filter(|p| p.is_virtual) {
         push(&prop.name);
     }
 

@@ -180,7 +180,8 @@ pub(crate) use provider_resources::{
 };
 pub(crate) use request_fields::{request_fields_at_position, resolve_request_field_definition};
 pub(crate) use route_names::{
-    RouteDiscovery, enumerate_all_routes, route_name_matches, route_uri_parameters,
+    RouteDiscovery, enumerate_all_routes, find_route_registration_references, route_name_matches,
+    route_uri_parameters,
 };
 pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
@@ -263,6 +264,18 @@ use database_schema::SchemaTable;
 
 /// The fully-qualified name of the Eloquent base model.
 pub(crate) const ELOQUENT_MODEL_FQN: &str = "Illuminate\\Database\\Eloquent\\Model";
+
+/// The fully-qualified name of Laravel's `SoftDeletes` trait.
+const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
+
+/// Whether a `used_traits` entry names Laravel's `SoftDeletes` trait.
+///
+/// `used_traits` may hold the FQN or the imported short name, so all three
+/// forms match, mirroring the established `class_uses_conditionable`
+/// detector.
+pub(crate) fn is_soft_deletes_trait(name: &str) -> bool {
+    name == SOFT_DELETES_FQN || name == "SoftDeletes" || name.ends_with("\\SoftDeletes")
+}
 
 /// The fully-qualified name of the Eloquent Builder class.
 pub const ELOQUENT_BUILDER_FQN: &str = "Illuminate\\Database\\Eloquent\\Builder";
@@ -537,6 +550,14 @@ fn carbon_type() -> PhpType {
     PhpType::named(atom(CONFIGURED_DATE_CLASS_FQN))
 }
 
+/// The column `SoftDeletes` casts to a date, when the model uses the trait:
+/// `DELETED_AT`, defaulting to `deleted_at`.
+pub(crate) fn soft_delete_column(laravel: &crate::types::LaravelMetadata) -> Option<&str> {
+    laravel
+        .soft_deletes
+        .then(|| laravel.deleted_at_name.as_deref().unwrap_or("deleted_at"))
+}
+
 fn timestamp_columns(laravel: &crate::types::LaravelMetadata) -> Vec<String> {
     if !laravel.timestamps.unwrap_or(true) {
         return Vec::new();
@@ -795,6 +816,7 @@ impl VirtualMemberProvider for LaravelModelProvider {
             }
 
             let timestamp_columns = timestamp_columns(laravel);
+            let soft_delete_column = soft_delete_column(laravel);
 
             if let Some(schema_table) = &schema_table {
                 for column in &schema_table.columns {
@@ -803,6 +825,8 @@ impl VirtualMemberProvider for LaravelModelProvider {
                     }
                     let php_type = if timestamp_columns.contains(&column.name) {
                         carbon_type()
+                    } else if soft_delete_column == Some(column.name.as_str()) {
+                        PhpType::nullable(carbon_type())
                     } else {
                         column.php_type.clone()
                     };
@@ -860,6 +884,18 @@ impl VirtualMemberProvider for LaravelModelProvider {
                         Some(&carbon_type()),
                     ));
                 }
+            }
+
+            // ── Soft-delete column ──────────────────────────────────
+            // `SoftDeletes` casts its column to a date, which is null
+            // until the model is trashed.
+            if let Some(column) = soft_delete_column
+                && seen_props.insert(column.to_string())
+            {
+                properties.push(PropertyInfo::virtual_property_typed(
+                    column,
+                    Some(&PhpType::nullable(carbon_type())),
+                ));
             }
 
             // ── Column name properties (last-resort fallback) ───────

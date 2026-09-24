@@ -739,6 +739,95 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
         target: name,
         out: Vec::new(),
     };
+    walk_project_routes(backend, &mut sink);
+    let mut results = sink.out;
+    results.extend(super::folio::resolve_folio_route_definition(backend, name));
+    results
+}
+
+/// Find-references starting from the `->name()` argument that registers a
+/// route: every `route()` call naming it, plus the registration itself when
+/// `include_declaration` is set.
+///
+/// `None` when the cursor is not on a route registration, which only a
+/// routes file (the project's or one a package loads) can hold.
+pub(crate) fn find_route_registration_references(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+    position: tower_lsp::lsp_types::Position,
+    include_declaration: bool,
+) -> Option<Vec<Location>> {
+    use crate::symbol_map::LaravelStringKind;
+
+    let is_route_file = uri.contains("/routes/")
+        || Url::parse(uri)
+            .ok()
+            .and_then(|u| u.to_file_path().ok())
+            .is_some_and(|path| {
+                backend
+                    .laravel_provider_resources
+                    .read()
+                    .route_files
+                    .contains(&path)
+            });
+    if !is_route_file {
+        return None;
+    }
+
+    let offset = crate::text_position::position_to_offset(content, position) as usize;
+    let names = route_names_registered_at(backend, uri, offset);
+    if names.is_empty() {
+        return None;
+    }
+
+    let keys: Vec<_> = names
+        .iter()
+        .map(
+            |key| crate::reference_index::ReferenceIndexKey::LaravelString {
+                kind: LaravelStringKind::Route,
+                key: key.clone(),
+            },
+        )
+        .collect();
+    let snapshot = backend.user_file_symbol_maps_for_reference_keys(&keys);
+    let mut locations: Vec<Location> = Vec::new();
+    for name in &names {
+        for location in super::find_laravel_string_key_references(
+            backend,
+            &LaravelStringKind::Route,
+            name,
+            uri,
+            &snapshot,
+            include_declaration,
+        ) {
+            if !locations.contains(&location) {
+                locations.push(location);
+            }
+        }
+    }
+    (!locations.is_empty()).then_some(locations)
+}
+
+/// The names of the routes whose `->name()` argument in `uri` covers byte
+/// `offset`.
+///
+/// Every route file is walked rather than just `uri`, so a file included
+/// under a named group still reports the group's prefix. A file that is
+/// both walked on its own and included under a group reports both names.
+fn route_names_registered_at(backend: &Backend, uri: &str, offset: usize) -> Vec<String> {
+    let mut sink = RoutesRegisteredAt {
+        uri,
+        offset,
+        out: Vec::new(),
+    };
+    walk_project_routes(backend, &mut sink);
+    sink.out
+}
+
+/// Walk every route file of the project, then of its installed packages,
+/// into `sink`.
+fn walk_project_routes(backend: &Backend, sink: &mut dyn RouteSink) {
     let mut scanned: HashSet<PathBuf> = HashSet::new();
     let snapshot = backend.user_file_symbol_maps();
     let workspace_root = backend.workspace.workspace_root.read().clone();
@@ -764,7 +853,7 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
             path.as_deref(),
             workspace_root.as_deref(),
             &macros,
-            &mut sink,
+            sink,
         );
     }
 
@@ -784,15 +873,10 @@ pub(crate) fn resolve_route_definitions(backend: &Backend, name: &str) -> Vec<Lo
                 Some(route_path),
                 workspace_root.as_deref(),
                 &macros,
-                &mut sink,
+                sink,
             );
         }
     }
-
-    let mut results = sink.out;
-    results.extend(super::folio::resolve_folio_route_definition(backend, name));
-
-    results
 }
 
 /// Where go-to-definition lands for a route-name argument: between the quotes
@@ -933,6 +1017,10 @@ struct RouteSite<'a> {
     uri: &'a Url,
     content: &'a str,
     offset: usize,
+    /// The byte range of the `->name()` argument that spells the name, when
+    /// the route has one. A name a registrar prefix or `Route::resource()`
+    /// generates has no argument of its own to stand on.
+    name_arg: Option<(usize, usize)>,
 }
 
 /// The enumeration sink: keeps every route, plus the prefixes and suffixes of
@@ -964,6 +1052,26 @@ impl RouteSink for RouteCollector<'_> {
 struct RouteDefinitions<'a> {
     target: &'a str,
     out: Vec<Location>,
+}
+
+/// The find-references sink: keeps the names of the routes whose `->name()`
+/// argument in `uri` covers `offset`.
+struct RoutesRegisteredAt<'a> {
+    uri: &'a str,
+    offset: usize,
+    out: Vec<String>,
+}
+
+impl RouteSink for RoutesRegisteredAt<'_> {
+    fn route(&mut self, route: RouteEntry, site: RouteSite<'_>) {
+        if let Some((start, end)) = site.name_arg
+            && (start..=end).contains(&self.offset)
+            && site.uri.as_str() == self.uri
+            && !self.out.contains(&route.name)
+        {
+            self.out.push(route.name);
+        }
+    }
 }
 
 impl RouteSink for RouteDefinitions<'_> {
@@ -1386,6 +1494,7 @@ fn walk_expr(
                 uri: paths.uri,
                 content,
                 offset: registration.name_offset,
+                name_arg: None,
             },
             sink,
         );
@@ -1464,6 +1573,10 @@ fn walk_expr(
                                 uri: paths.uri,
                                 content,
                                 offset: name_offset(first_arg.value(), content),
+                                name_arg: {
+                                    let span = first_arg.value().span();
+                                    Some((span.start.offset as usize, span.end.offset as usize))
+                                },
                             },
                         );
                     }
@@ -1495,6 +1608,7 @@ fn walk_expr(
                             uri: paths.uri,
                             content,
                             offset: expr.span().start.offset as usize,
+                            name_arg: None,
                         },
                     );
                 }

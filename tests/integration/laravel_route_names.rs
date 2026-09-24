@@ -966,7 +966,6 @@ async fn find_references_on_a_route_name_reaches_its_calls_and_registration() {
 /// The `->name()` that registers a route is as good a starting point as a
 /// call naming it.
 #[tokio::test]
-#[ignore = "known gap: find-references on a route's ->name() registration finds nothing"]
 async fn find_references_from_a_route_registration_reaches_its_calls() {
     let (backend, dir, _uri, _consumer) = workspace_calling(
         &[("routes/web.php", USERS_AND_TEAMS_ROUTES)],
@@ -978,12 +977,27 @@ async fn find_references_from_a_route_registration_reaches_its_calls() {
     assert_eq!(
         route_references(
             &backend,
-            routes_uri,
+            routes_uri.clone(),
             USERS_AND_TEAMS_ROUTES,
             "->name('",
             false
         )
         .await,
         vec![("Links.php".to_string(), 4), ("Links.php".to_string(), 6)]
+    );
+    assert_eq!(
+        route_references(
+            &backend,
+            routes_uri,
+            USERS_AND_TEAMS_ROUTES,
+            "->name('",
+            true
+        )
+        .await,
+        vec![
+            ("Links.php".to_string(), 4),
+            ("Links.php".to_string(), 6),
+            ("web.php".to_string(), 1),
+        ]
     );
 }

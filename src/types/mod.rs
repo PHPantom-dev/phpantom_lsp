@@ -1674,6 +1674,12 @@ pub struct LaravelMetadata {
     ///   property should be synthesized.
     /// - `Some(Some("modified"))` — custom column name.
     pub updated_at_name: Option<Option<String>>,
+    /// Whether the model uses Eloquent's `SoftDeletes` trait, which casts
+    /// its deletion column to a date.
+    pub soft_deletes: bool,
+    /// Override for the `DELETED_AT` column name constant `SoftDeletes`
+    /// reads. `None` when not declared (the default `"deleted_at"`).
+    pub deleted_at_name: Option<String>,
     /// Custom Eloquent builder class for the model.
     ///
     /// Detected from three Laravel mechanisms:
