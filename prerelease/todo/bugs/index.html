@@ -960,39 +960,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b361-softdeletes-does-not-contribute-a-deleted_at-column" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B361. <code>SoftDeletes</code> does not contribute a <code>deleted_at</code> column
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b362-the-base-models-own-declared-properties-become-wherecolumn-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B362. The base <code>Model</code>'s own declared properties become <code>where{Column}</code> methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b363-find-references-on-a-routes-name-registration-finds-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B363. Find-references on a route's <code>-&gt;name()</code> registration finds nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1614,39 +1581,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b361-softdeletes-does-not-contribute-a-deleted_at-column" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B361. <code>SoftDeletes</code> does not contribute a <code>deleted_at</code> column
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b362-the-base-models-own-declared-properties-become-wherecolumn-methods" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B362. The base <code>Model</code>'s own declared properties become <code>where{Column}</code> methods
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b363-find-references-on-a-routes-name-registration-finds-nothing" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B363. Find-references on a route's <code>-&gt;name()</code> registration finds nothing
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1748,44 +1682,6 @@ same way, so live scopes and accessors read "0 references", and a
 rename of the declaration strands every use. Relationship methods have
 the same shape through their <code>-&gt;posts</code> property reads. Pinned by the
 four ignored <code>definition_laravel::references_on_*</code> tests.</p>
-<h2 id="b361-softdeletes-does-not-contribute-a-deleted_at-column">B361. <code>SoftDeletes</code> does not contribute a <code>deleted_at</code> column<a class="headerlink" href="#b361-softdeletes-does-not-contribute-a-deleted_at-column" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>SoftDeletes::initializeSoftDeletes()</code> adds a <code>datetime</code> cast for
-<code>getDeletedAtColumn()</code> (<code>deleted_at</code> unless the model defines a
-<code>DELETED_AT</code> constant), so a soft-deleting model has a <code>Carbon|null</code>
-<code>$deleted_at</code> and a <code>whereDeletedAt()</code> finder. Nothing in
-<code>src/virtual_members/laravel/</code> synthesises either outside the migration
-parser, so a model without a migration or schema gets neither. The model
-extraction that already reads <code>CREATED_AT</code>/<code>UPDATED_AT</code> is the place to
-record the trait and the column name, including through a parent model.
-Pinned by the ignored
-<code>laravel_eloquent_magic::soft_deletes_contributes_a_deleted_at_column</code>.</p>
-<h2 id="b362-the-base-models-own-declared-properties-become-wherecolumn-methods">B362. The base <code>Model</code>'s own declared properties become <code>where{Column}</code> methods<a class="headerlink" href="#b362-the-base-models-own-declared-properties-become-wherecolumn-methods" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>collect_column_names</code> (<code>src/virtual_members/laravel/where_property.rs</code>)
-counts every property on the inheritance-resolved class as a column, and
-that includes the properties Eloquent's <code>Model</code> and its traits declare for
-configuration. Against the real framework, <code>User::</code> offers <code>whereTable</code>,
-<code>whereConnection</code>, <code>whereIncrementing</code>, <code>wherePerPage</code>, and the rest,
-none of which Laravel treats as a column (a declared property is never an
-attribute: <code>__get</code> only runs for undeclared or inaccessible names). The
-properties declared by the framework's base model need excluding the way
-<code>base_model_methods</code> already excludes its methods in
-<code>src/virtual_members/laravel/mod.rs</code>; the other callers of
-<code>collect_column_names</code> (<code>class_lookup.rs</code>,
-<code>diagnostics/type_errors/compatibility.rs</code>) share the fix. Pinned by the
-ignored <code>laravel_eloquent_magic::the_base_models_own_properties_are_not_columns</code>.</p>
-<h2 id="b363-find-references-on-a-routes-name-registration-finds-nothing">B363. Find-references on a route's <code>-&gt;name()</code> registration finds nothing<a class="headerlink" href="#b363-find-references-on-a-routes-name-registration-finds-nothing" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<p>Find-references on a <code>route('users.index')</code> call lists every call and,
-with the declaration included, the <code>-&gt;name('users.index')</code> that registers
-it. Starting from that <code>-&gt;name()</code> literal returns nothing: the literal is
-not a <code>LaravelStringKey</code> span, so <code>src/references/dispatch.rs</code> never
-reaches the string-key path. A config key already answers from its
-declaration (<code>test_find_references_laravel_config_from_declaration_site</code>);
-a route registration needs the same, through the route table
-<code>resolve_route_definitions</code> reads. Pinned by the ignored
-<code>laravel_route_names::find_references_from_a_route_registration_reaches_its_calls</code>.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
