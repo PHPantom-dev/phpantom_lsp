@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790236744007,
+  "lastUpdate": 1790237248122,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30463,6 +30463,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "995f33d01ae8d7651cd8ab421dd8f6402d3223b2",
+          "message": "A variable passed twice to one view keeps the value passed last",
+          "timestamp": "2026-09-24T09:50:01+02:00",
+          "tree_id": "768fd97156ece01caa6d93946ce4c9341e8f87b9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/995f33d01ae8d7651cd8ab421dd8f6402d3223b2"
+        },
+        "date": 1790237239295,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.8,
             "unit": "MiB"
           }
         ]
