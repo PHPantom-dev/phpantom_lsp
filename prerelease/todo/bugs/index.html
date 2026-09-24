@@ -927,17 +927,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B366. A union continued on the next docblock line loses the whole type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#laravel" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1548,17 +1537,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B366. A union continued on the next docblock line loses the whole type
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#laravel" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1656,17 +1634,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
-<h2 id="b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type">B366. A union continued on the next docblock line loses the whole type<a class="headerlink" href="#b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<p><code>@param array&lt;int, Widget&gt;</code> followed by a line starting <code>|Widget $items</code>
-is one type, <code>array&lt;int, Widget&gt;|Widget</code>. <code>split_type_token</code>
-(<code>src/docblock/type_strings.rs</code>) ends the token at the whitespace before
-the continuation's <code>|</code>, so the rest is read as the variable name, the tag
-matches no parameter, and the parameter keeps no type at all. The
-union/intersection suffix it consumes after a closing <code>&gt;</code> or <code>}</code> has to
-look past whitespace (including the joined line break) for a leading <code>|</code>
-or <code>&amp;</code>. Pinned by the ignored
-<code>docblock_types::param_type_continued_on_the_next_line_is_one_union</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h2 id="b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses">B360. References, reference lenses, and rename miss an Eloquent magic member's uses<a class="headerlink" href="#b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
