@@ -114,7 +114,6 @@ unlikely to move the needle for most users.
 | B345 | [Config key enumeration reads a key's raw source instead of its value](todo/bugs.md#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value)             | Low         | Low         |
 | B350 | [A `dirname(__DIR__)` path argument is not followed](todo/bugs.md#b350-a-dirname__dir__-path-argument-is-not-followed)                                                    | Low         | Low         |
 | B353 | [`.env.<environment>` files are not read](todo/bugs.md#b353-envenvironment-files-are-not-read)                                                                            | Low         | Low         |
-| B355 | [`$loop->parent` is typed `?object`, not the loop shape](todo/bugs.md#b355-loop-parent-is-typed-object-not-the-loop-shape)                                                | Low         | Low         |
 | B341 | [Any `->name()` call in a route file registers a route](todo/bugs.md#b341-any-name-call-in-a-route-file-registers-a-route)                                                | Low         | Medium      |
 | B343 | [View call-site data unions a key's values instead of keeping the last write](todo/bugs.md#b343-view-call-site-data-unions-a-keys-values-instead-of-keeping-the-last-write) | Low         | Medium      |
 | B354 | [A `)` inside a PHP comment closes a Blade directive's arguments](todo/bugs.md#b354-a--inside-a-php-comment-closes-a-blade-directives-arguments)                          | Low         | Medium      |

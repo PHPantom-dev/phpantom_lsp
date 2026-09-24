@@ -421,7 +421,6 @@ async fn loop_is_defined_inside_a_foreach() {
 /// Laravel's `$loop->parent` is the enclosing loop's own `$loop` object, so
 /// it carries the same members.
 #[tokio::test]
-#[ignore = "known gap: `$loop->parent` is typed `?object`, not the loop shape"]
 async fn loop_parent_in_a_nested_loop_offers_the_outer_loops_members() {
     let body = "@foreach($categories as $category)\n    @foreach($category->items as $item)\n        {{ $loop->parent-> }}\n    @endforeach\n@endforeach\n";
     let (backend, uri, text) = template(body).await;

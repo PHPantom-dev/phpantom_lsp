@@ -334,16 +334,6 @@ inside the open comment. Laravel balances directive parentheses with
 **Tests:** `blade_preprocessing::a_paren_inside_a_block_comment_does_not_close_the_header`
 and `a_multi_line_block_comment_holding_a_paren_does_not_close_the_header`.
 
-## B355. `$loop->parent` is typed `?object`, not the loop shape
-
-**Impact: Low · Complexity: Low**
-
-In a nested `@foreach`, `$loop->parent` is the outer loop's `$loop`, but
-the injected declaration (`src/blade/preprocessor/directive.rs`) types it
-`?object`, so `$loop->parent->index` offers nothing.
-
-**Test:** `blade_preprocessing::loop_parent_in_a_nested_loop_offers_the_outer_loops_members`.
-
 ## Miscellaneous
 
 No outstanding items.
