@@ -461,6 +461,19 @@ impl Backend {
         is_fqn: bool,
         cursor_offset: u32,
     ) -> Option<Location> {
+        // In a docblock a template parameter in scope shadows a class of
+        // the same name, so `@param T $x` under `@template T` names the
+        // template even when a class `T` exists.  In code it is the class.
+        if !is_fqn
+            && crate::completion::source::comment_position::is_offset_inside_docblock(
+                content,
+                cursor_offset as usize,
+            )
+            && let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset)
+        {
+            return template_def_location(uri, content, &tpl_def);
+        }
+
         let mut candidates = if is_fqn {
             // Already fully-qualified — use as-is.
             vec![name.to_string()]
@@ -522,20 +535,7 @@ impl Backend {
         // (e.g. `TKey`, `TModel`) defined in a `@template` tag on the
         // enclosing class or method docblock.
         if let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset) {
-            let target_uri = Url::parse(uri).ok()?;
-            let start_pos =
-                crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
-            let end_pos = crate::text_position::offset_to_position(
-                content,
-                (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
-            );
-            return Some(Location {
-                uri: target_uri,
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-            });
+            return template_def_location(uri, content, &tpl_def);
         }
 
         None
@@ -1035,4 +1035,22 @@ impl Backend {
 
         None
     }
+}
+
+/// The location of a `@template` parameter's name in its declaring tag.
+fn template_def_location(
+    uri: &str,
+    content: &str,
+    tpl_def: &crate::symbol_map::TemplateParamDef,
+) -> Option<Location> {
+    let target_uri = Url::parse(uri).ok()?;
+    let start = crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
+    let end = crate::text_position::offset_to_position(
+        content,
+        (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
+    );
+    Some(Location {
+        uri: target_uri,
+        range: Range { start, end },
+    })
 }

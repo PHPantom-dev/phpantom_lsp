@@ -21564,3 +21564,69 @@ $item->
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+// ─── Vendor-prefixed `@param` tags type the parameter in the body ───────────
+
+#[tokio::test]
+async fn test_completion_psalm_and_phpstan_param_type_the_body_variable() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///vendor_param_tags.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Pen { public function write(): void {} }\n",
+        "/** @psalm-param Pen $a */\n",
+        "function viaPsalm($a) {\n",
+        "    $a->\n",
+        "}\n",
+        "/** @phpstan-param Pen $b */\n",
+        "function viaPhpstan($b) {\n",
+        "    $b->\n",
+        "}\n",
+    );
+
+    let psalm = crate::common::complete_labels_at(&backend, &uri, text, 4, 8).await;
+    assert!(
+        psalm.iter().any(|l| l.starts_with("write")),
+        "@psalm-param should type $a, got: {psalm:?}"
+    );
+    let phpstan = crate::common::complete_labels_at(&backend, &uri, text, 8, 8).await;
+    assert!(
+        phpstan.iter().any(|l| l.starts_with("write")),
+        "@phpstan-param should type $b, got: {phpstan:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_completion_vendor_param_wins_over_plain_param_in_either_order() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///vendor_param_precedence.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Pen { public function write(): void {} }\n",
+        "/**\n",
+        " * @psalm-param Pen $a\n",
+        " * @param object $a\n",
+        " */\n",
+        "function vendorFirst($a) {\n",
+        "    $a->\n",
+        "}\n",
+        "/**\n",
+        " * @param object $b\n",
+        " * @phpstan-param Pen $b\n",
+        " */\n",
+        "function vendorLast($b) {\n",
+        "    $b->\n",
+        "}\n",
+    );
+
+    let first = crate::common::complete_labels_at(&backend, &uri, text, 7, 8).await;
+    assert!(
+        first.iter().any(|l| l.starts_with("write")),
+        "@psalm-param should win over a later @param, got: {first:?}"
+    );
+    let last = crate::common::complete_labels_at(&backend, &uri, text, 14, 8).await;
+    assert!(
+        last.iter().any(|l| l.starts_with("write")),
+        "@phpstan-param should win over an earlier @param, got: {last:?}"
+    );
+}

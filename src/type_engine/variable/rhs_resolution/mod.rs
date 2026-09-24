@@ -871,6 +871,7 @@ fn resolve_method_chain<'b>(
             receiver,
             ctx,
         );
+        calls::finish_return_constant_operands(&mut resolved, ctx);
         // A check written on the call itself (`if ($h->get() instanceof
         // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
         // call's own text, so a later occurrence of that text reads the

@@ -652,15 +652,7 @@ fn check_param_list(
 
         let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
 
-        // Try @param docblock type.
-        let docblock_type =
-            docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
-                .or_else(|| {
-                    content
-                        .get(..method_start_offset)
-                        .and_then(extract_preceding_docblock)
-                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
-                });
+        let docblock_type = declared_param_docblock_type(content, method_start_offset, pname);
 
         let effective =
             docblock::resolve_effective_type_typed(native_type.as_ref(), docblock_type.as_ref());
@@ -1629,6 +1621,27 @@ pub(super) fn substitute_class_string_template_bounds(
     }
 
     ty
+}
+
+/// The `@param` type the declaration starting at `decl_start` gives
+/// `pname`.
+///
+/// The declaration's own docblock is read first, through the tag parser,
+/// so a vendor tag (`@phpstan-param`, `@psalm-param`) takes precedence
+/// over a plain `@param` for the same parameter the way it does in the
+/// signature.  The backward source scan is the fallback for the shapes
+/// that parser does not see, such as a docblock sharing its line with the
+/// code of a closure.
+pub(crate) fn declared_param_docblock_type(
+    content: &str,
+    decl_start: usize,
+    pname: &str,
+) -> Option<PhpType> {
+    content
+        .get(..decl_start)
+        .and_then(extract_preceding_docblock)
+        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
+        .or_else(|| docblock::find_iterable_raw_type_in_source(content, decl_start, pname))
 }
 
 /// Extract the docblock comment immediately preceding a given offset.

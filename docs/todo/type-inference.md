@@ -336,13 +336,24 @@ raw strings.
 
 ---
 
-## T26. Globbed constant unions (`Foo::BAR_*`)
+## T26. Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)
 
-**Impact: Low · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
-Resolve wildcard constant patterns like `Foo::BAR_*` to the union of
-all matching constant types on the class. PHPStan supports this syntax
-in docblock type strings:
+A class constant named in a type position is not read at all: `@param
+Foo::BAR $x`, `@param self::FOO|self::BAR $x` and `@param C::class|D::class
+$x` all stay as unresolved text (or fall back to the native hint), where
+PHPStan and Psalm give the constant's value (`'bar'`, `'bar'|'foo'`,
+`'App\C'|'App\D'`). The same constants are read when they are the operand
+of `key-of<>`/`value-of<>`, through `constant_operand_shape`, so the value
+lookup exists; the bare reference just never reaches it. Found porting
+Psalm's `ConstValuesTest` and `ReconcilerTest`; the assertions are `// SKIP`
+in `tests/psalm_assertions/const_values.php` and
+`tests/psalm_assertions/type_reconciliation_reconciler.php`.
+
+The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
+matching constant types on the class. PHPStan supports this syntax in
+docblock type strings:
 
 ```php
 class Status {

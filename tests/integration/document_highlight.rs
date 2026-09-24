@@ -420,3 +420,38 @@ class Factory {
         highlights.len()
     );
 }
+
+// ─── Semi-reserved keywords used as member names ────────────────────────────
+
+#[test]
+fn highlight_member_named_like_a_keyword() {
+    let backend = create_test_backend();
+    let uri = "file:///highlight_keyword_member.php";
+    let php = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public string $class = '';\n",
+        "}\n",
+        "function test(Node $n): void {\n",
+        "    $n->class = 'a';\n",
+        "    echo $n->class;\n",
+        "}\n",
+    );
+
+    let highlights = highlight_at(&backend, uri, php, 6, 14);
+    let mut spans: Vec<(u32, u32, u32)> = highlights
+        .iter()
+        .map(|h| {
+            (
+                h.range.start.line,
+                h.range.start.character,
+                h.range.end.character,
+            )
+        })
+        .collect();
+    spans.sort_unstable();
+    assert!(
+        spans.contains(&(5, 8, 13)) && spans.contains(&(6, 13, 18)),
+        "both `->class` accesses should highlight, got: {spans:?}"
+    );
+}

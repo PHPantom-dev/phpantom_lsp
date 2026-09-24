@@ -4488,3 +4488,99 @@ class Square implements Shape
         messages_with_code(&diags, "type_mismatch_return")
     );
 }
+
+// ─── A template parameter named like a class is still the template ─────────
+
+#[test]
+fn class_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T1 {}
+
+/**
+ * @template T1
+ */
+trait Holds {
+    /** @return T1 */
+    public function first() { return null; }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded template accepts any value, even beside a class of the same name, got: {diags:?}"
+    );
+}
+
+#[test]
+fn class_template_is_not_a_same_named_class_in_another_namespace_block() {
+    let php = r#"<?php
+namespace A {
+    /**
+     * @template T1
+     */
+    trait Holds {
+        /** @return T1 */
+        public function first() { return null; }
+    }
+}
+namespace B {
+    trait T1 {}
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "The template must not resolve to another block's class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn function_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T2 {}
+
+/**
+ * @template T2
+ * @param T2 $x
+ * @return T2
+ */
+function pass($x) { return null; }
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded function template accepts any value, got: {diags:?}"
+    );
+}
+
+#[test]
+fn bounded_template_return_is_checked_against_its_bound() {
+    let php = r#"<?php
+interface Shape {}
+class Circle implements Shape {}
+class Plain {}
+
+/**
+ * @template T of Shape
+ */
+class Holder {
+    /** @return T */
+    public function wrong() { return new Plain(); }
+
+    /** @return T */
+    public function withinBound() { return new Circle(); }
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the value outside the bound is flagged, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("Plain"), "got: {msgs:?}");
+}

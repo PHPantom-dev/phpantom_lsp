@@ -404,7 +404,37 @@ impl PhpType {
     /// `$this` references that [`replace_self`] / [`replace_self_with_type`]
     /// would replace.
     pub fn contains_self_ref(&self) -> bool {
-        self.contains_name_matching(&is_self_ref_name)
+        self.contains_name_matching(&is_self_ref_name) || self.contains_self_constant()
+    }
+
+    /// Whether a `self::NAME` constant reference appears anywhere in this
+    /// type tree.  The PHPDoc parser keeps a member reference as raw text,
+    /// so it is not a name [`contains_name_matching`](Self::contains_name_matching)
+    /// would see.
+    fn contains_self_constant(&self) -> bool {
+        match self.raw_kind() {
+            TypeKind::Named(s) => self_constant_name(s).is_some(),
+            TypeKind::Raw(s) => self_constant_name(s).is_some(),
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::Nullable(inner)
+            | TypeKind::Array(inner)
+            | TypeKind::KeyOf(inner)
+            | TypeKind::ValueOf(inner)
+            | TypeKind::ClassString(Some(inner))
+            | TypeKind::InterfaceString(Some(inner)) => inner.contains_self_constant(),
+            TypeKind::Union(types) | TypeKind::Intersection(types) => {
+                types.iter().any(PhpType::contains_self_constant)
+            }
+            TypeKind::Generic(g) => g.args.iter().any(PhpType::contains_self_constant),
+            TypeKind::IndexAccess(target, index) => {
+                target.contains_self_constant() || index.contains_self_constant()
+            }
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => entries
+                .iter()
+                .any(|e| e.value_type.contains_self_constant()),
+            _ => false,
+        }
     }
 
     /// Check whether this type tree names any of `names`.
@@ -628,6 +658,22 @@ impl PhpType {
                         .map(|a| a.replace_self_inner(replacement, lsb))
                         .collect(),
                 )
+            }
+
+            // `self::FOO` names a constant of the class the annotation was
+            // read from, so it stays readable once the type leaves that
+            // class (`key-of<self::TABLE>` returned to a caller elsewhere).
+            // `static::FOO` is left alone: which class it reads is only
+            // known at the call.
+            TypeKind::Named(s) if let Some(constant) = self_constant_name(s) => {
+                qualify_self_constant(replacement, constant)
+                    .map(|reference| PhpType::named(atom(&reference)))
+                    .unwrap_or_else(|| self.clone())
+            }
+            TypeKind::Raw(s) if let Some(constant) = self_constant_name(s) => {
+                qualify_self_constant(replacement, constant)
+                    .map(PhpType::raw)
+                    .unwrap_or_else(|| self.clone())
             }
 
             // A bound already applied by an earlier hop still answers to a
@@ -931,4 +977,25 @@ impl PhpType {
             _ => {}
         }
     }
+}
+
+/// The constant half of a `self::NAME` reference, or `None` for any other
+/// name.
+fn self_constant_name(name: &str) -> Option<&str> {
+    let prefix = name.get(..6)?;
+    prefix
+        .eq_ignore_ascii_case("self::")
+        .then(|| &name[6..])
+        .filter(|constant| !constant.is_empty())
+}
+
+/// `Class::NAME` for the class a `self` replacement names, or `None` when
+/// the replacement is not a class.
+fn qualify_self_constant(replacement: &PhpType, constant: &str) -> Option<String> {
+    let class = match replacement.kind() {
+        TypeKind::Named(n) | TypeKind::StaticType(n) | TypeKind::ThisType(n) => *n,
+        TypeKind::Generic(g) => g.name,
+        _ => return None,
+    };
+    Some(format!("{class}::{constant}"))
 }

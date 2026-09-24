@@ -308,6 +308,8 @@ struct AssertTypeCall {
     expr: String,
     /// 1-based line number in the original source.
     original_line: usize,
+    /// Number of source lines the call spans (1 unless it is multi-line).
+    line_count: usize,
 }
 
 /// Extract all `assertType()` calls from the PHP source.
@@ -355,7 +357,8 @@ fn extract_assert_type_calls(source: &str) -> Vec<AssertTypeCall> {
             // Collect the full call text, potentially spanning multiple lines.
             let (call_text, lines_consumed) = collect_call_text(after_paren, &lines, i);
 
-            if let Some(parsed) = parse_assert_type_call(&call_text, source, &lines, i) {
+            if let Some(mut parsed) = parse_assert_type_call(&call_text, source, &lines, i) {
+                parsed.line_count = lines_consumed;
                 results.push(parsed);
             }
 
@@ -458,6 +461,7 @@ fn parse_assert_type_call(
         expected,
         expr,
         original_line: line_idx + 1,
+        line_count: 1,
     })
 }
 
@@ -574,9 +578,16 @@ fn transform_source(
     let mut result = String::with_capacity(source.len());
     let mut assertion_locations: Vec<(String, String, u32, usize)> = Vec::new();
     let mut output_line: u32 = 0; // 0-based line counter in output
+    // A multi-line call is replaced as a whole on its first line, so the
+    // original lines it continues onto must not be copied through.
+    let mut skip_until = 0;
 
     for (line_idx, line) in source.lines().enumerate() {
         let original_line_1based = line_idx + 1;
+
+        if original_line_1based <= skip_until {
+            continue;
+        }
 
         if let Some(indices) = line_to_assertions.get(&original_line_1based) {
             for &idx in indices {
@@ -596,7 +607,8 @@ fn transform_source(
                     output_line,
                     a.original_line,
                 ));
-                output_line += 1;
+                output_line += replacement.lines().count() as u32;
+                skip_until = skip_until.max(a.original_line + a.line_count - 1);
             }
         } else {
             result.push_str(line);

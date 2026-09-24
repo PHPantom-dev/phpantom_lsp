@@ -15153,3 +15153,129 @@ function tick(): void
         "a static local's initialiser should type it, got: {text}"
     );
 }
+
+// ─── Semi-reserved keywords used as member names ────────────────────────────
+
+#[test]
+fn hover_member_named_like_a_keyword() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_keyword_members.php";
+    let content = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public string $class = '';\n",
+        "    public function default(): int { return 1; }\n",
+        "}\n",
+        "function test(Node $n): void {\n",
+        "    $n->class;\n",
+        "    $n->default();\n",
+        "}\n",
+    );
+
+    let class_hover = hover_at(&backend, uri, content, 6, 9).expect("hover on ->class");
+    assert!(
+        hover_text(&class_hover).contains("string $class"),
+        "got: {}",
+        hover_text(&class_hover)
+    );
+    let default_hover = hover_at(&backend, uri, content, 7, 9).expect("hover on ->default()");
+    assert!(
+        hover_text(&default_hover).contains("function default(): int"),
+        "got: {}",
+        hover_text(&default_hover)
+    );
+}
+
+// ─── `parent::CONST` reads the parent's declaration ─────────────────────────
+
+#[test]
+fn hover_parent_constant_shows_the_parents_value() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_parent_const.php";
+    let content = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    const LIMIT = 1;\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    const LIMIT = 2;\n",
+        "    public function f(): int {\n",
+        "        return parent::LIMIT;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let hover = hover_at(&backend, uri, content, 7, 25).expect("hover on parent::LIMIT");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("LIMIT = 1"),
+        "should show Base's value, got: {text}"
+    );
+    assert!(
+        !text.contains("LIMIT = 2"),
+        "must not show Child's value, got: {text}"
+    );
+}
+
+// ─── PHPDoc-only tokens do not resolve to unrelated symbols ─────────────────
+
+/// A tag name, a `@template` parameter, and the `$name` half of a `@param`
+/// are docblock syntax, not references to the same-named class, function,
+/// or variable elsewhere in the file.
+#[test]
+fn hover_on_docblock_only_tokens_does_not_pick_up_same_named_symbols() {
+    let backend = create_test_backend();
+    let uri = "file:///hover_docblock_tokens.php";
+    let content = concat!(
+        "<?php\n",
+        "/** Unrelated class that shares a tag's name. */\n",
+        "class param {}\n",
+        "/** Unrelated class that shares the template's name. */\n",
+        "class T {}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param T $item\n",
+        " * @return T\n",
+        " */\n",
+        "function identity($item) { return $item; }\n",
+        "$item = new param();\n",
+    );
+
+    // The `param` of `@param`.
+    let on_tag = hover_at(&backend, uri, content, 7, 5);
+    assert!(
+        on_tag
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on the tag name must not show class `param`, got: {:?}",
+        on_tag.as_ref().map(hover_text)
+    );
+    // The `T` of `@template T`.
+    let on_template = hover_at(&backend, uri, content, 6, 14);
+    assert!(
+        on_template
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on the template declaration must not show class `T`, got: {:?}",
+        on_template.as_ref().map(hover_text)
+    );
+    // The `T` of `@param T $item`, which names the template.
+    let on_template_use = hover_at(&backend, uri, content, 7, 10);
+    assert!(
+        on_template_use
+            .as_ref()
+            .is_none_or(|h| !hover_text(h).contains("Unrelated class")),
+        "hover on a use of the template must not show class `T`, got: {:?}",
+        on_template_use.as_ref().map(hover_text)
+    );
+    // The `$item` of `@param T $item` is the parameter, not the
+    // top-level `$item` holding a `param`.
+    let on_param_var = hover_at(&backend, uri, content, 7, 14);
+    assert!(
+        on_param_var
+            .as_ref()
+            .is_none_or(|h| hover_text(h).contains("T $item") || !hover_text(h).contains("param")),
+        "hover on the @param variable must not show the top-level `$item`, got: {:?}",
+        on_param_var.as_ref().map(hover_text)
+    );
+}

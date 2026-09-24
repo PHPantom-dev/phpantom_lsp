@@ -1000,3 +1000,33 @@ async fn renaming_a_scope_out_of_its_convention_is_refused() {
         .expect_err("a scope renamed without its prefix strands its calls");
     assert!(refusal.contains("`active`"), "{refusal}");
 }
+
+// ─── CRLF line endings and multi-byte characters keep UTF-16 columns ────────
+
+#[tokio::test]
+async fn rename_method_on_crlf_file_with_multibyte_prefix_uses_utf16_columns() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///rename_crlf_utf16.php").unwrap();
+    let usage_prefix = "$s = '😀é'; $f->";
+    let text = format!(
+        "<?php\r\nclass Foo {{\r\n    public function bar(): void {{}}\r\n}}\r\n$f = new Foo();\r\n{usage_prefix}bar();\r\n"
+    );
+    open_php(&backend, &uri, &text).await;
+
+    let edit = rename(&backend, &uri, 2, 21, "baz")
+        .await
+        .expect("a workspace edit for the rename");
+    let mut ranges: Vec<(u32, u32, u32)> = edits_for_uri(&edit, &uri)
+        .iter()
+        .map(|e| {
+            (
+                e.range.start.line,
+                e.range.start.character,
+                e.range.end.character,
+            )
+        })
+        .collect();
+    ranges.sort_unstable();
+    let column = usage_prefix.encode_utf16().count() as u32;
+    assert_eq!(ranges, vec![(2, 20, 23), (5, column, column + 3)]);
+}

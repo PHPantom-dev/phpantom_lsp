@@ -88,7 +88,7 @@ unlikely to move the needle for most users.
 | T29 | [Definite vs possible variable existence tracking](todo/type-inference.md#t29-definite-vs-possible-variable-existence-tracking)                                             | Medium      | High        |
 | T30 | [Literal type collapse limit](todo/type-inference.md#t30-literal-type-collapse-limit)                                                                                       | Low-Medium  | Medium      |
 | T40 | [`pathinfo()` returns a shape or a string depending on the flags argument](todo/type-inference.md#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument) | Low-Medium  | Medium      |
-| T26 | [Globbed constant unions (`Foo::BAR_*`)](todo/type-inference.md#t26-globbed-constant-unions-foobar_)                                                                        | Low-Medium  | Medium      |
+| T26 | [Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)](todo/type-inference.md#t26-class-constants-named-as-docblock-types-foobar-foobar_) | Low-Medium  | Medium      |
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Medium      |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Medium-High |
 | T13 | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium-High |
@@ -99,6 +99,11 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
+| B345 | [A type check does not split an `iterable`](todo/bugs.md#b345-a-type-check-does-not-split-an-iterable) | Low-Medium  | Medium      |
+| B343 | [A `switch` case does not narrow a literal union](todo/bugs.md#b343-a-switch-case-does-not-narrow-a-literal-union) | Low-Medium  | Medium      |
+| B344 | [The falsy branch of a truthiness check keeps the object half](todo/bugs.md#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half) | Low         | Low-Medium  |
+| B346 | [`instanceof` on a class-or-interface union drops the intersection](todo/bugs.md#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection) | Low         | Medium      |
+| B347 | [A `Class::CONST` operand resolves to the first same-named class in the file](todo/bugs.md#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

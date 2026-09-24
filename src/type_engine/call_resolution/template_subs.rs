@@ -1227,15 +1227,40 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
     }
 
     let mut entries = Vec::new();
+    // The key PHP gives the next element written without one: one past the
+    // largest integer key so far.  Unknown once a key we cannot read (or a
+    // spread) could have been an integer.
+    let mut next_index: Option<i64> = Some(0);
     for elem in crate::type_engine::types::conditional::split_text_args(inner) {
         let elem = elem.trim();
-        let Some(arrow_pos) = elem.find("=>") else {
+        if elem.is_empty() {
+            continue;
+        }
+        let (key, value_text) = match elem.find("=>") {
+            Some(arrow_pos) => {
+                let key = literal_array_key_text(elem[..arrow_pos].trim());
+                match key.as_deref().map(str::parse::<i64>) {
+                    Some(Ok(int_key)) => {
+                        next_index = next_index.map(|next| next.max(int_key.saturating_add(1)));
+                    }
+                    Some(Err(_)) => {}
+                    None => next_index = None,
+                }
+                (key, elem[arrow_pos + 2..].trim())
+            }
+            None if elem.starts_with("...") => {
+                next_index = None;
+                (None, elem)
+            }
+            None => {
+                let key = next_index.map(|index| index.to_string());
+                next_index = next_index.map(|index| index.saturating_add(1));
+                (key, elem)
+            }
+        };
+        let Some(key) = key else {
             continue;
         };
-        let Some(key) = literal_array_key_text(elem[..arrow_pos].trim()) else {
-            continue;
-        };
-        let value_text = elem[arrow_pos + 2..].trim();
         // `resolve_arg_text_to_type` widens a scalar literal to its base
         // type (`1` → `int`), which would leave `value-of<T>` over the
         // bound shape with the scalar rather than the literal the caller

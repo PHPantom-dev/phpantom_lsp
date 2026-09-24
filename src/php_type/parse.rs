@@ -616,22 +616,47 @@ fn flatten_binary<'ast>(
 /// Evaluate `key-of<T>` when `T` is a concrete array or shape type.
 ///
 /// - `key-of<array{a: int, b: string}>` → `'a'|'b'`
+/// - `key-of<array{'x', 5: 'y'}>` → `0|5`
 /// - `key-of<array<string, mixed>>` → `string`
 /// - `key-of<list<T>>` → `int`
+/// - `key-of<list<int>|array{a: int}>` → `int|'a'`
 /// - Otherwise returns `key-of<T>` unchanged.
 pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
     match resolved.kind() {
         TypeKind::ArrayShape(entries) => {
-            let keys: Vec<PhpType> = entries
+            // An unkeyed entry sits at its position, and PHP stores a
+            // decimal-integer string key as the integer itself, so both
+            // come back as int literals.
+            let mut keys: Vec<PhpType> = entries
                 .iter()
-                .filter_map(|e| e.key.as_ref())
-                .map(PhpType::literal_string_value)
+                .enumerate()
+                .map(|(position, e)| match e.key.as_deref() {
+                    None => PhpType::literal_int(position.to_string()),
+                    Some(key) if is_canonical_int_key(key) => PhpType::literal_int(key.to_string()),
+                    Some(key) => PhpType::literal_string_value(key),
+                })
                 .collect();
+            dedup_types(&mut keys);
             if keys.is_empty() {
                 PhpType::named(atom("never"))
             } else {
                 PhpType::union(keys)
             }
+        }
+        // `key-of<A|B>` is every key either member can have.  Only folded
+        // when every member folds, so an operand still waiting on a
+        // constant or template keeps the operator for a later pass.
+        TypeKind::Union(members) => {
+            let mut keys = Vec::with_capacity(members.len());
+            for member in members {
+                let key = evaluate_key_of(member);
+                if matches!(key.kind(), TypeKind::KeyOf(_)) {
+                    return PhpType::key_of(resolved.clone());
+                }
+                keys.push(key);
+            }
+            dedup_types(&mut keys);
+            PhpType::union(keys)
         }
         TypeKind::Generic(g) => {
             let n = g.name.to_ascii_lowercase();
@@ -645,6 +670,17 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
         TypeKind::Array(_) => PhpType::named(atom("int")),
         _ => PhpType::key_of(resolved.clone()),
     }
+}
+
+/// Whether PHP stores an array key written as this string as an integer:
+/// a decimal integer with no sign on zero, no leading zeros, and no
+/// surrounding whitespace, within the platform integer range.
+fn is_canonical_int_key(key: &str) -> bool {
+    let digits = key.strip_prefix('-').unwrap_or(key);
+    !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && (digits == "0" && key == "0" || !digits.starts_with('0'))
+        && key.parse::<i64>().is_ok()
 }
 
 /// Evaluate `value-of<T>` when `T` is a concrete array or shape type.

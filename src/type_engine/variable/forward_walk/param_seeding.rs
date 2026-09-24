@@ -276,7 +276,7 @@ pub(crate) fn resolve_param_type(
     });
 
     // Check the `@param` docblock annotation.
-    let raw_docblock_type = crate::docblock::find_iterable_raw_type_in_source(
+    let raw_docblock_type = super::super::resolution::declared_param_docblock_type(
         ctx.content,
         method_span_start as usize,
         pname,
@@ -438,10 +438,25 @@ pub(crate) fn resolve_param_type(
         }
     }
 
-    // Variadic parameter wrapping.
-    if is_variadic && !param_results.is_empty() {
+    // A variadic parameter collects its arguments into an array.  Named
+    // arguments land in it under their names, so its keys are
+    // `int|string` rather than a list's (PHPStan and Psalm agree).  The
+    // array exists even when the elements are untyped.
+    if is_variadic {
+        let variadic_array = |elem: PhpType| {
+            PhpType::generic(
+                "array",
+                vec![
+                    PhpType::union(vec![PhpType::int(), PhpType::string()]),
+                    elem,
+                ],
+            )
+        };
+        if param_results.is_empty() {
+            param_results.push(ResolvedType::from_type_string(PhpType::mixed()));
+        }
         for rt in &mut param_results {
-            rt.type_string = PhpType::list(rt.type_string.clone());
+            rt.type_string = variadic_array(rt.type_string.clone());
             rt.class_info = None;
         }
     }

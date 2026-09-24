@@ -719,27 +719,36 @@ pub(super) fn resolve_rhs_call<'b>(
         Call::StaticMethod(static_call) => resolve_rhs_static_call(static_call, ctx),
     };
 
-    // A `@return value-of<ID_TABLE>` arrives here with the operator still
-    // standing: the docblock parser saw a name it could not read, and only
-    // the template path reads the constant behind it.  Finish it so the
-    // caller gets the value union the table describes rather than a type
-    // expression that widens to `mixed`.
-    if resolved
+    finish_return_constant_operands(&mut resolved, ctx);
+    resolved
+}
+
+/// Evaluate the type operators a call's return type reads through a
+/// constant.
+///
+/// A `@return value-of<ID_TABLE>` arrives with the operator still standing:
+/// the docblock parser saw a name it could not read, and only the template
+/// path reads the constant behind it.  Finish it so the caller gets the
+/// value union the table describes rather than a type expression that
+/// widens to `mixed`.
+pub(super) fn finish_return_constant_operands(
+    resolved: &mut [ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) {
+    if !resolved
         .iter()
         .any(|rt| rt.type_string.contains_unevaluated_operator())
     {
-        let rctx = ctx.as_resolution_ctx();
-        for rt in &mut resolved {
-            if let Some(evaluated) = crate::type_engine::call_resolution::evaluate_constant_operands(
-                &rt.type_string,
-                &rctx,
-            ) {
-                rt.type_string = evaluated;
-            }
+        return;
+    }
+    let rctx = ctx.as_resolution_ctx();
+    for rt in resolved {
+        if let Some(evaluated) =
+            crate::type_engine::call_resolution::evaluate_constant_operands(&rt.type_string, &rctx)
+        {
+            rt.type_string = evaluated;
         }
     }
-
-    resolved
 }
 
 pub(crate) fn infer_closure_literal_type(
