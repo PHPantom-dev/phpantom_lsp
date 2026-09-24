@@ -817,7 +817,6 @@ async fn a_key_under_a_lang_path_namespace_is_known() {
 
 /// `dirname(__DIR__).'/lang'` is the package root's `lang/` directory.
 #[tokio::test]
-#[ignore = "known gap: a `dirname(__DIR__)` path argument is not followed"]
 async fn a_namespace_registered_through_dirname_dir_resolves() {
     let provider = "\
 <?php

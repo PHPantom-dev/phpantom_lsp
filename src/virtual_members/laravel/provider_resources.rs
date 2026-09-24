@@ -1374,8 +1374,12 @@ pub(crate) fn resolve_path_arg(
     workspace_root: &Path,
     program: &Program<'_>,
 ) -> Option<PathBuf> {
-    if let Some(rel) = super::helpers::extract_dir_concat_path(expr, content) {
-        let resolved = file_dir.join(rel.trim_start_matches('/'));
+    if let Some((levels, rel)) = super::helpers::extract_dir_concat_path(expr, content) {
+        let base = file_dir
+            .ancestors()
+            .nth(levels as usize)
+            .unwrap_or(file_dir);
+        let resolved = base.join(rel.trim_start_matches('/'));
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 

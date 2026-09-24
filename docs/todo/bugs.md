@@ -186,18 +186,6 @@ Two halves of the same path classification:
 `a_key_only_a_published_package_file_declares_is_unknown`, and
 `a_package_translation_is_not_an_application_group`.
 
-## B350. A `dirname(__DIR__)` path argument is not followed
-
-**Impact: Low · Complexity: Low**
-
-`$this->loadTranslationsFrom(dirname(__DIR__).'/lang', 'billing')` is the
-common spelling in a package whose provider sits in `src/`, but
-`extract_dir_concat_path` (`src/virtual_members/laravel/helpers.rs`) only
-handles a bare `__DIR__` on the left of the concatenation, so the namespace
-resolves nowhere. The same helper serves views, config, and routes.
-
-**Test:** `laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves`.
-
 ## B357. The pivot index only sees relationships in files already parsed
 
 **Impact: Medium · Complexity: Medium**
