@@ -54,17 +54,25 @@ No outstanding items.
 
 ## Laravel
 
-## B358. A string key argument is read from its raw source, not its value
+## B359. Go-to-definition for a config/trans key misses an escaped declaration
 
 **Impact: Low · Complexity: Low**
 
-`config('app.it\'s')` names the key `it's`, but `push_laravel_string_span`
-(`src/symbol_map/extraction/laravel.rs`) slices the literal's source text, so
-the call site records `app.it\'s` and the unknown-key diagnostic flags a key
-the config declares. The same helper feeds every Laravel string kind (routes,
-views, translations), so any key spelled with an escape sequence is misread.
-The key should come from the literal's unescaped `value`; the span stays on
-the source text.
+`walk_elements` (`src/virtual_members/laravel/array_file.rs`) reads an array
+key's text with `extract_string_literal`, which slices the literal's raw
+source rather than resolving its unescaped `value`. A config key declared as
+`'it\'s' => …` is therefore recorded as `it\'s`, not `it's`. Every consumer
+of `for_each_entry`/`walk_elements` compares that raw text against a key
+built from the literal's actual value elsewhere in the pipeline (config
+reads go through `push_laravel_string_span`, which now resolves `value`; the
+config-value tree in `config_values.rs` already does the same), so a
+declaration spelled with an escape sequence never matches: go-to-definition
+(`collect_laravel_config_declarations` in `config_keys.rs`,
+`resolve_config_key_definition_fallback`) and find-all-references
+(`find_config_references`, `find_all_config_references`) all miss it, and the
+same applies to the trans-key equivalent in `trans_keys.rs`. The fix is the
+same shape as the one applied to `push_laravel_string_span`: read the
+literal's `value` for the key text, keep the span on the source text.
 
 ## Blade
 

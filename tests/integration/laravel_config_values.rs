@@ -180,6 +180,26 @@ async fn a_key_with_an_escaped_quote_is_named_by_its_value() {
     );
 }
 
+/// A `config()` call whose key argument itself needs an escape names the
+/// same key as a call that spells it without one.
+#[tokio::test]
+async fn a_call_site_key_with_an_escaped_quote_matches_the_declaration() {
+    let config = "<?php\nreturn [\n    \"it's\" => 'declared',\n];\n";
+    let consumer = demo("        config('app.it\\'s');");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[("config/app.php", config), ("app/Demo.php", &consumer)],
+        "app/Demo.php",
+    )
+    .await;
+
+    let messages = config_diagnostics(&backend, &uri, &consumer);
+    assert!(
+        messages.is_empty(),
+        "the call site's key is `it's` once PHP reads the literal, got {messages:?}"
+    );
+}
+
 // ─── Keys that do not exist ─────────────────────────────────────────────────
 
 /// A path that runs past a scalar value, or through a nested group that

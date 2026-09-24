@@ -443,6 +443,10 @@ fn emit_laravel_string_span(
 }
 
 /// Emit the span for one string-literal expression that names a key.
+///
+/// The key compared against declared config/route/view/translation names is
+/// the literal's unescaped runtime `value` (`'it\'s'` names `it's`), not the
+/// raw source between the quotes; the span still covers the source text.
 fn push_laravel_string_span(
     kind: crate::symbol_map::LaravelStringKind,
     is_write: bool,
@@ -451,7 +455,15 @@ fn push_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some((mut key, inner_start, mut inner_end)) = string_literal_at_range(expr, content) else {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let mut inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let Some(mut key) = s.value.and_then(crate::atom::literal_bytes_to_str) else {
         return;
     };
 
