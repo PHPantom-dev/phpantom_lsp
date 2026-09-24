@@ -103,8 +103,6 @@ unlikely to move the needle for most users.
 | B362 | [The base `Model`'s own declared properties become `where{Column}` methods](todo/bugs.md#b362-the-base-models-own-declared-properties-become-wherecolumn-methods) | Medium      | Medium      |
 | B361 | [`SoftDeletes` does not contribute a `deleted_at` column](todo/bugs.md#b361-softdeletes-does-not-contribute-a-deleted_at-column) | Low-Medium  | Medium      |
 | B363 | [Find-references on a route's `->name()` registration finds nothing](todo/bugs.md#b363-find-references-on-a-routes--name-registration-finds-nothing) | Low-Medium  | Low-Medium  |
-| B364 | [Blade `@include` and `@each` are not view references](todo/bugs.md#b364-blade-include-and-each-are-not-view-references) | Low-Medium  | Medium      |
-| B365 | [A view's template is dropped from references that include the declaration](todo/bugs.md#b365-a-views-template-is-dropped-from-references-that-include-the-declaration) | Low         | Medium      |
 | B366 | [A union continued on the next docblock line loses the whole type](todo/bugs.md#b366-a-union-continued-on-the-next-docblock-line-loses-the-whole-type) | Low         | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

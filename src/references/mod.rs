@@ -130,7 +130,7 @@ impl Backend {
             .map(|content| String::clone(&content))
     }
 
-    pub(super) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
+    pub(crate) fn reference_file_content_arc(&self, uri: &str) -> Option<Arc<String>> {
         if self.is_blade_file(uri)
             && let Some(content) = self.blade_virtual_php_arc(uri)
         {

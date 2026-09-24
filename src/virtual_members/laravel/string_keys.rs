@@ -242,12 +242,17 @@ pub(crate) fn find_laravel_string_key_references(
 
     if include_declaration && kind != &LaravelStringKind::Config {
         for decl in resolve_laravel_string_key(backend, kind, key, uri) {
-            crate::references::push_location(
-                &mut locations,
-                &decl.uri,
-                decl.range.start,
-                decl.range.end,
-            );
+            // A declaration is in its file's own coordinates, as
+            // go-to-definition reports it, but every other location here
+            // indexes a template's virtual PHP, and the `references` handler
+            // translates the whole list back as though it all did.
+            let decl_uri = decl.uri.as_str();
+            let range = if backend.is_blade_file(decl_uri) {
+                backend.translate_blade_range_to_php(decl_uri, decl.range)
+            } else {
+                decl.range
+            };
+            crate::references::push_location(&mut locations, &decl.uri, range.start, range.end);
         }
     }
 
@@ -305,7 +310,9 @@ fn find_string_key_usages(
         let Ok(parsed_uri) = Url::parse(file_uri) else {
             continue;
         };
-        let Some(content) = backend.get_file_content_arc(file_uri) else {
+        // A template's spans index the virtual PHP it lowers to, which the
+        // `references` handler translates back into the template afterwards.
+        let Some(content) = backend.reference_file_content_arc(file_uri) else {
             continue;
         };
         let lines = LineIndex::new(&content);

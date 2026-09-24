@@ -890,7 +890,6 @@ async fn find_references_on_a_view_name_reaches_every_php_caller() {
 /// With the declaration included, the template the name resolves to is one
 /// of the references, as go-to-definition already finds it.
 #[tokio::test]
-#[ignore = "known gap: a view's template is dropped from references that include the declaration"]
 async fn find_references_on_a_view_name_includes_the_template_as_its_declaration() {
     let (backend, _dir, caller) = profile_workspace().await;
     let uri = open_php_file(&backend, "app/UserController.php").await;
@@ -903,7 +902,6 @@ async fn find_references_on_a_view_name_includes_the_template_as_its_declaration
 
 /// `@include` and `@each` name a view as surely as `view()` does.
 #[tokio::test]
-#[ignore = "known gap: Blade @include/@each sites are not view references"]
 async fn find_references_on_a_view_name_reaches_blade_includes() {
     let (backend, _dir, caller) = profile_workspace().await;
     let uri = open_php_file(&backend, "app/UserController.php").await;

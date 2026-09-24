@@ -132,37 +132,7 @@ a route registration needs the same, through the route table
 
 ## Blade
 
-## B364. Blade `@include` and `@each` are not view references
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Find-references on a view name lists every PHP `view('users.profile')`
-call but none of the `@include('users.profile')` or
-`@each('users.profile', …)` directives that render it, whether the search
-starts in PHP or in the template, and whether or not the template is
-open. `find_string_key_usages` (`src/virtual_members/laravel/string_keys.rs`)
-only walks the snapshot of user PHP symbol maps; a template's spans index
-its virtual PHP, so reaching them needs the template maps in the snapshot
-and their locations translated back into template coordinates. Pinned by
-the ignored
-`laravel_view_names::find_references_on_a_view_name_reaches_blade_includes`.
-
-## B365. A view's template is dropped from references that include the declaration
-
-**Impact: Low · Complexity: Medium**
-
-With the declaration included, find-references on a view name should list
-the template it resolves to, which go-to-definition already finds.
-`find_laravel_string_key_references` adds it, at line 0 of
-`profile.blade.php`, but that location is in the template's own
-coordinates, and the `references` handler (`src/server.rs`) then runs
-every Blade location through `try_translate_location` as though it
-indexed the virtual PHP. Line 0 of the virtual PHP is the injected
-prologue, which has no template position, so the location is dropped. A
-result list mixing both coordinate systems needs each location to say
-which one it is in, or the declaration added after translation. Pinned by
-the ignored
-`laravel_view_names::find_references_on_a_view_name_includes_the_template_as_its_declaration`.
+No outstanding items.
 
 ## Miscellaneous
 
