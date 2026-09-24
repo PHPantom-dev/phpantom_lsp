@@ -172,4 +172,25 @@ Open **Settings > Configure Kate > LSP Client > User Server Settings** and add:
 }
 ```
 
+### Pragtical
+
+1. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`), type `Plugin Manager: Show`, and install **Language Server Protocol(LSP)**.
+
+2. Open the Command Palette again, type `Core: Open User Module`, and add:
+
+```lua
+local lsp = require "plugins.lsp"
+
+lsp.add_server {
+  name = "phpantom",
+  language = "PHP",
+  file_patterns = { "%.php$" },
+  command = { "/path/to/phpantom_lsp" }.
+  transport = "stdio",
+  requests_per_second = 16,
+  incremental_changes = false,
+  verbose = false
+}
+```
+
 For AI coding agent setup, see [Agent Setup](agent-setup.md).
