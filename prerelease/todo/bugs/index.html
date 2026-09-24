@@ -1092,17 +1092,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b353-envenvironment-files-are-not-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B353. <code>.env.&lt;environment&gt;</code> files are not read
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1856,17 +1845,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b353-envenvironment-files-are-not-read" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B353. <code>.env.&lt;environment&gt;</code> files are not read
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2094,15 +2072,6 @@ no completion, go-to-definition, hover, or diagnostic. They compile to
 <code>__()</code>/<code>trans_choice()</code> so the translation string context sees them.</p>
 <p><strong>Tests:</strong> <code>laravel_translation_keys::the_lang_directive_reaches_the_line</code>
 and <code>the_choice_directive_reaches_the_line</code>.</p>
-<h2 id="b353-envenvironment-files-are-not-read">B353. <code>.env.&lt;environment&gt;</code> files are not read<a class="headerlink" href="#b353-envenvironment-files-are-not-read" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<p>Laravel loads <code>.env.{APP_ENV}</code> in place of <code>.env</code> when it exists, which is
-how <code>.env.testing</code> supplies a test suite's database. <code>ENV_FILES</code> in
-<code>src/virtual_members/laravel/env_vars.rs</code> lists only <code>.env</code> and
-<code>.env.example</code>, so a variable declared only in <code>.env.testing</code> is reported
-as undeclared and has no definition. Which environment is active is not
-statically known, so every <code>.env.&lt;name&gt;</code> should count as a declaration.</p>
-<p><strong>Test:</strong> <code>laravel_env_keys::an_environment_specific_dotenv_file_declares_the_variable_too</code>.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
