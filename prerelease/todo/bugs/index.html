@@ -938,17 +938,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b341-any-name-call-in-a-route-file-registers-a-route" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B341. Any <code>-&gt;name()</code> call in a route file registers a route
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1570,17 +1559,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b341-any-name-call-in-a-route-file-registers-a-route" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B341. Any <code>-&gt;name()</code> call in a route file registers a route
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1680,17 +1658,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b341-any-name-call-in-a-route-file-registers-a-route">B341. Any <code>-&gt;name()</code> call in a route file registers a route<a class="headerlink" href="#b341-any-name-call-in-a-route-file-registers-a-route" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>$builder-&gt;name('x')-&gt;save()</code> or <code>$obj-&gt;getUser()-&gt;name('user')</code> in
-<code>routes/web.php</code> registers a route called <code>x</code>/<code>user</code>, so a typo in a real
-<code>route('x')</code> call is not flagged. <code>walk_expr</code> in
-<code>src/virtual_members/laravel/route_names.rs</code> accepts a <code>-&gt;name()</code> on any
-receiver. Requiring a registration verb in the chain is not enough on its
-own, because router macros (<code>Route::inertia()</code>, <code>Route::livewire()</code>) name
-routes too; the receiver has to be judged to be the router (the <code>Route</code>
-facade, a <code>Router</code>, or <code>$this</code> inside a router macro).</p>
-<p><strong>Test:</strong> <code>laravel_route_names::a_name_call_on_an_unrelated_builder_is_not_a_route</code>.</p>
 <h2 id="b342-published-package-views-under-resourcesviewsvendor-are-ignored">B342. Published package views under <code>resources/views/vendor</code> are ignored<a class="headerlink" href="#b342-published-package-views-under-resourcesviewsvendor-are-ignored" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p><code>loadViewsFrom($path, 'widgets')</code> registers <code>resources/views/vendor/widgets</code>
