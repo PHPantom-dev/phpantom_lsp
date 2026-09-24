@@ -185,6 +185,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`in_array()` only narrows by what the list proves.** When `in_array($x, $list, true)` is false for a `list<string>` or `list<User>`, `$x` can still be a string or a `User`, since the list may not hold that one, and when it is true for a list of `mixed` values, `$x` keeps its classes. A literal list such as `[null, '']` narrows both ways, now also when it is stored in a variable first.
 - **A raw Blade echo written inside literal braces is read as a raw echo.** In `{{!!$html!!}}`, the braces around the echo are plain text, so hovering one no longer shows `e()` or leads to its declaration, and the echo's own `{!!` and `!!}` are described and coloured as a raw echo's.
 - **An import added to a `namespace` written on one line goes inside it.** A `use` from a code action, completion, or class move is no longer written after the closing `}` of `namespace B { class Foo {} }`, outside the block, where PHP refuses the file. A `namespace` whose `{` is on the next line no longer gets the `use` between its name and the brace.
+- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
+- **Callbacks returning arrays keep their PHPDoc return type.** A parameter such as `(callable(string): string[])|null` now accepts an array-returning closure without a false type mismatch, including Symfony Console's autocompleter callback. Contributed by @shuvroroy. Closes #456.
 
 ## [0.11.0] - 2026-10-05
 
