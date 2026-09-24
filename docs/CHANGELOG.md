@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Eloquent query examples and inference coverage.** The Laravel playground demonstrates custom builders surviving query chains and callbacks following dotted relationships. An audit against the PHPStan Laravel extensions now guards these behaviours with editor and runtime assertions; the remaining inference gaps are tracked as focused follow-up work. Contributed by @shuvroroy.
 - **Extract interface is offered only to editors that can create files.** The action writes the new interface to a file of its own, which an editor has to say it accepts (the `create` resource operation) before a server may send it. Editors that do not are no longer shown an action they cannot apply.
 - **Updated the bundled mago toolchain to 1.47.5.** The parser, docblock parser, formatter, and supporting crates are refreshed to the latest upstream release. Contributed by @nguyentranchung.
 

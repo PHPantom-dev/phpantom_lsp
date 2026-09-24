@@ -187,6 +187,11 @@ class Demo
         Loaf::query()->stale()->get();                        // → Collection<Loaf>
         Baker::query()->active()->firstOrFail()->getName();   // → Baker
 
+        // Inherited methods and forwarded query methods keep the custom builder.
+        Loaf::query()->where('crust', 'sourdough')->orderBy('id')->stale(); // → LoafBuilder
+        Loaf::where('crust', 'sourdough')->orderBy('id')->stale();          // → LoafBuilder
+        Baker::query()->whereIn('id', [1])->lockForUpdate()->active();     // → BakerBuilder<Baker>
+
         // Paginators carry the model element type through foreach
         foreach (BlogAuthor::where('active', 1)->paginate() as $author) {
             $author->profile->getBio();       // → BlogAuthor
@@ -471,10 +476,14 @@ class Demo
             $query->where('published', true); // resolves to Builder<BlogPost>
         });
 
-        // Dot-notation relation chain
-        BlogPost::whereHas('author', function ($q) {
-            $q->where('active', true);    // resolves to Builder<BlogAuthor>
+        // Each dotted segment is resolved on the preceding related model.
+        BlogPost::whereHas('author.posts', function ($q) {
+            $q->where('published', true);    // resolves to Builder<BlogPost>
         });
+
+        // has() takes its callback in the fifth argument; arrow functions
+        // receive the final related model's builder too.
+        BlogAuthor::has('posts.author', '>=', 1, 'and', fn ($q) => $q->active()); // → Builder<BlogAuthor>
     }
 
 
