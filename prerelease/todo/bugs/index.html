@@ -1015,28 +1015,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b348-translation-groups-in-lang-subdirectories-are-not-enumerated" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B348. Translation groups in lang subdirectories are not enumerated
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b349-package-and-published-translation-files-are-misclassified" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B349. Package and published translation files are misclassified
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1724,28 +1702,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b348-translation-groups-in-lang-subdirectories-are-not-enumerated" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B348. Translation groups in lang subdirectories are not enumerated
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b349-package-and-published-translation-files-are-misclassified" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B349. Package and published translation files are misclassified
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1902,35 +1858,6 @@ diagnostic, hover types it), so navigation should reach the file that
 declares it.</p>
 <p><strong>Tests:</strong> <code>laravel_config_values::definition_of_an_unpublished_package_key_reaches_the_package_file</code>
 and <code>definition_of_a_framework_default_key_reaches_the_framework_file</code>.</p>
-<h2 id="b348-translation-groups-in-lang-subdirectories-are-not-enumerated">B348. Translation groups in lang subdirectories are not enumerated<a class="headerlink" href="#b348-translation-groups-in-lang-subdirectories-are-not-enumerated" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p>Laravel's <code>FileLoader</code> reads <code>__('admin/users.title')</code> from
-<code>lang/en/admin/users.php</code>. Go-to-definition reaches it, but the
-unknown-key diagnostic and completion do not know the group:
-<code>extract_lang_file_stem</code> (<code>src/completion/laravel_string_keys/enumerate.rs</code>)
-keeps only the last path segment.</p>
-<p><strong>Test:</strong> <code>laravel_translation_keys::a_subdirectory_group_is_known</code>.</p>
-<h2 id="b349-package-and-published-translation-files-are-misclassified">B349. Package and published translation files are misclassified<a class="headerlink" href="#b349-package-and-published-translation-files-are-misclassified" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Two halves of the same path classification:</p>
-<ul>
-<li>A published override in <code>lang/vendor/&lt;namespace&gt;/&lt;locale&gt;/&lt;group&gt;.php</code>
-  overrides and extends the package's own file, but the namespaced branch
-  only walks the registered package directories, so the override is not a
-  definition, hover quotes the package's line, and a key only the
-  override adds is flagged.</li>
-<li>Any file under a <code>/lang/</code> directory counts as an application group
-  (<code>is_lang_php_uri</code> in <code>enumerate.rs</code>, the <code>contains("/lang/")</code> check in
-  <code>trans_keys.rs</code>), so a package's own <code>lang/en/messages.php</code> and a
-  published <code>lang/vendor/…</code> file make <code>messages.x</code> a known <em>unnamespaced</em>
-  key.</li>
-</ul>
-<p><strong>Tests:</strong> <code>laravel_translation_keys::a_published_override_is_a_definition_of_the_package_key</code>,
-<code>a_published_override_is_the_line_hover_quotes</code>,
-<code>a_key_only_the_published_override_adds_is_known</code>,
-<code>a_published_package_file_is_not_an_application_group</code>,
-<code>a_key_only_a_published_package_file_declares_is_unknown</code>, and
-<code>a_package_translation_is_not_an_application_group</code>.</p>
 <h2 id="b357-the-pivot-index-only-sees-relationships-in-files-already-parsed">B357. The pivot index only sees relationships in files already parsed<a class="headerlink" href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>rebuild_laravel_pivot_index</code> (<code>src/resolution.rs</code>) builds the reverse
