@@ -905,6 +905,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#b367-a-class-name-in-a-file-with-several-braced-namespaces-resolves-against-the-first-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B367. A class name in a file with several braced namespaces resolves against the first one
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -931,17 +942,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Laravel
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B360. References, reference lenses, and rename miss an Eloquent magic member's uses
       </span>
     </span>
   </a>
@@ -1515,6 +1515,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#b367-a-class-name-in-a-file-with-several-braced-namespaces-resolves-against-the-first-one" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B367. A class name in a file with several braced namespaces resolves against the first one
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#array-types" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1541,17 +1552,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         Laravel
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B360. References, reference lenses, and rename miss an Eloquent magic member's uses
       </span>
     </span>
   </a>
@@ -1630,26 +1630,25 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h2 id="b367-a-class-name-in-a-file-with-several-braced-namespaces-resolves-against-the-first-one">B367. A class name in a file with several braced namespaces resolves against the first one<a class="headerlink" href="#b367-a-class-name-in-a-file-with-several-braced-namespaces-resolves-against-the-first-one" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>In a file that declares more than one <code>namespace Foo { … }</code> block, a
+member access's receiver written as a bare class name is resolved
+against the file's <em>first</em> namespace rather than the block it sits in.
+With <code>namespace Other { … }</code> followed by <code>namespace App { class Author
+{ public static function make() {} } function show() { Author::make(); } }</code>,
+the receiver of <code>Author::make()</code> resolves to <code>Other\Author</code>, so Find
+References on <code>make()</code> finds nothing. The reference search
+(<code>src/references/receivers.rs</code>, <code>member_scope.rs</code>) resolves receivers
+through <code>file_context</code>, whose <code>namespace</code> is the first one the file
+declares, rather than <code>file_context_at</code>, which picks the namespace block
+that contains the access.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses">B360. References, reference lenses, and rename miss an Eloquent magic member's uses<a class="headerlink" href="#b360-references-reference-lenses-and-rename-miss-an-eloquent-magic-members-uses" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p>A scope, accessor, or mutator is declared under one name and used under
-another: <code>scopeActive()</code> is called as <code>active()</code>, <code>getFullNameAttribute()</code>
-and an <code>Attribute</code>-returning <code>fullName()</code> are read as <code>-&gt;full_name</code>,
-<code>setLogoAttribute()</code> is written as <code>-&gt;logo = …</code>. Go-to-definition follows
-a use back to its declaration (<code>src/definition/member/</code>), but nothing under
-<code>src/references/</code> maps the declaration forward, so find-references on the
-declaring method finds only direct calls to it. The member reference
-lens (<code>indexed_member_reference_count</code> in <code>src/code_lens.rs</code>) counts the
-same way, so live scopes and accessors read "0 references", and a
-rename of the declaration strands every use. Relationship methods have
-the same shape through their <code>-&gt;posts</code> property reads. Pinned by the
-four ignored <code>definition_laravel::references_on_*</code> tests.</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
