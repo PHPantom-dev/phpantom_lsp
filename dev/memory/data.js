@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790242450402,
+  "lastUpdate": 1790243462598,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30701,6 +30701,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "c5ed93b32fd8b39984fbd7532a40e8a31ffd5575",
+          "message": "Soft-deleting models know their `deleted_at` column",
+          "timestamp": "2026-09-24T11:34:50+02:00",
+          "tree_id": "db1a835d9072f52dfc365c2e6d663648b9428fcb",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/c5ed93b32fd8b39984fbd7532a40e8a31ffd5575"
+        },
+        "date": 1790243454592,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.9,
             "unit": "MiB"
           }
         ]
