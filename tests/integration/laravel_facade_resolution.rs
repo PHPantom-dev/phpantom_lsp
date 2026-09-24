@@ -479,7 +479,6 @@ async fn definition_targets_after(content: &str, after: &str) -> Vec<String> {
 /// A facade call jumps to the method on the class the call is forwarded
 /// to, not to the facade.
 #[tokio::test]
-#[ignore = "known gap: go-to-definition on a facade call stops at the facade"]
 async fn a_forwarded_facade_call_goes_to_the_concrete_declaration() {
     let content = "\
 <?php
@@ -503,7 +502,6 @@ class Svc {
 /// A facade call the manager only forwards through `@mixin` jumps to the
 /// contract that declares it.
 #[tokio::test]
-#[ignore = "known gap: go-to-definition on a facade call stops at the facade"]
 async fn a_forwarded_mixin_call_goes_to_the_contract_declaration() {
     let content = "\
 <?php

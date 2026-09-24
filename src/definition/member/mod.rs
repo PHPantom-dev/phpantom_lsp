@@ -39,10 +39,11 @@ use crate::text_position::position_to_offset;
 use crate::type_engine::resolver::CtxLoaders;
 use crate::types::ResolvedType;
 use crate::types::*;
+use crate::virtual_members::ResolvedClassCache;
 use crate::virtual_members::laravel::{
     ELOQUENT_BUILDER_FQN, accessor_method_candidates, count_property_to_relationship_method,
-    custom_builder_fqn, extends_eloquent_model, is_accessor_or_mutator_method,
-    where_property_method_to_column,
+    custom_builder_fqn, extends_eloquent_model, facade_concrete_class,
+    is_accessor_or_mutator_method, where_property_method_to_column,
 };
 
 /// Pre-extracted context for a member definition lookup.
@@ -256,6 +257,7 @@ impl Backend {
                 lookup_class,
                 &effective_name,
                 &class_loader,
+                Some(&self.resolved_class_cache),
             )
             .unwrap_or_else(|| {
                 (
@@ -408,9 +410,13 @@ impl Backend {
         }
 
         // Try with scope mapping in the fallback path too.
-        let Some((search_name, declaring_class, declaring_fqn)) =
-            Self::resolve_search_name(target_class, fallback_class, &effective_name, &class_loader)
-        else {
+        let Some((search_name, declaring_class, declaring_fqn)) = Self::resolve_search_name(
+            target_class,
+            fallback_class,
+            &effective_name,
+            &class_loader,
+            Some(&self.resolved_class_cache),
+        ) else {
             // Last resort: Eloquent array entry (virtual properties) and
             // where{Property} method mapping.
             if extends_eloquent_model(fallback_class, &class_loader) {
@@ -542,6 +548,7 @@ impl Backend {
         lookup_class: &ClassInfo,
         effective_name: &str,
         class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        cache: Option<&ResolvedClassCache>,
     ) -> Option<(String, ClassInfo, String)> {
         if let Some((cls, fqn)) =
             Self::find_declaring_class(lookup_class, effective_name, class_loader)
@@ -602,7 +609,37 @@ impl Backend {
             return Some((effective_name.to_string(), cls, fqn));
         }
 
+        // Try facade-forwarded method: `Facade::__callStatic` hands the
+        // call to the instance its `getFacadeAccessor()` names.
+        if let Some((cls, fqn)) =
+            Self::find_facade_forwarded_method(lookup_class, effective_name, class_loader, cache)
+        {
+            return Some((effective_name.to_string(), cls, fqn));
+        }
+
         None
+    }
+
+    /// Find where a static call on a Laravel facade is declared on the
+    /// concrete class the facade forwards to (or on something that class
+    /// inherits or mixes in).
+    fn find_facade_forwarded_method(
+        class: &ClassInfo,
+        member_name: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        cache: Option<&ResolvedClassCache>,
+    ) -> Option<(ClassInfo, String)> {
+        let concrete = facade_concrete_class(class, class_loader, cache)?;
+        let (declaring_class, fqn) =
+            Self::find_declaring_class(&concrete, member_name, class_loader)?;
+
+        // A member declared on the concrete class itself comes back under
+        // its short name; use the FQN so the file lookup can disambiguate.
+        if !fqn.contains('\\') && fqn == concrete.name {
+            Some((declaring_class, concrete.fqn().to_string()))
+        } else {
+            Some((declaring_class, fqn))
+        }
     }
 
     /// Locate the `::macro('name', ...)` registration site for a Laravel macro

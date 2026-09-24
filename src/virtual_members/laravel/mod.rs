@@ -238,6 +238,7 @@ use builder::build_builder_forwarded_methods;
 pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
 pub use facade::LaravelFacadeProvider;
+pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
 pub(crate) use factory::{
     factory_model_type, is_factory_class, is_has_factory_trait, model_to_factory_fqn,

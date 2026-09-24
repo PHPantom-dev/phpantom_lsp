@@ -42,19 +42,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-## B338. Go-to-definition on a facade call stops at the facade
-
-**Impact: Medium · Complexity: Medium**
-
-`Auth::guard()` completes and hovers with `AuthManager::guard()`'s
-signature, but go-to-definition finds nothing: `find_declaring_class`
-(`src/definition/member/declaring.rs`) walks ancestors and `@mixin`s but
-never follows the facade accessor to the concrete class. The same applies
-to a member the concrete class gets through its own `@mixin`
-(`Auth::check()` → `Guard::check()`).
-
-**Tests:** `laravel_facade_resolution::a_forwarded_facade_call_goes_to_the_concrete_declaration`
-and `a_forwarded_mixin_call_goes_to_the_contract_declaration`.
+No outstanding items.
 
 ## Array types
 
