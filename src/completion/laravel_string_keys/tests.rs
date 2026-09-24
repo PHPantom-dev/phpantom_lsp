@@ -1,4 +1,3 @@
-use super::enumerate::extract_lang_file_stem;
 use super::*;
 use tower_lsp::lsp_types::Position;
 
@@ -663,18 +662,6 @@ fn rejects_non_laravel_function() {
     let col = line_text.find("bar").unwrap() as u32 + 1;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     assert!(ctx.is_none(), "Non-Laravel function should not match");
-}
-
-#[test]
-fn lang_file_stem_extraction() {
-    assert_eq!(
-        extract_lang_file_stem("file:///app/lang/en/messages.php"),
-        Some("messages".to_string())
-    );
-    assert_eq!(
-        extract_lang_file_stem("file:///app/resources/lang/en/validation.php"),
-        Some("validation".to_string())
-    );
 }
 
 #[test]

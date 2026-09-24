@@ -1361,12 +1361,13 @@ fn instantiated_or_class_string<'arena>(expr: &Expression<'arena>) -> Option<&'a
 /// Resolve an expression that names a file to the path it points at.
 ///
 /// Covers the forms Laravel projects use to locate route, config, view, and
-/// translation files: `__DIR__ . '/…'`, `base_path('…')`, a bare literal
-/// (absolute, or relative to the referring file), and a local variable
-/// assigned one of those forms earlier in the same scope (Livewire's
-/// service provider writes `$config = __DIR__.'/../config/x.php';` before
-/// passing `$config` to `mergeConfigFrom`).  `program` is the parse of
-/// `content`, which that last form is resolved against.
+/// translation files: `__DIR__ . '/…'` and `dirname(__DIR__) . '/…'`,
+/// `base_path('…')`, a bare literal (absolute, or relative to the referring
+/// file), and a local variable assigned one of those forms earlier in the
+/// same scope (Livewire's service provider writes
+/// `$config = __DIR__.'/../config/x.php';` before passing `$config` to
+/// `mergeConfigFrom`).  `program` is the parse of `content`, which that last
+/// form is resolved against.
 pub(crate) fn resolve_path_arg(
     expr: &Expression<'_>,
     content: &str,
@@ -1374,15 +1375,6 @@ pub(crate) fn resolve_path_arg(
     workspace_root: &Path,
     program: &Program<'_>,
 ) -> Option<PathBuf> {
-    if let Some((levels, rel)) = super::helpers::extract_dir_concat_path(expr, content) {
-        let base = file_dir
-            .ancestors()
-            .nth(levels as usize)
-            .unwrap_or(file_dir);
-        let resolved = base.join(rel.trim_start_matches('/'));
-        return resolved.canonicalize().ok().or(Some(resolved));
-    }
-
     // `base_path('app/.../web.php')` resolves relative to the workspace
     // root, `resource_path('views/components')` relative to `resources/`
     // inside it.  Both take an optional argument, and naming the base
@@ -1405,21 +1397,15 @@ pub(crate) fn resolve_path_arg(
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 
-    if let Some((val, _, _)) = super::helpers::extract_string_literal(expr, content) {
-        if val.starts_with('/') {
-            let p = PathBuf::from(val);
-            return p.canonicalize().ok().or(Some(p));
-        }
-        let resolved = file_dir.join(val);
-        return resolved.canonicalize().ok().or(Some(resolved));
-    }
-
     if let Expression::Variable(Variable::Direct(dv)) = expr {
         let assigned = last_assignment_before(program, dv.start_offset(), dv.name)?;
         return resolve_path_arg(assigned, content, file_dir, workspace_root, program);
     }
 
-    None
+    let resolved = PathBuf::from(crate::document_links::try_evaluate_path_expr(
+        expr, file_dir,
+    )?);
+    resolved.canonicalize().ok().or(Some(resolved))
 }
 
 /// The workspace-relative directory a Laravel path helper resolves against,

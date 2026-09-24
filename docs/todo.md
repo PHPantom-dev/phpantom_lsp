@@ -98,10 +98,8 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B349 | [Package and published translation files are misclassified](todo/bugs.md#b349-package-and-published-translation-files-are-misclassified)                                  | Medium      | Medium      |
 | B357 | [The pivot index only sees relationships in files already parsed](todo/bugs.md#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed)                    | Medium      | Medium      |
 | B344 | [A config list value reads as an empty shape](todo/bugs.md#b344-a-config-list-value-reads-as-an-empty-shape)                                                              | Low-Medium  | Low         |
-| B348 | [Translation groups in lang subdirectories are not enumerated](todo/bugs.md#b348-translation-groups-in-lang-subdirectories-are-not-enumerated)                            | Low-Medium  | Low         |
 | B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
 | B346 | [Config defaults are merged recursively instead of Laravel's top-level merge](todo/bugs.md#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge) | Low-Medium  | Medium      |
 | B347 | [Config go-to-definition never falls back to a package or framework file](todo/bugs.md#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file)      | Low-Medium  | Medium      |

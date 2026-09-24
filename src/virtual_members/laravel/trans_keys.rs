@@ -54,39 +54,30 @@ pub(crate) fn unresolved_trans_type() -> PhpType {
 /// Falls back to the top of the file when the exact key cannot be located.
 pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Location> {
     let mut results = Vec::new();
+    let root = backend.workspace.workspace_root.read().clone();
 
     if let Some((namespace, rest)) = key.split_once("::") {
         let file_stem = rest.split('.').next().unwrap_or(rest);
-        for res in &backend.laravel_provider_resources.read().trans_dirs {
-            if res.namespace != namespace {
-                continue;
+        let prefix = format!("{namespace}::{file_stem}");
+        let resources = backend.laravel_provider_resources.read();
+        if !resources
+            .trans_dirs
+            .iter()
+            .any(|res| res.namespace == namespace)
+        {
+            return results;
+        }
+        // A published override replaces the package's line, so it comes
+        // first and is the one hover quotes.  It only has to declare the
+        // keys it changes, so a file that lacks the key is no definition.
+        if let Some(root) = &root {
+            for dir in published_trans_dirs(root, namespace) {
+                push_group_definitions(&dir, file_stem, &prefix, key, false, &mut results);
             }
-            let Ok(entries) = std::fs::read_dir(&res.path) else {
-                continue;
-            };
-            for entry in entries.flatten() {
-                let locale_dir = entry.path();
-                if !locale_dir.is_dir() {
-                    continue;
-                }
-                let candidate = locale_dir.join(format!("{file_stem}.php"));
-                if !candidate.is_file() {
-                    continue;
-                }
-                let Ok(content) = std::fs::read_to_string(&candidate) else {
-                    continue;
-                };
-                let Ok(uri) = Url::from_file_path(&candidate) else {
-                    continue;
-                };
-                let prefix = format!("{namespace}::{file_stem}");
-                let declarations = collect_trans_declarations(&content, &prefix);
-                if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                    let pos = crate::text_position::offset_to_position(&content, decl.start);
-                    results.push(crate::definition::point_location(uri, pos));
-                    continue;
-                }
-                results.push(crate::definition::point_location(uri, Position::new(0, 0)));
+        }
+        for res in &resources.trans_dirs {
+            if res.namespace == namespace {
+                push_group_definitions(&res.path, file_stem, &prefix, key, true, &mut results);
             }
         }
         return results;
@@ -95,33 +86,34 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
     let snapshot = backend.user_file_symbol_maps();
 
     let file_stem = key.split('.').next().unwrap_or(key);
-    let target_suffix = format!("/{file_stem}.php");
+    let root_uri = root.as_deref().map(crate::util::path_to_uri);
 
     for (file_uri, _) in &snapshot {
-        if !(file_uri.contains("/lang/") || file_uri.contains("/resources/lang/")) {
+        if root_uri
+            .as_deref()
+            .and_then(|root_uri| app_lang_group(root_uri, file_uri))
+            != Some(file_stem)
+        {
+            continue;
+        }
+        let Ok(uri) = Url::parse(file_uri) else {
+            continue;
+        };
+        let Some(content) = backend.get_file_content(file_uri) else {
+            continue;
+        };
+
+        let declarations = collect_trans_declarations(&content, file_stem);
+        if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+            let pos = crate::text_position::offset_to_position(&content, decl.start);
+            results.push(crate::definition::point_location(uri, pos));
             continue;
         }
 
-        if file_uri.ends_with(&target_suffix) {
-            let Ok(uri) = Url::parse(file_uri) else {
-                continue;
-            };
-            let Some(content) = backend.get_file_content(file_uri) else {
-                continue;
-            };
-
-            let declarations = collect_trans_declarations(&content, file_stem);
-            if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
-                let pos = crate::text_position::offset_to_position(&content, decl.start);
-                results.push(crate::definition::point_location(uri, pos));
-                continue;
-            }
-
-            results.push(crate::definition::point_location(uri, Position::new(0, 0)));
-        }
+        results.push(crate::definition::point_location(uri, Position::new(0, 0)));
     }
 
-    if let Some(root) = backend.workspace.workspace_root.read().clone() {
+    if let Some(root) = root {
         for_each_json_lang_file(&root, |path, map| {
             if map.contains_key(key)
                 && let Ok(uri) = Url::from_file_path(path)
@@ -132,6 +124,84 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
     }
 
     results
+}
+
+/// Push a location for `key` in each `<locale>/<file_stem>.php` under `dir`,
+/// a directory of locale subdirectories.  A file that exists but does not
+/// declare the key is reached at its top when `fallback_to_top` is set.
+fn push_group_definitions(
+    dir: &std::path::Path,
+    file_stem: &str,
+    prefix: &str,
+    key: &str,
+    fallback_to_top: bool,
+    results: &mut Vec<Location>,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let locale_dir = entry.path();
+        if !locale_dir.is_dir() {
+            continue;
+        }
+        let candidate = locale_dir.join(format!("{file_stem}.php"));
+        if !candidate.is_file() {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&candidate) else {
+            continue;
+        };
+        let Ok(uri) = Url::from_file_path(&candidate) else {
+            continue;
+        };
+        let declarations = collect_trans_declarations(&content, prefix);
+        if let Some(decl) = declarations.into_iter().find(|d| d.key == key) {
+            let pos = crate::text_position::offset_to_position(&content, decl.start);
+            results.push(crate::definition::point_location(uri, pos));
+        } else if fallback_to_top {
+            results.push(crate::definition::point_location(uri, Position::new(0, 0)));
+        }
+    }
+}
+
+/// The application's translation directories, relative to the project root.
+/// `lang_path()` is one or the other depending on whether `resources/lang`
+/// exists; both are read so a project part-way through the move resolves.
+const APP_LANG_DIRS: [&str; 2] = ["lang", "resources/lang"];
+
+/// The group an application translation file holds, or `None` when `uri` is
+/// not one.
+///
+/// `FileLoader` reads `<lang>/<locale>/<group>.php`, and a group may name a
+/// subdirectory: `lang/en/admin/users.php` is the `admin/users` group.
+/// `<lang>/vendor/` holds published package overrides, which are only read
+/// for their namespace, and a `lang/` directory anywhere else in the project
+/// (a package's own) is not the application's.
+pub(crate) fn app_lang_group<'a>(root_uri: &str, uri: &'a str) -> Option<&'a str> {
+    let rel = uri
+        .strip_prefix(root_uri.trim_end_matches('/'))?
+        .strip_prefix('/')?;
+    let rest = APP_LANG_DIRS
+        .iter()
+        .find_map(|dir| rel.strip_prefix(dir)?.strip_prefix('/'))?;
+    let (locale, file) = rest.split_once('/')?;
+    if locale == "vendor" {
+        return None;
+    }
+    file.strip_suffix(".php").filter(|group| !group.is_empty())
+}
+
+/// The directories an application publishes a package's translations into,
+/// `<lang>/vendor/<namespace>`, which `FileLoader::loadNamespaceOverrides()`
+/// lays over the package's own lines.
+pub(crate) fn published_trans_dirs(
+    root: &std::path::Path,
+    namespace: &str,
+) -> impl Iterator<Item = std::path::PathBuf> {
+    APP_LANG_DIRS
+        .iter()
+        .map(move |dir| root.join(dir).join("vendor").join(namespace))
 }
 
 /// The line a translation key resolves to inside the file that declares it.
@@ -210,7 +280,7 @@ pub(crate) fn for_each_json_lang_file(
     root: &std::path::Path,
     mut visit: impl FnMut(&std::path::Path, &serde_json::Map<String, serde_json::Value>),
 ) {
-    for sub in ["lang", "resources/lang"] {
+    for sub in APP_LANG_DIRS {
         let Ok(entries) = std::fs::read_dir(root.join(sub)) else {
             continue;
         };

@@ -188,7 +188,8 @@ pub(crate) use storage::{
     storage_facade_local_names,
 };
 pub(crate) use trans_keys::{
-    collect_trans_declarations, for_each_json_lang_file, trans_line, unresolved_trans_type,
+    app_lang_group, collect_trans_declarations, for_each_json_lang_file, published_trans_dirs,
+    trans_line, unresolved_trans_type,
 };
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};

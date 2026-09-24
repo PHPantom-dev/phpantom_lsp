@@ -37,3 +37,25 @@ fn translation_types_resolve_while_the_workspace_index_is_held() {
     assert_eq!(leaf, Some(PhpType::string()));
     assert_eq!(group, Some(super::trans_group_type()));
 }
+
+#[test]
+fn only_the_applications_own_group_files_are_groups() {
+    use super::app_lang_group;
+
+    let root = "file:///app";
+    for (uri, group) in [
+        ("file:///app/lang/en/messages.php", Some("messages")),
+        (
+            "file:///app/resources/lang/en/validation.php",
+            Some("validation"),
+        ),
+        ("file:///app/lang/en/admin/users.php", Some("admin/users")),
+        ("file:///app/lang/vendor/billing/en/invoice.php", None),
+        ("file:///app/packages/billing/lang/en/invoice.php", None),
+        ("file:///app/lang/en.php", None),
+        ("file:///app/language/en/messages.php", None),
+        ("file:///other/lang/en/messages.php", None),
+    ] {
+        assert_eq!(app_lang_group(root, uri), group, "{uri}");
+    }
+}

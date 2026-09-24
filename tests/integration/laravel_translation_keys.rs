@@ -269,7 +269,6 @@ async fn a_subdirectory_group_reaches_its_file() {
 /// The same subdirectory group is a key the diagnostic knows, and its
 /// leaf's bare name (`users.title`) is not.
 #[tokio::test]
-#[ignore = "known gap: translation groups in lang subdirectories are not enumerated"]
 async fn a_subdirectory_group_is_known() {
     let (backend, _dir, uri, content) = workspace(
         LARAVEL_APP_COMPOSER,
@@ -564,7 +563,6 @@ async fn a_package_key_is_judged_against_what_the_package_ships() {
 /// `lang/vendor/<namespace>/<locale>/<group>.php` over the package's own
 /// file, so the published copy is a definition of the key too.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_published_override_is_a_definition_of_the_package_key() {
     let mut files = billing_files();
     files.push((
@@ -582,7 +580,6 @@ async fn a_published_override_is_a_definition_of_the_package_key() {
 
 /// The override replaces the package's line, so it is the one hover quotes.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_published_override_is_the_line_hover_quotes() {
     let mut files = billing_files();
     files.push((
@@ -599,7 +596,6 @@ async fn a_published_override_is_the_line_hover_quotes() {
 /// The override is merged with `array_replace_recursive()`, so a key only
 /// the published copy adds is as real as one the package ships.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_key_only_the_published_override_adds_is_known() {
     let mut files = billing_files();
     files.push((
@@ -627,10 +623,13 @@ async fn a_key_only_the_published_override_adds_is_known() {
 async fn an_unregistered_namespace_resolves_nowhere() {
     let (backend, _dir, uri, content) = workspace(
         LARAVEL_APP_COMPOSER,
-        &[(
-            "lang/vendor/ghost/en/messages.php",
-            "<?php\nreturn [\n    'hi' => 'Hi',\n];\n",
-        )],
+        &[
+            ("lang/en/auth.php", AUTH_EN),
+            (
+                "lang/vendor/ghost/en/messages.php",
+                "<?php\nreturn [\n    'hi' => 'Hi',\n];\n",
+            ),
+        ],
         "__('ghost::messages.hi');",
     )
     .await;
@@ -649,7 +648,6 @@ async fn an_unregistered_namespace_resolves_nowhere() {
 /// A published package file under `lang/vendor/` is only ever read for its
 /// namespace, never as an application group of the same name.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_published_package_file_is_not_an_application_group() {
     let mut files = billing_files();
     files.push((
@@ -668,7 +666,6 @@ async fn a_published_package_file_is_not_an_application_group() {
 
 /// Nor does it make the bare key valid.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_key_only_a_published_package_file_declares_is_unknown() {
     let (backend, _dir, uri, content) = workspace(
         LARAVEL_APP_COMPOSER,
@@ -691,7 +688,6 @@ async fn a_key_only_a_published_package_file_declares_is_unknown() {
 /// A package's own `lang/` directory holds lines for its namespace, not
 /// application groups.
 #[tokio::test]
-#[ignore = "known gap: package and published translation files are misclassified"]
 async fn a_package_translation_is_not_an_application_group() {
     let mut files = billing_files();
     files.push(("lang/en/auth.php", AUTH_EN));
