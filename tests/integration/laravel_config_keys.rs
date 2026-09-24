@@ -111,7 +111,7 @@ async fn config_diagnostics_for(
     diags
         .iter()
         .filter(
-            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_config"),
+            |d| matches!(&d.code, Some(NumberOrString::String(s)) if s == "invalid_laravel_config" || s == "invalid_laravel_storage_disk"),
         )
         .map(|d| d.message.clone())
         .collect()
@@ -144,7 +144,7 @@ async fn a_key_written_at_runtime_is_a_declaration() {
         "only the disk nothing configures is unknown, got: {messages:?}"
     );
     assert!(
-        messages[0].contains("filesystems.disks.nowhere"),
+        messages[0].contains("storage disk: 'nowhere'"),
         "the flagged key should be the unconfigured disk, got: {}",
         messages[0]
     );

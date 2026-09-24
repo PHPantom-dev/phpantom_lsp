@@ -1,7 +1,7 @@
 use super::*;
 use tower_lsp::lsp_types::Position;
 
-fn detect_at_end(content: &str, value: &str) -> Option<LaravelStringKeyContext> {
+fn detect_at_end<'a>(content: &'a str, value: &str) -> Option<LaravelStringKeyContext<'a>> {
     let cursor = content.rfind(value)? + value.len();
     detect_laravel_string_key_context(
         content,
@@ -32,8 +32,62 @@ fn the_kinds_completed_elsewhere_offer_no_candidates() {
         LaravelStringKind::ContainerBinding,
     ] {
         assert!(
-            backend.string_key_candidates(&kind).is_empty(),
+            backend.string_key_candidates(&kind, None, "").is_empty(),
             "{kind:?} should offer no candidates"
+        );
+    }
+}
+
+#[test]
+fn configured_resource_candidates_include_database_roles_and_null_drivers() {
+    let backend = crate::test_fixtures::make_backend();
+    backend.laravel_string_key_cache.write().config_keys = Some(Arc::from([
+        "cache.stores.redis".to_string(),
+        "database.connections.mysql".to_string(),
+        "queue.connections.sync".to_string(),
+    ]));
+
+    assert_eq!(
+        backend
+            .string_key_candidates(&LaravelStringKind::Config, None, "")
+            .as_ref(),
+        [
+            "cache.stores.redis",
+            "database.connections.mysql",
+            "queue.connections.sync",
+        ]
+    );
+    assert_eq!(
+        backend
+            .string_key_candidates(
+                &LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection,),
+                Some("database.connections."),
+                "mysql::",
+            )
+            .as_ref(),
+        ["mysql::read", "mysql::write", "mysql::direct"]
+    );
+    for (resource, config_prefix, expected) in [
+        (
+            LaravelConfigResource::CacheStore,
+            "cache.stores.",
+            vec!["null", "redis"],
+        ),
+        (
+            LaravelConfigResource::QueueConnection,
+            "queue.connections.",
+            vec!["null", "sync"],
+        ),
+    ] {
+        assert_eq!(
+            backend
+                .string_key_candidates(
+                    &LaravelStringKind::ConfigResource(resource),
+                    Some(config_prefix),
+                    "",
+                )
+                .as_ref(),
+            expected,
         );
     }
 }
@@ -44,6 +98,10 @@ fn a_string_key_is_iconed_by_what_it_names() {
     use tower_lsp::lsp_types::CompletionItemKind;
     for (kind, expected) in [
         (LaravelStringKind::Config, CompletionItemKind::PROPERTY),
+        (
+            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            CompletionItemKind::PROPERTY,
+        ),
         (LaravelStringKind::View, CompletionItemKind::FILE),
         (LaravelStringKind::Trans, CompletionItemKind::TEXT),
         (
@@ -72,6 +130,14 @@ fn detects_route_call() {
     let col = line_text.find("user.").unwrap() as u32 + 5;
     let ctx = detect_laravel_string_key_context(content, Position::new(line, col));
     let ctx = ctx.expect("should detect route() context");
+    assert!(matches!(ctx.kind, LaravelStringKind::Route));
+    assert_eq!(ctx.prefix, "user.");
+}
+
+#[test]
+fn detects_instance_route_call() {
+    let content = "<?php\n$redirect->route('user.');\n";
+    let ctx = detect_at_end(content, "user.").expect("should detect ->route() context");
     assert!(matches!(ctx.kind, LaravelStringKind::Route));
     assert_eq!(ctx.prefix, "user.");
 }
@@ -253,6 +319,7 @@ fn detects_every_ability_call_shape() {
         "Gate::forUser($user)->allows('upd'",
         "Gate::forUser($user)->authorize('upd'",
         "Gate::forUser($user)->has('upd'",
+        "Gate::forUser($user)->inspect('upd'",
         // A controller's own helper.
         "$this->authorize('upd'",
         // The user the check is about.
@@ -358,7 +425,7 @@ fn storage_argument_scanning_preserves_existing_static_contexts() {
     for (expression, expected_kind, expected_prefix) in [
         (
             "DB::connection('primary')",
-            LaravelStringKind::Config,
+            LaravelStringKind::ConfigResource(LaravelConfigResource::DatabaseConnection),
             Some("database.connections."),
         ),
         (
@@ -395,7 +462,10 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
         let content = storage_source(expression);
         let ctx = detect_at_end(&content, "arch")
             .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
-        assert!(matches!(ctx.kind, LaravelStringKind::Config));
+        assert!(matches!(
+            ctx.kind,
+            LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+        ));
         assert_eq!(ctx.prefix, "arch", "prefix for `{expression}`");
         assert_eq!(
             ctx.config_sub_prefix,
@@ -411,8 +481,161 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
         let content = format!("<?php\n{expression};\n");
         let ctx = detect_at_end(&content, "arch")
             .unwrap_or_else(|| panic!("should detect `{expression}` as a disk context"));
-        assert!(matches!(ctx.kind, LaravelStringKind::Config));
+        assert!(matches!(
+            ctx.kind,
+            LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+        ));
         assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
+    }
+}
+
+#[test]
+fn detects_each_direct_config_resource_family() {
+    for (expression, expected) in [
+        ("auth('name')", LaravelConfigResource::AuthGuard),
+        ("Auth::guard('name')", LaravelConfigResource::AuthGuard),
+        ("Cache::store('name')", LaravelConfigResource::CacheStore),
+        ("Log::channel('name')", LaravelConfigResource::LogChannel),
+        ("Log::stack(['name'])", LaravelConfigResource::LogChannel),
+        (
+            "DB::connection('name')",
+            LaravelConfigResource::DatabaseConnection,
+        ),
+        (
+            "Queue::connection('name')",
+            LaravelConfigResource::QueueConnection,
+        ),
+        ("Mail::mailer('name')", LaravelConfigResource::Mailer),
+        (
+            "Broadcast::connection('name')",
+            LaravelConfigResource::BroadcastConnection,
+        ),
+    ] {
+        let content = format!("<?php\n{expression};\n");
+        let ctx = detect_at_end(&content, "name")
+            .unwrap_or_else(|| panic!("should detect `{expression}`"));
+        assert_eq!(ctx.kind, LaravelStringKind::ConfigResource(expected));
+    }
+}
+
+#[test]
+fn auth_middleware_completion_replaces_only_the_current_guard() {
+    let content = "<?php\nRoute::middleware('auth:web, admin');\n";
+    let ctx = detect_at_end(content, "admin").expect("auth middleware guard context");
+    assert_eq!(
+        ctx.kind,
+        LaravelStringKind::ConfigResource(LaravelConfigResource::AuthGuard)
+    );
+    assert_eq!(ctx.prefix, "admin");
+    assert_eq!(
+        &content[ctx.content_start_offset..content.find("admin").unwrap() + 5],
+        " admin"
+    );
+
+    for literal in ["signed:admin", "AUTH:admin", "auth"] {
+        let content = format!("<?php\nRoute::middleware('{literal}');\n");
+        assert!(detect_at_end(&content, literal).is_none(), "`{literal}`");
+    }
+}
+
+#[test]
+fn facade_chain_detection_follows_the_receiver_spine_only() {
+    for chain in [
+        "Route::get('/', fn () => null)->",
+        "  Route \n ::get('/', fn () => null)->",
+    ] {
+        let content = format!("<?php {chain}");
+        assert!(chain_starts_at_laravel_facade(
+            &content, chain, 6, None, "Route", None,
+        ));
+    }
+
+    for chain in [
+        "factory(Route::class)->",
+        "Route::class && factory()->",
+        "Acme\\Route::get()->",
+        "Factory::get()->Route::get()->",
+        "::get()->",
+        "Route->get()->",
+    ] {
+        let content = format!("<?php {chain}");
+        assert!(!chain_starts_at_laravel_facade(
+            &content, chain, 6, None, "Route", None,
+        ));
+    }
+}
+
+#[test]
+fn attribute_groups_select_only_a_top_level_attribute_class() {
+    for callable in [
+        "#[ Cache",
+        "#[Deprecated, Cache",
+        "#[Deprecated(']'), Cache",
+        "#[Deprecated('#['), Cache",
+        "#[Deprecated(values: ['x, y']), Cache",
+        "#[Deprecated(new class {}), Cache",
+        "$value = \"#[ignored]\";\n#[ Cache",
+        "# #[ignored]\n#[ Cache",
+    ] {
+        let start = callable.rfind("Cache").unwrap();
+        assert_eq!(attribute_class_start(callable, start), Some(start));
+    }
+    for callable in [
+        "#[Deprecated(Cache",
+        "#[Deprecated([Cache",
+        "#[Deprecated], Cache",
+        "#[Deprecated] function example() { Cache",
+        "// #[\nCache",
+        "/* #[ */ Cache",
+        "Cache",
+    ] {
+        let start = callable.rfind("Cache").unwrap();
+        assert_eq!(attribute_class_start(callable, start), None);
+    }
+}
+
+#[test]
+fn receiver_chain_boundaries_ignore_nested_statements_and_newlines() {
+    for prefix in [
+        "<?php\nRoute::get('/')\n ->name('x')\n ->",
+        "<?php\nRoute::get('/', function () { return 1; })->",
+        "<?php\nRoute::get('/', /* ) ] } */ fn () => null) // keep chaining\n ->",
+        "<?= $rendered ?><?php Route::get('/')->",
+    ] {
+        let start = receiver_chain_start(prefix);
+        assert_eq!(prefix[start..].trim_start().get(..5), Some("Route"));
+    }
+    let prefix = "<?php\nif ($ready) {}\nunrelated()->";
+    let start = receiver_chain_start(prefix);
+    assert_eq!(prefix[start..].trim_start(), "unrelated()->");
+
+    let prefix = "<?php\n\"ignored; }\";\n# ignored }\n;\nRoute::get('/')->";
+    let start = receiver_chain_start(prefix);
+    assert_eq!(prefix[start..].trim_start(), "Route::get('/')->");
+}
+
+#[test]
+fn receiver_spine_suffix_accepts_nested_and_legacy_chain_shapes() {
+    for suffix in [
+        "get([fn () => ['value']])[0]::next()?->tail",
+        "get([\"close ) ] }\"])->tail",
+        "get(){0}->tail",
+        "get(function () { return ['}']; })->tail",
+        "get('/', /* ) ] } */ fn () => null) // continue\n ->tail",
+        "get() # continue\n ->tail",
+    ] {
+        assert!(is_method_chain_suffix(suffix), "suffix: {suffix}");
+    }
+    for suffix in [
+        "get() + unrelated()",
+        "get('unterminated)",
+        "get()->'invalid'",
+        "get()->\"invalid\"",
+        "get([missing)",
+        "get()->a()->b()->c()->d()->target",
+        "get()?->a()?->b()?->c()?->d()?->target",
+    ] {
+        assert!(!is_method_chain_suffix(suffix), "suffix: {suffix}");
     }
 }
 
@@ -420,9 +643,13 @@ fn detects_storage_disk_scalar_methods_and_named_arguments() {
 fn storage_facade_resolution_accepts_imports_and_rejects_homonyms() {
     for content in [
         "<?php\nStorage::disk('arch');\n",
+        "<?php\nIlluminate\\Support\\Facades\\Storage::disk('arch');\n",
+        "<?php\nnamespace App;\n\\Illuminate\\Support\\Facades\\Storage::disk('arch');\n",
+        "<?php\nuse Vendor\\Unrelated;\nStorage::disk('arch');\n",
         "<?php\nuse Illuminate\\Support\\Facades\\Storage as Disks;\nDisks::disk('arch');\n",
         "<?php\nuse Illuminate\\Support\\Facades\\{Storage as Disks, Cache};\nDisks::disk('arch');\n",
         "<?php\nuse Vendor\\Package\\{Cache};\nuse Illuminate\\Support\\Facades\\Storage as Disks;\nDisks::disk('arch');\n",
+        "<?php\nnamespace App;\nuse Vendor\\Storage;\n\\Storage::disk('arch');\n",
     ] {
         assert!(
             detect_at_end(content, "arch").is_some(),
@@ -432,6 +659,8 @@ fn storage_facade_resolution_accepts_imports_and_rejects_homonyms() {
 
     for content in [
         "<?php\nVendor\\Storage::disk('arch');\n",
+        "<?php\n\\Acme\\Storage::disk('arch');\n",
+        "<?php\nnamespace App;\nStorage::disk('arch');\n",
         "<?php\nuse Vendor\\Storage;\nStorage::disk('arch');\n",
         "<?php\nnamespace App;\nuse Vendor\\{Storage as Disks};\nDisks::disk('arch');\n",
         "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\{Storage;\nStorage::disk('arch');\n",
@@ -443,17 +672,103 @@ fn storage_facade_resolution_accepts_imports_and_rejects_homonyms() {
         );
     }
 
-    // A malformed import binds nothing, so the short name is left to the
-    // global-alias rule rather than treated as an import of the facade.
-    for content in [
-        "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage nope;\nStorage::disk('arch');\n",
-        "<?php\nnamespace App;\nuse Illuminate\\Support\\Facades\\Storage as Disks trailing;\nDisks::disk('arch');\n",
+    assert_eq!(
+        imported_item_target(
+            "Storage nope",
+            None,
+            "Illuminate\\Support\\Facades",
+            &["Storage"],
+            "Storage",
+        ),
+        None
+    );
+    assert_eq!(
+        imported_item_target(
+            "Storage as Disks trailing",
+            None,
+            "Illuminate\\Support\\Facades",
+            &["Storage"],
+            "Disks",
+        ),
+        None
+    );
+}
+
+#[test]
+fn storage_facade_completion_respects_import_bindings_in_namespaces() {
+    for (import, local_name) in [
+        ("use Illuminate\\Support\\Facades\\Storage;", "Storage"),
+        ("use Illuminate\\Support\\Facades\\{Storage};", "Storage"),
+        (
+            "use Illuminate\\Support\\Facades\\{Cache, Storage};",
+            "Storage",
+        ),
+        (
+            "use Illuminate\\Support\\Facades\\{\n    Cache,\n    Storage,\n};",
+            "Storage",
+        ),
+        (
+            "use Illuminate\\Support\\Facades\\Storage as Disks;",
+            "Disks",
+        ),
+        (
+            "use Illuminate\\Support\\Facades\\{Storage as Disks, Cache};",
+            "Disks",
+        ),
     ] {
-        assert!(
-            detect_at_end(content, "arch").is_none(),
-            "source: {content}"
-        );
+        for class_name in ["Storage", "Disks"] {
+            let content = format!("<?php\nnamespace App;\n{import}\n{class_name}::disk('arch');\n");
+            let expected = (class_name == local_name).then_some(LaravelStringKind::ConfigResource(
+                LaravelConfigResource::StorageDisk,
+            ));
+            assert_eq!(
+                detect_at_end(&content, "arch").map(|context| context.kind),
+                expected,
+                "source: {content}"
+            );
+        }
     }
+}
+
+#[test]
+fn storage_facade_completion_rejects_unrelated_and_malformed_imports() {
+    for import in [
+        "use Vendor\\Storage;",
+        "use Vendor\\Package\\{Storage};",
+        "use Illuminate\\Support\\Facades\\Storage nope;",
+        "use Illuminate\\Support\\Facades\\Storage as;",
+        "use Illuminate\\Support\\Facades\\Storage as Disks trailing;",
+        "use Illuminate\\Support\\Facades\\{Storage;",
+        "use function Illuminate\\Support\\Facades\\Storage;",
+    ] {
+        for class_name in ["Storage", "Disks"] {
+            let content = format!("<?php\nnamespace App;\n{import}\n{class_name}::disk('arch');\n");
+            assert!(
+                detect_at_end(&content, "arch").is_none(),
+                "source: {content}"
+            );
+        }
+    }
+}
+
+#[test]
+fn authoritative_short_attribute_name_is_not_assumed_to_be_framework_class() {
+    let reference = ResolvedClassReference {
+        written: "Cache",
+        semantic: "Cache",
+        semantic_is_authoritative: true,
+    };
+    assert_eq!(
+        resolve_known_class_reference(
+            "<?php #[Cache('redis')]",
+            reference,
+            "Illuminate\\Container\\Attributes",
+            &["Cache"],
+            false,
+            None,
+        ),
+        None
+    );
 }
 
 #[test]
@@ -472,7 +787,10 @@ fn detects_every_forget_disk_array_value_and_spelling() {
                 crate::text_position::offset_to_position(&content, cursor),
             )
             .unwrap_or_else(|| panic!("should detect `{value}` in `{expression}`"));
-            assert!(matches!(ctx.kind, LaravelStringKind::Config));
+            assert!(matches!(
+                ctx.kind,
+                LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+            ));
             assert_eq!(ctx.prefix, value);
             assert_eq!(ctx.config_sub_prefix, Some("filesystems.disks."));
         }
@@ -541,18 +859,23 @@ fn forget_disk_arrays_complete_values_but_not_associative_keys() {
     );
 
     let value = detect_at_end(content, "archive").expect("the array value is a disk name");
-    assert!(matches!(value.kind, LaravelStringKind::Config));
+    assert!(matches!(
+        value.kind,
+        LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk)
+    ));
     assert_eq!(value.prefix, "archive");
 }
 
 #[test]
-fn rejects_invalid_storage_argument_names_and_shapes() {
+fn rejects_invalid_resource_argument_names_and_shapes() {
     for expression in [
+        "auth(['archive'])",
         "Storage::disk(['archive'])",
         "Storage::fake(['archive'])",
         "Storage::persistentFake(['archive'])",
         "Storage::forgetDisk([['archive']])",
         "Storage::disk(disk: 'archive')",
+        "Storage::disk(NAME: 'archive')",
         "Storage::fake(name: 'archive')",
         "Storage::persistentFake(name: 'archive')",
         "Storage::forgetDisk(name: 'archive')",
@@ -608,6 +931,21 @@ Storage::forgetDisk([['nested'], wrap(fn () => new class {}), 'it\'s', 'archive'
     ));
     assert!(!string_literal_is_array_key("'key\n", "'key".len(), b'\''));
     assert!(!string_literal_is_array_key("'key", "'key".len(), b'\''));
+    assert!(string_literal_is_array_key(
+        "'key\npart'\n => 'archive'",
+        "'key".len(),
+        b'\'',
+    ));
+    assert!(string_literal_is_array_key(
+        "'key' /* why */\n // still a key\n # also trivia\n => 'archive'",
+        "'key".len(),
+        b'\'',
+    ));
+    assert!(!string_literal_is_array_key(
+        "'value' /* unterminated",
+        "'value".len(),
+        b'\'',
+    ));
 }
 
 #[test]

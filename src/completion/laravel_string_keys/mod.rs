@@ -14,7 +14,8 @@ use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::symbol_map::LaravelStringKind;
+use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+use crate::types::FileContext;
 
 mod context;
 mod enumerate;
@@ -27,7 +28,9 @@ use context::*;
 /// names is what it should look like.
 fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
     match kind {
-        LaravelStringKind::Config => CompletionItemKind::PROPERTY,
+        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
+            CompletionItemKind::PROPERTY
+        }
         LaravelStringKind::View => CompletionItemKind::FILE,
         LaravelStringKind::Trans => CompletionItemKind::TEXT,
         LaravelStringKind::MorphAlias => CompletionItemKind::ENUM_MEMBER,
@@ -53,14 +56,55 @@ impl Backend {
     /// valid, which ordinary class completion already offers, and the set of
     /// keys is open besides — a list of them would read as the whole answer
     /// when it is not.
-    fn string_key_candidates(&self, kind: &LaravelStringKind) -> Arc<[String]> {
+    fn string_key_candidates(
+        &self,
+        kind: &LaravelStringKind,
+        config_sub_prefix: Option<&str>,
+        typed_prefix: &str,
+    ) -> Arc<[String]> {
         match kind {
             LaravelStringKind::Route => self.cached_route_names(),
-            // Only the keys `config/` declares: a key written at runtime is
-            // extracted from the same literal the cursor is inside, so the
-            // half-typed name of a `Storage::fake('…')` under the cursor
-            // would be offered back as a completion for itself.
             LaravelStringKind::Config => self.cached_config_keys(),
+            LaravelStringKind::ConfigResource(resource) => {
+                let prefix = config_sub_prefix.expect("config resources always have a prefix");
+                // Runtime writes can contain the half-typed name under the
+                // cursor, so offer only names declared by config files.
+                let keys = self.cached_config_keys();
+                let first = keys.partition_point(|key| key.as_str() < prefix);
+                let mut names: Vec<String> = keys[first..]
+                    .iter()
+                    .take_while(|key| key.starts_with(prefix))
+                    .filter_map(|key| {
+                        let name = key.strip_prefix(prefix)?;
+                        (!name.contains('.')).then(|| name.to_string())
+                    })
+                    .collect();
+                if crate::symbol_map::laravel_resources::is_implicit_resource_name(
+                    *resource, "null",
+                ) && let Err(index) = names.binary_search_by(|name| name.as_str().cmp("null"))
+                {
+                    names.insert(index, "null".to_string());
+                }
+                if *resource == LaravelConfigResource::DatabaseConnection
+                    && typed_prefix.contains("::")
+                {
+                    let mut variants = Vec::with_capacity(
+                        names.len()
+                            * crate::symbol_map::laravel_resources::DATABASE_ROLE_SUFFIXES.len(),
+                    );
+                    for name in names {
+                        for suffix in crate::symbol_map::laravel_resources::DATABASE_ROLE_SUFFIXES {
+                            let mut variant = String::with_capacity(name.len() + suffix.len());
+                            variant.push_str(&name);
+                            variant.push_str(suffix);
+                            variants.push(variant);
+                        }
+                    }
+                    variants.into()
+                } else {
+                    names.into()
+                }
+            }
             LaravelStringKind::View => self.cached_view_names(),
             LaravelStringKind::Trans => self.cached_trans_keys(),
             LaravelStringKind::Command => self.laravel_commands.read().all_names().into(),
@@ -83,42 +127,51 @@ impl Backend {
     ///
     /// Detects the cursor inside a supported string argument of `route()`,
     /// `config()`, `Storage::forgetDisk()`, etc. and offers matching names.
+    #[cfg(test)]
     pub(crate) fn try_laravel_string_key_completion(
         &self,
         content: &str,
         position: Position,
     ) -> Option<CompletionResponse> {
-        let ctx = detect_laravel_string_key_context(content, position)?;
+        self.try_laravel_string_key_completion_inner(content, position, None, None, None)
+    }
 
-        // The candidate lists are shared with every other consumer, so only
-        // the names the typed prefix keeps are copied out of them.
-        let candidates = self.string_key_candidates(&ctx.kind);
-        let prefix_lower = ctx.prefix.to_lowercase();
-        let matches_prefix =
-            |name: &str| prefix_lower.is_empty() || name.to_lowercase().starts_with(&prefix_lower);
+    /// Live-request form of Laravel string-key completion. Resolved names
+    /// distinguish imported facade aliases from namespace-local homonyms.
+    pub(crate) fn try_laravel_string_key_completion_in_file(
+        &self,
+        content: &str,
+        position: Position,
+        file_ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
+        let indexed_function_exists = |name: &str| self.has_indexed_function(name);
+        let indexed_class_exists = |name: &str| self.has_indexed_class(name);
+        self.try_laravel_string_key_completion_inner(
+            content,
+            position,
+            file_ctx.resolved_names.as_deref(),
+            Some(&indexed_function_exists),
+            Some(&indexed_class_exists),
+        )
+    }
 
-        let names: Vec<String> = match ctx.config_sub_prefix {
-            // For config-backed attributes like #[Database('mysql')], filter
-            // to sub-keys under the relevant config prefix and strip it so
-            // the user sees just the connection/store/channel name.
-            Some(sub_prefix) => {
-                let mut names: Vec<String> = candidates
-                    .iter()
-                    .filter_map(|key| key.strip_prefix(sub_prefix))
-                    // Only show direct children (no dots = leaf key).
-                    .filter(|rest| !rest.contains('.') && matches_prefix(rest))
-                    .map(str::to_string)
-                    .collect();
-                names.sort();
-                names.dedup();
-                names
-            }
-            None => candidates
-                .iter()
-                .filter(|name| matches_prefix(name))
-                .cloned()
-                .collect(),
-        };
+    fn try_laravel_string_key_completion_inner(
+        &self,
+        content: &str,
+        position: Position,
+        resolved_names: Option<&crate::names::OwnedResolvedNames>,
+        indexed_function_exists: Option<&dyn Fn(&str) -> bool>,
+        indexed_class_exists: Option<&dyn Fn(&str) -> bool>,
+    ) -> Option<CompletionResponse> {
+        let ctx = detect_laravel_string_key_context_inner(
+            content,
+            position,
+            resolved_names,
+            indexed_function_exists,
+            indexed_class_exists,
+        )?;
+
+        let candidates = self.string_key_candidates(&ctx.kind, ctx.config_sub_prefix, ctx.prefix);
 
         // Build the TextEdit range: from the start of the string content
         // (right after the opening quote) to the current cursor position.
@@ -130,22 +183,27 @@ impl Backend {
             end: position,
         };
 
-        let items: Vec<CompletionItem> = names
-            .into_iter()
+        let prefix = ctx.prefix.as_bytes();
+        let item_kind = string_key_item_kind(&ctx.kind);
+        let items: Vec<CompletionItem> = candidates
+            .iter()
+            .filter(|name| {
+                name.as_bytes()
+                    .get(..prefix.len())
+                    .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+            })
+            .cloned()
             .enumerate()
-            .map(|(i, name)| {
-                let kind = string_key_item_kind(&ctx.kind);
-                CompletionItem {
-                    label: name.clone(),
-                    kind: Some(kind),
-                    sort_text: Some(format!("{:05}", i)),
-                    filter_text: Some(name.clone()),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range: edit_range,
-                        new_text: name,
-                    })),
-                    ..Default::default()
-                }
+            .map(|(i, name)| CompletionItem {
+                label: name.clone(),
+                kind: Some(item_kind),
+                sort_text: Some(format!("{:05}", i)),
+                filter_text: Some(name.clone()),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range: edit_range,
+                    new_text: name,
+                })),
+                ..Default::default()
             })
             .collect();
 

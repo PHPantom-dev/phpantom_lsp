@@ -645,7 +645,7 @@ accessors, `@property` tags) — no database needed.
 
 **Impact: Low-Medium · Complexity: Medium**
 
-References and go-to-definition already work for the four indexed
+References and go-to-definition already work for indexed Laravel
 string kinds, but the rename, document-highlight, and semantic-token
 arms are explicit no-ops. Wiring them up exceeds the Laravel LSP (which
 has none of the three): renaming a translation key updates the lang
@@ -654,43 +654,49 @@ updates the `->name()` declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
 
-#### L32. Config-backed named-resource strings
+#### L56. Typed Laravel connection names
 
 **Impact: Medium · Complexity: Medium**
 
-Storage disks are one instance of a general pattern: a method argument
-names an entry under a known config subtree, and the config scanner
-already parses those files. Auth guards (`auth('...')`,
-`Auth::guard()`, `->middleware('auth:web')`), cache stores
-(`Cache::store()`), log channels (`Log::channel()`), and storage disks
-(`Storage::disk()`, test fakes, disk eviction, and `#[Storage]`) already
-complete against their config subtree — but all of them route through
-the generic `LaravelStringKind::Config` kind rather than a dedicated
-one, so they get completion plus the shared config
-diagnostics/go-to-definition and nothing family-specific (a "cache
-store" hovers with the same generic wording as any other config key).
-`Log::stack()` (array values) isn't recognized at all. Generalize into
-a declarative table of `(trigger context, config path)` pairs so each
-new family is one table row, and cover the rest of the family in one
-pass:
+The method name `->connection()` does not identify one config subtree: the
+receiver may select `database.connections.*`, `queue.connections.*`, or
+`broadcasting.connections.*`. Resolve it through the shared type engine, and
+treat `->onConnection()` as a queue connection. A model's `$connection` is a
+database connection, while the same property on a queueable job selects a
+queue connection. Each confirmed literal should receive the same completion,
+hover, navigation, diagnostics, and references as the direct facade spelling.
 
-- **Database connections** — `DB::connection()`, `->connection()` /
-  `$connection` on models and jobs → `database.connections.*`.
-- **Queue connections and queues** — `Queue::connection()`,
-  `->onConnection()` → `queue.connections.*`; `->onQueue()` names are
-  free-form (completion from literals seen elsewhere, no diagnostic).
-- **Mailers** — `Mail::mailer()` → `mail.mailers.*`.
-- **Broadcast connections** — `Broadcast::connection()` →
-  `broadcasting.connections.*`.
-- **Rate limiter names** — not config-backed: registered via
-  `RateLimiter::for('name', …)` in providers. Scan literal
-  registrations (same shape as the macro scanner) and validate
-  `throttle:name` middleware parameters and `new RateLimited('name')`
-  against the set.
+#### L55. Typed controller middleware names
 
-Each family gets the full string-kind treatment for free once wired
-as a `LaravelStringKey`: completion, go-to-definition (jump to the
-config entry), hover, diagnostics, and references.
+**Impact: Low-Medium · Complexity: Medium**
+
+`$this->middleware('auth:admin')` names middleware only when `$this` is a
+Laravel controller; an unrelated class may define the same method for a
+different purpose. Confirm the enclosing class through the shared type engine
+before completing or validating embedded authentication guards. Static and
+fluent `Route::middleware()` calls remain syntactically unambiguous.
+
+#### L57. Laravel queue names
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`->onQueue()` names are free-form rather than config-backed. Complete from
+literals seen elsewhere in the project and connect those occurrences for
+navigation and references, but do not diagnose a name merely because the
+static index has not seen it.
+
+#### L58. Laravel rate limiter names
+
+**Impact: Medium · Complexity: Medium**
+
+Rate limiter names are registered through `RateLimiter::for('name', …)` in
+service providers. Scan literal registrations using the same provider-aware
+shape as the macro scanner, then complete, navigate, and validate
+`throttle:name` middleware parameters and `new RateLimited('name')` against
+the discovered set. Numeric inline limits such as `throttle:60,1` remain
+values rather than named registrations. Keep the world open when no
+registration source can be read so a partial index does not create false
+diagnostics.
 
 #### L39. Unused view and translation key detection
 

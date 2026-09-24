@@ -17,6 +17,7 @@ use super::{
     ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::names::OwnedResolvedNames;
 use crate::util::strip_fqn_prefix;
 
 // ─── Extraction context ─────────────────────────────────────────────────────
@@ -70,6 +71,13 @@ struct ExtractionCtx<'a> {
     trivias: &'a [Trivia<'a>],
     /// The full source text of the file being extracted.
     content: &'a str,
+    /// Semantic names resolved by `mago-names` for this file. Production
+    /// indexing supplies this so Laravel-specific syntax does not guess from
+    /// an alias or a namespace-local homonym. Syntax-only tests omit it.
+    resolved_names: Option<&'a OwnedResolvedNames>,
+    /// Laravel strings whose meaning depends on a workspace symbol being
+    /// absent. They are activated after the batch publishes its declarations.
+    conditional_laravel_spans: Vec<super::ConditionalLaravelStringSpan>,
     /// Closures and arrow functions passed as arguments to callable-typed
     /// parameters, used by inlay hints.
     untyped_closure_sites: Vec<UntypedClosureSite>,
@@ -87,11 +95,6 @@ struct ExtractionCtx<'a> {
     /// Whether the file imports from `Illuminate\Container\Attributes\`
     /// (checked once lazily, cached for all attribute inspections).
     has_laravel_container_attrs: Option<bool>,
-    /// The local names Laravel's `Storage` facade answers to in this file,
-    /// resolved once lazily.  `disk()`, `fake()` and `forgetDisk()` are
-    /// common method names on unrelated facades, so the question comes up
-    /// often enough that rescanning the source each time is wasteful.
-    laravel_storage_facade_names: Option<Vec<String>>,
     /// Whether the file imports from `PHPUnit\Framework\Attributes\`, cached
     /// the same way as [`Self::has_laravel_container_attrs`].
     has_phpunit_attrs: Option<bool>,
@@ -113,6 +116,28 @@ struct ExtractionCtx<'a> {
     /// being extracted.  It is what gives `@covers ::name` on a test method
     /// a subject; without one that shape names a global function.
     covers_default_class: Option<crate::atom::Atom>,
+}
+
+impl<'a> ExtractionCtx<'a> {
+    fn resolved_name_at(&self, offset: u32) -> Option<&'a str> {
+        self.resolved_names.and_then(|names| names.get(offset))
+    }
+
+    /// Move Laravel string spans emitted since `start` into the dormant
+    /// candidate list. The tail is normally one span, so removing in place
+    /// avoids allocating a temporary vector on this already-rare path.
+    fn defer_laravel_spans_since(
+        &mut self,
+        start: usize,
+        dependency: super::LaravelStringDependency,
+    ) {
+        let spans = &mut self.spans;
+        let candidates = &mut self.conditional_laravel_spans;
+        for span in spans.drain(start..) {
+            debug_assert!(matches!(&span.kind, SymbolKind::LaravelStringKey { .. }));
+            candidates.push(super::ConditionalLaravelStringSpan::new(dependency, span));
+        }
+    }
 }
 
 mod class_like;
@@ -154,7 +179,38 @@ fn descend_unhandled<'a>(node: Node<'a, 'a>, ctx: &mut ExtractionCtx<'a>, scope_
 ///
 /// Walks every statement recursively and emits [`SymbolSpan`] entries for
 /// every navigable symbol occurrence.
+#[cfg(test)]
 pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> SymbolMap {
+    extract_symbol_map_inner(program, content, None)
+}
+
+/// Build a [`SymbolMap`] using the semantic names produced by `mago-names`.
+#[cfg(test)]
+pub(crate) fn extract_symbol_map_with_resolved_names(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: &OwnedResolvedNames,
+) -> SymbolMap {
+    let mut map = extract_symbol_map_inner(program, content, Some(resolved_names));
+    map.refresh_conditional_laravel_spans(None, |_| false);
+    map
+}
+
+/// Build a semantic map while retaining workspace-dependent Laravel spans as
+/// dormant candidates for the publication lifecycle to settle.
+pub(crate) fn extract_symbol_map_for_index(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: &OwnedResolvedNames,
+) -> SymbolMap {
+    extract_symbol_map_inner(program, content, Some(resolved_names))
+}
+
+fn extract_symbol_map_inner(
+    program: &Program<'_>,
+    content: &str,
+    resolved_names: Option<&OwnedResolvedNames>,
+) -> SymbolMap {
     let mut ctx = ExtractionCtx {
         spans: Vec::new(),
         var_defs: Vec::new(),
@@ -172,13 +228,14 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
         instance_method_scopes: Vec::new(),
         trivias: program.trivia.as_slice(),
         content,
+        resolved_names,
+        conditional_laravel_spans: Vec::new(),
         untyped_closure_sites: Vec::new(),
         view_receiver_sites: Vec::new(),
         gate_subjects: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
         has_laravel_container_attrs: None,
-        laravel_storage_facade_names: None,
         has_phpunit_attrs: None,
         has_laravel_http_attrs: None,
         in_console_command: false,
@@ -286,6 +343,7 @@ pub(crate) fn extract_symbol_map(program: &Program<'_>, content: &str) -> Symbol
 
     SymbolMap {
         spans: ctx.spans,
+        conditional_laravel_spans: ctx.conditional_laravel_spans,
         member_access_indices,
         var_defs: ctx.var_defs,
         scopes: ctx.scopes,

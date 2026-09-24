@@ -1976,6 +1976,10 @@ impl Backend {
             }
         }
 
+        // The refreshed discovery indexes may add or remove a namespace-local
+        // `auth()` or a real global class that shadows a Laravel facade alias.
+        // Re-evaluate only maps that recorded one of those dormant candidates.
+        self.refresh_all_published_laravel_candidates();
         // The purge above took the files' symbol maps and reference-index
         // entries with it, and a completed workspace index is never walked
         // again to put them back, so the reference-count lenses would stop

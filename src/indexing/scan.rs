@@ -187,6 +187,11 @@ impl Backend {
         self.clear_class_not_found_cache();
         self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
+
+        // Composer changes can introduce or remove functions/classes that
+        // shadow Laravel's runtime helper and facade aliases. Only maps with
+        // such candidates are revisited.
+        self.refresh_all_published_laravel_candidates();
     }
 
     /// Scan autoload files for a single project root and populate the
