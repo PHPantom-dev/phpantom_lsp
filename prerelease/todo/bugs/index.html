@@ -938,17 +938,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B339. A parent model's <code>$fillable</code> and <code>$casts</code> do not reach the child
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b340-column-name-string-completion-recovers-its-receiver-from-text" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1063,6 +1052,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B350. A <code>dirname(__DIR__)</code> path argument is not followed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B357. The pivot index only sees relationships in files already parsed
       </span>
     </span>
   </a>
@@ -1669,17 +1669,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B339. A parent model's <code>$fillable</code> and <code>$casts</code> do not reach the child
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#b340-column-name-string-completion-recovers-its-receiver-from-text" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1801,6 +1790,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B357. The pivot index only sees relationships in files already parsed
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#blade" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1878,20 +1878,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h2 id="b339-a-parent-models-fillable-and-casts-do-not-reach-the-child">B339. A parent model's <code>$fillable</code> and <code>$casts</code> do not reach the child<a class="headerlink" href="#b339-a-parent-models-fillable-and-casts-do-not-reach-the-child" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class BaseModel extends Model { protected $fillable = [&#39;uuid&#39;]; protected $casts = [&#39;is_archived&#39; =&gt; &#39;boolean&#39;]; }</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class User extends BaseModel {}</span>
-</code></pre></div>
-<p><code>$user-&gt;uuid</code> and <code>$user-&gt;is_archived</code> are missing: <code>LaravelModelProvider</code>
-(<code>src/virtual_members/laravel/mod.rs</code>) reads <code>class.laravel()</code> for the
-model itself only. PHP inherits a property the child does not redeclare,
-so each model-metadata field (<code>$fillable</code>, <code>$guarded</code>, <code>$casts</code>, <code>$dates</code>,
-<code>$attributes</code>, <code>$hidden</code>, <code>$appends</code>, <code>$primaryKey</code>, <code>$keyType</code>,
-<code>$timestamps</code>, the timestamp column constants) has to come from the
-nearest class in the parent chain that declares it. That needs the
-metadata to record "declared" separately from "empty".</p>
-<p><strong>Test:</strong> <code>laravel_eloquent_magic::columns_declared_on_a_parent_model_are_inherited</code>.</p>
 <h2 id="b340-column-name-string-completion-recovers-its-receiver-from-text">B340. Column-name string completion recovers its receiver from text<a class="headerlink" href="#b340-column-name-string-completion-recovers-its-receiver-from-text" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>$user-&gt;posts()-&gt;where('|')</code> and <code>$user-&gt;posts-&gt;where('|')</code> offer no
@@ -2009,6 +1995,17 @@ common spelling in a package whose provider sits in <code>src/</code>, but
 handles a bare <code>__DIR__</code> on the left of the concatenation, so the namespace
 resolves nowhere. The same helper serves views, config, and routes.</p>
 <p><strong>Test:</strong> <code>laravel_translation_keys::a_namespace_registered_through_dirname_dir_resolves</code>.</p>
+<h2 id="b357-the-pivot-index-only-sees-relationships-in-files-already-parsed">B357. The pivot index only sees relationships in files already parsed<a class="headerlink" href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>rebuild_laravel_pivot_index</code> (<code>src/resolution.rs</code>) builds the reverse
+pivot index from <code>uri_classes_index</code>, so a model only gets its <code>$pivot</code>
+(or <code>-&gt;as()</code>-renamed) property when the file declaring the
+<code>belongsToMany</code> that targets it has been parsed. <code>phpantom_lsp analyze
+--project-root examples/laravel examples/laravel/app/Demo.php</code> reports
+<code>Property 'pivot' not found on class 'App\Models\BakeryRecipe'</code> (and the
+same for <code>ingredient</code>), which the full-project run does not, because
+<code>Bakery.php</code> is never parsed. The index needs the relationship methods of
+every model the classmap knows about, not just the loaded ones.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
