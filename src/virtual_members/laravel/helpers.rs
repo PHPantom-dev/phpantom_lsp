@@ -1152,6 +1152,25 @@ pub(crate) fn extract_string_literal<'c>(
     Some((&content[start..end], start, end))
 }
 
+/// [`extract_string_literal`], but the text returned is the literal's
+/// decoded runtime value (`'it\'s'` → `it's`) rather than the raw source
+/// between the quotes. The span offsets still cover the source text.
+pub(crate) fn resolved_string_literal<'arena>(
+    expr: &Expression<'arena>,
+    content: &str,
+) -> Option<(&'arena str, usize, usize)> {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return None;
+    };
+    let start = s.span.start.offset as usize + 1;
+    let end = s.span.end.offset as usize - 1;
+    if start >= end || end > content.len() {
+        return None;
+    }
+    let value = s.value.and_then(crate::atom::literal_bytes_to_str)?;
+    Some((value, start, end))
+}
+
 /// [`extract_string_literal`] in the shape a span-emitting caller wants:
 /// the literal's content and the offset it starts at, as a `u32`.
 pub(crate) fn string_literal_at<'c>(

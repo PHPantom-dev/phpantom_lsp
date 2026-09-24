@@ -200,6 +200,25 @@ async fn a_call_site_key_with_an_escaped_quote_matches_the_declaration() {
     );
 }
 
+/// Go-to-definition on a key declared with an escaped quote lands on the
+/// declaration, the same as any other key.
+#[tokio::test]
+async fn goto_definition_finds_a_key_declared_with_an_escaped_quote() {
+    let config = "<?php\nreturn [\n    'it\\'s' => 'escaped',\n];\n";
+    let consumer = demo("        config(\"app.it's\");");
+    let (backend, _dir, uri) = create_initialized_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[("config/app.php", config), ("app/Demo.php", &consumer)],
+        "app/Demo.php",
+    )
+    .await;
+
+    let found = definitions_at(&backend, &uri, &consumer, "app.it's").await;
+    assert_eq!(found.len(), 1, "got {found:?}");
+    assert!(found[0].uri.as_str().ends_with("/config/app.php"));
+    assert_eq!(found[0].range.start.line, 2, "'it\\'s' is on line 2");
+}
+
 // ─── Keys that do not exist ─────────────────────────────────────────────────
 
 /// A path that runs past a scalar value, or through a nested group that

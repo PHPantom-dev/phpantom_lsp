@@ -72,7 +72,8 @@ pub(crate) type EntryVisitor<'a, 'v> = dyn FnMut(&[String], usize, usize, &'a Ex
 /// nested arrays, parenthesised arrays, and the arguments of
 /// `array_merge()`.
 ///
-/// The name a key is spelled with is taken from `content`, so a key the
+/// The name a key is spelled with is the string literal's decoded runtime
+/// value (`'it\'s'` names `it's`), not the raw source text; a key the
 /// parser could not read as a string literal is skipped along with
 /// everything beneath it.
 pub(crate) fn for_each_entry<'a>(
@@ -118,7 +119,7 @@ fn walk_elements<'a>(
             continue;
         };
         let Some((key_text, key_start, key_end)) =
-            super::helpers::extract_string_literal(kv.key, content)
+            super::helpers::resolved_string_literal(kv.key, content)
         else {
             continue;
         };
