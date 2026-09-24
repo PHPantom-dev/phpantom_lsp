@@ -209,18 +209,40 @@ Route::get('/orders/{order}', 'show')->whereNumber('order')->withoutMiddleware('
 /// `->name()` on a chain that never reaches the router is some other
 /// builder's method, not a route registration.
 #[tokio::test]
-#[ignore = "known gap: any `->name()` call in a route file registers a route"]
 async fn a_name_call_on_an_unrelated_builder_is_not_a_route() {
     let routes = "\
 <?php
 Route::get('/home', 'home')->name('home');
 $builder->name('not-a-route')->save();
 $obj->getUser('/x', SomeController::class)->name('user');
+$query->name('prefixed')->get('/y');
+$this->get('/z', 'z')->name('this-outside-a-macro');
 ";
     assert_route_names(
         &[("routes/web.php", routes)],
         &["home"],
-        &["not-a-route", "user"],
+        &["not-a-route", "user", "prefixed", "this-outside-a-macro"],
+    )
+    .await;
+}
+
+/// A routes file is required with `$router` in scope, and `Router::group()`
+/// hands the router to its closure under whatever name the closure gives it.
+#[tokio::test]
+async fn a_name_call_on_the_router_variable_is_a_route() {
+    let routes = "\
+<?php
+$router->get('/a', 'a')->name('file.router');
+\\Illuminate\\Support\\Facades\\Route::get('/b', 'b')->name('facade.fqn');
+Route::group([], function ($r) {
+    $r->get('/c', 'c')->name('closure.param');
+    $router->get('/d', 'd')->name('outer.router');
+});
+";
+    assert_route_names(
+        &[("routes/web.php", routes)],
+        &["file.router", "facade.fqn", "closure.param"],
+        &["outer.router"],
     )
     .await;
 }

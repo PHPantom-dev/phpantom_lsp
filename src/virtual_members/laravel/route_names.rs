@@ -10,6 +10,7 @@ use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{Location, Url};
 
 use crate::Backend;
+use crate::atom::bytes_to_str;
 use crate::text_position::offset_to_position;
 
 use super::const_eval::{Scope, bind_assignment, const_string, for_each_iteration};
@@ -849,8 +850,9 @@ pub(crate) struct RouteDiscovery {
     pub open_suffixes: Vec<String>,
 }
 
-/// The name and URI prefixes a route inherits from the groups enclosing it.
-#[derive(Clone, Copy, Default)]
+/// The name and URI prefixes a route inherits from the groups enclosing it,
+/// and the receivers the router is reachable through at that point.
+#[derive(Clone, Copy)]
 struct GroupPrefix<'a> {
     /// Accumulated route-name prefix (`->name('admin.')`, `['as' => …]`).
     name: &'a str,
@@ -862,6 +864,50 @@ struct GroupPrefix<'a> {
     /// literal name alone (missing whatever the unknown group name
     /// contributes ahead of it) is not a route that necessarily exists.
     unknowable: bool,
+    /// The variable (without its `$`) holding the router: `router` in a
+    /// routes file, which Laravel's `RouteFileRegistrar` requires with
+    /// `$router` in scope, and the first parameter of a group closure, which
+    /// `Router::group()` calls with the router.
+    router_var: Option<&'a str>,
+    /// Whether `$this` is the router, as it is inside a router macro body.
+    this_is_router: bool,
+}
+
+impl GroupPrefix<'_> {
+    /// The scope a route source starts in, before any group opens.
+    fn top_level() -> Self {
+        GroupPrefix {
+            name: "",
+            uri: "",
+            unknowable: false,
+            router_var: Some("router"),
+            this_is_router: false,
+        }
+    }
+
+    /// Whether the call chain `expr` starts at the router, so that a
+    /// `->name()` or registration verb along it is a route rather than some
+    /// other builder's method (`$query->name('x')->get()`).
+    ///
+    /// The root has to be the `Route` facade, the router variable in scope,
+    /// or `$this` inside a router macro.
+    fn chain_reaches_router(&self, mut expr: &Expression<'_>, content: &str) -> bool {
+        loop {
+            match expr {
+                Expression::Call(Call::Method(mc)) => expr = mc.object,
+                Expression::Parenthesized(p) => expr = p.expression,
+                Expression::Call(Call::StaticMethod(sc)) => {
+                    return is_facade(sc.class, content, "Route");
+                }
+                Expression::Variable(Variable::Direct(variable)) => {
+                    let name = bytes_to_str(variable.name).trim_start_matches('$');
+                    return (self.this_is_router && name == "this")
+                        || self.router_var == Some(name);
+                }
+                _ => return false,
+            }
+        }
+    }
 }
 
 /// Where a route-file walk reports what it finds.
@@ -1277,7 +1323,7 @@ fn walk_route_file(
             walk_stmt(
                 stmt,
                 content,
-                GroupPrefix::default(),
+                GroupPrefix::top_level(),
                 paths,
                 &mut scope,
                 sink,
@@ -1330,7 +1376,9 @@ fn walk_expr(
 ) {
     // A chain that registers a resource generates its whole route set here;
     // none of the per-route handling below applies to it.
-    if let Some(registration) = resource_registration(expr, content) {
+    if let Some(registration) = resource_registration(expr, content)
+        && group.chain_reaches_router(expr, content)
+    {
         push_resource_routes(
             &registration,
             group,
@@ -1376,6 +1424,7 @@ fn walk_expr(
                     name: &name_prefix,
                     uri: &uri_prefix,
                     unknowable: group.unknowable || dynamic_head.is_some(),
+                    ..group
                 };
                 for arg in mc.argument_list.arguments.iter() {
                     walk_group_body(arg.value(), content, inner, paths, scope, sink);
@@ -1384,6 +1433,7 @@ fn walk_expr(
                 let leaf = leaf_route_name(mc, content, scope);
                 if let Some(first_arg) = mc.argument_list.arguments.iter().next()
                     && let Some(name_val) = &leaf.name
+                    && group.chain_reaches_router(mc.object, content)
                 {
                     let full = format!("{}{name_val}", group.name);
                     // Only collect leaf names (non-prefix names that don't end with '.').
@@ -1426,7 +1476,10 @@ fn walk_expr(
                 // becomes the route's even with no `->name()` after the verb.
                 let registrar = chain_name_prefix(mc.object, content);
                 let full = format!("{}{registrar}", group.name);
-                if !registrar.is_empty() && !full.ends_with('.') {
+                if !registrar.is_empty()
+                    && !full.ends_with('.')
+                    && group.chain_reaches_router(mc.object, content)
+                {
                     if group.unknowable {
                         sink.open_suffix(full.clone());
                     }
@@ -1476,6 +1529,7 @@ fn walk_expr(
                     name: &name_prefix,
                     uri: &uri_prefix,
                     unknowable: group.unknowable || dynamic_head.is_some(),
+                    ..group
                 };
                 for arg in sc.argument_list.arguments.iter() {
                     walk_group_body(arg.value(), content, inner, paths, scope, sink);
@@ -1485,7 +1539,7 @@ fn walk_expr(
                 // forwards to the router's `auth` macro, which `laravel/ui`
                 // ships as a mixin.
                 let macro_name: &[u8] =
-                    if method_lower == b"routes" && is_auth_facade(sc.class, content) {
+                    if method_lower == b"routes" && is_facade(sc.class, content, "Auth") {
                         b"auth"
                     } else {
                         ident.value
@@ -1525,15 +1579,18 @@ fn record_open_prefix(group_name: &str, head: &str, sink: &mut dyn RouteSink) {
     }
 }
 
-/// Whether the subject of a static call spells Laravel's `Auth` facade.
-fn is_auth_facade(class: &Expression<'_>, content: &str) -> bool {
+/// Whether the subject of a static call spells the Laravel facade `facade`
+/// (`Auth`, `Route`), by its short name or its full one.
+fn is_facade(class: &Expression<'_>, content: &str, facade: &str) -> bool {
     let span = class.span();
     let Some(text) = content.get(span.start.offset as usize..span.end.offset as usize) else {
         return false;
     };
     let text = text.trim_start_matches('\\');
-    text.eq_ignore_ascii_case("Auth")
-        || text.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Auth")
+    let short = text
+        .strip_prefix("Illuminate\\Support\\Facades\\")
+        .unwrap_or(text);
+    short.eq_ignore_ascii_case(facade)
 }
 
 /// Collect the route names a call to the router macro `method` registers.
@@ -1569,6 +1626,10 @@ fn walk_macro(
         name: &name_prefix,
         uri: &uri_prefix,
         unknowable: group.unknowable,
+        // The macro closure is bound to the router and sees none of the
+        // caller's variables.
+        router_var: None,
+        this_is_router: true,
     };
     in_parsed_route_file(&open.content, b"macro.php", |program| {
         let sub_paths = ScanPaths {
@@ -1718,6 +1779,13 @@ fn walk_group_body(
 ) {
     match expr {
         Expression::Closure(closure) => {
+            let group = match closure.parameter_list.parameters.first() {
+                Some(param) => GroupPrefix {
+                    router_var: Some(bytes_to_str(param.variable.name).trim_start_matches('$')),
+                    ..group
+                },
+                None => group,
+            };
             for stmt in closure.body.statements.iter() {
                 walk_stmt(stmt, content, group, paths, scope, sink);
             }

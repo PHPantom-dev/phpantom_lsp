@@ -54,21 +54,6 @@ No outstanding items.
 
 ## Laravel
 
-## B341. Any `->name()` call in a route file registers a route
-
-**Impact: Low · Complexity: Medium**
-
-`$builder->name('x')->save()` or `$obj->getUser()->name('user')` in
-`routes/web.php` registers a route called `x`/`user`, so a typo in a real
-`route('x')` call is not flagged. `walk_expr` in
-`src/virtual_members/laravel/route_names.rs` accepts a `->name()` on any
-receiver. Requiring a registration verb in the chain is not enough on its
-own, because router macros (`Route::inertia()`, `Route::livewire()`) name
-routes too; the receiver has to be judged to be the router (the `Route`
-facade, a `Router`, or `$this` inside a router macro).
-
-**Test:** `laravel_route_names::a_name_call_on_an_unrelated_builder_is_not_a_route`.
-
 ## B342. Published package views under `resources/views/vendor` are ignored
 
 **Impact: Low-Medium · Complexity: Medium**
