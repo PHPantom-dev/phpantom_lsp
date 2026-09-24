@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790227087233,
+  "lastUpdate": 1790227120614,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30021,6 +30021,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 75.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dfc8c8faa8a2f59ac9734935e967e5fa7b66e3b3",
+          "message": "Hover works on an unfinished `->` or `::` at the end of a file",
+          "timestamp": "2026-09-24T07:00:38+02:00",
+          "tree_id": "433a99bd5709ae5837f1cb56a71691bcc553e02a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dfc8c8faa8a2f59ac9734935e967e5fa7b66e3b3"
+        },
+        "date": 1790227112045,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79,
             "unit": "MiB"
           }
         ]
