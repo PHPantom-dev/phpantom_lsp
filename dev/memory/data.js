@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790229837288,
+  "lastUpdate": 1790230177554,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -30123,6 +30123,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.5,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "8f4be66c528c83ea9742d8a97b52da17895bb7c3",
+          "message": "Go-to-definition on a facade call opens the method the facade forwards\nto",
+          "timestamp": "2026-09-24T07:52:52+02:00",
+          "tree_id": "75ab08664f0053038948bfce1e1d48798e3ff2f6",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8f4be66c528c83ea9742d8a97b52da17895bb7c3"
+        },
+        "date": 1790230170786,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 82.6,
             "unit": "MiB"
           }
         ]
