@@ -971,43 +971,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b344-a-config-list-value-reads-as-an-empty-shape" class="md-nav__link">
+  <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B344. A config list value reads as an empty shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B345. Config key enumeration reads a key's raw source instead of its value
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B346. Config defaults are merged recursively instead of Laravel's top-level merge
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B347. Config go-to-definition never falls back to a package or framework file
+        B358. A string key argument is read from its raw source, not its value
       </span>
     </span>
   </a>
@@ -1658,43 +1625,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#b344-a-config-list-value-reads-as-an-empty-shape" class="md-nav__link">
+  <a href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B344. A config list value reads as an empty shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B345. Config key enumeration reads a key's raw source instead of its value
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B346. Config defaults are merged recursively instead of Laravel's top-level merge
-      </span>
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B347. Config go-to-definition never falls back to a package or framework file
+        B358. A string key argument is read from its raw source, not its value
       </span>
     </span>
   </a>
@@ -1822,42 +1756,15 @@ Within one call site the last write should win; the union is only right
 across <em>different</em> call sites.</p>
 <p><strong>Tests:</strong> <code>laravel_view_names::a_duplicate_key_in_the_data_array_keeps_the_last_value</code>
 and <code>a_with_call_replaces_the_same_key_from_the_data_argument</code>.</p>
-<h2 id="b344-a-config-list-value-reads-as-an-empty-shape">B344. A config list value reads as an empty shape<a class="headerlink" href="#b344-a-config-list-value-reads-as-an-empty-shape" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<p><code>'handlers' =&gt; [FooHandler::class, BarHandler::class]</code> makes
-<code>config('logging.handlers')</code> hover as <code>array{}</code>: <code>array_node</code> in
-<code>src/virtual_members/laravel/config_values.rs</code> skips every element without
-a key. A keyless array is a list and should type as one (<code>list&lt;…&gt;</code> of its
-element types, or at least a non-empty <code>array</code>).</p>
-<p><strong>Test:</strong> <code>laravel_config_values::a_list_value_is_not_an_empty_array</code>.</p>
-<h2 id="b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value">B345. Config key enumeration reads a key's raw source instead of its value<a class="headerlink" href="#b345-config-key-enumeration-reads-a-keys-raw-source-instead-of-its-value" title="Permanent link">&para;</a></h2>
+<h2 id="b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value">B358. A string key argument is read from its raw source, not its value<a class="headerlink" href="#b358-a-string-key-argument-is-read-from-its-raw-source-not-its-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<p><code>'it\'s' =&gt; …</code> declares the key <code>it's</code>, but the unknown-config-key
-diagnostic flags <code>config('app.it\'s')</code>/<code>config("app.it's")</code> because the key
-reader (<code>src/virtual_members/laravel/config_keys.rs</code> and the enumeration
-behind completion) slices the literal's source text. Read the literal's
-unescaped <code>value</code>, as <code>config_values.rs</code> now does.</p>
-<p><strong>Test:</strong> <code>laravel_config_values::a_key_with_an_escaped_quote_is_named_by_its_value</code>.</p>
-<h2 id="b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge">B346. Config defaults are merged recursively instead of Laravel's top-level merge<a class="headerlink" href="#b346-config-defaults-are-merged-recursively-instead-of-laravels-top-level-merge" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>mergeConfigFrom()</code> is <code>array_merge($package, $app)</code>: a group the
-application publishes replaces the package's group whole. The framework's
-own defaults (<code>LoadConfiguration</code>) merge one level deeper, and only for its
-list of mergeable options. <code>merge_defaults</code> merges at every level and key
-enumeration takes the union of all sources, so keys the application
-deliberately removed are still offered and accepted.</p>
-<p><strong>Tests:</strong> <code>laravel_config_values::a_published_group_replaces_the_packages_group_whole</code>
-and <code>an_application_group_replaces_the_framework_group_whole</code>.</p>
-<h2 id="b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file">B347. Config go-to-definition never falls back to a package or framework file<a class="headerlink" href="#b347-config-go-to-definition-never-falls-back-to-a-package-or-framework-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>When <code>config/&lt;file&gt;.php</code> exists, <code>resolve_config_key_declaration</code>
-(<code>config_keys.rs</code>) returns line 0 of it even when the key is declared only
-by the package's config (<code>mergeConfigFrom</code>) or the framework's
-<code>vendor/laravel/framework/config/&lt;file&gt;.php</code>. The key is known (no
-diagnostic, hover types it), so navigation should reach the file that
-declares it.</p>
-<p><strong>Tests:</strong> <code>laravel_config_values::definition_of_an_unpublished_package_key_reaches_the_package_file</code>
-and <code>definition_of_a_framework_default_key_reaches_the_framework_file</code>.</p>
+<p><code>config('app.it\'s')</code> names the key <code>it's</code>, but <code>push_laravel_string_span</code>
+(<code>src/symbol_map/extraction/laravel.rs</code>) slices the literal's source text, so
+the call site records <code>app.it\'s</code> and the unknown-key diagnostic flags a key
+the config declares. The same helper feeds every Laravel string kind (routes,
+views, translations), so any key spelled with an escape sequence is misread.
+The key should come from the literal's unescaped <code>value</code>; the span stays on
+the source text.</p>
 <h2 id="b357-the-pivot-index-only-sees-relationships-in-files-already-parsed">B357. The pivot index only sees relationships in files already parsed<a class="headerlink" href="#b357-the-pivot-index-only-sees-relationships-in-files-already-parsed" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
 <p><code>rebuild_laravel_pivot_index</code> (<code>src/resolution.rs</code>) builds the reverse
