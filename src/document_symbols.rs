@@ -750,6 +750,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$items"),
@@ -761,6 +762,7 @@ mod tests {
                     is_variadic: true,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),

@@ -24,6 +24,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_syntax::cst::Program;
+use mago_syntax::cst::argument::ArgumentList;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::statement::Statement;
@@ -31,8 +32,12 @@ use mago_syntax::cst::statement::Statement;
 use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::parser::with_parsed_program;
-use crate::php_type::PhpType;
-use crate::type_engine::resolver::Loaders;
+use crate::php_type::{PhpType, TypeKind};
+use crate::type_engine::conditional_resolution::{
+    ConditionalClassContext, TemplateContext, VarClassStringResolver,
+    resolve_conditional_with_text_args_and_defaults,
+};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
 // ─── Callee identity ────────────────────────────────────────────────────────
@@ -64,6 +69,16 @@ impl OutParamCallee {
                 Some(m) => &m.template_params,
                 None => &[],
             },
+        }
+    }
+
+    /// The receiver's FQN, for resolving `self`/`static` inside a
+    /// `@param-out` conditional's own text. `None` for a plain function,
+    /// which has no such receiver.
+    fn declaring_fqn(&self) -> Option<Atom> {
+        match self {
+            Self::Function(_) => None,
+            Self::Method(cls, _) => Some(cls.fqn()),
         }
     }
 
@@ -198,6 +213,56 @@ pub(crate) fn effective_out_type(
         // Nothing declared, nothing to contradict.
         None => Some(inferred),
     }
+}
+
+/// Decide a PHPStan conditional out type against the arguments *this*
+/// call actually supplied.
+///
+/// [`effective_out_type`] answers for the declaration, which is shared by
+/// every call site, so a conditional (`@param-out ($arg is null ? A&I :
+/// A) $arg`) survives it unevaluated — only the call site knows what was
+/// passed, so only the call site can pick a branch. Returns `hint`
+/// unchanged when it isn't a conditional, or when the condition can't be
+/// decided from this call's arguments.
+pub(crate) fn resolve_out_type_for_call(
+    hint: PhpType,
+    parameters: &[ParameterInfo],
+    callee: &OutParamCallee,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    resolution_ctx: &ResolutionCtx<'_>,
+    var_resolver: VarClassStringResolver<'_>,
+) -> PhpType {
+    if !matches!(hint.kind(), TypeKind::Conditional(_)) {
+        return hint;
+    }
+    let text_args = super::super::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        content,
+    )
+    .join(", ");
+    let arg_type_resolver = |text: &str| Backend::resolve_arg_text_to_type(text, resolution_ctx);
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &[],
+        bindings: &[],
+        arg_type_resolver: Some(&arg_type_resolver),
+        this_type: None,
+    };
+    let declaring_fqn = callee.declaring_fqn();
+    resolve_conditional_with_text_args_and_defaults(
+        &hint,
+        parameters,
+        &text_args,
+        var_resolver,
+        ConditionalClassContext {
+            calling: resolution_ctx.current_class.map(|c| c.name.as_str()),
+            declaring: declaring_fqn.as_deref(),
+        },
+        resolution_ctx.class_loader,
+        &tpl,
+    )
+    .unwrap_or(hint)
 }
 
 /// Read the callee's body for the type it leaves in `param`, memoized and

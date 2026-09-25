@@ -786,6 +786,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$age"),
@@ -797,6 +798,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -821,6 +823,7 @@ mod tests {
                 is_variadic: false,
                 is_reference: false,
                 closure_this_type: None,
+                param_out_type: None,
             }]
             .into(),
             ..MethodInfo::virtual_method("getAttribute", None)
@@ -844,6 +847,7 @@ mod tests {
                     is_variadic: true,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$out"),
@@ -855,6 +859,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: true,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -1313,6 +1318,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$options"),
@@ -1324,6 +1330,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),

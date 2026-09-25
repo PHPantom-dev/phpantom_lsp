@@ -98,6 +98,7 @@ fn param(name: &str, type_hint: &str) -> crate::types::ParameterInfo {
         is_variadic: false,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }
 }
 

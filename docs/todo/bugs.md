@@ -738,7 +738,27 @@ The single-argument `array<V>` form has `array-key` keys.
 Found porting PHPStan's `nsrt/key-of-generic.php`; the assertions are
 `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-### B396. A conditional type on `$this` or in `@param-out` is not evaluated
+### B420. A conditional return whose winning branch is `never` reads as the declared type
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @template S = false */
+class Builder {
+    /** @return ($this is self<true> ? void : never) */
+    public function execute(): void {}
+}
+(new Builder())->execute(); // should be never, is null (the declared void)
+```
+
+The condition is decided, but `is_uninformative_return()` treats `void`
+and `never` alike, so a `never` branch is dropped and the call falls back
+to its declared return type. A `never` branch does carry information: the
+call does not return.
+
+Found porting PHPStan's `nsrt/template-default.php`; the assertion is
+`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+
+### B421. `(A&I)|A` does not simplify to `A`
 **Impact: Low · Complexity: Medium**
 
 ```php
@@ -746,18 +766,19 @@ class T {
     /** @param A|null $arg  @param-out ($arg is null ? A&I : A) $arg */
     public static function m(?A &$arg = null): void {}
 }
-$b = null;
-T::m($b);
-$b; // should be A&I, is A
+$d = $a->unknownMethod();
+T::m($d);
+$d; // should be A, is A&I
 ```
 
-A conditional `@param-out`, and a conditional return keyed on `$this`
-(`($this is self<true> ? int : string)` after a `@phpstan-self-out`), fall
-back to a branch without comparing against the argument or receiver.
+An argument whose type cannot be resolved leaves the condition undecided,
+so the out type is the union of both branches. A union member that is a
+subtype of another member (`A&I` of `A`) is kept rather than absorbed, and
+the class-list conversion then lets the intersection's entry stand in for
+the plain `A`.
 
-Found porting PHPStan's `nsrt/pr-5108.php`, `nsrt/template-default.php`;
-the assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
+Found porting PHPStan's `nsrt/pr-5108.php`; the assertion is `// SKIP` in
+the ported copy under `tests/phpstan_nsrt/`.
 
 ## Laravel
 

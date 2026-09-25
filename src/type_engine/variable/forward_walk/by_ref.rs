@@ -12,7 +12,9 @@ use mago_syntax::cst::argument::Argument;
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::call_resolution::{OutParamCallee, effective_out_type};
+use crate::type_engine::call_resolution::{
+    OutParamCallee, effective_out_type, resolve_out_type_for_call,
+};
 use crate::types::ResolvedType;
 
 pub(crate) fn process_by_ref_closure_captures<'b>(
@@ -702,6 +704,33 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             if out_hint.references_any_name(callee_templates) {
                 continue;
             }
+            // A PHPStan conditional out type (`@param-out ($arg is null ?
+            // A&I : A) $arg`) is call-site-agnostic up to this point; only
+            // this call's own arguments say which branch it actually takes.
+            // Snapshotting clones the scope, so it is only paid for a
+            // hint that actually has a condition to decide.
+            let out_hint = if !matches!(out_hint.kind(), TypeKind::Conditional(_)) {
+                out_hint
+            } else {
+                let scope_resolver = scope.snapshot_resolver();
+                let var_ctx = ctx.var_ctx_for_with_scope(
+                    "",
+                    ctx.cursor_offset,
+                    &scope_resolver,
+                    Some(scope.proofs()),
+                );
+                let call_var_resolver =
+                    super::super::resolution::build_var_resolver_from_ctx(&var_ctx);
+                resolve_out_type_for_call(
+                    out_hint,
+                    &parameters,
+                    &template_owner,
+                    arg_list,
+                    ctx.content,
+                    &var_ctx.as_resolution_ctx(),
+                    Some(&call_var_resolver),
+                )
+            };
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native

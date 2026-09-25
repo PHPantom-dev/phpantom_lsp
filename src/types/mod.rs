@@ -308,6 +308,17 @@ pub struct ParameterInfo {
     /// `\Illuminate\Routing\Route` rather than the lexically enclosing class.
     /// Common in Laravel where closures are rebound via `Closure::bindTo()`.
     pub closure_this_type: Option<PhpType>,
+    /// The type a by-reference parameter holds after the call returns,
+    /// declared via the `@param-out` PHPDoc tag.
+    ///
+    /// Distinct from `type_hint`, which is what the caller may hand in.
+    /// `@param-out` may name a type the declared input type doesn't
+    /// admit at all (`@param A|null $arg` paired with `@param-out
+    /// ($arg is null ? A&I : A) $arg`), so the two are tracked
+    /// separately rather than merged. Read this through
+    /// [`Self::out_type`], which falls back to the plain declared type
+    /// when no `@param-out` tag is present.
+    pub param_out_type: Option<PhpType>,
 }
 
 impl ParameterInfo {
@@ -324,6 +335,7 @@ impl ParameterInfo {
             && self.is_variadic == other.is_variadic
             && self.is_reference == other.is_reference
             && self.closure_this_type == other.closure_this_type
+            && self.param_out_type == other.param_out_type
     }
 
     /// Fold `null` into the effective type when the default value is the
@@ -362,7 +374,16 @@ impl ParameterInfo {
     ///
     /// Returns `None` when the parameter carries no type at all, and
     /// leaves a hint that is *only* `null` alone rather than erasing it.
+    ///
+    /// An explicit `@param-out` tag is authoritative and returned as-is,
+    /// possibly a [`TypeKind::Conditional`](crate::php_type::TypeKind::Conditional)
+    /// keyed on the parameter's own pre-call type — evaluating it against
+    /// the call site is the caller's job, not this method's, since only
+    /// the caller knows what was actually passed.
     pub fn out_type(&self) -> Option<PhpType> {
+        if let Some(ref param_out) = self.param_out_type {
+            return Some(param_out.clone());
+        }
         let hint = self.type_hint.as_ref()?;
         if !self.is_reference || !self.defaults_to_null() {
             return Some(hint.clone());

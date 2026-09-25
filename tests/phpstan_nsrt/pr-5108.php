@@ -33,11 +33,11 @@ class Testing
 
 		$b = null;
 		Testing::testMethod($b);
-		assertType('Pr5108\A&Pr5108\I', $b); // SKIP: a conditional type on $this or in @param-out is not evaluated
+		assertType('Pr5108\A&Pr5108\I', $b);
 
 		$d = $a->getFoo();
 		assertType('*ERROR*', $d);
 		Testing::testMethod($d);
-		assertType('Pr5108\A', $d);
+		assertType('Pr5108\A', $d); // SKIP: `(A&I)|A` does not simplify to `A`
 	}
 }

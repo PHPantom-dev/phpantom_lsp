@@ -179,3 +179,69 @@ function f(Box $box): void {
         "did not expect $box to be mutated without a self-out tag, got: {text}"
     );
 }
+
+const FLAG_BUILDER: &str = r#"
+/** @template TReady = false */
+final class Builder {
+    /** @phpstan-self-out self<true> */
+    public function ready(): void {}
+
+    /** @return ($this is self<true> ? int : string) */
+    public function result(): int|string { return 0; }
+}
+"#;
+
+/// Hover on the last occurrence of `needle` in `content`.
+fn hover_last(content: &str, needle: &str) -> String {
+    let backend = create_test_backend();
+    let offset = content.rfind(needle).expect("needle present");
+    let before = &content[..offset];
+    let line = before.matches('\n').count() as u32;
+    let character = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, line, character).expect("expected hover");
+    hover_text(&hover).to_string()
+}
+
+/// A conditional return keyed on `$this` is decided against the receiver's
+/// template arguments as a preceding `@phpstan-self-out` left them.
+#[test]
+fn this_conditional_return_follows_self_out_binding() {
+    let content = format!(
+        r#"<?php
+{FLAG_BUILDER}
+function f(): void {{
+    $b = new Builder();
+    $b->ready();
+    $r = $b->result();
+    $r;
+}}
+"#
+    );
+    let text = hover_last(&content, "$r;");
+    assert!(
+        text.contains("int") && !text.contains("string"),
+        "expected result() to read as int once ready() bound TReady to true, got: {text}"
+    );
+}
+
+/// Without the self-out call the template keeps its default, so the
+/// condition's other branch is taken.
+#[test]
+fn this_conditional_return_uses_template_default_before_self_out() {
+    let content = format!(
+        r#"<?php
+{FLAG_BUILDER}
+function f(): void {{
+    $b = new Builder();
+    $r = $b->result();
+    $r;
+}}
+"#
+    );
+    let text = hover_last(&content, "$r;");
+    assert!(
+        text.contains("string") && !text.contains("int"),
+        "expected result() to read as string while TReady is still false, got: {text}"
+    );
+}

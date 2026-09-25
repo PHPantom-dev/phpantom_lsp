@@ -191,7 +191,7 @@ impl Backend {
                         Some(&var_resolver),
                         &template_subs,
                         ctx.current_class.map(|c| c.name.as_str()),
-                        merged.fqn().as_str(),
+                        &merged,
                         ctx.class_loader,
                     )
                     .or_else(|| {
@@ -220,6 +220,7 @@ impl Backend {
                                 params: &m.template_params,
                                 bindings: &m.template_bindings,
                                 arg_type_resolver: Some(&arg_ty_resolver),
+                                this_type: None,
                             };
                             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                                 &substituted,
@@ -569,6 +570,7 @@ impl Backend {
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
+                            this_type: None,
                         };
                         resolve_conditional_with_text_args(
                             cond,

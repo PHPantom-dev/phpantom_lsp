@@ -1271,6 +1271,7 @@ pub(crate) fn extract_parameters(
                 is_variadic,
                 is_reference,
                 closure_this_type: None,
+                param_out_type: None,
             }
         })
         .collect()

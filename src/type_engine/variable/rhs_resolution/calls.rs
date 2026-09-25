@@ -1197,6 +1197,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     params: &func_info.template_params,
                     bindings: &func_info.template_bindings,
                     arg_type_resolver: Some(&arg_ty_resolver),
+                    this_type: None,
                 };
                 crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
                     cond,
@@ -1964,7 +1965,7 @@ pub(super) fn resolve_conditional_return_for_call(
     text_args: &str,
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
     calling_class_name: &str,
-    declaring_class_name: &str,
+    owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
@@ -1973,17 +1974,24 @@ pub(super) fn resolve_conditional_return_for_call(
     let method = method_ref?;
     let cond = method.conditional_return.as_ref()?;
     let params = method.parameters.as_slice();
+    let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
         calling: Some(calling_class_name),
-        declaring: Some(declaring_class_name),
+        declaring: Some(declaring_fqn.as_str()),
     };
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let this_type = crate::type_engine::conditional_resolution::receiver_type_for_condition(
+        declaring_fqn.as_str(),
+        &owner.template_params,
+        template_subs,
+    );
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: Some(class_values.as_ref()),
         params: method.template_params.as_slice(),
         bindings: method.template_bindings.as_slice(),
         arg_type_resolver,
+        this_type: Some(&this_type),
     };
     let resolved =
         crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -2012,6 +2020,7 @@ pub(super) fn resolve_conditional_return_for_call(
             params: method.template_params.as_slice(),
             bindings: method.template_bindings.as_slice(),
             arg_type_resolver,
+            this_type: Some(&this_type),
         };
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
             &substituted,
@@ -2340,7 +2349,7 @@ pub(super) fn resolve_owner_method_call(
         &text_args,
         Some(&var_resolver),
         current_class_name,
-        owner.fqn().as_str(),
+        owner,
         ctx.class_loader,
         template_subs,
         Some(&arg_ty_resolver),
@@ -2365,6 +2374,7 @@ pub(super) fn resolve_owner_method_call(
                     .map(|m| m.template_bindings.as_slice())
                     .unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
+                this_type: None,
             };
             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                 &ty,

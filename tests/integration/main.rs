@@ -221,6 +221,7 @@ mod narrowing_branch_values;
 mod narrowing_condition_proofs;
 mod narrowing_flow_tracking;
 mod narrowing_nested_short_circuit;
+mod param_out;
 mod parser;
 mod php_version;
 mod position_encoding_robustness;

@@ -127,12 +127,13 @@ unlikely to move the needle for most users.
 | B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
 | B395 | [`key-of<array<V>>` is `int` instead of `int\|string`](todo/bugs.md#b395-key-ofarrayv-is-int-instead-of-intstring) | Low         | Low         |
-| B396 | [A conditional type on `$this` or in `@param-out` is not evaluated](todo/bugs.md#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated) | Low         | Medium      |
 | B405 | [A closure called through `->call()`, or a callable held in a variable, is not resolved](todo/bugs.md#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved) | Low         | Medium      |
 | B406 | [Closure variadics are lists or untyped, and a `null` default does not always make a parameter nullable](todo/bugs.md#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable) | Low         | Low         |
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |
 | B408 | [An assignment inside an argument to `new` is not seen](todo/bugs.md#b408-an-assignment-inside-an-argument-to-new-is-not-seen) | Low         | Low         |
 | B411 | [Arithmetic on float literals is not folded](todo/bugs.md#b411-arithmetic-on-float-literals-is-not-folded) | Low         | Low         |
+| B420 | [A conditional return whose winning branch is `never` reads as the declared type](todo/bugs.md#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type) | Low         | Medium      |
+| B421 | [`(A&I)\|A` does not simplify to `A`](todo/bugs.md#b421-aia-does-not-simplify-to-a) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

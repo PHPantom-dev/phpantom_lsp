@@ -72,6 +72,7 @@ impl Backend {
                 params: &bound.template_params,
                 bindings: &bound.template_bindings,
                 arg_type_resolver: Some(&arg_ty_resolver),
+                this_type: None,
             };
             let evaluated =
                 crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
@@ -822,6 +823,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     is_variadic: p.variadic,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

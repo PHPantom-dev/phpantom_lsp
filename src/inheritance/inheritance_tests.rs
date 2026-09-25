@@ -309,6 +309,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),

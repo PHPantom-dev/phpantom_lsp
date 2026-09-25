@@ -764,9 +764,9 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
 
 /// Merge a function or method's `@param` docblock tags into its parsed
 /// native parameters: richer docblock types, per-parameter descriptions,
-/// `@param-closure-this` binding, and extra `@param` tags naming a
-/// parameter `func_get_args()` reads that the native signature has none
-/// for.
+/// `@param-closure-this` binding, `@param-out` post-call types, and extra
+/// `@param` tags naming a parameter `func_get_args()` reads that the
+/// native signature has none for.
 ///
 /// A `@param` tag that omits its variable name (common in
 /// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
@@ -813,6 +813,15 @@ pub(crate) fn merge_param_docblock_into_parameters(
         }
     }
 
+    // Populate `param_out_type` from `@param-out` tags so a by-reference
+    // parameter's post-call type is read from the docblock's own
+    // annotation rather than guessed from its declared input type.
+    for (out_type, param_name) in extract_param_out_from_info(info) {
+        if let Some(param) = parameters.iter_mut().find(|p| p.name == param_name) {
+            param.param_out_type = Some(out_type);
+        }
+    }
+
     // Append extra `@param` tags that don't match any native parameter.
     // These document parameters accessed via `func_get_args()` or
     // similar mechanisms and should appear in hover/signature.
@@ -829,6 +838,7 @@ pub(crate) fn merge_param_docblock_into_parameters(
                 is_variadic: false,
                 is_reference: false,
                 closure_this_type: None,
+                param_out_type: None,
             });
         }
     }
@@ -929,6 +939,30 @@ pub fn extract_param_closure_this_from_info(info: &DocblockInfo) -> Vec<(PhpType
             && let Some(name) = tag.variable()
         {
             results.push((PhpType::parse(&type_text), name.into_owned()));
+        }
+    }
+
+    results
+}
+
+/// Extract all `@param-out` declarations from a docblock.
+///
+/// The tag format is `@param-out Type $paramName`, declaring what a
+/// by-reference parameter holds after the call returns — often a
+/// PHPStan conditional type keyed on the parameter's own pre-call value
+/// (`@param-out ($arg is null ? A&I : A) $arg`).
+///
+/// Returns a list of `(type, param_name)` pairs.  The `param_name`
+/// includes the `$` prefix.
+pub fn extract_param_out_from_info(info: &DocblockInfo) -> Vec<(PhpType, String)> {
+    let mut results = Vec::new();
+
+    for tag in info.tags_by_kind(TagKind::ParamOut) {
+        if let Some(type_text) = tag.type_text()
+            && let Some(name) = tag.variable()
+            && let Some(ty) = sanitise_and_parse_docblock_type(&type_text)
+        {
+            results.push((ty, name.into_owned()));
         }
     }
 

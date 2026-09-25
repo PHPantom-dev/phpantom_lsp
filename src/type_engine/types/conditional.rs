@@ -58,6 +58,15 @@ pub struct TemplateContext<'a> {
     /// through to the else branch even when their real type would satisfy the
     /// condition.
     pub arg_type_resolver: ArgTypeResolver<'a>,
+    /// The receiver's own resolved type, with its class-level `@template`
+    /// parameters already substituted (e.g. `Builder<true, false>`).
+    ///
+    /// Feeds a condition keyed on `$this` (`@return ($this is self<true,
+    /// true> ? void : never)` after a `@phpstan-self-out`): the receiver
+    /// is not an argument, so it has no place in `params`/`text_args`,
+    /// and this is where the condition's subject comes from instead.
+    /// `None` leaves such a condition undecided.
+    pub this_type: Option<&'a PhpType>,
 }
 
 /// Callback that resolves an argument's source text (e.g. `"$obj->toHtml()"`)
@@ -71,6 +80,7 @@ impl<'a> TemplateContext<'a> {
             params,
             bindings: &[],
             arg_type_resolver: None,
+            this_type: None,
         }
     }
 }
@@ -176,9 +186,35 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 Some(branch) => resolve_branch(branch),
                 None => union_branch_types(resolve_branch(then_type), resolve_branch(else_type)),
             };
+            let target = param.as_str();
+
+            // `$this` names the receiver, not a parameter: decide the
+            // condition against the resolved receiver type the caller
+            // supplied (its class-level `@template` values already
+            // substituted, e.g. by a preceding `@phpstan-self-out`) rather
+            // than looking it up among `params`/`text_args`.
+            if target.eq_ignore_ascii_case("$this") {
+                let Some(this_ty) = tpl.this_type else {
+                    return undecided_answer();
+                };
+                let condition = match class_ctx.declaring {
+                    Some(declaring) => Cow::Owned(condition.replace_bare_self(declaring)),
+                    None => Cow::Borrowed(condition),
+                };
+                let decided = if condition.is_null() {
+                    Some(this_ty.is_null())
+                } else {
+                    type_condition_result(this_ty, &condition, class_loader)
+                };
+                return match decided {
+                    Some(satisfied) if satisfied ^ *negated => resolve_branch(then_type),
+                    Some(_) => resolve_branch(else_type),
+                    None => undecided_answer(),
+                };
+            }
+
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
-            let target = param.as_str();
             if !target.starts_with('$')
                 && let Some(resolved) = try_resolve_with_template_default(
                     target,
@@ -995,6 +1031,27 @@ fn class_condition_result(
     else {
         return None;
     };
+    // The same class with type arguments that provably don't line up in
+    // either direction (`Builder<true, false>` against `Builder<true,
+    // true>`): template arguments are invariant, so no value of the
+    // argument's type is an instance of the condition's. Without this the
+    // class check below would see a class that is trivially "a subtype of
+    // itself" and leave the condition open.
+    if let (TypeKind::Generic(arg_generic), TypeKind::Generic(cond_generic)) =
+        (arg_ty.kind(), condition.kind())
+        && arg_class.fqn() == cond_class.fqn()
+        && arg_generic.args.len() == cond_generic.args.len()
+        && arg_generic
+            .args
+            .iter()
+            .zip(cond_generic.args.iter())
+            .any(|(a, c)| {
+                !crate::class_lookup::is_subtype_of_typed(a, c, class_loader)
+                    && !crate::class_lookup::is_subtype_of_typed(c, a, class_loader)
+            })
+    {
+        return Some(false);
+    }
     // The condition names a subtype of the argument's declared type, so the
     // value handed over may well be one of them.
     if crate::class_lookup::is_subtype_of_names(cond_name, arg_name, class_loader) {
@@ -1282,11 +1339,48 @@ pub(crate) fn resolve_conditional_without_args(
     conditional: &PhpType,
     params: &[ParameterInfo],
 ) -> Option<PhpType> {
-    resolve_conditional_without_args_and_defaults(conditional, params, None)
+    resolve_conditional_without_args_and_defaults(conditional, params, None, None)
+}
+
+/// The receiver's own type for deciding a `$this`-keyed condition:
+/// `declaring_fqn` with its class-level `@template` parameters filled in
+/// from `template_subs`, in declaration order (`Builder<true, false>`),
+/// which is the order a `self<…>` condition writes its arguments in.
+pub(crate) fn receiver_type_for_condition(
+    declaring_fqn: &str,
+    class_template_params: &[crate::atom::Atom],
+    template_subs: &HashMap<String, PhpType>,
+) -> PhpType {
+    if class_template_params.is_empty() {
+        return PhpType::named(atom(declaring_fqn));
+    }
+    let args = class_template_params
+        .iter()
+        .map(|p| {
+            template_subs
+                .get(p.as_str())
+                .cloned()
+                .unwrap_or_else(PhpType::mixed)
+        })
+        .collect();
+    PhpType::generic(declaring_fqn, args)
+}
+
+/// The receiver a `$this`-keyed condition is decided against on the
+/// no-arguments path. See [`TemplateContext::this_type`].
+#[derive(Clone, Copy)]
+pub struct ThisContext<'a> {
+    /// The receiver's resolved type, class-level `@template` values
+    /// already substituted.
+    pub this_type: &'a PhpType,
+    /// The class `self` names inside the condition.
+    pub declaring_class_name: &'a str,
+    pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 }
 
 /// Like [`resolve_conditional_without_args`], but also accepts optional
-/// template parameter defaults from the owning class.
+/// template parameter defaults from the owning class, and the receiver a
+/// condition keyed on `$this` is decided against.
 ///
 /// When the conditional's subject (e.g. `TAsync`) is not a method parameter
 /// but a class-level template parameter with a default value, the default
@@ -1299,7 +1393,11 @@ pub fn resolve_conditional_without_args_and_defaults(
     conditional: &PhpType,
     params: &[ParameterInfo],
     template_defaults: Option<&HashMap<String, PhpType>>,
+    this_ctx: Option<ThisContext<'_>>,
 ) -> Option<PhpType> {
+    let recurse = |branch: &PhpType| {
+        resolve_conditional_without_args_and_defaults(branch, params, template_defaults, this_ctx)
+    };
     match conditional.kind() {
         TypeKind::Conditional(cond) => {
             let (param, negated, condition, then_type, else_type) = (
@@ -1309,9 +1407,30 @@ pub fn resolve_conditional_without_args_and_defaults(
                 &cond.then_type,
                 &cond.else_type,
             );
+            let target = param.as_str();
+
+            // `$this` names the receiver, not a parameter — see the
+            // matching branch in
+            // [`resolve_conditional_with_text_args_and_defaults`].
+            if target.eq_ignore_ascii_case("$this") {
+                let Some(this_ctx) = this_ctx else {
+                    return union_branch_types(recurse(then_type), recurse(else_type));
+                };
+                let condition = condition.replace_bare_self(this_ctx.declaring_class_name);
+                let decided = if condition.is_null() {
+                    Some(this_ctx.this_type.is_null())
+                } else {
+                    type_condition_result(this_ctx.this_type, &condition, this_ctx.class_loader)
+                };
+                return match decided {
+                    Some(satisfied) if satisfied ^ *negated => recurse(then_type),
+                    Some(_) => recurse(else_type),
+                    None => union_branch_types(recurse(then_type), recurse(else_type)),
+                };
+            }
+
             // Check if the conditional subject is a template parameter
             // with a default value (not a method $parameter).
-            let target = param.as_str();
             if !target.starts_with('$')
                 && let Some(resolved) = try_resolve_with_template_default(
                     target,
@@ -1336,11 +1455,7 @@ pub fn resolve_conditional_without_args_and_defaults(
                 } else {
                     else_type
                 };
-                return resolve_conditional_without_args_and_defaults(
-                    branch,
-                    params,
-                    template_defaults,
-                );
+                return recurse(branch);
             }
 
             // Otherwise fall back to whether the parameter is optional at all:
@@ -1348,10 +1463,10 @@ pub fn resolve_conditional_without_args_and_defaults(
             let has_null_default = param_info.is_some_and(|p| !p.is_required);
 
             if condition.is_null() && has_null_default {
-                resolve_conditional_without_args_and_defaults(then_type, params, template_defaults)
+                recurse(then_type)
             } else {
                 // Try else branch
-                resolve_conditional_without_args_and_defaults(else_type, params, template_defaults)
+                recurse(else_type)
             }
         }
         _ => {
@@ -1539,6 +1654,7 @@ mod tests {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         }
     }
 
@@ -1636,6 +1752,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -1697,6 +1814,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         // The call sits in an unrelated class; only the declaring class
         // resolves the default's `self` to the constant the resolver knows.
@@ -1765,6 +1883,7 @@ mod tests {
                 params: &[],
                 bindings: &[],
                 arg_type_resolver: Some(&resolver),
+                this_type: None,
             };
             resolve_conditional_with_text_args_and_defaults(
                 &PhpType::parse("($flag is true ? Then : Else)"),
@@ -1930,6 +2049,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -1962,6 +2082,7 @@ mod tests {
                 params: &[],
                 bindings: &[],
                 arg_type_resolver: Some(&resolver),
+                this_type: None,
             };
             let resolved = resolve_conditional_with_text_args_and_defaults(
                 &cond,
@@ -1995,6 +2116,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -2024,6 +2146,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         let resolved = resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -2116,6 +2239,7 @@ mod tests {
             params: &[crate::atom::atom("T")],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         let evaluated = evaluate_nested_conditionals_text(
             &ty,
@@ -2166,6 +2290,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -2217,6 +2342,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         resolve_conditional_with_text_args_and_defaults(
             &cond,
@@ -2284,6 +2410,7 @@ mod tests {
             params: &[],
             bindings: &[],
             arg_type_resolver: Some(&resolver),
+            this_type: None,
         };
         let resolve = |text_args: &str| {
             resolve_conditional_with_text_args_and_defaults(
@@ -2314,6 +2441,7 @@ mod tests {
             params: &[atom("B")],
             bindings: &bindings,
             arg_type_resolver: None,
+            this_type: None,
         };
         let resolve = |text_args: &str| {
             resolve_conditional_with_text_args_and_defaults(

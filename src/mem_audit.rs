@@ -620,14 +620,15 @@ impl Audit {
     fn param_slice(&mut self, params: &[ParameterInfo]) {
         for p in params {
             self.n_params += 1;
-            // type_hint, native_type_hint, closure_this_type
-            self.pt_inline_slots += 3;
+            // type_hint, native_type_hint, closure_this_type, param_out_type
+            self.pt_inline_slots += 4;
             if p.description.is_none() && p.default_value.is_none() {
                 self.par_no_docs += 1;
             }
             self.par_types += opt_ty(&p.type_hint);
             self.par_types += opt_ty(&p.native_type_hint);
             self.par_types += opt_ty(&p.closure_this_type);
+            self.par_types += opt_ty(&p.param_out_type);
             self.par_docs += s(&p.description);
             self.par_defaults += s(&p.default_value);
         }

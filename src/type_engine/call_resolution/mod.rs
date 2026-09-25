@@ -67,7 +67,7 @@ mod return_types;
 mod target_cache;
 mod template_subs;
 
-pub(crate) use out_param::{OutParamCallee, effective_out_type};
+pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{

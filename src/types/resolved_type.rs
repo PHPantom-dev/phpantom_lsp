@@ -270,6 +270,45 @@ impl ResolvedType {
                         attached.push(member.clone());
                     }
                 }
+
+                // An intersection union member (`(A&I)|B`) resolved each of
+                // its classes into its own flat `results` entry above, which
+                // would otherwise read as `A|I|B` — the intersection's
+                // members listed as independent alternatives. Tag every one
+                // of them with the whole intersection instead, the way a
+                // top-level intersection is tagged: the entries stay apart
+                // so each class still contributes its members, and the join
+                // reads them back as the one intersection they are.
+                for member in members {
+                    let TypeKind::Intersection(inner) = member.kind() else {
+                        continue;
+                    };
+                    let inner_fqns: Option<Vec<String>> = inner
+                        .iter()
+                        .map(|part| part.base_name().map(str::to_string))
+                        .collect();
+                    let Some(inner_fqns) = inner_fqns else {
+                        continue;
+                    };
+                    let matches = |rt: &ResolvedType, name: &str| {
+                        rt.class_info.as_ref().is_some_and(|c| {
+                            let fqn = c.fqn().to_string();
+                            fqn == name || crate::util::short_name(&fqn) == name
+                        })
+                    };
+                    let all_present = inner_fqns
+                        .iter()
+                        .all(|name| results.iter().any(|rt| matches(rt, name)));
+                    if !all_present {
+                        continue;
+                    }
+                    for rt in results.iter_mut() {
+                        if inner_fqns.iter().any(|name| matches(rt, name)) {
+                            rt.type_string = member.clone();
+                        }
+                    }
+                    attached.push(member.clone());
+                }
             }
 
             // When the original type hint is a union or nullable,

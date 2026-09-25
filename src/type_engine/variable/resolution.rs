@@ -2000,6 +2000,19 @@ pub(super) fn try_apply_pass_by_reference_type(
                 ctx.backend,
             )
         {
+            // A PHPStan conditional out type (`@param-out ($arg is null ?
+            // A&I : A) $arg`) is call-site-agnostic up to this point; only
+            // this call's own arguments say which branch it actually takes.
+            let var_resolver = build_var_resolver_from_ctx(ctx);
+            let out_hint = crate::type_engine::call_resolution::resolve_out_type_for_call(
+                out_hint,
+                &parameters,
+                &callee,
+                argument_list,
+                ctx.content,
+                &ctx.as_resolution_ctx(),
+                Some(&var_resolver),
+            );
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &out_hint,
                 &ctx.current_class.name,

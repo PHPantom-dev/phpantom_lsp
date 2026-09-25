@@ -22,9 +22,10 @@ use crate::types::ClassLikeKind;
 use crate::types::*;
 
 use crate::type_engine::conditional_resolution::{
-    TemplateContext, VarClassStringResolver, resolve_conditional_with_text_args,
-    resolve_conditional_with_text_args_and_defaults, resolve_conditional_without_args,
-    resolve_conditional_without_args_and_defaults, split_text_args,
+    TemplateContext, ThisContext, VarClassStringResolver, receiver_type_for_condition,
+    resolve_conditional_with_text_args, resolve_conditional_with_text_args_and_defaults,
+    resolve_conditional_without_args, resolve_conditional_without_args_and_defaults,
+    split_text_args,
 };
 use crate::type_engine::resolver::ResolutionCtx;
 
@@ -158,17 +159,24 @@ fn resolve_conditional_return_hint(
     var_resolver: VarClassStringResolver<'_>,
     template_subs: &HashMap<String, PhpType>,
     calling_class_name: Option<&str>,
-    declaring_fqn: &str,
+    owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     let cond = method.conditional_return.as_ref()?;
+    let declaring_fqn = owner.fqn();
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let this_type = receiver_type_for_condition(
+        declaring_fqn.as_str(),
+        &owner.template_params,
+        template_subs,
+    );
     let tpl = TemplateContext {
         defaults: Some(class_values.as_ref()),
         params: &method.template_params,
         bindings: &method.template_bindings,
         arg_type_resolver: None,
+        this_type: Some(&this_type),
     };
     let resolved = if !text_args.is_empty() {
         resolve_conditional_with_text_args_and_defaults(
@@ -178,13 +186,22 @@ fn resolve_conditional_return_hint(
             var_resolver,
             crate::type_engine::conditional_resolution::ConditionalClassContext {
                 calling: calling_class_name,
-                declaring: Some(declaring_fqn),
+                declaring: Some(declaring_fqn.as_str()),
             },
             class_loader,
             &tpl,
         )
     } else {
-        resolve_conditional_without_args_and_defaults(cond, &method.parameters, tpl.defaults)
+        resolve_conditional_without_args_and_defaults(
+            cond,
+            &method.parameters,
+            tpl.defaults,
+            Some(ThisContext {
+                this_type: &this_type,
+                declaring_class_name: declaring_fqn.as_str(),
+                class_loader,
+            }),
+        )
     }?;
     Some(if !template_subs.is_empty() {
         resolved.substitute(template_subs)
@@ -372,7 +389,7 @@ impl Backend {
                 var_resolver,
                 template_subs,
                 mr_ctx.calling_class_name,
-                class_info.fqn().as_str(),
+                class_info,
                 mr_ctx.class_loader,
             ) {
                 let classes: Vec<Arc<ClassInfo>> =

@@ -166,6 +166,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
                     is_variadic: param.variadic,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 }
             })
             .collect();
