@@ -157,6 +157,14 @@ pub(crate) fn resolved_types_for_hint(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<crate::types::ResolvedType> {
+    let hint = if laravel::has_model_type_operator(&hint) && !owning_class_name.is_empty() {
+        laravel::expand_model_type(
+            &hint.resolve_self_refs_bounded(owning_class_name, None),
+            class_loader,
+        )
+    } else {
+        laravel::expand_model_type(&hint, class_loader)
+    };
     let classes = type_hint_to_classes_typed(&hint, owning_class_name, all_classes, class_loader);
     if classes.is_empty() {
         vec![crate::types::ResolvedType::from_type_string(hint)]
@@ -296,14 +304,36 @@ fn type_hint_to_classes_typed_depth(
         ),
 
         // ── Generic type ───────────────────────────────────────────
-        TypeKind::Generic(g) => resolve_named_type(
-            &g.name,
-            &g.args,
-            owning_class_name,
-            all_classes,
-            class_loader,
-            depth,
-        ),
+        TypeKind::Generic(g) => {
+            if matches!(
+                g.name.as_str(),
+                "builder-of" | "collection-of" | "factory-of" | "relation-of"
+            ) {
+                let bound = if owning_class_name.is_empty() {
+                    ty.clone()
+                } else {
+                    ty.resolve_self_refs_bounded(owning_class_name, None)
+                };
+                let expanded = laravel::expand_model_type(&bound, class_loader);
+                if &expanded != ty {
+                    return type_hint_to_classes_typed_depth(
+                        &expanded,
+                        owning_class_name,
+                        all_classes,
+                        class_loader,
+                        depth + 1,
+                    );
+                }
+            }
+            resolve_named_type(
+                &g.name,
+                &g.args,
+                owning_class_name,
+                all_classes,
+                class_loader,
+                depth,
+            )
+        }
 
         // ── Array slice (T[]) ──────────────────────────────────────
         // Not a class type itself; skip.

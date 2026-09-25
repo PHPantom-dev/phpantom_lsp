@@ -218,7 +218,13 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
 /// Hyphenated PHPDoc pseudo-type names that `mago_phpdoc_syntax` cannot
 /// parse because hyphens are not valid PHP identifier characters.
 /// Each pair is `(hyphenated, placeholder)`.
-const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[("model-property", "__model_property__")];
+const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[
+    ("model-property", "__model_property__"),
+    ("builder-of", "__builder_of__"),
+    ("collection-of", "__collection_of__"),
+    ("factory-of", "__factory_of__"),
+    ("relation-of", "__relation_of__"),
+];
 
 /// Replace known hyphenated pseudo-type names with underscore
 /// placeholders so that `mago_phpdoc_syntax` can parse the surrounding

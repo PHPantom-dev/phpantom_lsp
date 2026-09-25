@@ -464,6 +464,7 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     let mut z = Sz::default();
     z.add(size_of::<LaravelMetadata>());
     z += opt_ty(&l.factory_model);
+    z += opt_ty(&l.custom_factory);
     z += opt_ty(&l.custom_collection);
     z += opt_ty(&l.custom_builder);
     let cast_sources = l.cast_sources.as_deref();

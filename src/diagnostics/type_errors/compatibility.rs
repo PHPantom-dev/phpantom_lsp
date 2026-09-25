@@ -371,6 +371,15 @@ pub(crate) fn is_type_compatible(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     strict_types: bool,
 ) -> bool {
+    if crate::virtual_members::laravel::has_model_type_operator(arg_type)
+        || crate::virtual_members::laravel::has_model_type_operator(param_type)
+    {
+        let arg = crate::virtual_members::laravel::expand_model_type(arg_type, class_loader);
+        let param = crate::virtual_members::laravel::expand_model_type(param_type, class_loader);
+        if &arg != arg_type || &param != param_type {
+            return is_type_compatible(&arg, &param, class_loader, strict_types);
+        }
+    }
     // ── Architecture note ───────────────────────────────────────
     //
     // This function is a diagnostic-policy layer on top of the core

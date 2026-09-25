@@ -134,6 +134,53 @@ check(
     $seasonalRecipes->getPivotClass() === \App\Models\RecipeIngredient::class
 );
 
+// ─── Model PHPDoc types (builder-of / collection-of / relation-of) ──────────
+
+// What `Demo::modelDocblockTypes()` and `Demo::relationDocblockTypes()` claim
+// those types resolve to, checked against the classes Eloquent really builds.
+
+check(
+    'builder-of<BlogAuthor> is the Eloquent builder',
+    \App\Models\BlogAuthor::query() instanceof \Illuminate\Database\Eloquent\Builder
+);
+check(
+    'collection-of<BlogAuthor> is AuthorCollection, via #[CollectedBy]',
+    (new \App\Models\BlogAuthor())->newCollection() instanceof \App\Models\AuthorCollection
+);
+
+// relation-of<BlogAuthor, 'posts'> — the relationship itself, not its result.
+$posts = (new \App\Models\BlogAuthor())->posts();
+check(
+    "relation-of<BlogAuthor, 'posts'> is a HasMany",
+    $posts instanceof \Illuminate\Database\Eloquent\Relations\HasMany
+);
+check(
+    "relation-of<BlogAuthor, 'posts'> relates BlogPost",
+    $posts->getRelated() instanceof \App\Models\BlogPost
+);
+check(
+    "relation-of<BlogAuthor, 'posts'> is declared by BlogAuthor",
+    $posts->getParent() instanceof \App\Models\BlogAuthor
+);
+
+// A dotted path follows one relation on to the next: 'posts.author' walks
+// BlogAuthor::posts() to BlogPost, then BlogPost::author() back to BlogAuthor.
+$writer = (new \App\Models\BlogPost())->author();
+check(
+    "relation-of<BlogAuthor, 'posts.author'> is a BelongsTo",
+    $writer instanceof \Illuminate\Database\Eloquent\Relations\BelongsTo
+);
+check(
+    "relation-of<BlogAuthor, 'posts.author'> relates BlogAuthor",
+    $writer->getRelated() instanceof \App\Models\BlogAuthor
+);
+
+// The builder form of the same path ends on the related model instead.
+check(
+    "builder-of<BlogAuthor, 'posts'> queries BlogPost",
+    \App\Models\BlogPost::query()->getModel() instanceof \App\Models\BlogPost
+);
+
 // ─── Accessor methods ───────────────────────────────────────────────────────
 
 // Legacy accessor
