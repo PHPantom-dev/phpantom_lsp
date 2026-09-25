@@ -881,18 +881,3 @@ unresolvable operand and adds `mixed`.
 
 Found porting PHPStan's `nsrt/falsey-coalesce.php`; the assertions are
 `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B410. A `void` call's result is typed `void` instead of `null`
-**Impact: Low · Complexity: Low**
-
-```php
-function f(\EmptyIterator $it): void {
-    $x = $it->rewind(); // should be null, is void
-}
-```
-
-A variable never holds `void`; the value of a `void` call is `null`.
-
-Found porting PHPStan's `nsrt/emptyiterator.php`,
-`nsrt/template-default.php`; the assertions are `// SKIP` in the ported
-copies under `tests/phpstan_nsrt/`.

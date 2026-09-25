@@ -946,6 +946,26 @@ fn compound_assignment_result(
     }
 }
 
+/// Rewrite a `void` call result to `null` before it is stored as a
+/// variable's type.
+///
+/// PHP has no `void` value: a `void`-declared function implicitly returns
+/// `null`, so a variable assigned from such a call holds `null`, not
+/// `void`. This is scoped to the assignment funnel rather than the RHS
+/// pipeline itself, so a call's resolved type still reads as `void`
+/// wherever that distinction matters outside of a variable holding it
+/// (e.g. the argument-type-mismatch diagnostic reports a `void` argument
+/// as always wrong, even against a nullable parameter).
+fn normalize_void_assignment(mut resolved: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    for rt in &mut resolved {
+        if rt.type_string.is_void() {
+            rt.type_string = PhpType::null();
+            rt.class_info = None;
+        }
+    }
+    resolved
+}
+
 /// Resolve the type of an RHS expression using the current scope.
 ///
 /// This is the key integration point: instead of calling
@@ -1106,7 +1126,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
 
     let result = super::super::rhs_resolution::resolve_rhs_expression(rhs, &var_ctx);
     if !result.is_empty() {
-        return result;
+        return normalize_void_assignment(result);
     }
 
     // ── Structural fallbacks ────────────────────────────────────

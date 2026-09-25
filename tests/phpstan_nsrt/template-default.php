@@ -76,7 +76,7 @@ function () {
 	assertType('TemplateDefault\\Builder<true, false>', $qb);
 	$qb->two();
 	assertType('TemplateDefault\\Builder<true, true>', $qb);
-	assertType('null', $qb->execute()); // SKIP: a void call's result is typed void instead of null
+	assertType('null', $qb->execute());
 };
 
 function () {
@@ -86,7 +86,7 @@ function () {
 	assertType('TemplateDefault\\Builder<false, true>', $qb);
 	$qb->one();
 	assertType('TemplateDefault\\Builder<true, true>', $qb);
-	assertType('null', $qb->execute()); // SKIP: a void call's result is typed void instead of null
+	assertType('null', $qb->execute());
 };
 
 function () {

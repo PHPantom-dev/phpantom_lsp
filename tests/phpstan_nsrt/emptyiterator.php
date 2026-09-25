@@ -11,7 +11,7 @@ class Foo
 		assertType('EmptyIterator', $it);
 		assertType('never', $it->key());
 		assertType('never', $it->current());
-		assertType('null', $it->next()); // SKIP: a void call's result is typed void instead of null
+		assertType('null', $it->next());
 		assertType('false', $it->valid());
 	}
 
