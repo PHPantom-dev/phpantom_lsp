@@ -1305,10 +1305,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated" class="md-nav__link">
+  <a href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B396. A conditional type on <code>$this</code> or in <code>@param-out</code> is not evaluated
+        B420. A conditional return whose winning branch is <code>never</code> reads as the declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b421-aia-does-not-simplify-to-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code>
       </span>
     </span>
   </a>
@@ -2298,10 +2309,21 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated" class="md-nav__link">
+  <a href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B396. A conditional type on <code>$this</code> or in <code>@param-out</code> is not evaluated
+        B420. A conditional return whose winning branch is <code>never</code> reads as the declared type
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b421-aia-does-not-simplify-to-a" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code>
       </span>
     </span>
   </a>
@@ -2929,22 +2951,38 @@ the body sees <code>?T</code> and the call site binds <code>T</code> with <code>
 <p>The single-argument <code>array&lt;V&gt;</code> form has <code>array-key</code> keys.</p>
 <p>Found porting PHPStan's <code>nsrt/key-of-generic.php</code>; the assertions are
 <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated">B396. A conditional type on <code>$this</code> or in <code>@param-out</code> is not evaluated<a class="headerlink" href="#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated" title="Permanent link">&para;</a></h3>
+<h3 id="b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type">B420. A conditional return whose winning branch is <code>never</code> reads as the declared type<a class="headerlink" href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">class T {</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">    /** @param A|null $arg  @param-out ($arg is null ? A&amp;I : A) $arg */</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="x">    public static function m(?A &amp;$arg = null): void {}</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">}</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">$b = null;</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">T::m($b);</span>
-<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a><span class="x">$b; // should be A&amp;I, is A</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">/** @template S = false */</span>
+<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">class Builder {</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="x">    /** @return ($this is self&lt;true&gt; ? void : never) */</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">    public function execute(): void {}</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">}</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">(new Builder())-&gt;execute(); // should be never, is null (the declared void)</span>
 </code></pre></div>
-<p>A conditional <code>@param-out</code>, and a conditional return keyed on <code>$this</code>
-(<code>($this is self&lt;true&gt; ? int : string)</code> after a <code>@phpstan-self-out</code>), fall
-back to a branch without comparing against the argument or receiver.</p>
-<p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>, <code>nsrt/template-default.php</code>;
-the assertions are <code>// SKIP</code> in the ported copies under
-<code>tests/phpstan_nsrt/</code>.</p>
+<p>The condition is decided, but <code>is_uninformative_return()</code> treats <code>void</code>
+and <code>never</code> alike, so a <code>never</code> branch is dropped and the call falls back
+to its declared return type. A <code>never</code> branch does carry information: the
+call does not return.</p>
+<p>Found porting PHPStan's <code>nsrt/template-default.php</code>; the assertion is
+<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<h3 id="b421-aia-does-not-simplify-to-a">B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code><a class="headerlink" href="#b421-aia-does-not-simplify-to-a" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="x">class T {</span>
+<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="x">    /** @param A|null $arg  @param-out ($arg is null ? A&amp;I : A) $arg */</span>
+<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="x">    public static function m(?A &amp;$arg = null): void {}</span>
+<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="x">}</span>
+<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="x">$d = $a-&gt;unknownMethod();</span>
+<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="x">T::m($d);</span>
+<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="x">$d; // should be A, is A&amp;I</span>
+</code></pre></div>
+<p>An argument whose type cannot be resolved leaves the condition undecided,
+so the out type is the union of both branches. A union member that is a
+subtype of another member (<code>A&amp;I</code> of <code>A</code>) is kept rather than absorbed, and
+the class-list conversion then lets the intersection's entry stand in for
+the plain <code>A</code>.</p>
+<p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>; the assertion is <code>// SKIP</code> in
+the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
