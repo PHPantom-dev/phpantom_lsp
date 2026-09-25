@@ -788,23 +788,6 @@ Found porting PHPStan's `nsrt/static-methods.php`,
 `nsrt/static-properties.php`; the assertions are `// SKIP` in the ported
 copies under `tests/phpstan_nsrt/`.
 
-### B398. `self` inside an object shape is not bound to the declaring class
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-class Foo {
-    /** @param object{foo: self} $o */
-    public function f($o): void { $o->foo; } // should be Foo, is self
-    /** @return object{foo: self} */
-    public function g(): object {}
-}
-```
-
-The keyword survives into the shape's property type, so reading it later
-names whatever class is asking. Found porting PHPStan's `nsrt/object-shape.php`;
-the three assertions are `// SKIP` in `tests/phpstan_nsrt/object-shape.php`
-(they used to pass only because the runner accepted `self` for any class).
-
 ## Laravel
 
 No outstanding items.

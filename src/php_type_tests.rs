@@ -1920,6 +1920,18 @@ fn replace_self_intersection() {
     assert_eq!(replaced.to_string(), "App\\User&JsonSerializable");
 }
 
+// ── replace_bare_self ───────────────────────────────────────
+
+#[test]
+fn replace_bare_self_in_shapes_and_callables() {
+    let ty = PhpType::parse("object{foo: self, bar: static}|array{list<self>}|Closure(self): self");
+    assert!(ty.contains_bare_self());
+    assert_eq!(
+        ty.replace_bare_self("App\\User").to_string(),
+        "object{foo: App\\User, bar: static}|array{list<App\\User>}|(Closure(App\\User): App\\User)"
+    );
+}
+
 // ── replace_self_bound ──────────────────────────────────────
 
 #[test]

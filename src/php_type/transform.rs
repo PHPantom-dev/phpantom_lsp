@@ -326,50 +326,18 @@ impl PhpType {
     }
 
     fn replace_bare_keyword(&self, keyword: &str, class_name: &str) -> PhpType {
-        if let TypeKind::Benevolent(inner) = self.raw_kind() {
-            return PhpType::benevolent(inner.replace_bare_keyword(keyword, class_name));
-        }
-        if let TypeKind::ListShape(inner) = self.raw_kind() {
-            return PhpType::as_list_shape(inner.replace_bare_keyword(keyword, class_name));
-        }
-        match self.kind() {
+        match self.raw_kind() {
             TypeKind::Named(s) if s.eq_ignore_ascii_case(keyword) => {
                 PhpType::named(atom(class_name))
             }
-            TypeKind::Named(_) | TypeKind::Literal(_) | TypeKind::Raw(_) => self.clone(),
-            TypeKind::Nullable(inner) => {
-                PhpType::nullable(inner.replace_bare_keyword(keyword, class_name))
-            }
-            TypeKind::Union(types) => PhpType::union(
-                types
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case(keyword) => PhpType::generic_atom(
+                atom(class_name),
+                g.args
                     .iter()
-                    .map(|t| t.replace_bare_keyword(keyword, class_name))
+                    .map(|a| a.replace_bare_keyword(keyword, class_name))
                     .collect(),
             ),
-            TypeKind::Intersection(types) => PhpType::intersection(
-                types
-                    .iter()
-                    .map(|t| t.replace_bare_keyword(keyword, class_name))
-                    .collect(),
-            ),
-            TypeKind::Generic(g) => {
-                let resolved_name = if g.name.eq_ignore_ascii_case(keyword) {
-                    atom(class_name)
-                } else {
-                    g.name
-                };
-                PhpType::generic_atom(
-                    resolved_name,
-                    g.args
-                        .iter()
-                        .map(|a| a.replace_bare_keyword(keyword, class_name))
-                        .collect(),
-                )
-            }
-            TypeKind::Array(inner) => {
-                PhpType::array_of(inner.replace_bare_keyword(keyword, class_name))
-            }
-            _ => self.clone(),
+            _ => self.map_children(&|t| t.replace_bare_keyword(keyword, class_name)),
         }
     }
 
@@ -385,19 +353,7 @@ impl PhpType {
     }
 
     fn contains_bare_keyword(&self, keyword: &str) -> bool {
-        match self.kind() {
-            TypeKind::Named(s) => s.eq_ignore_ascii_case(keyword),
-            TypeKind::Nullable(inner) => inner.contains_bare_keyword(keyword),
-            TypeKind::Union(types) | TypeKind::Intersection(types) => {
-                types.iter().any(|t| t.contains_bare_keyword(keyword))
-            }
-            TypeKind::Generic(g) => {
-                g.name.eq_ignore_ascii_case(keyword)
-                    || g.args.iter().any(|a| a.contains_bare_keyword(keyword))
-            }
-            TypeKind::Array(inner) => inner.contains_bare_keyword(keyword),
-            _ => false,
-        }
+        self.contains_name_matching(&|name| name.eq_ignore_ascii_case(keyword))
     }
 
     /// Check whether this type tree contains any `self`, `static`, or

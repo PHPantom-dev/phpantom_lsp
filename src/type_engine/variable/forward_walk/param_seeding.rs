@@ -208,15 +208,30 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 }
 
 /// Finish a `@param` type the docblock parser could only read as text:
-/// qualify the class names in it, then evaluate the type operators it
-/// reads through a constant.
+/// qualify the class names in it, bind `self` to the enclosing class, then
+/// evaluate the type operators it reads through a constant.
 ///
 /// Reading the constant here means the body sees the keys the table
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
     let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
+    let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
+}
+
+/// A declared parameter type with `self` bound to the enclosing class, or
+/// `None` when there is nothing to bind.
+///
+/// `self` is lexical, so it names the enclosing class wherever the value
+/// travels afterwards (`$o->foo` on an `object{foo: self}`).  A trait is
+/// left alone: there `self` is whichever class uses it.
+fn bind_enclosing_self(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<PhpType> {
+    let class = ctx.current_class;
+    (!class.name.is_empty()
+        && class.kind != crate::types::ClassLikeKind::Trait
+        && ty.contains_bare_self())
+    .then(|| ty.replace_bare_self(&class.fqn()))
 }
 
 /// The declaration a parameter belongs to, as far as resolving its type
@@ -603,6 +618,8 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
+    let bound = bind_enclosing_self(declared, ctx);
+    let declared = bound.as_ref().unwrap_or(declared);
     let finished = finish_constant_operands(declared, ctx);
     let hint = finished.as_ref().unwrap_or(declared);
 

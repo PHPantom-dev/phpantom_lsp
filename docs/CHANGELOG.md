@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`self` inside a docblock type names the class that wrote it.** A parameter typed `object{foo: self}` or `list<self>`, or a method returning `object{foo: self}`, now reads `$o->foo` as the declaring class instead of carrying the bare `self` along, including through subclasses that inherit the method.
 - **`??` on a left side that is never assigned, or only ever `null`, no longer widens to `mixed`.** `$x = $a ?? 1;` with `$a` never assigned now reads as `1`, matching what PHP actually evaluates it to.
 - **An assignment written as a value resolves wherever an expression can appear, not just as a bare statement.** `$x = ($y = 1);` and `$x = $a ?? ($y = 1) ?? 1;` now give `$x` the assigned value instead of leaving it unresolved or widening the surrounding `??` chain to `mixed`.
 - **`array_map()` with a callback that takes no parameters keeps the callback's return type.** `array_map(fn () => new Foo(), $items)` is now `list<Foo>` instead of a bare `array`.

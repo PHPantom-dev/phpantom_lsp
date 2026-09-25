@@ -132,7 +132,6 @@ unlikely to move the needle for most users.
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
 | B395 | [`key-of<array<V>>` is `int` instead of `int\|string`](todo/bugs.md#b395-key-ofarrayv-is-int-instead-of-intstring) | Low         | Low         |
 | B396 | [A conditional type on `$this` or in `@param-out` is not evaluated](todo/bugs.md#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated) | Low         | Medium      |
-| B398 | [`self` inside an object shape is not bound to the declaring class](todo/bugs.md#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class) | Low         | Low-Medium  |
 | B405 | [A closure called through `->call()`, or a callable held in a variable, is not resolved](todo/bugs.md#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved) | Low         | Medium      |
 | B406 | [Closure variadics are lists or untyped, and a `null` default does not always make a parameter nullable](todo/bugs.md#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable) | Low         | Low         |
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |

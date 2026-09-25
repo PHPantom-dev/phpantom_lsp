@@ -12,7 +12,7 @@ class Foo
 	 */
 	public function doFoo($o): void
 	{
-		assertType('Foo', $o->foo); // SKIP
+		assertType('Foo', $o->foo);
 		assertType('int', $o->bar);
 	}
 
@@ -21,7 +21,7 @@ class Foo
 	 */
 	public function doFoo2(object $o): void
 	{
-		assertType('Foo', $o->foo); // SKIP
+		assertType('Foo', $o->foo);
 		assertType('int', $o->bar);
 	}
 
@@ -46,7 +46,7 @@ class Foo
 	public function testObjectShape()
 	{
 		$result = $this->returnObjectShape();
-		assertType('Foo', $result->foo); // SKIP
+		assertType('Foo', $result->foo);
 	}
 
 }

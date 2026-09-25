@@ -234,14 +234,31 @@ fn type_hint_to_classes_typed_depth(
 
         // ── Object shape ───────────────────────────────────────────
         TypeKind::ObjectShape(entries) => {
+            // The synthetic class stands in for no class of its own, so a
+            // `self` in a property type names the owning class, exactly as a
+            // bare `self` would (see `resolve_named_type`).
+            let self_fqn = if !owning_class_name.is_empty()
+                && entries.iter().any(|e| e.value_type.contains_bare_self())
+            {
+                find_class_by_name(all_classes, owning_class_name)
+                    .map(Arc::clone)
+                    .or_else(|| class_loader(owning_class_name))
+                    .map(|c| c.fqn())
+            } else {
+                None
+            };
             let properties = SharedVec::from_vec(
                 entries
                     .iter()
                     .map(|e| {
+                        let type_hint = match &self_fqn {
+                            Some(fqn) => e.value_type.replace_bare_self(fqn),
+                            None => e.value_type.clone(),
+                        };
                         Arc::new(PropertyInfo {
                             name: atom(&e.key.clone().unwrap_or_default()),
                             name_offset: 0,
-                            type_hint: Some(e.value_type.clone()),
+                            type_hint: Some(type_hint),
                             native_type_hint: None,
                             description: None,
                             is_static: false,
