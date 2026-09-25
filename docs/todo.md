@@ -36,7 +36,6 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
-| B416 | [`(object)` of a non-empty array loses `stdClass`](todo/bugs.md#b416-object-of-a-non-empty-array-loses-stdclass) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | B369 | [`isset($arr[$k])` and `array_key_exists($k, $arr)` do not narrow `$k` to the array's keys](todo/bugs.md#b369-issetarrk-and-array_key_existsk-arr-do-not-narrow-k-to-the-arrays-keys) | Medium | Medium |
 | B412 | [An array shape argument is only checked on its values, and only against a typed array](todo/bugs.md#b412-an-array-shape-argument-is-only-checked-on-its-values-and-only-against-a-typed-array) | Medium | Medium |

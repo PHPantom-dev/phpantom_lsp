@@ -129,7 +129,10 @@ namespace PsalmTest_return_type_7 {
 
     $obj = (object)returnsInt();
 
-    assertType('object{scalar:int}', $obj);
+    // PHPantom is more precise than Psalm here: an object cast always
+    // instantiates stdClass, so the result keeps that class identity
+    // alongside the shape.
+    assertType('object{scalar: int}&stdClass', $obj);
 }
 
 // Test: infersObjectShapeOfCastArray
@@ -143,6 +146,9 @@ namespace PsalmTest_return_type_8 {
 
     $obj = (object)returnsArray();
 
-    assertType('object{a:int}', $obj);
+    // PHPantom is more precise than Psalm here: an object cast always
+    // instantiates stdClass, so the result keeps that class identity
+    // alongside the shape.
+    assertType('object{a: int}&stdClass', $obj);
 }
 

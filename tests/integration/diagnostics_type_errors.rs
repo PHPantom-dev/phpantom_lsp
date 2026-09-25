@@ -1976,6 +1976,23 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_object_literal_satisfying_object_shape_intersected_with_stdclass() {
+    let php = r#"<?php
+/** @param object{foo: int}&\stdClass $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape((object) ['foo' => 1]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A non-empty array cast to object is a stdClass with those keys, so it should satisfy object{{foo: int}}&stdClass, got: {diags:?}"
+    );
+}
+
+#[test]
 fn diagnostic_for_class_with_mistyped_property_against_object_shape() {
     let php = r#"<?php
 final class Mistyped {

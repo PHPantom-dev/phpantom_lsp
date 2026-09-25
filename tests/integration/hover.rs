@@ -14319,6 +14319,28 @@ fn hover_object_cast_of_an_empty_array_is_stdclass() {
     );
 }
 
+/// A cast to `object` always instantiates `stdClass`, so a non-empty
+/// array's cast keeps `stdClass`'s class identity alongside the known
+/// keys rather than reporting only the shape.
+#[test]
+fn hover_object_cast_of_a_non_empty_array_keeps_stdclass() {
+    let backend = create_test_backend();
+    let uri = "file:///object_cast_shape.php";
+    let content = concat!(
+        "<?php\n",
+        "function demo(): void {\n",
+        "    $obj = (object) ['foo' => 1];\n",
+        "    $obj;\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 3, 6).expect("hover $obj");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("object{foo: int}") && text.contains("stdClass"),
+        "a non-empty array cast to object should keep stdClass alongside the shape, got: {text}"
+    );
+}
+
 /// PHP's array union keeps the left side's keys and adds the right side's,
 /// so `+` between two literals merges their shapes the same way `+=` does.
 #[test]

@@ -815,24 +815,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B416. `(object)` of a non-empty array loses `stdClass`
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param object{foo: int}&\stdClass $s */
-function f(object $s): void {}
-f((object) ['foo' => 1]); // reported: expects object{foo: int}&stdClass, got object{foo: int}
-```
-
-Casting an array to an object always produces a `stdClass`. `object_cast_type`
-returns bare `stdClass` for `(object) []` and for anything it cannot read,
-but for a shape or a scalar it returns only the `object{…}` shape. The result
-should be `object{…}&stdClass`, so it keeps `stdClass`'s class identity (and
-the dynamic properties that come with it) alongside the known keys.
-
-Found running the php-typing-conformance suite
-(`phpdoc_advanced_object_shape_variants.php`). Every other column except
-Psalm accepts the call.
-
-**Where to look:** `object_cast_type` in
-`type_engine/variable/rhs_resolution/mod.rs`.
+No outstanding items.

@@ -1466,36 +1466,43 @@ fn push_unique_type(types: &mut Vec<PhpType>, member: PhpType) {
 
 /// The object shape `(object) $expr` produces: an array shape casts
 /// key-for-key, a scalar becomes `object{scalar: T}`, and anything else
-/// (including an unresolved operand) falls back to `stdClass`.
+/// (including an unresolved operand) falls back to `stdClass`. A cast
+/// always produces a `stdClass` instance, so a shape result keeps
+/// `stdClass`'s class identity via an intersection.
 ///
 /// The cast does not preserve literal precision, so shape values widen.
 fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
     let inner =
         (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
+    let std_class = || PhpType::named(atom("stdClass"));
     match inner.as_ref().map(PhpType::kind) {
         // `(object) []` is a `stdClass` with no properties; an `object{}`
         // shape would say the same thing in a spelling nothing else uses.
-        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => {
-            PhpType::named(atom("stdClass"))
-        }
-        Some(TypeKind::ArrayShape(entries)) => PhpType::object_shape(
-            entries
-                .iter()
-                .map(|e| ShapeEntry {
-                    key: e.key.clone(),
-                    value_type: e.value_type.widen_scalar_literals(),
-                    optional: e.optional,
-                })
-                .collect(),
-        ),
+        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => std_class(),
+        Some(TypeKind::ArrayShape(entries)) => PhpType::intersection(vec![
+            PhpType::object_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: e.value_type.widen_scalar_literals(),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            std_class(),
+        ]),
         Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
-            PhpType::object_shape(vec![ShapeEntry {
-                key: Some("scalar".to_string()),
-                value_type: inner.as_ref().unwrap().clone(),
-                optional: false,
-            }])
+            PhpType::intersection(vec![
+                PhpType::object_shape(vec![ShapeEntry {
+                    key: Some("scalar".to_string()),
+                    value_type: inner.as_ref().unwrap().clone(),
+                    optional: false,
+                }]),
+                std_class(),
+            ])
         }
-        _ => PhpType::named(atom("stdClass")),
+        _ => std_class(),
     }
 }
 

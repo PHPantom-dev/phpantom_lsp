@@ -806,15 +806,15 @@ function test(bool $flag) {
     assert_eq!(resolve_literal_test_var(content, "$text"), "string");
     assert_eq!(
         resolve_literal_test_var(content, "$string_object"),
-        "object{scalar: string}"
+        "object{scalar: string}&stdClass"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$int_object"),
-        "object{scalar: int}"
+        "object{scalar: int}&stdClass"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_object"),
-        "object{scalar: int|string}"
+        "object{scalar: int|string}&stdClass"
     );
     assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "int");
     assert_eq!(resolve_literal_test_var(content, "$float_sum"), "float");
