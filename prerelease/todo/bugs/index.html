@@ -1399,10 +1399,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b409-on-an-undefined-or-null-only-left-side-gives-mixed" class="md-nav__link">
+  <a href="#b417-an-assignment-used-as-a-value-does-not-resolve-outside-a-bare-rhs" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B409. <code>??</code> on an undefined or null-only left side gives <code>mixed</code>
+        B417. An assignment used as a value does not resolve outside a bare RHS
       </span>
     </span>
   </a>
@@ -2453,10 +2453,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b409-on-an-undefined-or-null-only-left-side-gives-mixed" class="md-nav__link">
+  <a href="#b417-an-assignment-used-as-a-value-does-not-resolve-outside-a-bare-rhs" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B409. <code>??</code> on an undefined or null-only left side gives <code>mixed</code>
+        B417. An assignment used as a value does not resolve outside a bare RHS
       </span>
     </span>
   </a>
@@ -3142,19 +3142,34 @@ the dynamic properties that come with it) alongside the known keys.</p>
 Psalm accepts the call.</p>
 <p><strong>Where to look:</strong> <code>object_cast_type</code> in
 <code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
-<h3 id="b409-on-an-undefined-or-null-only-left-side-gives-mixed">B409. <code>??</code> on an undefined or null-only left side gives <code>mixed</code><a class="headerlink" href="#b409-on-an-undefined-or-null-only-left-side-gives-mixed" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
+<h3 id="b417-an-assignment-used-as-a-value-does-not-resolve-outside-a-bare-rhs">B417. An assignment used as a value does not resolve outside a bare RHS<a class="headerlink" href="#b417-an-assignment-used-as-a-value-does-not-resolve-outside-a-bare-rhs" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-37-1" name="__codelineno-37-1" href="#__codelineno-37-1"></a><span class="x">function f(): void {</span>
-<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="x">    $x = $a ?? 1; // $a is never assigned; should be 1, is mixed</span>
-<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="x">    if (rand(0, 1)) { $b = null; }</span>
-<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="x">    $y = $b ?? 2; // should be 2, is mixed</span>
-<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="x">}</span>
+<a id="__codelineno-37-2" name="__codelineno-37-2" href="#__codelineno-37-2"></a><span class="x">    $x = ($y = 1);</span>
+<a id="__codelineno-37-3" name="__codelineno-37-3" href="#__codelineno-37-3"></a><span class="x">    // $x and $y both resolve to nothing (not even `mixed`).</span>
+<a id="__codelineno-37-4" name="__codelineno-37-4" href="#__codelineno-37-4"></a><span class="x">}</span>
+<a id="__codelineno-37-5" name="__codelineno-37-5" href="#__codelineno-37-5"></a><span class="x">function g(): void {</span>
+<a id="__codelineno-37-6" name="__codelineno-37-6" href="#__codelineno-37-6"></a><span class="x">    $x = 0 ?? ($y = 1);</span>
+<a id="__codelineno-37-7" name="__codelineno-37-7" href="#__codelineno-37-7"></a><span class="x">    // $x resolves fine (`0`); $y&#39;s assignment inside the `??` operand</span>
+<a id="__codelineno-37-8" name="__codelineno-37-8" href="#__codelineno-37-8"></a><span class="x">    // is never seen, so the RHS of the whole chain silently widens to</span>
+<a id="__codelineno-37-9" name="__codelineno-37-9" href="#__codelineno-37-9"></a><span class="x">    // `mixed` beside it.</span>
+<a id="__codelineno-37-10" name="__codelineno-37-10" href="#__codelineno-37-10"></a><span class="x">}</span>
 </code></pre></div>
-<p>An operand that is undefined, or <code>null</code> wherever it is defined, contributes
-nothing to the result; <code>resolve_null_coalesce_chain</code> treats it as an
-unresolvable operand and adds <code>mixed</code>.</p>
-<p>Found porting PHPStan's <code>nsrt/falsey-coalesce.php</code>; the assertions are
-<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p><code>resolve_rhs_expression</code> (the shared pipeline in
+<code>type_engine/variable/rhs_resolution/mod.rs</code>, used by ternaries, <code>??</code>
+chains, match arms, and every other operand position) has no arm for
+<code>Expression::Assignment</code> at all, parenthesized or not. The only place an
+assignment resolves as a value is <code>resolve_rhs_with_scope</code>'s dedicated
+chain-assignment special case (<code>$a = $b = expr</code>), which is reached solely
+from the top-level RHS of a plain <code>$var = …;</code> statement and does not
+unwrap a <code>Parenthesized</code> wrapper first, so <code>$a = ($b = expr)</code> misses it
+too.</p>
+<p>Found while porting PHPStan's <code>nsrt/falsey-coalesce.php</code>: <code>$x = $a ??
+($y=1) ?? 1;</code> needs <code>($y=1)</code> to resolve to <code>1</code> inside the <code>??</code> chain, and
+because <code>resolve_rhs_expression</code> cannot resolve it, the chain adds
+<code>mixed</code>. Two assertions stay <code>// SKIP</code> in the ported copy under
+<code>tests/phpstan_nsrt/falsey-coalesce.php</code> because of this
+(<code>maybeNullableVarAssign</code>, <code>notExistsAssign</code>).</p>
 
 
 
