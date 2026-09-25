@@ -4584,3 +4584,42 @@ class Holder {
     );
     assert!(msgs[0].contains("Plain"), "got: {msgs:?}");
 }
+
+/// A Laravel model operator is a name for a class, so it has to be
+/// resolved before the returned and declared types are compared — and
+/// before the message is written. Leaving it until the comparison
+/// reported the operator's own spelling back at the reader, who wrote a
+/// type that does name something.
+///
+/// `static` here is bound to the trait that wrote the annotation, which
+/// is no model at all, so the operator stands for the framework's own
+/// collection.
+#[test]
+fn a_model_operator_is_resolved_before_the_return_type_is_reported() {
+    let php = r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Collection;
+
+/** @phpstan-require-extends \Illuminate\Database\Eloquent\Model */
+trait HasFactory
+{
+    /** @return collection-of<static> */
+    public static function many(): Collection
+    {
+        return new Collection();
+    }
+
+    /** @return static|Collection */
+    public static function caller(): mixed
+    {
+        return static::many();
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(
+        !messages.iter().any(|m| m.contains("collection-of")),
+        "the operator should be resolved, not reported as itself: {messages:?}"
+    );
+}
