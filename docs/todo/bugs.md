@@ -22,7 +22,111 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B412. An array shape argument is only checked on its values, and only against a typed array
+**Impact: Medium · Complexity: Medium**
+
+```php
+declare(strict_types=1);
+/** @param array{foo: int} $a  @param list{string} $b  @param non-empty-list<int> $c  @param list<string> $d */
+function f(array $a, array $b, array $c, array $d): void {}
+f(['foo' => 'one'], [null], [], ['x', 'k' => 'y']); // all four should be reported, none is
+```
+
+When a shape argument fails the shape-superset rule in `is_type_compatible`
+(a key the parameter requires holds the wrong type), nothing rejects it: it
+falls through to the "typed array → `ArrayShape`: MAYBE" rule, which answers
+yes for any array-like argument, shapes included. The "`ArrayShape` → typed
+array" rule compares only the entries' values with the parameter's value
+type. The keys are never checked, so a string key passes for a `list<T>`
+or an `array<string, V>` with an int key. An empty shape counts as a
+`non-empty-list` or `non-empty-array` because no entries means no failures.
+A shape literal is a complete, known value, so all three are definite
+mismatches rather than MAYBEs.
+
+Leave the extra-key question alone. `array{foo: int}` accepting a shape
+that also has `buz` is the deliberate "shapes are open by convention" rule.
+
+Found running the php-typing-conformance suite
+(`arrays_shape_sealed_by_default.php` line 36, `arrays_non_empty_list.php`,
+`regressions_array_element_null_subtraction.php`,
+`regressions_list_or_map_union_rejects_hybrid.php`). PHPStan, Psalm and
+mago report all four.
+
+**Where to look:** the `ArrayShape` rules in
+`src/diagnostics/type_errors/compatibility.rs` (shape superset, shape →
+typed array, typed array → shape).
+
+### B413. A subclass that binds its parent's template satisfies every parameterisation of the parent
+**Impact: Medium · Complexity: Medium**
+
+```php
+/** @template T */ class Box {}
+/** @extends Box<int> */ final class IntBox extends Box {}
+/** @param Box<string> $box */ function f(Box $box): void {}
+f(new IntBox()); // should be reported, is not
+/** @var Box<int> $b */ $b = new Box();
+f($b);           // reported
+```
+
+The same-base generic rule compares `Box<int>` with `Box<string>`
+argument by argument. `IntBox` has no type arguments of its own, though,
+so it reaches the nominal fallback, which only asks whether `IntBox`
+extends `Box`. The argument's `@extends`/`@implements` binding for the
+parameter's base class should be substituted first, then judged by the
+generic rule.
+
+Found running the php-typing-conformance suite
+(`generics_extends_implements.php`). PHPStan, Psalm and mago report it.
+
+**Where to look:** the same-base generic covariance block in
+`src/diagnostics/type_errors/compatibility.rs`, with the ancestor's
+bindings from the inheritance merge.
+
+### B414. A template's `of` bound is not checked at the call that binds it
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @template T of array */
+final class Collection { /** @param T $items */ public function __construct(public $items) {} }
+new Collection(1); // should be reported, is not
+
+/** @template T of array  @param T $a */
+function g($a): void {}
+g(1);              // should be reported, is not
+```
+
+A parameter typed by a bounded template is checked against nothing, so an
+argument outside the bound binds `T` to it silently. The bound should be
+the parameter type the argument has to satisfy, as it already is when
+nothing binds `T`.
+
+Found running the php-typing-conformance suite
+(`generics_template_bound_array.php`). PHPStan, Psalm and mago report it.
+
+**Where to look:** template substitution for argument checks in
+`src/diagnostics/type_errors/`.
+
+### B415. A closure's parameter types are not checked against a `callable(…)` parameter
+**Impact: Low-Medium · Complexity: Medium** (depends on [T13](type-inference.md#t13-closure-variables-lose-callable-signature-detail))
+
+```php
+/** @param callable(int): string $cb */
+function f(callable $cb): void {}
+f(static fn (string $v): string => $v); // should be reported, is not
+```
+
+The callable-vs-callable rule in `is_type_compatible` checks the return
+type only. A resolved closure never records its parameter list, so an
+empty `params` means "unknown" and the parameters stay a MAYBE. Once T13
+records the declared parameter types, compare them contravariantly: each
+parameter the callable spec passes must be accepted by the closure's
+parameter.
+
+Found running the php-typing-conformance suite
+(`callables_docblock_signature.php`). PHPStan, Psalm and mago report it.
+
+**Where to look:** the "Callable specification ↔ callable specification"
+rule in `src/diagnostics/type_errors/compatibility.rs`.
 
 ## Standard-library return types
 
@@ -180,8 +284,8 @@ Found porting PHPStan's `nsrt/bug-10566.php`, `nsrt/bug-11200.php`,
 **Where to look:** `type_engine/variable/forward_walk/receiver_mutation.rs`
 and the call-expression narrowing store.
 
-### B369. `isset($arr[$k])` does not narrow `$k` to the keys the array has
-**Impact: Low-Medium · Complexity: Medium**
+### B369. `isset($arr[$k])` and `array_key_exists($k, $arr)` do not narrow `$k` to the array's keys
+**Impact: Medium · Complexity: Medium**
 
 ```php
 function f(string $s): void {
@@ -193,14 +297,31 @@ function f(string $s): void {
     assert(isset($seen[$s]));
     $seen[$s] = true; // should stay array{'|': bool, '&': bool}
 }
+
+/** @param array<string, int> $values */
+function g(int|string $key, array $values): void {
+    if (array_key_exists($key, $values)) {
+        takesString($key); // reported: expects string, got int|string
+    }
+}
 ```
 
-When the array's keys are all known, an `isset()` on an offset proves the key
-is one of them. Without that, a later write through the same key cannot find
-its entry and widens the whole shape to `non-empty-array<string, bool>`.
+A successful `isset()` on an offset, or `array_key_exists()`, proves the key
+is in the array's key domain. When the keys are all known, that means one of
+them. When only the key type is declared, it means the key type. Without
+this narrowing, a later write through the same key cannot find its entry and
+widens the whole shape to `non-empty-array<string, bool>`. In the
+`array_key_exists()` case the missing narrowing is a false positive that
+PHPStan and mago do not report.
 
 Found porting PHPStan's `nsrt/bug-11716.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+`// SKIP` in the ported copy under `tests/phpstan_nsrt/`. The
+`array_key_exists()` false positive was found running the
+php-typing-conformance suite (`assertions_array_key_exists_key_narrowing.php`).
+
+**Where to look:** `array_key_exists_target` in `assertions.rs` and the
+`isset` handling, both under `type_engine/variable/forward_walk/cond_narrowing/`. B371
+narrows the *array* from the same call; this entry narrows the *key*.
 
 ### B370. A loose comparison against a literal does not narrow
 **Impact: Low-Medium · Complexity: Medium**
@@ -777,6 +898,38 @@ The keyword survives into the shape's property type, so reading it later
 names whatever class is asking. Found porting PHPStan's `nsrt/object-shape.php`;
 the three assertions are `// SKIP` in `tests/phpstan_nsrt/object-shape.php`
 (they used to pass only because the runner accepted `self` for any class).
+
+## Laravel
+
+No outstanding items.
+
+## Blade
+
+No outstanding items.
+
+## Miscellaneous
+
+### B416. `(object)` of a non-empty array loses `stdClass`
+**Impact: Low · Complexity: Low**
+
+```php
+/** @param object{foo: int}&\stdClass $s */
+function f(object $s): void {}
+f((object) ['foo' => 1]); // reported: expects object{foo: int}&stdClass, got object{foo: int}
+```
+
+Casting an array to an object always produces a `stdClass`. `object_cast_type`
+returns bare `stdClass` for `(object) []` and for anything it cannot read,
+but for a shape or a scalar it returns only the `object{…}` shape. The result
+should be `object{…}&stdClass`, so it keeps `stdClass`'s class identity (and
+the dynamic properties that come with it) alongside the known keys.
+
+Found running the php-typing-conformance suite
+(`phpdoc_advanced_object_shape_variants.php`). Every other column except
+Psalm accepts the call.
+
+**Where to look:** `object_cast_type` in
+`type_engine/variable/rhs_resolution/mod.rs`.
 
 ### B409. `??` on an undefined or null-only left side gives `mixed`
 **Impact: Low · Complexity: Low**

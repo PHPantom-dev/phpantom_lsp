@@ -36,6 +36,10 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
+| B416 | [`(object)` of a non-empty array loses `stdClass`](todo/bugs.md#b416-object-of-a-non-empty-array-loses-stdclass) | Low | Low |
+| A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
+| B369 | [`isset($arr[$k])` and `array_key_exists($k, $arr)` do not narrow `$k` to the array's keys](todo/bugs.md#b369-issetarrk-and-array_key_existsk-arr-do-not-narrow-k-to-the-arrays-keys) | Medium | Medium |
+| B412 | [An array shape argument is only checked on its values, and only against a typed array](todo/bugs.md#b412-an-array-shape-argument-is-only-checked-on-its-values-and-only-against-a-typed-array) | Medium | Medium |
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
@@ -52,6 +56,14 @@ contributor even though it's short.
 | E4  | [Embedded stub override with external stubs](todo/external-stubs.md#e4-embedded-stub-override-with-external-stubs) (depends on E1)                              | Medium      | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
 | D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
+| D25  | [Two traits declaring the same property with different types is not reported](todo/diagnostics.md#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported) | Low | Low-Medium |
+| B413 | [A subclass that binds its parent's template satisfies every parameterisation of the parent](todo/bugs.md#b413-a-subclass-that-binds-its-parents-template-satisfies-every-parameterisation-of-the-parent) | Medium | Medium |
+| D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
+| B414 | [A template's `of` bound is not checked at the call that binds it](todo/bugs.md#b414-a-templates-of-bound-is-not-checked-at-the-call-that-binds-it) | Low-Medium | Medium |
+| D27  | [Destructuring offsets an array cannot have is not reported](todo/diagnostics.md#d27-destructuring-offsets-an-array-cannot-have-is-not-reported) | Low | Medium |
+| T13  | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail) | Low-Medium | Medium-High |
+| B415 | [A closure's parameter types are not checked against a `callable(…)` parameter](todo/bugs.md#b415-a-closures-parameter-types-are-not-checked-against-a-callable-parameter) (depends on T13) | Low-Medium | Medium |
+| D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
 | F20 | [Migrate to the maintained `tower-lsp` fork](todo/lsp-features.md#f20-migrate-to-the-maintained-tower-lsp-fork)                                              | Low-Medium  | Very High   |
@@ -91,7 +103,6 @@ unlikely to move the needle for most users.
 | T26 | [Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)](todo/type-inference.md#t26-class-constants-named-as-docblock-types-foobar-foobar_) | Low-Medium  | Medium      |
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Medium      |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Medium-High |
-| T13 | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail)                                             | Low-Medium  | Medium-High |
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium-High |
 | T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | High        |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
@@ -103,7 +114,6 @@ unlikely to move the needle for most users.
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
 | B387 | [`foreach` over `SplObjectStorage` swaps its keys and values](todo/bugs.md#b387-foreach-over-splobjectstorage-swaps-its-keys-and-values) | Medium      | Low-Medium  |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
-| B369 | [`isset($arr[$k])` does not narrow `$k` to the keys the array has](todo/bugs.md#b369-issetarrk-does-not-narrow-k-to-the-keys-the-array-has) | Low-Medium  | Medium      |
 | B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |
 | B372 | [A condition stored in a variable loses its narrowing](todo/bugs.md#b372-a-condition-stored-in-a-variable-loses-its-narrowing) | Low-Medium  | Medium      |
 | B381 | [Appending to an array shape turns it into a list](todo/bugs.md#b381-appending-to-an-array-shape-turns-it-into-a-list) | Low-Medium  | Medium      |
