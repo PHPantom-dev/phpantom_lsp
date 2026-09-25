@@ -190,10 +190,15 @@ fn handed_to_callback(params: Vec<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Vec<Php
 }
 
 /// Filter inferred callable param types, replacing any param whose type
-/// has an unresolvable base (e.g. PHPStan pseudo-types like
-/// `collection-of<T>`) with `PhpType::mixed()`.  `mixed` is not
-/// considered informative by `seed_closure_params`, so the param simply
-/// won't be seeded — much better than skipping the entire closure body.
+/// has an unresolvable base (e.g. PHPStan pseudo-types we have no model
+/// for) with `PhpType::mixed()`.  `mixed` is not considered informative
+/// by `seed_closure_params`, so the param simply won't be seeded — much
+/// better than skipping the entire closure body.
+///
+/// The Laravel model operators are resolved first rather than discarded:
+/// `Closure(builder-of<static>)` is a real class once `static` is bound
+/// to the receiver, which the caller has already done by the time this
+/// runs, so the closure receives the model's builder instead of nothing.
 pub(crate) fn filter_resolvable_inferred_params(
     inferred: &[PhpType],
     ctx: &ForwardWalkCtx<'_>,
@@ -201,10 +206,15 @@ pub(crate) fn filter_resolvable_inferred_params(
     inferred
         .iter()
         .map(|ty| {
-            if has_unresolvable_base(ty, ctx) {
-                PhpType::mixed()
+            let ty = if crate::virtual_members::laravel::has_model_type_operator(ty) {
+                crate::virtual_members::laravel::expand_model_type(ty, ctx.class_loader)
             } else {
                 ty.clone()
+            };
+            if has_unresolvable_base(&ty, ctx) {
+                PhpType::mixed()
+            } else {
+                ty
             }
         })
         .collect()
