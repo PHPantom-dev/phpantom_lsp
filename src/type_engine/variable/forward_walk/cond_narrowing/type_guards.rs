@@ -72,7 +72,18 @@ pub(crate) fn apply_type_guard_on_operands(
                 // of a negated guard means the variable is NOT the
                 // guarded type, and vice versa.
                 let effective_truthy = if negated { !truthy } else { truthy };
-                let mut results = scope.get(var_name).to_vec();
+                let splits_iterable = matches!(
+                    kind,
+                    narrowing::TypeGuardKind::Array | narrowing::TypeGuardKind::Object
+                );
+                let mut results = splits_iterable
+                    .then(|| {
+                        split_iterable_alternatives(scope.get(var_name), |hint| {
+                            ctx.resolved_types_for(hint)
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| scope.get(var_name).to_vec());
                 if results.is_empty() {
                     // Nothing known about the subject.  A guard that
                     // holds still proves its type outright; one that

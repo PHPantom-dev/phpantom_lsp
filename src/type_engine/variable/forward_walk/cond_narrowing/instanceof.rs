@@ -18,7 +18,15 @@ pub(super) fn exclude_classes_in_scope(
     scope: &mut ScopeState,
 ) -> bool {
     let had_types = !scope.get(var_name).is_empty();
-    let mut results = scope.get(var_name).to_vec();
+    let mut results = split_iterable_alternatives(scope.get(var_name), |hint| {
+        crate::type_engine::type_resolution::resolved_types_for_hint(
+            hint,
+            &var_ctx.current_class.name,
+            var_ctx.all_classes,
+            var_ctx.class_loader,
+        )
+    })
+    .unwrap_or_else(|| scope.get(var_name).to_vec());
     for cls in classes {
         ResolvedType::apply_narrowing(&mut results, |class_list| {
             narrowing::apply_instanceof_exclusion(cls, var_ctx, class_list)
@@ -30,6 +38,42 @@ pub(super) fn exclude_classes_in_scope(
     }
     scope.set(var_name, results);
     false
+}
+
+/// `types` with each `iterable` alternative spelled out as the
+/// `array|Traversable` it stands for, or `None` when it holds none.
+///
+/// An `instanceof` check filters a subject by the classes its entries
+/// name, and an `iterable` names none, so the check could neither keep its
+/// `Traversable` half (with the type arguments) nor rule it out.
+/// `resolve` turns the split type back into entries that carry their
+/// classes.  `is_array()` and `is_object()` split the same way, so the
+/// `Traversable` half they leave behind is one a later `instanceof` can
+/// filter.
+pub(super) fn split_iterable_alternatives(
+    types: &[ResolvedType],
+    resolve: impl Fn(PhpType) -> Vec<ResolvedType>,
+) -> Option<Vec<ResolvedType>> {
+    let split: Vec<Option<PhpType>> = types
+        .iter()
+        .map(|rt| {
+            rt.class_info
+                .is_none()
+                .then(|| rt.type_string.split_iterable())
+                .flatten()
+        })
+        .collect();
+    if split.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(types.len() + 1);
+    for (rt, split) in types.iter().zip(split) {
+        match split {
+            Some(ty) => ResolvedType::extend_unique(&mut out, resolve(ty)),
+            None => out.push(rt.clone()),
+        }
+    }
+    Some(out)
 }
 
 /// Narrow every subject the `&&` chain's operands prove an
@@ -316,7 +360,11 @@ pub(super) fn commit_instanceof_narrowing(
         return;
     }
 
-    let existing = scope.get(var_name);
+    let split_existing =
+        split_iterable_alternatives(scope.get(var_name), |hint| ctx.resolved_types_for(hint));
+    let existing = split_existing
+        .as_deref()
+        .unwrap_or_else(|| scope.get(var_name));
     if existing.is_empty() {
         // Untyped variable — instanceof provides the type.
         scope.set(var_name, narrowed);
@@ -455,24 +503,74 @@ pub(super) fn commit_instanceof_narrowing(
                 .is_some_and(|c| c.name == name || c.fqn() == name)
         }) || passes_check(name)
     };
-    let filtered: Vec<ResolvedType> = existing
-        .iter()
-        .filter(|rt| {
-            rt.class_info
-                .as_ref()
-                .is_some_and(|c| passes_check(&c.fqn()))
-        })
-        .map(|rt| {
-            let mut rt = rt.clone();
+    //
+    // An alternative that fails the check can still pass it through a
+    // subclass: on `SomeClass|SomeInterface`, `instanceof SomeInterface`
+    // also admits a `SomeClass` subclass implementing the interface.  That
+    // half becomes the intersection, carried by one entry per class so
+    // member lookup sees both, and is judged beside the alternatives that
+    // passed outright (`SomeClass&SomeInterface|SomeInterface`).  When no
+    // alternative passes outright, `apply_instanceof_inclusion` below
+    // decides instead.
+    let mut filtered: Vec<ResolvedType> = Vec::with_capacity(existing.len());
+    let mut any_passed = false;
+    for rt in existing {
+        let Some(cls) = rt.class_info.as_ref() else {
+            continue;
+        };
+        let fqn = cls.fqn();
+        let mut rt = rt.clone();
+        if passes_check(&fqn) {
             rt.restrict_type_string_to_classes(&survives);
-            if let Some(non_null) = rt.type_string.non_null_type() {
-                rt.type_string = non_null;
+        } else if !exact && !intersected {
+            rt.restrict_type_string_to_classes(&|name: &str| name == cls.name || name == fqn);
+        } else {
+            continue;
+        }
+        if let Some(non_null) = rt.type_string.non_null_type() {
+            rt.type_string = non_null;
+        }
+        if passes_check(&fqn) {
+            any_passed = true;
+            filtered.push(rt);
+            continue;
+        }
+        for checked in &narrowed {
+            let Some(checked_cls) = checked.class_info.as_ref() else {
+                continue;
+            };
+            // A checked class below this alternative is what that half
+            // narrows to: `Animal&Dog` is just `Dog`.
+            if crate::class_lookup::is_subtype_of_names(&checked_cls.fqn(), &fqn, ctx.class_loader)
+            {
+                if !filtered.iter().any(|f| {
+                    f.class_info
+                        .as_ref()
+                        .is_some_and(|c| c.fqn() == checked_cls.fqn())
+                }) {
+                    filtered.push(checked.clone());
+                }
+                continue;
             }
-            rt
-        })
-        .collect();
+            if !narrowing::can_share_instance(cls, checked_cls) {
+                continue;
+            }
+            let both = narrowing::class_first_intersection(
+                (rt.type_string.clone(), cls),
+                (checked.type_string.clone(), checked_cls),
+            );
+            filtered.push(ResolvedType {
+                type_string: both.clone(),
+                ..rt.clone()
+            });
+            filtered.push(ResolvedType {
+                type_string: both,
+                ..checked.clone()
+            });
+        }
+    }
 
-    if !filtered.is_empty() {
+    if any_passed && !filtered.is_empty() {
         // Filter matched — use the filtered results (preserves richer type
         // info from original resolution).  Also strip bare `null` entries:
         // a successful instanceof check guarantees non-null, so `null`

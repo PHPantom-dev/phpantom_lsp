@@ -28,10 +28,10 @@ namespace PsalmTest_const_values_3 {
     function foo(string $s) : void {
         switch ($s) {
           case "foo":
-            assertType("'foo'", $s); // SKIP: a switch case does not narrow a literal union
+            assertType("'foo'", $s);
             break;
           case "bar":
-            assertType("'bar'", $s); // SKIP: a switch case does not narrow a literal union
+            assertType("'bar'", $s);
             break;
         }
     }

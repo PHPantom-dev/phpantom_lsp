@@ -51,17 +51,16 @@ namespace PsalmTest_type_reconciliation_reconciler {
     }
 
     // Test: falsyWithSomeClassPipeFalse, falsyWithSomeClassPipeBool
-    // Psalm narrows the second to `false`; PHPantom keeps a bool whole.
     /**
      * @param SomeClass|false $a
      * @param SomeClass|bool $b
      */
     function falsy($a, $b): void {
         if (!$a) {
-            assertType('false', $a); // SKIP: the falsy branch does not remove an object
+            assertType('false', $a);
         }
         if (!$b) {
-            assertType('bool', $b); // SKIP: the falsy branch does not remove an object
+            assertType('false', $b);
         }
     }
 
@@ -117,7 +116,7 @@ namespace PsalmTest_type_reconciliation_reconciler {
     /** @param class-string<SomeClass>|null $x */
     function nullableClassString($x): void {
         if (!$x) {
-            assertType('null', $x); // SKIP: the falsy branch does not remove a class-string
+            assertType('null', $x);
         }
         if ($x === null) {
             assertType('null', $x);
@@ -132,19 +131,19 @@ namespace PsalmTest_type_reconciliation_reconciler {
     /** @param iterable<int, string> $x */
     function iterableNarrowing($x): void {
         if (is_array($x)) {
-            assertType('array<int, string>', $x); // SKIP: a type check does not split an iterable
+            assertType('array<int, string>', $x);
         }
         if ($x instanceof \Traversable) {
-            assertType('Traversable<int, string>', $x); // SKIP: a type check does not split an iterable
+            assertType('Traversable<int, string>', $x);
         }
         if (is_object($x)) {
-            assertType('Traversable<int, string>', $x); // SKIP: a type check does not split an iterable
+            assertType('Traversable<int, string>', $x);
         }
         if (!is_object($x)) {
-            assertType('array<int, string>', $x); // SKIP: a type check does not split an iterable
+            assertType('array<int, string>', $x);
         }
         if (!is_array($x)) {
-            assertType('Traversable<int, string>', $x); // SKIP: a type check does not split an iterable
+            assertType('Traversable<int, string>', $x);
         }
     }
 
@@ -153,10 +152,10 @@ namespace PsalmTest_type_reconciliation_reconciler {
     /** @param SomeClass|SomeInterface $x */
     function classInterfaceUnion($x): void {
         if ($x instanceof SomeInterface) {
-            assertType('SomeClass&SomeInterface|SomeInterface', $x); // SKIP: instanceof on a class|interface union drops the intersection
+            assertType('SomeClass&SomeInterface|SomeInterface', $x);
         }
         if ($x instanceof SomeClass) {
-            assertType('SomeClass|SomeClass&SomeInterface', $x); // SKIP: instanceof on a class|interface union drops the intersection
+            assertType('SomeClass|SomeClass&SomeInterface', $x);
         }
     }
 

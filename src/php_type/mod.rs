@@ -453,6 +453,56 @@ impl LiteralValue {
         self.string_content()
             .is_some_and(|content| is_php_numeric_string(&content))
     }
+
+    /// Whether PHP 8's `==` holds between the two values, or `None` when a
+    /// literal's value cannot be read.
+    ///
+    /// Two numeric strings, or a number and a numeric string, compare as
+    /// numbers (`'1e3' == '1000'`); any other pair of strings compares
+    /// byte for byte.  A number never equals a non-numeric string, since
+    /// PHP 8 compares the two as strings and a number's string form is
+    /// numeric.
+    pub fn loosely_equals(&self, other: &LiteralValue) -> Option<bool> {
+        let numeric = |value: &LiteralValue| -> Option<f64> {
+            match value {
+                LiteralValue::Int(_) => value.parse_i64().map(|n| n as f64),
+                LiteralValue::Float(_) => value.parse_f64(),
+                LiteralValue::String(_) => {
+                    let content = value.string_content()?;
+                    is_php_numeric_string(&content)
+                        .then(|| content.trim().parse().ok())
+                        .flatten()
+                }
+            }
+        };
+        match (self, other) {
+            (LiteralValue::Int(_), LiteralValue::Int(_)) => {
+                Some(self.parse_i64()? == other.parse_i64()?)
+            }
+            (LiteralValue::String(_), LiteralValue::String(_))
+                if !self.is_numeric_string() || !other.is_numeric_string() =>
+            {
+                Some(self.string_content()? == other.string_content()?)
+            }
+            (LiteralValue::String(_), _) if !self.is_numeric_string() => Some(false),
+            (_, LiteralValue::String(_)) if !other.is_numeric_string() => Some(false),
+            _ => Some(numeric(self)? == numeric(other)?),
+        }
+    }
+}
+
+/// The truthiness of a named type, bare or with type arguments.
+///
+/// A class instance is always truthy, and so is a class name: no class is
+/// called `''` or `'0'`.
+fn named_truthiness(name: &str) -> Option<bool> {
+    match name.to_ascii_lowercase().as_str() {
+        "object" | "non-empty-string" | "non-empty-array" | "non-empty-list" | "positive-int"
+        | "negative-int" | "callable" | "closure" | "class-string" | "interface-string"
+        | "trait-string" | "enum-string" => Some(true),
+        other if is_keyword_type(other) => None,
+        _ => Some(true),
+    }
 }
 
 /// Match PHP 8's `NUM_STRING` grammar without accepting Rust-only float
@@ -1374,6 +1424,73 @@ impl PhpType {
             TypeKind::Named(s) => s.eq_ignore_ascii_case("iterable"),
             TypeKind::Nullable(inner) => inner.is_iterable(),
             _ => false,
+        }
+    }
+
+    /// This type with every `iterable` alternative spelled out as the
+    /// `array|Traversable` union it stands for, type arguments carried
+    /// onto both halves (`iterable<K, V>` → `array<K, V>|Traversable<K, V>`).
+    ///
+    /// A check that tells arrays from objects (`is_array()`,
+    /// `instanceof Traversable`) keeps one half and drops the other, which
+    /// it cannot do while the two share one name.  Returns `None` when no
+    /// top-level alternative is an `iterable`.
+    pub fn split_iterable(&self) -> Option<PhpType> {
+        let alternatives = match self.kind() {
+            TypeKind::Union(members) => &members[..],
+            _ => std::slice::from_ref(self),
+        };
+        fn without_null(member: &PhpType) -> (&PhpType, bool) {
+            match member.kind() {
+                TypeKind::Nullable(inner) => (inner, true),
+                _ => (member, false),
+            }
+        }
+        if !alternatives.iter().any(|m| match without_null(m).0.kind() {
+            TypeKind::Named(n) => n.eq_ignore_ascii_case("iterable"),
+            TypeKind::Generic(g) => {
+                g.name.eq_ignore_ascii_case("iterable") && matches!(g.args.len(), 1 | 2)
+            }
+            _ => false,
+        }) {
+            return None;
+        }
+        let mut members = Vec::with_capacity(alternatives.len() + 1);
+        for member in alternatives {
+            let (inner, nullable) = without_null(member);
+            match inner.split_iterable_member() {
+                Some((array, traversable)) => {
+                    members.push(array);
+                    members.push(traversable);
+                }
+                None => members.push(inner.clone()),
+            }
+            if nullable {
+                members.push(PhpType::null());
+            }
+        }
+        Some(PhpType::union(members))
+    }
+
+    /// The array and `Traversable` halves of a single `iterable` member.
+    fn split_iterable_member(&self) -> Option<(PhpType, PhpType)> {
+        let traversable = || atom("Traversable");
+        match self.kind() {
+            TypeKind::Named(n) if n.eq_ignore_ascii_case("iterable") => {
+                Some((PhpType::array(), PhpType::named(traversable())))
+            }
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("iterable") => match &g.args[..] {
+                [value] => Some((
+                    PhpType::generic_array_val(value.clone()),
+                    PhpType::generic_atom(traversable(), vec![PhpType::mixed(), value.clone()]),
+                )),
+                [key, value] => Some((
+                    PhpType::generic_array(key.clone(), value.clone()),
+                    PhpType::generic_atom(traversable(), vec![key.clone(), value.clone()]),
+                )),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -2507,13 +2624,11 @@ impl PhpType {
                 LiteralValue::Int(_) => value.parse_i64().is_none_or(|value| value != 0),
                 LiteralValue::Float(_) => value.parse_f64().is_none_or(|value| value != 0.0),
             }),
-            TypeKind::Named(name) => match name.to_ascii_lowercase().as_str() {
-                "object" | "non-empty-string" | "non-empty-array" | "non-empty-list"
-                | "positive-int" | "negative-int" | "callable" | "closure" => Some(true),
-                other if is_keyword_type(other) => None,
-                // A class instance is always truthy in PHP.
-                _ => Some(true),
-            },
+            TypeKind::Named(name) => named_truthiness(name),
+            // `class-string<Foo>` names a class and `Collection<int>` is an
+            // instance of one, so each is truthy whatever its arguments.
+            TypeKind::Generic(generic) => named_truthiness(&generic.name),
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(true),
             // An object shape or an intersection is an object, and an object
             // is always truthy.  A shape with at least one required field is
             // a non-empty array; an empty one (`array{}`) is falsy.

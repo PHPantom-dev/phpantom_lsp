@@ -44,6 +44,7 @@ use property_checks::*;
 pub(crate) use apply::*;
 pub(crate) use assertion_aliases::*;
 pub(crate) use cursor_ternary::*;
+pub(crate) use emptiness::apply_switch_arm_narrowing;
 pub(crate) use in_array::*;
 pub(crate) use member_exists::*;
 pub(crate) use nested_assignments::*;

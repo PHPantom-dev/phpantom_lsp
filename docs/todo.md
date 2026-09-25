@@ -98,11 +98,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B342 | [Published package views under `resources/views/vendor` are ignored](todo/bugs.md#b342-published-package-views-under-resourcesviewsvendor-are-ignored)                    | Low-Medium  | Medium      |
-| B345 | [A type check does not split an `iterable`](todo/bugs.md#b345-a-type-check-does-not-split-an-iterable) | Low-Medium  | Medium      |
-| B343 | [A `switch` case does not narrow a literal union](todo/bugs.md#b343-a-switch-case-does-not-narrow-a-literal-union) | Low-Medium  | Medium      |
-| B344 | [The falsy branch of a truthiness check keeps the object half](todo/bugs.md#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half) | Low         | Low-Medium  |
-| B346 | [`instanceof` on a class-or-interface union drops the intersection](todo/bugs.md#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

@@ -273,7 +273,7 @@ pub(crate) fn extract_literal_identity_check(
 /// A `-1` is a unary minus over a literal rather than a literal of its
 /// own, so the sign is folded back in; anything else that is not written
 /// out as a value in the source has no literal type.
-fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
+pub(super) fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
     match expr {
         Expression::Parenthesized(paren) => literal_comparand_type(paren.expression),
         Expression::UnaryPrefix(prefix) => {

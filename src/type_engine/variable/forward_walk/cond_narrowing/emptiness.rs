@@ -236,6 +236,94 @@ pub(super) fn strip_literal_from_type(ty: &PhpType, excluded: &PhpType) -> Optio
     (!ty.is_subtype_of(excluded)).then(|| ty.clone())
 }
 
+/// Narrow a `switch` subject to what one of its arms can see.
+///
+/// A `case` compares with `==`, so an arm entered through the labels in
+/// `matched` keeps only the literal alternatives one of them loosely
+/// equals, and the `default` arm (`matched` empty) drops the ones any label
+/// in `excluded` equals.  `"foo"|"bar"` is `'foo'` under `case "foo":`.
+///
+/// Alternatives that are not literals stay: a `string` holds values no
+/// label mentions, and whether `null` or a `bool` equals a label is a
+/// question this does not try to answer.  A `matched` label that is not a
+/// literal could be any value, so it leaves the subject alone.
+pub(crate) fn apply_switch_arm_narrowing(
+    subject: &Expression<'_>,
+    matched: &[&Expression<'_>],
+    excluded: &[&Expression<'_>],
+    scope: &mut ScopeState,
+) {
+    let Some(var_name) = expr_to_subject(subject) else {
+        return;
+    };
+    let literals = |labels: &[&Expression<'_>]| -> Vec<PhpType> {
+        labels
+            .iter()
+            .filter_map(|label| literal_comparand_type(label))
+            .filter(|ty| ty.as_literal().is_some())
+            .collect()
+    };
+    let (labels, keep_equal) = if matched.is_empty() {
+        (literals(excluded), false)
+    } else {
+        let labels = literals(matched);
+        if labels.len() != matched.len() {
+            return;
+        }
+        (labels, true)
+    };
+    if labels.is_empty() {
+        return;
+    }
+    let keep = |member: &LiteralValue| {
+        let equal = labels.iter().filter_map(PhpType::as_literal).any(|label| {
+            // An unreadable value might be equal, and might not be.
+            member.loosely_equals(label).unwrap_or(keep_equal)
+        });
+        equal == keep_equal
+    };
+
+    let types = scope.get(&var_name);
+    let mut changed = false;
+    let mut narrowed = Vec::with_capacity(types.len());
+    for rt in types {
+        match filter_literal_members(&rt.type_string, &keep) {
+            Some(ty) if ty == rt.type_string => narrowed.push(rt.clone()),
+            Some(ty) => {
+                changed = true;
+                narrowed.push(ResolvedType {
+                    type_string: ty,
+                    ..rt.clone()
+                });
+            }
+            None => changed = true,
+        }
+    }
+    // Nothing left means the arm cannot run with what the subject holds,
+    // which is the reachability question rather than this one.
+    if changed && !narrowed.is_empty() {
+        scope.set(&var_name, narrowed);
+    }
+}
+
+/// `ty` with the literal alternatives `keep` rejects removed, or `None`
+/// when that leaves nothing.
+fn filter_literal_members(ty: &PhpType, keep: &impl Fn(&LiteralValue) -> bool) -> Option<PhpType> {
+    match ty.kind() {
+        TypeKind::Union(members) => {
+            refine_union_members(members, |member| filter_literal_members(member, keep))
+        }
+        TypeKind::Nullable(inner) => Some(match filter_literal_members(inner, keep) {
+            Some(kept) => PhpType::nullable(kept),
+            None => PhpType::null(),
+        }),
+        _ => match ty.as_literal() {
+            Some(literal) if !keep(literal) => None,
+            _ => Some(ty.clone()),
+        },
+    }
+}
+
 /// Apply [`refine_non_empty_in_scope`]'s rule to one `PhpType`, returning
 /// `None` when every member was the empty value being ruled out.
 pub(super) fn refine_non_empty_type(ty: &PhpType, empty: EmptyValue) -> Option<PhpType> {

@@ -91,6 +91,13 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_falsy_from_scope(&var_name, scope);
     }
+    // `!$x` / `empty($x)` — the body holds the falsy part of the subject,
+    // the same set the else of `if ($x)` narrows to: `Foo|false` is
+    // `false` there.
+    if let Some(var_name) = extract_falsy_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        narrow_to_falsy_in_scope(&var_name, scope);
+    }
     // Bare truthy check: `if ($x) { ... }` — $x is truthy in the
     // then-body, so strip null and false from its type.
     if let Some(var_name) = expr_to_subject(condition) {

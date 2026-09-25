@@ -1184,6 +1184,13 @@ fn filter_type_by_guard(
     if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
         return filter_type_by_guard(&expanded, kind, keep_matching, class_loader);
     }
+    // `is_array()` and `is_object()` each keep one half of an `iterable`,
+    // so it has to be split before they can drop the other.
+    if matches!(kind, TypeGuardKind::Array | TypeGuardKind::Object)
+        && let Some(split) = ty.split_iterable()
+    {
+        return filter_type_by_guard(&split, kind, keep_matching, class_loader);
+    }
 
     // `is_numeric()` also returns true for numeric strings, not just
     // `int`/`float`.  Narrow string-like members to `numeric-string`

@@ -217,6 +217,7 @@ mod laravel_view_names;
 mod lsp_concurrency;
 mod lsp_refresh_resilience;
 mod move_cli;
+mod narrowing_branch_values;
 mod narrowing_condition_proofs;
 mod narrowing_flow_tracking;
 mod narrowing_nested_short_circuit;

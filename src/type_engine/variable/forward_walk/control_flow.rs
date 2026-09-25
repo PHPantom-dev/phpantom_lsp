@@ -141,20 +141,62 @@ pub(crate) fn process_switch<'b>(
     let mut branch_scopes: Vec<ScopeState> = Vec::new();
     let mut has_default = false;
 
-    let walk_arm = |stmts: &[&Statement<'b>], branch_scopes: &mut Vec<ScopeState>| {
+    // Every literal label, which the `default` arm has seen fail.
+    let all_labels: Vec<&Expression<'b>> = cases
+        .iter()
+        .filter_map(|case| match case {
+            SwitchCase::Expression(c) => Some(c.expression),
+            SwitchCase::Default(_) => None,
+        })
+        .collect();
+
+    // An arm is narrowed by the labels that lead into it, unless the arm
+    // before it can run on into it without a `break`: then the labels say
+    // nothing about the values that arrive that way.
+    let mut falls_into_next = false;
+    let mut walk_arm = |stmts: &[&Statement<'b>],
+                        labels: &[&Expression<'b>],
+                        is_default: bool,
+                        branch_scopes: &mut Vec<ScopeState>| {
         let mut case_scope = pre_switch_scope.clone();
+        if !falls_into_next {
+            if !is_default {
+                apply_switch_arm_narrowing(switch.expression, labels, &[], &mut case_scope);
+            } else if labels.is_empty() {
+                apply_switch_arm_narrowing(switch.expression, &[], &all_labels, &mut case_scope);
+            }
+        }
+        falls_into_next = !branch_exits_stmts(stmts.iter().copied(), &case_scope, ctx);
         let exit_frame = ExitFrameGuard::push();
         walk_body_forward(stmts.iter().copied(), &mut case_scope, ctx);
         let arm_exits = exit_frame.pop();
+        // The cursor sits in this arm, so what the arm knows at the
+        // cursor is the answer, not the join of every arm after it.
+        let holds_cursor = stmts
+            .first()
+            .zip(stmts.last())
+            .is_some_and(|(first, last)| {
+                ctx.cursor_offset >= first.span().start.offset
+                    && ctx.cursor_offset <= last.span().end.offset
+            });
+        if holds_cursor {
+            return Some(case_scope);
+        }
         merge_exit_edges(&mut case_scope, &arm_exits.breaks);
         branch_scopes.push(case_scope);
+        None
     };
 
     // Walk cases, accumulating fall-through groups.
-    let mut accumulated_stmts: Vec<&Statement<'b>> = Vec::new();
+    let mut group_labels: Vec<&Expression<'b>> = Vec::new();
+    let mut group_has_default = false;
     for case in &cases {
-        if case.is_default() {
-            has_default = true;
+        match case {
+            SwitchCase::Expression(c) => group_labels.push(c.expression),
+            SwitchCase::Default(_) => {
+                has_default = true;
+                group_has_default = true;
+            }
         }
 
         let stmts: Vec<_> = case.statements().iter().collect();
@@ -163,14 +205,14 @@ pub(crate) fn process_switch<'b>(
             continue;
         }
 
-        accumulated_stmts.extend(stmts);
-        walk_arm(&accumulated_stmts, &mut branch_scopes);
-        accumulated_stmts.clear();
-    }
-
-    // Handle trailing fall-through cases (empty cases at the end).
-    if !accumulated_stmts.is_empty() {
-        walk_arm(&accumulated_stmts, &mut branch_scopes);
+        if let Some(at_cursor) =
+            walk_arm(&stmts, &group_labels, group_has_default, &mut branch_scopes)
+        {
+            *scope = at_cursor;
+            return;
+        }
+        group_labels.clear();
+        group_has_default = false;
     }
 
     if branch_scopes.is_empty() {

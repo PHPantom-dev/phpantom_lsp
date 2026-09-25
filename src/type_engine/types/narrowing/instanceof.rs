@@ -1059,8 +1059,10 @@ fn collect_negated_and_instanceof_classes<'b>(
 /// Each member of the union answers on its own: one that already names a
 /// subtype of the checked class is the more specific of the two and
 /// stays as it is, one the checked class is a subtype of narrows to the
-/// class, and one that is unrelated (or not an object at all) cannot
-/// pass and is dropped.
+/// class, one that could share an instance with it (a class that can
+/// still be extended, checked against an interface) becomes the
+/// intersection of the two, and one that is unrelated (or not an object
+/// at all) cannot pass and is dropped.
 ///
 /// Returns `None` when nothing can be said — no class loader, a class
 /// name that does not resolve, a `self`/`static`/`parent` reference the
@@ -1103,8 +1105,12 @@ pub(in crate::type_engine) fn narrow_type_by_instanceof(
 }
 
 /// The alternatives a value of `ty` can take, with `?T` spelled out as
-/// the `T|null` it stands for so each half is judged separately.
+/// the `T|null` it stands for and `iterable` as `array|Traversable`, so
+/// each half is judged separately.
 fn instanceof_union_members(ty: &PhpType) -> Vec<PhpType> {
+    if let Some(split) = ty.split_iterable() {
+        return split.union_members().into_iter().cloned().collect();
+    }
     match ty.kind() {
         TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
         TypeKind::Union(members) => members.to_vec(),
@@ -1179,6 +1185,50 @@ fn instanceof_member(
     if crate::class_lookup::is_subtype_of_named(member, class_name, loader) {
         return Some(member.clone());
     }
-    crate::class_lookup::is_subtype_of_names(class_name, member_name, loader)
-        .then(|| extraction.class_type.clone())
+    if crate::class_lookup::is_subtype_of_names(class_name, member_name, loader) {
+        return Some(extraction.class_type.clone());
+    }
+    let member_cls = loader(member_name)?;
+    let checked_cls = loader(class_name)?;
+    can_share_instance(&member_cls, &checked_cls).then(|| {
+        class_first_intersection(
+            (member.clone(), &member_cls),
+            (extraction.class_type.clone(), &checked_cls),
+        )
+    })
+}
+
+/// Whether one object can be an instance of both `a` and `b` when neither
+/// extends the other.
+///
+/// That takes an interface on at least one side: a subclass of a class
+/// that can still be extended may implement any interface, and one object
+/// may implement any two.  Two classes never share an instance, and a
+/// final class or an enum already lists every interface it will have.
+pub(in crate::type_engine) fn can_share_instance(a: &ClassInfo, b: &ClassInfo) -> bool {
+    use crate::types::ClassLikeKind;
+    let extendable = |c: &ClassInfo| match c.kind {
+        ClassLikeKind::Interface => true,
+        ClassLikeKind::Class => !c.is_final,
+        ClassLikeKind::Trait | ClassLikeKind::Enum => false,
+    };
+    (a.kind == ClassLikeKind::Interface || b.kind == ClassLikeKind::Interface)
+        && extendable(a)
+        && extendable(b)
+}
+
+/// `a&b` with a class ahead of an interface, which is how the value is
+/// usually described (`Model&HasFactory`), and `a` first otherwise.
+pub(in crate::type_engine) fn class_first_intersection(
+    a: (PhpType, &ClassInfo),
+    b: (PhpType, &ClassInfo),
+) -> PhpType {
+    use crate::types::ClassLikeKind;
+    let (first, second) =
+        if a.1.kind == ClassLikeKind::Interface && b.1.kind != ClassLikeKind::Interface {
+            (b.0, a.0)
+        } else {
+            (a.0, b.0)
+        };
+    PhpType::intersection(vec![first, second])
 }
