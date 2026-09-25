@@ -47,6 +47,6 @@ function (Foo $foo, Bar $bar) {
 	assertType('array<StaticMethods\Bar>', $bar->method());
 	assertType('array<StaticMethods\Bar>', $bar->method()[0]->method());
 
-	assertType('array<StaticMethods\Foo>', Foo::staticMethod()); // SKIP: static inside a generic type is left unbound on a Class:: access
-	assertType('array<StaticMethods\Bar>', Bar::staticMethod()); // SKIP: static inside a generic type is left unbound on a Class:: access
+	assertType('array<StaticMethods\Foo>', Foo::staticMethod());
+	assertType('array<StaticMethods\Bar>', Bar::staticMethod());
 };

@@ -232,6 +232,14 @@ pub(super) fn resolve_rhs_property_access(
                 all_classes,
                 class_loader,
             );
+            // `self::`, `static::`, and `parent::` all forward late static
+            // binding, so a property typed `static` stays open; an explicit
+            // `ClassName::` pins the class, collapsing it just like a fixed
+            // method call (see `lsb_class_for_call`).
+            let forwards_lsb = matches!(
+                spa.class,
+                Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
+            );
             for cls in &target_classes {
                 let resolved = resolve_property_with_hint(
                     &prop_name,
@@ -241,7 +249,18 @@ pub(super) fn resolve_rhs_property_access(
                     class_loader,
                 );
                 if !resolved.is_empty() {
-                    return resolved;
+                    return if forwards_lsb {
+                        resolved
+                    } else {
+                        resolved
+                            .into_iter()
+                            .map(|mut rt| {
+                                rt.type_string =
+                                    rt.type_string.replace_self_bound(&cls.fqn(), None);
+                                rt
+                            })
+                            .collect()
+                    };
                 }
             }
         }

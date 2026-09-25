@@ -40,6 +40,6 @@ function (Foo $foo, Bar $bar) {
 	assertType('array<StaticProperties\Foo>', $foo->prop);
 	assertType('array<StaticProperties\Bar>', $bar->prop);
 
-	assertType('array<StaticProperties\Foo>', Foo::$staticProp); // SKIP: static inside a generic type is left unbound on a Class:: access
-	assertType('array<StaticProperties\Bar>', Bar::$staticProp); // SKIP: static inside a generic type is left unbound on a Class:: access
+	assertType('array<StaticProperties\Foo>', Foo::$staticProp);
+	assertType('array<StaticProperties\Bar>', Bar::$staticProp);
 };

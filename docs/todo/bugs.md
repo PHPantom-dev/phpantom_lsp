@@ -768,26 +768,6 @@ Found porting PHPStan's `nsrt/pr-5108.php`, `nsrt/template-default.php`;
 the assertions are `// SKIP` in the ported copies under
 `tests/phpstan_nsrt/`.
 
-### B397. `static` inside a generic type is left unbound on a `Class::` access
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class Foo {
-    /** @return array<static> */ public static function all() {}
-    /** @var array<static> */ public static $items;
-}
-class Bar extends Foo {}
-Foo::all();   // should be array<Foo>, is array<static()>
-Bar::$items;  // should be array<Bar>, is array<static(Bar)>
-```
-
-Instance calls bind a nested `static`; static calls and static property reads
-leave it open (or empty) instead of fixing it to the named class.
-
-Found porting PHPStan's `nsrt/static-methods.php`,
-`nsrt/static-properties.php`; the assertions are `// SKIP` in the ported
-copies under `tests/phpstan_nsrt/`.
-
 ## Laravel
 
 No outstanding items.

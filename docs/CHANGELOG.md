@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`static` inside a generic type collapses to the named class on a `Class::` access.** `Foo::all()` returning `@return array<static>` now reads as `array<Foo>` instead of leaving the bound empty, and `Bar::$items` typed `@var array<static>` now reads as `array<Bar>` instead of staying open as `array<static(Bar)>`. `self::`/`static::`/`parent::` still keep the binding open, since those forward late static binding from the calling context.
 - **`self` inside a docblock type names the class that wrote it.** A parameter typed `object{foo: self}` or `list<self>`, or a method returning `object{foo: self}`, now reads `$o->foo` as the declaring class instead of carrying the bare `self` along, including through subclasses that inherit the method.
 - **`??` on a left side that is never assigned, or only ever `null`, no longer widens to `mixed`.** `$x = $a ?? 1;` with `$a` never assigned now reads as `1`, matching what PHP actually evaluates it to.
 - **An assignment written as a value resolves wherever an expression can appear, not just as a bare statement.** `$x = ($y = 1);` and `$x = $a ?? ($y = 1) ?? 1;` now give `$x` the assigned value instead of leaving it unresolved or widening the surrounding `??` chain to `mixed`.

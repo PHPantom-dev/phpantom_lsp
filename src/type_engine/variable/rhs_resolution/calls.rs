@@ -2732,9 +2732,13 @@ pub(super) fn resolve_rhs_static_call(
             // An explicit `A::` on a non-static method is PHP's pre-8
             // instance-forwarding form, which keeps `$this` (and with it late
             // static binding) bound, so only a `static` method written out
-            // fixes the class.
+            // fixes the class. That forwarding needs a `$this` to forward
+            // from, so it does not apply outside any class (global-scope
+            // code has no enclosing class to bind `static` open over).
             let target_is_static = method_is_static(owner, &method_name, ctx);
-            let lsb_class = (forwards_lsb || !target_is_static).then(|| ctx.current_class.fqn());
+            let lsb_class = (!ctx.current_class.name.is_empty()
+                && (forwards_lsb || !target_is_static))
+                .then(|| ctx.current_class.fqn());
             let self_replace =
                 |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
 

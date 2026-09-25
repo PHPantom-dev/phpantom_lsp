@@ -118,7 +118,6 @@ unlikely to move the needle for most users.
 | B386 | [Array functions flatten the shapes they are given](todo/bugs.md#b386-array-functions-flatten-the-shapes-they-are-given) | Low-Medium  | Medium      |
 | B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
 | B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |
-| B397 | [`static` inside a generic type is left unbound on a `Class::` access](todo/bugs.md#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access) | Low-Medium  | Low-Medium  |
 | B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |
 | B371 | [A check compared to `true`, or `array_key_exists()` with a non-literal key, does not narrow](todo/bugs.md#b371-a-check-compared-to-true-or-array_key_exists-with-a-non-literal-key-does-not-narrow) | Low         | Low-Medium  |
 | B373 | [`is_a()` narrowing ignores `allow_string`, class-string variables, and a narrower subject](todo/bugs.md#b373-is_a-narrowing-ignores-allow_string-class-string-variables-and-a-narrower-subject) | Low         | Medium      |
