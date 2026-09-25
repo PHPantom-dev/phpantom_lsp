@@ -13,7 +13,9 @@ function foo(array $list): void
 		$value = 'foo';
 	}
 
-	assertType('list<mixed>', $list);
+	// More precise than upstream, which reports `list<mixed>`: every entry
+	// was overwritten through the reference.
+	assertType("list<'foo'>", $list);
 }
 
 /**
@@ -25,7 +27,7 @@ function bar(array $list): void
 		$value = 'foo';
 	}
 
-	assertType("list<'foo'>", $list); // SKIP: a foreach by-reference write does not change the array's element type
+	assertType("list<'foo'>", $list);
 }
 
 /**
@@ -56,7 +58,8 @@ function bar3(array $list): void
 		}
 	}
 
-	assertType("list<mixed>", $list); // could be list<'foo'|'maybe'>
+	// More precise than upstream, which reports `list<mixed>`.
+	assertType("list<'foo'|'maybe'>", $list);
 }
 
 /**
@@ -68,7 +71,8 @@ function baz(array $list): void
 		$value = 'bar';
 	}
 
-	assertType('list<string>', $list);
+	// More precise than upstream, which reports `list<string>`.
+	assertType("list<'bar'>", $list);
 }
 
 /**

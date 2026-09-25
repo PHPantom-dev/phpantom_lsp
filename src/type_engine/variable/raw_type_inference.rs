@@ -567,6 +567,13 @@ pub(in crate::type_engine) fn extract_arg_texts_from_ast(
         .collect()
 }
 
+fn first_param_name(params: &FunctionLikeParameterList<'_>) -> Option<String> {
+    params
+        .parameters
+        .first()
+        .map(|param| bytes_to_str(param.variable.name).to_string())
+}
+
 /// Infer the return type of a callback (arrow function or closure) by
 /// resolving its body expression with the first parameter seeded to
 /// `param_type`.
@@ -580,14 +587,14 @@ fn infer_callback_return_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let (param_name, body_expr) = match callback_expr {
+        // A callback that takes no parameters ignores the element it is
+        // handed, but its body still decides the result.
         Expression::ArrowFunction(arrow) => {
-            let param = arrow.parameter_list.parameters.first()?;
-            let name = bytes_to_str(param.variable.name).to_string();
+            let name = first_param_name(&arrow.parameter_list);
             (name, arrow.expression)
         }
         Expression::Closure(closure) => {
-            let param = closure.parameter_list.parameters.first()?;
-            let name = bytes_to_str(param.variable.name).to_string();
+            let name = first_param_name(&closure.parameter_list);
             // Find the first return statement's expression.
             let ret_expr = closure.body.statements.iter().find_map(|stmt| {
                 if let Statement::Return(ret) = stmt {
@@ -621,7 +628,7 @@ fn infer_callback_return_type(
         _ => vec![seed_member(param_type)],
     };
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
-        if var == param_name {
+        if param_name.as_deref() == Some(var) {
             resolved_param.clone()
         } else {
             vec![]

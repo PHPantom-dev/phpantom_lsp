@@ -57,6 +57,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`array_map()` with a callback that takes no parameters keeps the callback's return type.** `array_map(fn () => new Foo(), $items)` is now `list<Foo>` instead of a bare `array`.
+- **A by-reference `foreach` updates the array it walks.** After `foreach ($list as &$value) { $value = 'x'; }`, `$list` holds the values the loop wrote through the reference. A `break` keeps the entries the loop never reached.
+- **Writing to an integer key of an array shape keeps the shape.** `$arr[1] = 'x'` on an `array{1: string, 2: int}` updates that entry instead of widening the whole value to `array<int, string|int>`.
+- **Assigning through `ArrayAccess` replaces what a check proved about that offset.** After `assert($o[1] === null); $o[1] = new Foo();`, `$o[1]` reads as `Foo` rather than `null`.
 - **A closure's return type comes from what its body returns.** A closure handed to a generic function such as `map($boxes, fn (Box $b): Box => $b)` now keeps the `Box<stdClass>` its body returns rather than the bare `Box` it declares, and an untyped `fn ($b) => $b` receives the element type the call hands it instead of `mixed`. `array_map()` likewise keeps the array shape a callback declared `: array` returns.
 - **A method declared `: never` stays `never` when it overrides an interface.** `EmptyIterator::key()` used to take `Iterator`'s `@return TKey|null` and read as `mixed|null`.
 - **`@var` above a `global` statement types only what the statement imports.** A nameless `/** @var int */` types the single variable a `global $foo;` brings in, and a `@var` naming some other variable no longer changes that variable's type.

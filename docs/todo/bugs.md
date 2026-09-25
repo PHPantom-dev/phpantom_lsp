@@ -673,83 +673,16 @@ deliberate in `merge_push_type` / the append arm of
 to keep appends inside loops from growing the shape without bound, so this
 needs a decision on whether straight-line appends may keep the shape.
 
+Letting every append onto a shape extend it (the way a keyed shape already
+does) is not enough on its own: the loop walker's re-walks each add an
+entry, so `$d = []; foreach ($xs as $x) { $d[] = $x; }` comes out as
+`array{}|array{int, int, int}`. The loop join has to generalize shapes that
+differ only in length back to a list, or appends inside a loop body have to
+keep the list treatment.
+
 Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
 it is too slow under the runner (see
 [P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
-
-### B382. Writing an integer key into an integer-keyed shape widens the shape
-**Impact: Low · Complexity: Low**
-
-```php
-/** @param array{1: string, 2: int} $arr */
-function f(array $arr): void {
-    $arr[1] = 'x'; // should stay array{1: string, 2: int}, is non-empty-array<int, string|int>
-}
-```
-
-The in-place update only looks for positional (unkeyed) entries, so an
-explicit `1:` key falls through to the generic keyed write.
-
-Found porting PHPStan's `nsrt/preserve-large-constant-array.php`; the
-assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-**Where to look:** the keyed arm of `merge_nested_array_write_inner` in
-`type_engine/variable/array_shape_writes.rs`.
-
-### B383. Joining `array{}` with a non-empty list loses the element type
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param list<int> $c */
-function f(array $c): void {
-    if (count($c) > 0) {
-        $c = array_map(fn() => new \stdClass(), $c);
-    }
-    $c; // should be list<stdClass>, is array
-}
-```
-
-The `else` path narrowed `$c` to `array{}`, and joining that with
-`non-empty-list<stdClass>` falls back to bare `array`.
-
-Found porting PHPStan's `nsrt/bug-10264.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B384. A `foreach` by-reference write does not change the array's element type
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param list<mixed> $list */
-function f(array $list): void {
-    foreach ($list as $k => &$v) { $v = 'foo'; }
-    $list; // should be list<'foo'>, is list<mixed>
-}
-```
-
-An unconditional write to the by-reference value replaces every element.
-
-Found porting PHPStan's `nsrt/bug-13809.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B385. Assigning through `ArrayAccess` does not replace an offset's narrowing
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param ArrayAccess<int, ?object> $o */
-function f(ArrayAccess $o): void {
-    assert($o[1] === null);
-    $o[1] = new stdClass();
-    $o[1]; // should be stdClass, is null
-}
-```
-
-Plain arrays already replace the narrowed offset on write; the object branch
-of the offset assignment does not.
-
-Found porting PHPStan's `nsrt/bug-13214.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-## Docblock handling
 
 ### B390. A literal argument bound to a function template is widened
 **Impact: Low-Medium · Complexity: Medium**

@@ -37,7 +37,7 @@ class A
 			assertType('array{}', $c);
 		}
 
-		assertType('list<stdClass>', $c); // SKIP: joining array{} with a non-empty list loses the element type
+		assertType('list<stdClass>', $c);
 	}
 
 	function doBar() {

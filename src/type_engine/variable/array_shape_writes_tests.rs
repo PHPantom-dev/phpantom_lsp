@@ -88,6 +88,19 @@ fn element_writes_refine_the_type_they_are_written_into() {
         ),
         "non-empty-array<string, string|int>"
     );
+    // A written-out integer key the shape already spells out updates that
+    // entry in place, the same as a positional slot would.
+    assert_eq!(
+        write(
+            "array{1: string, 2: int}",
+            vec![ArrayWriteKey::Keyed {
+                key_type: PhpType::int(),
+                slot: Some(1),
+            }],
+            "string",
+        ),
+        "array{1: string, 2: int}"
+    );
     // A keyed array keeps its key and value types through a literal-key
     // write and through an append.
     assert_eq!(

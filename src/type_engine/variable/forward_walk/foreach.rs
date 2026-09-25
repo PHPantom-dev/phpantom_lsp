@@ -560,6 +560,15 @@ pub(crate) fn process_foreach<'b>(
 
     let exits = exit_frame.pop();
 
+    let written_element = if cursor_in_body {
+        None
+    } else {
+        by_ref_written_element(foreach, entry_value_types.as_deref(), scope, &exits.breaks)
+    };
+    let iterated_before = written_element
+        .as_ref()
+        .map(|(name, _)| pre_loop_scope.get(name).to_vec());
+
     // An iterable that proves it has entries — a non-empty array literal,
     // or a type refined to `non-empty-array`/`non-empty-list`/a required
     // shape entry — runs the body at least once, so what was known before
@@ -586,6 +595,9 @@ pub(crate) fn process_foreach<'b>(
     // fall-through alone does not describe it.
     if !cursor_in_body {
         merge_exit_edges(scope, &exits.breaks);
+        if let (Some((name, element)), Some(before)) = (written_element, iterated_before) {
+            write_back_by_ref_element(&name, element, &before, scope);
+        }
         let _ = narrow_iterated_collection(
             foreach,
             &body_stmts,
@@ -595,6 +607,92 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// The element type a by-reference `foreach` leaves in the array it
+/// iterated, paired with that array's variable name.
+///
+/// `foreach ($list as &$value)` writes through `$value` into the entry it
+/// is visiting, so every entry the loop finished with holds whatever
+/// `$value` held at the end of the body (the fall-through and every
+/// `continue`, which the walk has already joined into `scope`). A `break`
+/// leaves the entry it stopped on with the value at that point and every
+/// later entry untouched, so those alternatives join in too.
+///
+/// Returns `None` when the loop does not iterate a plain variable by
+/// reference, or when the body leaves the entries as they were.
+fn by_ref_written_element(
+    foreach: &Foreach<'_>,
+    entry_value_types: Option<&[ResolvedType]>,
+    scope: &ScopeState,
+    breaks: &[ScopeState],
+) -> Option<(String, PhpType)> {
+    let value_expr = match &foreach.target {
+        ForeachTarget::Value(val) => val.value,
+        ForeachTarget::KeyValue(kv) => kv.value,
+    };
+    let Expression::UnaryPrefix(up) = value_expr else {
+        return None;
+    };
+    let (UnaryPrefixOperator::Reference(_), Expression::Variable(Variable::Direct(value_var))) =
+        (&up.operator, up.operand)
+    else {
+        return None;
+    };
+    let Expression::Variable(Variable::Direct(iterated)) = foreach.expression else {
+        return None;
+    };
+    let value_name = bytes_to_str(value_var.name);
+    let entry = entry_value_types.filter(|types| !types.is_empty())?;
+
+    let mut alternatives: Vec<ResolvedType> = Vec::new();
+    if !scope.unreachable {
+        alternatives.extend_from_slice(scope.get(value_name));
+    }
+    if !breaks.is_empty() {
+        for edge in breaks {
+            alternatives.extend_from_slice(edge.get(value_name));
+        }
+        alternatives.extend_from_slice(entry);
+    }
+    if alternatives.is_empty() {
+        return None;
+    }
+    let element = ResolvedType::types_joined(&alternatives);
+    if element.equivalent(&ResolvedType::types_joined(entry)) {
+        return None;
+    }
+    Some((bytes_to_str(iterated.name).to_string(), element))
+}
+
+/// Give the array a by-reference `foreach` iterated the element type its
+/// body wrote through the reference.
+///
+/// Only an array the body did not otherwise reassign is rewritten: once
+/// the variable holds something other than what the loop started from,
+/// the entries the reference wrote are no longer the ones it holds.
+fn write_back_by_ref_element(
+    name: &str,
+    element: PhpType,
+    before: &[ResolvedType],
+    scope: &mut ScopeState,
+) {
+    let current = scope.get(name);
+    if current.is_empty() || before.is_empty() {
+        return;
+    }
+    let array_type = ResolvedType::types_joined(current);
+    if !array_type.is_array_like() || array_type != ResolvedType::types_joined(before) {
+        return;
+    }
+    let Some(rewritten) =
+        crate::type_engine::variable::array_func_rules::with_element_type(&array_type, element)
+    else {
+        return;
+    };
+    let mut entry = current[0].clone();
+    entry.type_string = rewritten;
+    scope.set(name, vec![entry]);
 }
 
 /// Resolve the iterable expression's type for a foreach.

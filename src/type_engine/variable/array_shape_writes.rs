@@ -110,14 +110,16 @@ fn merge_nested_array_write_inner(
             }
         }
         ArrayWriteKey::Keyed { key_type, slot } => {
-            // A written-out index into a shape that already has that
-            // positional slot updates it in place, keeping the tuple's
-            // arity and the slots the write did not name. Folding it into
-            // the generic pair instead would union every slot's type
-            // together, so reading any one of them back gives the union.
+            // A written-out index into a shape that already has that slot,
+            // positional or spelled out as an integer key, updates it in
+            // place, keeping the shape's arity and the slots the write did
+            // not name. Folding it into the generic pair instead would
+            // union every slot's type together, so reading any one of them
+            // back gives the union.
             if let Some(slot) = slot
                 && let Some(entries) = base.shape_entries()
-                && let Some(index) = positional_entry_index(entries, *slot)
+                && let Some(index) = integer_keyed_entry_index(entries, *slot)
+                    .or_else(|| positional_entry_index(entries, *slot))
             {
                 let inner_merged = if keys.len() == 1 {
                     value_type.clone()
@@ -354,6 +356,19 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     });
 
     PhpType::array_shape(entries)
+}
+
+/// The position in `entries` of the entry whose explicit key is the
+/// integer `index`.
+fn integer_keyed_entry_index(entries: &[ShapeEntry], index: usize) -> Option<usize> {
+    entries.iter().position(|entry| {
+        entry
+            .key
+            .as_deref()
+            .filter(|key| is_decimal_int_array_key(key))
+            .and_then(|key| key.parse::<usize>().ok())
+            == Some(index)
+    })
 }
 
 /// The position in `entries` of the `index`th unkeyed entry.

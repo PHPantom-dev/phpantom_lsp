@@ -232,7 +232,12 @@ fn apply_array_write<'b>(
     // If the base variable is an object (e.g. SplObjectStorage, ArrayAccess),
     // array-access syntax invokes offsetSet, not actual array mutation.
     // Preserve the original object type instead of overwriting it with an array shape.
+    // A read of the same offset is still taken to return what was written,
+    // the same assumption an `===` check on that read narrows under.
     if base_type.is_object_like() && !base_type.is_array_like() {
+        if !append {
+            overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+        }
         return;
     }
 
@@ -276,21 +281,34 @@ fn apply_array_write<'b>(
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
 
-    // A keyed write is authoritative for the element it targets, so it
-    // must overwrite any synthetic scope key (`$tmp[$key]`, `$a["x"]`)
-    // narrowing left behind for that same subject. Left stale, a
-    // narrowed-to-null entry from an `isset`/`!isset` guard survives past
-    // the write that just proved the key present, and resurfaces when
-    // this branch's scope merges back with one where the key was proven
-    // present a different way — see `apply_null_narrowing_truthy`'s
-    // `extract_not_isset_vars` arm, which narrows the synthetic key to
-    // null before the guarded body ever runs. An append (`$var[] = …`)
-    // has no addressable key to overwrite and is skipped.
-    if !append && let Some(key) = array_write_synthetic_key(base_name, key_chain) {
-        // `rhs_types`, not `value_php_type`: the latter is a plain
-        // `PhpType` string flattened for the shape merge above, which
-        // drops the `class_info` a member-access completion on the
-        // synthetic key (`$result["user"]->`) needs.
+    if !append {
+        overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+    }
+}
+
+/// Record the value a keyed write stored as the type of the offset it
+/// targets.
+///
+/// A keyed write is authoritative for the element it targets, so it
+/// must overwrite any synthetic scope key (`$tmp[$key]`, `$a["x"]`)
+/// narrowing left behind for that same subject. Left stale, a
+/// narrowed-to-null entry from an `isset`/`!isset` guard survives past
+/// the write that just proved the key present, and resurfaces when
+/// this branch's scope merges back with one where the key was proven
+/// present a different way — see `apply_null_narrowing_truthy`'s
+/// `extract_not_isset_vars` arm, which narrows the synthetic key to
+/// null before the guarded body ever runs. An append (`$var[] = …`)
+/// has no addressable key to overwrite, so callers skip it.
+fn overwrite_written_offset(
+    base_name: &str,
+    key_chain: &[&Expression<'_>],
+    rhs_types: Vec<ResolvedType>,
+    scope: &mut ScopeState,
+) {
+    if let Some(key) = array_write_synthetic_key(base_name, key_chain) {
+        // `rhs_types`, not a flattened `PhpType`: the shape merge's plain
+        // type string drops the `class_info` a member-access completion on
+        // the synthetic key (`$result["user"]->`) needs.
         let synthetic_types = if rhs_types.is_empty() {
             vec![ResolvedType::from_type_string(PhpType::mixed())]
         } else {

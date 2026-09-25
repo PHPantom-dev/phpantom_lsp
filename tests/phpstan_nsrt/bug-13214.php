@@ -20,7 +20,7 @@ class HelloWorld
 
 		$array[1] = $child;
 
-		assertType(stdClass::class, $array[1]); // SKIP: assigning through ArrayAccess does not replace an offset's narrowing
+		assertType(stdClass::class, $array[1]);
 	}
 
 	/**

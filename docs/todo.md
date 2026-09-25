@@ -129,10 +129,6 @@ unlikely to move the needle for most users.
 | B377 | [A type guard on an array offset does not narrow the array](todo/bugs.md#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array) | Low         | Medium      |
 | B378 | [`count($a) == count($b)` does not give `$b` `$a`'s length](todo/bugs.md#b378-counta--countb-does-not-give-b-as-length) | Low         | Medium      |
 | B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
-| B382 | [Writing an integer key into an integer-keyed shape widens the shape](todo/bugs.md#b382-writing-an-integer-key-into-an-integer-keyed-shape-widens-the-shape) | Low         | Low         |
-| B383 | [Joining `array{}` with a non-empty list loses the element type](todo/bugs.md#b383-joining-array-with-a-non-empty-list-loses-the-element-type) | Low         | Low-Medium  |
-| B384 | [A `foreach` by-reference write does not change the array's element type](todo/bugs.md#b384-a-foreach-by-reference-write-does-not-change-the-arrays-element-type) | Low         | Medium      |
-| B385 | [Assigning through `ArrayAccess` does not replace an offset's narrowing](todo/bugs.md#b385-assigning-through-arrayaccess-does-not-replace-an-offsets-narrowing) | Low         | Low-Medium  |
 | B388 | [`DOMNamedNodeMap::item()` ignores the map's node type](todo/bugs.md#b388-domnamednodemapitem-ignores-the-maps-node-type) | Low         | Low         |
 | B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
