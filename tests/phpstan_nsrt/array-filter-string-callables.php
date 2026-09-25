@@ -83,5 +83,5 @@ function unionOfCallableStrings(): void
 		2,
 		'foo',
 	];
-	assertType("array{1, 2}|array{2: 'foo'}", array_filter($list, $func)); // SKIP: array functions flatten the shapes they are given
+	assertType("array{1, 2}|array{2: 'foo'}", array_filter($list, $func));
 }

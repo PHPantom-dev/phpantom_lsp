@@ -21,7 +21,7 @@ class Foo
 		assertType('Iterator<string, DOMAttr>', $attributes->getIterator());
 		assertType('DOMAttr|null', $attributes->getNamedItem('foo'));
 		assertType('DOMAttr|null', $attributes->getNamedItemNS('foo', 'bar'));
-		assertType('DOMAttr|null', $attributes->item(0)); // SKIP: DOMNamedNodeMap::item() ignores the map's node type
+		assertType('DOMAttr|null', $attributes->item(0));
 
 		foreach ($element->attributes ?? [] as $attr) {
 			assertType('DOMAttr', $attr);

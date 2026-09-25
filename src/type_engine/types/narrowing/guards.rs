@@ -812,6 +812,28 @@ pub(crate) fn narrow_type_by_guard_name(
     (!narrowed.is_empty_sentinel()).then_some(narrowed)
 }
 
+/// Split `ty` by the type-check function `name` (`is_int`, `is_string`, …)
+/// into the values it accepts and whether it can reject any.
+///
+/// A type check decides by type alone, so unlike an arbitrary callback
+/// both halves are known: the accepted part is `None` when no value of
+/// `ty` passes, and the flag is `false` when every value does.  Returns
+/// `None` for a name that is not a type check.
+pub(crate) fn split_type_by_guard_name(
+    name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<(Option<PhpType>, bool)> {
+    let kind = type_guard_kind_from_name(name)?;
+    let accepted = match filter_type_by_guard(ty, kind, true, class_loader) {
+        None => Some(ty.clone()),
+        Some(filtered) if filtered.is_empty_sentinel() => None,
+        Some(filtered) => Some(filtered),
+    };
+    let may_reject = guard_outcome_possible(ty, kind, false, class_loader);
+    Some((accepted, may_reject))
+}
+
 /// Narrow `ty` to the values of `var_name` that can make `condition`
 /// truthy.
 ///

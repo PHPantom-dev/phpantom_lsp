@@ -236,7 +236,10 @@ function probe(?int $w, ?bool $a, ?string $s, ?DateTime $d): void {
 "#;
     assert_assigned_types(
         content,
-        &[("$filtered", "array<string, int|true|string|DateTime>")],
+        &[(
+            "$filtered",
+            "array{w?: int, a?: true, s?: string, d?: DateTime}",
+        )],
     );
 }
 
@@ -867,7 +870,8 @@ function probe(array $users, array $byName, array $ordersByName, array $loose, a
 /// An argument the rule cannot read could contribute anything, so it declines
 /// and leaves the stub's bare `array` standing rather than claim a union that
 /// is missing a member. A bare `array` names no element type, and a spread
-/// holds the arrays to merge rather than one of them.
+/// holds the arrays to merge rather than one of them. Two empty literals are
+/// shapes it can read, and merge to the empty shape.
 #[test]
 fn array_merge_declines_on_arguments_it_cannot_read() {
     let content = r#"<?php
@@ -887,7 +891,55 @@ function probe(array $users, array $groups, array $bare): void {
         &[
             ("$withBare", "array"),
             ("$spread", "array"),
-            ("$empty", "array"),
+            ("$empty", "array{}"),
+        ],
+    );
+}
+
+/// Merging shapes keeps their entries: a later string key overwrites an
+/// earlier one in place (joining both values when it is optional), and
+/// integer keys are renumbered in the order they are appended.
+#[test]
+fn array_merge_of_shapes_keeps_their_entries() {
+    let content = r#"<?php
+/**
+ * @param array{id: int, name: string} $row
+ * @param array{name?: null} $patch
+ */
+function probe(array $row, array $patch): void {
+    $renumbered = array_merge(['a' => 1, 5 => 'x'], [7 => 'y']);
+    $patched = array_merge($row, $patch);
+    $overwritten = array_merge($row, ['id' => 'new']);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$renumbered", "array{a: 1, 0: 'x', 1: 'y'}"),
+            ("$patched", "array{id: int, name: string|null}"),
+            ("$overwritten", "array{id: 'new', name: string}"),
+        ],
+    );
+}
+
+/// A callback held in a variable as one of several type-check names keeps
+/// whatever any of them accepts.
+#[test]
+fn array_filter_with_a_callable_string_variable_narrows_by_each_alternative() {
+    let content = r#"<?php
+/** @param array<string, int|string|float|null> $map */
+function probe(array $map, bool $flag): void {
+    $single = 'is_string';
+    $either = $flag ? 'is_string' : 'is_int';
+    $strings = array_filter($map, $single);
+    $scalars = array_filter($map, $either);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$strings", "array<string, string>"),
+            ("$scalars", "array<string, string|int>"),
         ],
     );
 }

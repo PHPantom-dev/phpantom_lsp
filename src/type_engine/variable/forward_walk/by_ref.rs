@@ -38,7 +38,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             if let Call::Function(fc) = call
                 && let Expression::Closure(closure) = crate::parser::unwrap_parens(fc.function)
             {
-                process_by_ref_closure_capture(closure, scope, ctx, true);
+                process_by_ref_closure_capture(closure, scope, ctx, true, true);
             }
 
             let args = match call {
@@ -52,7 +52,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr {
                     let certain = call_invokes_arg_immediately(call, &selector, scope, ctx);
-                    process_by_ref_closure_capture(closure, scope, ctx, certain);
+                    process_by_ref_closure_capture(closure, scope, ctx, certain, false);
                 } else {
                     process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
@@ -62,7 +62,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
         // variable, passed somewhere opaque) may still run any time later,
         // so the types it assigns are unioned into the captured variables.
         Expression::Closure(closure) => {
-            process_by_ref_closure_capture(closure, scope, ctx, false);
+            process_by_ref_closure_capture(closure, scope, ctx, false, false);
         }
         // `new Wrapper(function () use (&$x) { … })` hands the closure to an
         // object that invokes it later (or never), which is the
@@ -305,11 +305,18 @@ pub(crate) fn node_param_has_invocation_tag(
 /// any later point, so the assigned types are *unioned* with the outer
 /// types (mirroring PHPStan, which widens by-ref captures even for
 /// closures that are merely defined).
+///
+/// `runs_once` is narrower: only a closure called where it is written
+/// runs exactly once.  One handed to a call that invokes it immediately
+/// (`array_map`, `array_walk`) may still run once per element, so its body
+/// is walked the way a loop body is and an append inside it builds the
+/// collection instead of a one-entry shape.
 pub(crate) fn process_by_ref_closure_capture<'b>(
     closure: &'b Closure<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     invoked_immediately: bool,
+    runs_once: bool,
 ) {
     let captured: Vec<String> = closure
         .use_clause
@@ -327,7 +334,9 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         return;
     }
 
-    let full_ctx = ctx.with_cursor_offset(u32::MAX);
+    let full_ctx = ctx
+        .with_cursor_offset(u32::MAX)
+        .with_in_loop(ctx.in_loop || !runs_once);
     let mut closure_scope = ScopeState::new();
 
     seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());

@@ -22,91 +22,11 @@ No outstanding items.
 
 ## Type comparison
 
-### B415. A closure's parameter types are not checked against a `callable(…)` parameter
-**Impact: Low-Medium · Complexity: Medium** (depends on [T13](type-inference.md#t13-closure-variables-lose-callable-signature-detail))
-
-```php
-/** @param callable(int): string $cb */
-function f(callable $cb): void {}
-f(static fn (string $v): string => $v); // should be reported, is not
-```
-
-The callable-vs-callable rule in `is_type_compatible` checks the return
-type only. A resolved closure never records its parameter list, so an
-empty `params` means "unknown" and the parameters stay a MAYBE. Once T13
-records the declared parameter types, compare them contravariantly: each
-parameter the callable spec passes must be accepted by the closure's
-parameter.
-
-Found running the php-typing-conformance suite
-(`callables_docblock_signature.php`). PHPStan, Psalm and mago report it.
-
-**Where to look:** the "Callable specification ↔ callable specification"
-rule in `src/diagnostics/type_errors/compatibility.rs`.
+No outstanding items.
 
 ## Standard-library return types
 
-### B386. Array functions flatten the shapes they are given
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param array{a: int, b: string} $x  @param array{a: int, b?: string} $y */
-function f(\DateTimeInterface $d, ?\DateTimeInterface $e, array $x, array $y): void {
-    array_filter([$d, $e]); // should be array{0: DateTimeInterface, 1?: DateTimeInterface}
-    array_merge($x, $y);    // should be array{a: int, b: string}, is array<string, int|string>
-    min([3, 1, 2]);         // should be 1, is 1|2|3
-    $cb = rand(0, 1) ? 'is_string' : 'is_int';
-    array_filter($list, $cb); // should narrow by both callbacks
-}
-```
-
-`array_filter` and `array_merge` generalise a shape argument before working
-on it, `min()`/`max()` over a literal array do not pick the extreme value,
-and `array_filter` only recognises a callable-string callback written inline.
-
-Found porting PHPStan's `nsrt/array-filter-string-callables.php`,
-`nsrt/bug-6927.php`, `nsrt/minmax-php8.php`; the assertions are
-`// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
-
-**Where to look:** `filtered_container`, `array_merge_type`, and
-`min_max_type` in `type_engine/variable/array_func_rules.rs`.
-
-### B387. `foreach` over `SplObjectStorage` swaps its keys and values
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @param SplObjectStorage<Order, int> $s */
-function f(SplObjectStorage $s): void {
-    foreach ($s as $k => $v) {
-        $k; // should be int, is Order
-        $v; // should be Order, is int
-    }
-}
-```
-
-Iterating the storage yields integer positions and the stored objects; the
-stub's `@template-implements Iterator<int, TObject>` says so. The `foreach`
-key/value extraction takes the `ArrayAccess<TObject, TData>` binding instead,
-so completion inside the loop offers the data type's members for the object.
-
-Found porting PHPStan's `nsrt/bug-13985.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B388. `DOMNamedNodeMap::item()` ignores the map's node type
-**Impact: Low · Complexity: Low**
-
-```php
-function f(\DOMElement $e): void {
-    $attrs = $e->attributes;
-    $attrs->item(0); // should be DOMAttr|null, is ?DOMNode
-}
-```
-
-The stub declares `@return DOMNode|null` where its siblings use `TNode`; a
-stub patch fixes it.
-
-Found porting PHPStan's `nsrt/bug-13365.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Reachability
 
@@ -782,7 +702,33 @@ the ported copy under `tests/phpstan_nsrt/`.
 
 ## Laravel
 
-No outstanding items.
+### B420. A value typed as a model's base collection has the custom collection's class but not its type
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @param Collection<int, Product> $c */   // Product collects into ProductCollection
+function f(Collection $c): void {
+    if ($c instanceof ProductCollection) {
+        takesProducts($c); // reported: expects ProductCollection, got Collection<int, Product>
+    }
+}
+```
+
+Resolving `Eloquent\Collection<int, Product>` to classes swaps in the
+model's custom collection (`try_swap_custom_collection`) while the type
+string keeps naming the base collection. `instanceof ProductCollection`
+then finds the class already narrow enough and keeps the stale type string,
+which the argument check compares against. The swap is also too eager for a
+declared parameter: the caller may hand over a plain collection it built
+itself, so completion offering `ProductCollection` methods there is an
+over-claim. Only a collection Eloquent produces (a `get()` return, a
+`chunk()` callback argument) is known to be the custom one; that direction
+is already handled by `replace_eloquent_collections_in_type`.
+
+**Where to look:** `try_swap_custom_collection` in
+`src/virtual_members/laravel/mod.rs`, called from `type_hint_to_classes_typed`,
+and the "already subtypes" shortcut in `apply_instanceof_inclusion`
+(`src/type_engine/types/narrowing/instanceof.rs`).
 
 ## Blade
 

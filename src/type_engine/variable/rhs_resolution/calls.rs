@@ -819,8 +819,9 @@ pub(crate) fn infer_closure_literal_type(
 /// parameters makes it fail every declared `Closure(BrandView): …` it is
 /// handed to. A parameter with no native hint contributes `mixed`, which a
 /// contravariant check accepts from any expected parameter type; a hinted
-/// one goes through the class loader so the short name written in the
-/// literal matches the fully-qualified name in the expectation.
+/// one is qualified against the file's namespace before the global one,
+/// the way PHP reads the hint, so `Error` inside `namespace App` names
+/// `App\Error` and matches the fully-qualified name in the expectation.
 fn declared_closure_params(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -839,8 +840,9 @@ fn declared_closure_params(
                 .hint
                 .as_ref()
                 .map(|hint| {
-                    crate::util::resolve_php_type_names(
+                    crate::util::resolve_source_php_type_names(
                         &crate::parser::extract_hint_type(hint),
+                        ctx.current_class.file_namespace.as_deref(),
                         ctx.class_loader,
                     )
                 })

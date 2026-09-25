@@ -801,6 +801,14 @@ fn collect_mixin_members(
                 .or_insert_with(|| default.clone());
         }
 
+        // The object a forwarded call actually runs on, which is what a
+        // `static`/`self`/`$this` in one of the mixin method's parameters
+        // describes (see `bind_param_self_refs`).
+        let mixin_type = match generic_args {
+            Some(args) if !args.is_empty() => PhpType::generic(&resolved_mixin_name, args.to_vec()),
+            _ => PhpType::named(crate::atom::atom(&resolved_mixin_name)),
+        };
+
         // Interning fingerprint for the transform applied below.  The
         // conditional-collapse inputs (`template_values`) are the subs
         // plus the mixin class's template defaults, and the
@@ -880,6 +888,7 @@ fn collect_mixin_members(
                 if decorated_forward {
                     apply_decorated_forward_return(&mut method, &resolved_mixin_name, &mixin_class);
                 }
+                bind_param_self_refs(&mut method, &mixin_type);
                 method.is_virtual = true;
                 method
             });
@@ -928,6 +937,7 @@ fn collect_mixin_members(
                 if decorated_forward {
                     apply_decorated_forward_return(&mut m, &resolved_mixin_name, &mixin_class);
                 }
+                bind_param_self_refs(&mut m, &mixin_type);
                 m.is_virtual = true;
                 collector.methods.push(Arc::new(m));
             }
@@ -1002,6 +1012,31 @@ fn is_forwards_calls_trait(name: &str) -> bool {
     name == FORWARDS_CALLS_FQN
         || name == FORWARDS_CALLS_SHORT
         || short_name(name) == FORWARDS_CALLS_SHORT
+}
+
+/// Bind the `static`/`self`/`$this` in a mixed-in method's parameters to
+/// the mixin class.
+///
+/// A mixin proxies the call to the object it names, so that object is what
+/// the method runs on: `Relation::where(fn (Builder $q) => …)` reaches
+/// `Builder::where(Closure(static) $column)` and the closure is handed the
+/// builder, not the relation. The return type keeps its late binding, since
+/// a forwarder that gets its target back returns itself.
+fn bind_param_self_refs(method: &mut MethodInfo, mixin_type: &PhpType) {
+    if !method
+        .parameters
+        .iter()
+        .any(|p| p.type_hint.as_ref().is_some_and(PhpType::contains_self_ref))
+    {
+        return;
+    }
+    for param in method.parameters.make_mut() {
+        if let Some(hint) = param.type_hint.as_ref()
+            && hint.contains_self_ref()
+        {
+            param.type_hint = Some(hint.replace_self_with_type(mixin_type));
+        }
+    }
 }
 
 /// Whether a return type is a `self` that carries generic arguments

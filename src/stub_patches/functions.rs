@@ -149,7 +149,17 @@ fn patch_array_map(func: &mut FunctionInfo) {
 /// `array_filter($items, fn ($i) => preg_match($re, $i))` keeps every
 /// element the callback returns a truthy value for, and typing the
 /// return as `bool` would call that idiom a type error.
+///
+/// What the callback is handed depends on `$mode`: the value by default,
+/// the key under `ARRAY_FILTER_USE_KEY`, and both under
+/// `ARRAY_FILTER_USE_BOTH`. A parameter type cannot read another argument,
+/// so the callback is typed as the union of the three forms, value form
+/// first since it is the default. A callback has to fit one of them, not
+/// the one its mode picks.
 fn patch_array_filter(func: &mut FunctionInfo) {
+    const TKEY: &str = "TKey";
+    const TVALUE: &str = "TValue";
+
     let array_name = match func.parameters.first() {
         Some(p) if p.name.as_str() == "$array" => p.name,
         _ => return,
@@ -158,7 +168,24 @@ fn patch_array_filter(func: &mut FunctionInfo) {
         Some(p) if p.name.as_str() == "$callback" => p.name,
         _ => return,
     };
-    link_callback_to_array_element(func, callback_name, array_name, "mixed");
+
+    let array_hint = PhpType::parse(&format!("array<{TKEY}, {TVALUE}>"));
+    let callback_hint = PhpType::parse(&format!(
+        "(callable({TVALUE}): mixed)|(callable({TKEY}): mixed)|(callable({TVALUE}, {TKEY}): mixed)"
+    ));
+    for param in func.parameters.make_mut() {
+        if param.name == callback_name {
+            param.type_hint = Some(callback_hint.clone());
+        } else if param.name == array_name {
+            param.type_hint = Some(array_hint.clone());
+        }
+    }
+
+    func.template_params = vec![atom(TKEY), atom(TVALUE)];
+    func.template_param_bounds = [(atom(TKEY), PhpType::parse("array-key"))]
+        .into_iter()
+        .collect();
+    func.template_bindings = vec![(atom(TKEY), array_name), (atom(TVALUE), array_name)];
 }
 
 /// Which half of the array a user-comparison sort hands its callback.

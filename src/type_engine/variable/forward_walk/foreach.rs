@@ -822,8 +822,14 @@ pub(crate) fn bind_foreach_value<'b>(
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
             // Strategy 1: extract from the type's own generic parameters
-            // (or, for tuple-style shapes, the union of positional values).
-            let value_php_type = it.iterable_element_type();
+            // (or, for tuple-style shapes, the union of positional values),
+            // read through the class's traversal binding when it has one.
+            let value_php_type =
+                crate::type_engine::variable::foreach_resolution::generic_traversal_value_type(
+                    it,
+                    ctx.class_loader,
+                )
+                .or_else(|| it.iterable_element_type());
             if let Some(vt) = value_php_type {
                 scope.set(&var_name, ctx.resolved_types_for(vt.clone()));
                 return;

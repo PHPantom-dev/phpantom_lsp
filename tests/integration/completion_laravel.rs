@@ -84,8 +84,9 @@ namespace Illuminate\\Database\\Eloquent;
 /**
  * @template TKey of array-key
  * @template TModel
+ * @extends \\Illuminate\\Support\\Collection<TKey, TModel>
  */
-class Collection {
+class Collection extends \\Illuminate\\Support\\Collection {
     /** @return int */
     public function count(): int { return 0; }
     /** @return TModel|null */

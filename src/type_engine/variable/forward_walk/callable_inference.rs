@@ -72,7 +72,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
             }
         }
 
-        params
+        handed_to_callback(params, ctx)
     } else {
         vec![]
     }
@@ -158,7 +158,7 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
         params
     };
 
-    if let Some(receiver) = receiver_classes.first() {
+    let params = if let Some(receiver) = receiver_classes.first() {
         let receiver_type = super::super::closure_resolution::build_receiver_self_type_pub(
             receiver,
             ctx.class_loader,
@@ -169,7 +169,24 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
             .collect()
     } else {
         params
-    }
+    };
+    handed_to_callback(params, ctx)
+}
+
+/// The types a callee hands a callback, with each base Eloquent collection
+/// of a concrete model narrowed to the collection that model builds, the
+/// same as the collection a caller gets back from `get()`.
+fn handed_to_callback(params: Vec<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Vec<PhpType> {
+    params
+        .into_iter()
+        .map(|p| {
+            crate::virtual_members::laravel::replace_eloquent_collections_in_type(
+                &p,
+                ctx.class_loader,
+            )
+            .unwrap_or(p)
+        })
+        .collect()
 }
 
 /// Filter inferred callable param types, replacing any param whose type
@@ -421,10 +438,11 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             params
         };
 
-        params
+        let params = params
             .into_iter()
             .map(|p| p.replace_self_with_type(&receiver_type))
-            .collect()
+            .collect();
+        handed_to_callback(params, ctx)
     } else {
         vec![]
     }

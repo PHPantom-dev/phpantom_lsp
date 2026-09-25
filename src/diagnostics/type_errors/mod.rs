@@ -12,7 +12,9 @@
 pub(super) mod compatibility;
 
 pub(super) use compatibility::is_type_compatible;
-use compatibility::{missing_required_shape_keys, shape_breaks_list_order};
+use compatibility::{
+    first_rejected_callable_param, missing_required_shape_keys, shape_breaks_list_order,
+};
 
 use std::collections::{HashMap, HashSet};
 
@@ -801,19 +803,34 @@ impl Backend {
                     effective_param_type.conditionals_as_branch_unions(),
                     arg_type,
                 );
-                // Two callables only ever disagree here on their return
-                // type, and the parameter list printed for the argument is
-                // empty whether or not the closure declares parameters —
-                // say which halves were actually compared so the empty
-                // parentheses don't read as the complaint.
+                // Two signatures printed side by side leave the reader to
+                // diff them by eye, so name the half that disagrees.
                 if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
                     (arg_type.kind(), effective_param_type.kind())
-                    && let (Some(arg_return), Some(param_return)) =
-                        (&arg_sig.return_type, &param_sig.return_type)
                 {
-                    message.push_str(&format!(
-                        " (return type {arg_return} does not satisfy {param_return})"
-                    ));
+                    if let (Some(arg_return), Some(param_return)) =
+                        (&arg_sig.return_type, &param_sig.return_type)
+                        && !is_type_compatible(
+                            arg_return,
+                            param_return,
+                            &class_loader,
+                            strict_types,
+                        )
+                    {
+                        message.push_str(&format!(
+                            " (return type {arg_return} does not satisfy {param_return})"
+                        ));
+                    } else if let Some((pos, passed, accepts)) = first_rejected_callable_param(
+                        arg_sig,
+                        param_sig,
+                        &class_loader,
+                        strict_types,
+                    ) {
+                        message.push_str(&format!(
+                            " (parameter {} accepts {accepts}, but is passed {passed})",
+                            pos + 1
+                        ));
+                    }
                 }
                 // "got void" reads as a type the value happens to have
                 // rather than as the absence of one, so say what the call

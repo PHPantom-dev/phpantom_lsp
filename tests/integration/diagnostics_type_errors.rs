@@ -9947,6 +9947,173 @@ class Shelter
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A closure parameter that cannot take the value the `callable(...)`
+/// spelling promises to pass fails on the first call.
+#[test]
+fn callable_spec_rejects_a_closure_whose_parameter_cannot_take_the_passed_value() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int): string $callback */
+function takesIntCallback(callable $callback): void {}
+
+takesIntCallback(static fn (string $value): string => $value);
+takesIntCallback(static function (int $key, string $value): string { return $value; });
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 1 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// Parameters are contravariant: a wider, untyped or surplus-ignoring
+/// closure parameter list takes everything the specification passes.
+#[test]
+fn callable_spec_accepts_a_closure_with_wider_or_untyped_parameters() {
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Cat extends Animal {}
+
+/** @param callable(Cat, int): void $callback */
+function takesCatCallback(callable $callback): void {}
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesCatCallback(static fn (Animal $a, int|string $i): null => null);
+takesCatCallback(static fn ($a, $i) => null);
+takesCatCallback(static fn (Cat $c) => null);
+takesCatCallback(static fn (Animal $a, int ...$rest) => null);
+takesCatCallback(strlen(...));
+takesInts(static fn (int ...$is) => null);
+takesInts(static fn (int $a, ?int $b = null) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A variadic specification parameter fills every closure parameter from
+/// its position on, so each of them has to take it.
+#[test]
+fn callable_spec_checks_every_parameter_a_variadic_fills() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesInts(static fn (int $a, string $b) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 2 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// A template in the specification binds from the closure itself, so the
+/// closure's parameter type is the binding rather than a mismatch.
+#[test]
+fn callable_spec_with_a_template_parameter_accepts_any_closure_parameter() {
+    let php = r#"<?php
+namespace App;
+
+/**
+ * @template T
+ * @param callable(T): void $callback
+ * @param T $value
+ */
+function apply(callable $callback, mixed $value): void {}
+
+apply(static fn (string $s) => null, 'a');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A closure parameter's class hint is read against the file's namespace
+/// first, as PHP reads it, so it names the same class the specification
+/// does rather than a global class of the same short name.
+#[test]
+fn callable_spec_resolves_a_closure_parameter_hint_in_the_file_namespace() {
+    let php = r#"<?php
+namespace App;
+
+class Error {}
+
+/**
+ * @param list<Error> $errors
+ * @param callable(Error, Error): int $compare
+ */
+function sortErrors(array $errors, callable $compare): void {}
+
+sortErrors([], static fn (Error $a, Error $b): int => 0);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A call proxied through `@mixin` runs on the mixin object, so a
+/// `Closure(static)` parameter of the mixin's method hands the closure the
+/// mixin class, not the class the call was written on.
+#[test]
+fn callable_spec_binds_static_in_a_mixin_parameter_to_the_mixin() {
+    let php = r#"<?php
+namespace App;
+
+class Builder
+{
+    /**
+     * @param \Closure(static): mixed $column
+     * @return $this
+     */
+    public function where(\Closure $column): static { return $this; }
+}
+
+/** @mixin Builder */
+class Relation
+{
+    public function __call(string $method, array $args): mixed { return null; }
+}
+
+function f(Relation $relation): void {
+    $relation->where(function (Builder $query): void {});
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `array_filter` hands its callback the value, the key, or both depending
+/// on the mode, so a callback that fits any of those forms is accepted and
+/// one that fits none is not.
+#[test]
+fn array_filter_accepts_a_callback_for_whichever_mode_it_takes() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param array<int, string> $lines */
+function f(array $lines): void {
+    array_filter($lines, static fn (string $line): bool => $line !== '');
+    array_filter($lines, static fn (int $number): bool => $number > 3, ARRAY_FILTER_USE_KEY);
+    array_filter($lines, static fn (string $line, int $number): bool => $number > 3, ARRAY_FILTER_USE_BOTH);
+    array_filter($lines, static fn (array $nope): bool => true);
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Closure(array)"), "{messages:?}");
+}
+
 // ─── Required array-shape keys ──────────────────────────────────────────────
 
 /// An array written out at the call site lists every key it has, so a
@@ -12454,4 +12621,97 @@ final class Scope {
         "got {:?}",
         messages_with_code(&collect(php), "type_mismatch_argument")
     );
+}
+
+/// The Eloquent builder's `chunk()` hands its callback the collection its
+/// `get()` builds, which is the model's own (custom) collection, even though
+/// the shared `BuildsQueries` trait spells the parameter as the base
+/// `Support\Collection`. A callback typed with the collection it really
+/// receives is fine; one typed with something unrelated is not. A
+/// parameter declared as the base collection still accepts one, since that
+/// is a demand on the caller rather than something Eloquent builds.
+#[test]
+fn eloquent_chunk_callback_receives_the_models_collection() {
+    let php = r#"<?php
+namespace Illuminate\Support {
+    /** @template TKey of array-key @template TValue */
+    class Collection {}
+}
+namespace Illuminate\Database\Concerns {
+    /** @template TValue */
+    trait BuildsQueries {
+        /**
+         * @param  int  $count
+         * @param  callable(\Illuminate\Support\Collection<int, TValue>, int): mixed  $callback
+         * @return bool
+         */
+        public function chunk($count, callable $callback) { return true; }
+    }
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @use \Illuminate\Database\Concerns\BuildsQueries<TModel> */
+        use \Illuminate\Database\Concerns\BuildsQueries;
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
+        public function get() {}
+    }
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends \Illuminate\Support\Collection<TKey, TModel>
+     */
+    class Collection extends \Illuminate\Support\Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+    use Illuminate\Database\Eloquent\Model;
+
+    class Order extends Model {}
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    class Product extends Model {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    function takesProducts(ProductCollection $p): void {}
+
+    class Keeper {
+        /** @param Collection<int, Product> $products */
+        public function keep(Collection $products): void {}
+    }
+
+    /** @param Collection<int, Product> $plain */
+    function f(Collection $plain): void {
+        (new Keeper())->keep($plain);
+        Order::query()->chunk(100, function (Collection $orders): void {});
+        Product::query()->chunk(100, function (ProductCollection $products): void {});
+        Product::query()->chunk(100, function (\Illuminate\Support\Collection $products): void {});
+        Order::query()->chunk(100, function (ProductCollection $wrong): void {});
+        Product::query()->chunk(100, function (Collection $products): void {
+            if (!$products instanceof ProductCollection) {
+                $products = new ProductCollection();
+            }
+            takesProducts($products);
+        });
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("ProductCollection"), "{messages:?}");
 }
