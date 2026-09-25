@@ -1652,6 +1652,270 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
+<td>B368</td>
+<td><a href="../todo/bugs/#b368-a-narrowed-member-read-or-call-result-survives-a-call-that-can-change-it">A narrowed member read or call result survives a call that can change it</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B374</td>
+<td><a href="../todo/bugs/#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type"><code>instanceof</code> against a class that cannot be loaded clears the variable's type</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B379</td>
+<td><a href="../todo/bugs/#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after">The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B387</td>
+<td><a href="../todo/bugs/#b387-foreach-over-splobjectstorage-swaps-its-keys-and-values"><code>foreach</code> over <code>SplObjectStorage</code> swaps its keys and values</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B391</td>
+<td><a href="../todo/bugs/#b391-a-closures-return-type-is-read-from-its-declaration-not-its-body">A closure's return type is read from its declaration, not its body</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B403</td>
+<td><a href="../todo/bugs/#b403-new-of-a-class-that-cannot-be-loaded-has-no-type"><code>new</code> of a class that cannot be loaded has no type</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B369</td>
+<td><a href="../todo/bugs/#b369-issetarrk-does-not-narrow-k-to-the-keys-the-array-has"><code>isset($arr[$k])</code> does not narrow <code>$k</code> to the keys the array has</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B370</td>
+<td><a href="../todo/bugs/#b370-a-loose-comparison-against-a-literal-does-not-narrow">A loose comparison against a literal does not narrow</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B372</td>
+<td><a href="../todo/bugs/#b372-a-condition-stored-in-a-variable-loses-its-narrowing">A condition stored in a variable loses its narrowing</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B381</td>
+<td><a href="../todo/bugs/#b381-appending-to-an-array-shape-turns-it-into-a-list">Appending to an array shape turns it into a list</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B386</td>
+<td><a href="../todo/bugs/#b386-array-functions-flatten-the-shapes-they-are-given">Array functions flatten the shapes they are given</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B390</td>
+<td><a href="../todo/bugs/#b390-a-literal-argument-bound-to-a-function-template-is-widened">A literal argument bound to a function template is widened</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B392</td>
+<td><a href="../todo/bugs/#b392-template-defaults-are-ignored">Template defaults are ignored</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B397</td>
+<td><a href="../todo/bugs/#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access"><code>static</code> inside a generic type is left unbound on a <code>Class::</code> access</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B404</td>
+<td><a href="../todo/bugs/#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members"><code>$this</code> in a <code>@phpstan-require-extends</code> trait does not see the required class's members</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B371</td>
+<td><a href="../todo/bugs/#b371-a-check-compared-to-true-or-array_key_exists-with-a-non-literal-key-does-not-narrow">A check compared to <code>true</code>, or <code>array_key_exists()</code> with a non-literal key, does not narrow</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B373</td>
+<td><a href="../todo/bugs/#b373-is_a-narrowing-ignores-allow_string-class-string-variables-and-a-narrower-subject"><code>is_a()</code> narrowing ignores <code>allow_string</code>, class-string variables, and a narrower subject</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B375</td>
+<td><a href="../todo/bugs/#b375-phpstan-assert-if-true-misses-the-receivers-template-binding-and-untyped-subjects"><code>@phpstan-assert-if-true</code> misses the receiver's template binding and untyped subjects</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B376</td>
+<td><a href="../todo/bugs/#b376-reflectionclassissubclassof-does-not-narrow-the-reflected-class"><code>ReflectionClass::isSubclassOf()</code> does not narrow the reflected class</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B377</td>
+<td><a href="../todo/bugs/#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array">A type guard on an array offset does not narrow the array</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B378</td>
+<td><a href="../todo/bugs/#b378-counta--countb-does-not-give-b-as-length"><code>count($a) == count($b)</code> does not give <code>$b</code> <code>$a</code>'s length</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B380</td>
+<td><a href="../todo/bugs/#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it">A loop that must run, or a <code>switch</code> that cannot fall out, still joins the path that skips it</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B382</td>
+<td><a href="../todo/bugs/#b382-writing-an-integer-key-into-an-integer-keyed-shape-widens-the-shape">Writing an integer key into an integer-keyed shape widens the shape</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B383</td>
+<td><a href="../todo/bugs/#b383-joining-array-with-a-non-empty-list-loses-the-element-type">Joining <code>array{}</code> with a non-empty list loses the element type</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B384</td>
+<td><a href="../todo/bugs/#b384-a-foreach-by-reference-write-does-not-change-the-arrays-element-type">A <code>foreach</code> by-reference write does not change the array's element type</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B385</td>
+<td><a href="../todo/bugs/#b385-assigning-through-arrayaccess-does-not-replace-an-offsets-narrowing">Assigning through <code>ArrayAccess</code> does not replace an offset's narrowing</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B388</td>
+<td><a href="../todo/bugs/#b388-domnamednodemapitem-ignores-the-maps-node-type"><code>DOMNamedNodeMap::item()</code> ignores the map's node type</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B389</td>
+<td><a href="../todo/bugs/#b389-a-native-never-return-is-overridden-by-the-docblock">A native <code>never</code> return is overridden by the docblock</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B393</td>
+<td><a href="../todo/bugs/#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost">A template bound through an argument's ancestors, or by several arguments, is lost</a></td>
+<td>Low</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B394</td>
+<td><a href="../todo/bugs/#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t">A <code>null</code> default on an untyped <code>@param T</code> parameter makes it <code>?T</code></a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B395</td>
+<td><a href="../todo/bugs/#b395-key-ofarrayv-is-int-instead-of-intstring"><code>key-of&lt;array&lt;V&gt;&gt;</code> is <code>int</code> instead of <code>int\|string</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B396</td>
+<td><a href="../todo/bugs/#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated">A conditional type on <code>$this</code> or in <code>@param-out</code> is not evaluated</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B398</td>
+<td><a href="../todo/bugs/#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class"><code>self</code> inside an object shape is not bound to the declaring class</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B399</td>
+<td><a href="../todo/bugs/#b399-var-above-a-global-statement-is-misapplied"><code>@var</code> above a <code>global</code> statement is misapplied</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B400</td>
+<td><a href="../todo/bugs/#b400-only-the-nearest-of-several-stacked-var-docblocks-applies">Only the nearest of several stacked <code>@var</code> docblocks applies</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B401</td>
+<td><a href="../todo/bugs/#b401-an-invalid-phpdoc-type-is-shown-verbatim">An invalid PHPDoc type is shown verbatim</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B402</td>
+<td><a href="../todo/bugs/#b402-phpstan-method-does-not-outrank-method"><code>@phpstan-method</code> does not outrank <code>@method</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B405</td>
+<td><a href="../todo/bugs/#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved">A closure called through <code>-&gt;call()</code>, or a callable held in a variable, is not resolved</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B406</td>
+<td><a href="../todo/bugs/#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable">Closure variadics are lists or untyped, and a <code>null</code> default does not always make a parameter nullable</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B407</td>
+<td><a href="../todo/bugs/#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union">A property inferred from the constructor drops <code>[]</code> and does not narrow a readonly union</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B408</td>
+<td><a href="../todo/bugs/#b408-an-assignment-inside-an-argument-to-new-is-not-seen">An assignment inside an argument to <code>new</code> is not seen</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B409</td>
+<td><a href="../todo/bugs/#b409--on-an-undefined-or-null-only-left-side-gives-mixed"><code>??</code> on an undefined or null-only left side gives <code>mixed</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B410</td>
+<td><a href="../todo/bugs/#b410-a-void-calls-result-is-typed-void-instead-of-null">A <code>void</code> call's result is typed <code>void</code> instead of <code>null</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B411</td>
+<td><a href="../todo/bugs/#b411-arithmetic-on-float-literals-is-not-folded">Arithmetic on float literals is not folded</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
 <td></td>
 <td><strong><a href="../todo/diagnostics/">Diagnostics</a></strong></td>
 <td></td>
@@ -2258,10 +2522,22 @@ unlikely to move the needle for most users.</p>
 <td>High</td>
 </tr>
 <tr>
+<td>P65</td>
+<td><a href="../todo/performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">Every call site repeats the full function lookup, hit or miss</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
 <td>P58</td>
 <td><a href="../todo/performance/#p58-a-member-completion-cache-hit-copies-the-whole-item-list">A member-completion cache hit copies the whole item list</a></td>
 <td>Low</td>
 <td>Low</td>
+</tr>
+<tr>
+<td>P66</td>
+<td><a href="../todo/performance/#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares">Stub version filtering rescans a stub file once per symbol it declares</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
 </tr>
 <tr>
 <td>P48</td>

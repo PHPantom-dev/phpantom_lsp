@@ -3385,6 +3385,52 @@ the join; <code>closures.rs</code> on the first return; <code>loop_control.rs</c
 writes into branch scopes too, and exit and return edges are recorded at
 arbitrary nesting depth and merged at an outer fork, so a "keys the branch
 wrote" set has to be carried through nested forks.</p>
+<hr />
+<h2 id="p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65. Every call site repeats the full function lookup, hit or miss<a class="headerlink" href="#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The forward walker asks <code>find_or_load_function</code> about the same call
+several times per statement (by-reference out-parameters, <code>@assert</code>
+narrowing, the return type), and nothing remembers the answer. A hit
+clones the whole <code>FunctionInfo</code> out of <code>global_functions</code>; a miss, which
+is every call to a function the project never declares, walks all four
+phases again, including cloning <code>autoload_file_paths</code> and building a URI
+per path. Every hover re-walks the enclosing body from its first
+statement, so the cost lands once per call site per hover.</p>
+<p>PHPStan's <code>nsrt/if.php</code> (a 545-line closure calling undeclared helpers
+such as <code>foo()</code> and <code>doFoo()</code>) measures about 70 ms per hover near its
+end in a release build, with <code>find_or_load_function</code>,
+<code>resolve_function_name_at</code>, and the <code>CiMap</code> lookups they make taking the
+top of the profile. Real code rarely calls hundreds of undeclared
+functions, but it does call the same declared ones over and over, and
+each of those pays the clone.</p>
+<p>The same file takes 53 s under the assertType runner in a debug build,
+which is why it is not among the ported fixtures in <code>tests/phpstan_nsrt/</code>
+yet; port it once this lands.</p>
+<p>Caching the resolved <code>Arc&lt;FunctionInfo&gt;</code> (and a negative entry) per
+request, keyed by the candidate names, would turn the repeats into
+lookups. Returning an <code>Arc</code> rather than a clone is the larger half of
+the saving on its own.</p>
+<p><strong>Where to look:</strong> <code>find_or_load_function</code> in <code>resolution.rs</code>, and the
+<code>function_loader</code> closures built for <code>VarResolutionCtx</code>.</p>
+<hr />
+<h2 id="p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares">P66. Stub version filtering rescans a stub file once per symbol it declares<a class="headerlink" href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>set_php_version</code> drops every stub symbol marked <code>@removed</code> at or before
+the target version. For a file that mentions <code>@removed</code> at all,
+<code>is_stub_function_removed</code> and its class and constant counterparts locate
+each symbol with <code>source.find("function NAME(")</code> from the start of the
+file, so a stub file declaring n symbols is scanned n times. Whether a
+file mentions <code>@removed</code> is now answered once per file, which halved the
+cost, but the per-symbol search remains: building a full-stub backend in
+a debug build still spends about 0.45 s there, and every test that uses
+<code>new_test_with_full_stubs</code> (including each fixture the assertType runner
+checks) pays it. The server pays it once at startup, far less in a
+release build.</p>
+<p>Scanning each such file once for its <code>@removed</code> docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.</p>
+<p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
+<code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
 
 
 
