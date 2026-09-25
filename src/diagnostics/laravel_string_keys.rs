@@ -531,6 +531,42 @@ impl Backend {
         // imports before looking up the model's policy.
         Some(class_loader(&name)?.fqn().to_string())
     }
+
+    /// Whether `literal` names no template this project ships, as a
+    /// `view-string` argument demands it does.
+    ///
+    /// `false` covers "no" and "cannot tell" alike, because only a name
+    /// we can prove wrong is worth reporting:
+    ///
+    /// * An empty literal is a string being typed, not a claim.
+    /// * A project the view scan found no templates in tells us nothing
+    ///   about any name — it may not be a Laravel project at all, or its
+    ///   roots may be somewhere the scan does not reach.
+    /// * A `package::name` view lives in a directory a provider
+    ///   registers. When no provider registered that namespace, the
+    ///   package's templates are simply not enumerable here, so the name
+    ///   is unjudgeable rather than wrong.
+    pub(crate) fn view_string_literal_is_unknown(&self, literal: &str) -> bool {
+        if literal.is_empty() {
+            return false;
+        }
+        let known = self.cached_view_names();
+        if known.is_empty() {
+            return false;
+        }
+        let name = crate::virtual_members::laravel::canonical_view_name(literal);
+        if let Some((namespace, _)) = name.split_once("::")
+            && !self
+                .laravel_provider_resources
+                .read()
+                .view_dirs
+                .iter()
+                .any(|dir| dir.namespace == namespace)
+        {
+            return false;
+        }
+        known.binary_search_by(|k| k.as_str().cmp(&name)).is_err()
+    }
 }
 
 /// Whether the sorted `keys` hold `key` itself or a key nested under it

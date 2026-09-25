@@ -474,20 +474,22 @@ impl Backend {
         items
     }
 
-    /// Try completion for `model-property<Model>` typed parameters.
+    /// The declared type of the parameter the string under the cursor
+    /// fills, with the call context it was found through.
     ///
-    /// When the cursor is inside a string argument whose corresponding
-    /// parameter is typed as `model-property<Model>`, suggests the
-    /// model's known property names.  Uses the shared
-    /// [`detect_string_call_context`] to locate the enclosing call,
-    /// then resolves the callable target to inspect the parameter type.
-    pub(crate) fn try_model_property_completion(
+    /// The prologue every *type*-driven string strategy shares, resolved
+    /// once and handed to each: locating the enclosing call is a scan and
+    /// resolving its callee is full type resolution, so a strategy that
+    /// repeated them would pay for both again on every keystroke inside a
+    /// string. Strategies that recognise a call by its *name* have no use
+    /// for it and run before these.
+    pub(crate) fn typed_string_argument(
         &self,
         content: &str,
         position: Position,
         ctx: &FileContext,
         code: &CodeContext<'_>,
-    ) -> Option<CompletionResponse> {
+    ) -> Option<(StringCallContext, PhpType)> {
         let cursor_offset = position_to_offset(content, position) as usize;
         let sc = detect_string_call_context(content, cursor_offset, code)?;
 
@@ -498,9 +500,26 @@ impl Backend {
         };
 
         let resolved = self.resolve_callable_target(&call_expr, content, position, ctx)?;
-        let param = resolved.parameters.get(sc.arg_index)?;
-        let param_type = param.type_hint.as_ref()?;
+        let param_type = resolved
+            .parameters
+            .get(sc.arg_index)?
+            .type_hint
+            .as_ref()?
+            .clone();
+        Some((sc, param_type))
+    }
 
+    /// Try completion for `model-property<Model>` typed parameters.
+    ///
+    /// When the cursor is inside a string argument whose corresponding
+    /// parameter is typed as `model-property<Model>`, suggests the
+    /// model's known property names.
+    pub(crate) fn model_property_completion(
+        &self,
+        sc: &StringCallContext,
+        param_type: &PhpType,
+        ctx: &FileContext,
+    ) -> Option<CompletionResponse> {
         let model_name_owned: String;
         let model_name: &str = if let TypeKind::Generic(g) = param_type.kind()
             && g.name.eq_ignore_ascii_case("model-property")

@@ -120,39 +120,86 @@ impl Backend {
                 .collect(),
         };
 
-        // Build the TextEdit range: from the start of the string content
-        // (right after the opening quote) to the current cursor position.
-        // This replaces the entire typed prefix with the selected name,
-        // so dots in the name don't break the editor's word-based filter.
-        let start_pos = crate::text_position::offset_to_position(content, ctx.content_start_offset);
-        let edit_range = Range {
-            start: start_pos,
-            end: position,
-        };
+        string_key_response(
+            names,
+            string_key_item_kind(&ctx.kind),
+            content,
+            ctx.content_start_offset,
+            position,
+        )
+    }
 
-        let items: Vec<CompletionItem> = names
-            .into_iter()
-            .enumerate()
-            .map(|(i, name)| {
-                let kind = string_key_item_kind(&ctx.kind);
-                CompletionItem {
-                    label: name.clone(),
-                    kind: Some(kind),
-                    sort_text: Some(format!("{:05}", i)),
-                    filter_text: Some(name.clone()),
-                    text_edit: Some(CompletionTextEdit::Edit(TextEdit {
-                        range: edit_range,
-                        new_text: name,
-                    })),
-                    ..Default::default()
-                }
-            })
+    /// Try view-name completion inside a `view-string` argument.
+    ///
+    /// The Laravel PHPStan extensions let a parameter ask for a template
+    /// name rather than any string, which the call's own spelling does not
+    /// reveal — only the callee's signature does. So where
+    /// [`try_laravel_string_key_completion`](Self::try_laravel_string_key_completion)
+    /// recognises `view('…')` by name, this offers the project's templates
+    /// whenever the parameter the cursor sits in is declared `view-string`.
+    pub(crate) fn view_string_completion(
+        &self,
+        sc: &crate::completion::eloquent_string::StringCallContext,
+        param_type: &crate::php_type::PhpType,
+        content: &str,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        if !param_type.is_view_string() {
+            return None;
+        }
+
+        let prefix_lower = sc.partial.to_lowercase();
+        let names: Vec<String> = self
+            .cached_view_names()
+            .iter()
+            .filter(|name| name.to_lowercase().starts_with(&prefix_lower))
+            .cloned()
             .collect();
 
-        if items.is_empty() {
-            None
-        } else {
-            Some(CompletionResponse::Array(items))
-        }
+        string_key_response(
+            names,
+            CompletionItemKind::FILE,
+            content,
+            sc.string_content_start,
+            position,
+        )
     }
+}
+
+/// Offer `names` as replacements for the string the cursor is typing.
+///
+/// Each item replaces the whole literal from `content_start` to the cursor
+/// rather than inserting at it, so a dotted name is not mangled by the
+/// editor's word-based filtering (which treats `.` as a boundary and would
+/// otherwise leave `users.users.profile` behind).
+fn string_key_response(
+    names: Vec<String>,
+    kind: CompletionItemKind,
+    content: &str,
+    content_start: usize,
+    position: Position,
+) -> Option<CompletionResponse> {
+    if names.is_empty() {
+        return None;
+    }
+    let edit_range = Range {
+        start: crate::text_position::offset_to_position(content, content_start),
+        end: position,
+    };
+    let items: Vec<CompletionItem> = names
+        .into_iter()
+        .enumerate()
+        .map(|(i, name)| CompletionItem {
+            label: name.clone(),
+            kind: Some(kind),
+            sort_text: Some(format!("{:05}", i)),
+            filter_text: Some(name.clone()),
+            text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                range: edit_range,
+                new_text: name,
+            })),
+            ..Default::default()
+        })
+        .collect();
+    Some(CompletionResponse::Array(items))
 }
