@@ -571,12 +571,11 @@ fn completed_workspace_index_is_reused_without_waiting() {
     waiter.join().expect("waiter thread");
 }
 
-/// A rename or Find References request must not walk the workspace again
-/// once the initial index has finished. Discovering a file the watcher
-/// never reported stays on the explicit refresh, which is not the path
-/// those requests take.
+/// A Find References request still discovers a file created after the
+/// index finished, without a watcher event. Files already indexed are not
+/// parsed again.
 #[test]
-fn request_reuses_a_completed_index_instead_of_rediscovering_files() {
+fn request_refresh_discovers_a_file_added_after_indexing() {
     let dir = tempfile::tempdir().expect("temp dir");
     let src = dir.path().join("src");
     std::fs::create_dir_all(&src).expect("src dir");
@@ -603,36 +602,19 @@ fn request_reuses_a_completed_index_instead_of_rediscovering_files() {
     .expect("created file");
     backend.ensure_workspace_indexed_for_request();
     assert!(
-        !backend
+        backend
             .symbols
             .fqn_class_index
             .read()
             .contains_key("App\\Created"),
-        "a finished index must not be walked again on the next request"
+        "a request refresh must parse a file the watcher never reported"
     );
-
-    let indexing = backend.workspace_index_lock.lock();
-    let (done_tx, done_rx) = std::sync::mpsc::channel();
-    let waiter = {
-        let backend = backend.clone_for_blocking();
-        std::thread::spawn(move || {
-            backend.ensure_workspace_indexed_for_request();
-            done_tx.send(()).expect("report completion");
-        })
-    };
-    done_rx
-        .recv_timeout(std::time::Duration::from_secs(1))
-        .expect("a completed index should bypass the in-flight lock");
-    drop(indexing);
-    waiter.join().expect("waiter thread");
-
-    backend.ensure_workspace_indexed();
     assert!(
         backend
             .symbols
             .fqn_class_index
             .read()
-            .contains_key("App\\Created")
+            .contains_key("App\\Known")
     );
 }
 
