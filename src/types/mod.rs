@@ -1110,9 +1110,11 @@ pub(crate) struct ResolvedCallableTarget {
     /// through a possibly different resolution path can disagree and
     /// produce a false positive, never a genuine mismatch (e.g.
     /// PHPUnit's `assertSame(ExpectedType $expected, mixed $actual)`).
-    /// The argument-compatibility diagnostic must skip these parameters
-    /// entirely.
-    pub self_bound_params: crate::atom::AtomSet,
+    /// The argument-compatibility diagnostic checks these parameters
+    /// against the mapped type instead: the declared type with those
+    /// templates replaced by their `of` bounds, or nothing at all (`None`)
+    /// when none of them declares a bound.
+    pub self_bound_params: crate::atom::AtomMap<Option<PhpType>>,
 }
 /// Stores extracted information about a standalone PHP function.
 ///

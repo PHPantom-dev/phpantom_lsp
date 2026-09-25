@@ -604,9 +604,13 @@ impl Backend {
                 // where `ExpectedType` is bound only by `$expected`).
                 // Comparing the argument to its own substitution is
                 // circular and can only produce false positives.
-                if resolved.self_bound_params.contains(&param.name) {
-                    continue;
-                }
+                // Its template's `of` bound is still a constraint, so that is
+                // what the argument is checked against instead.
+                let self_bound_type = match resolved.self_bound_params.get(&param.name) {
+                    Some(None) => continue,
+                    Some(Some(bound)) => Some(bound),
+                    None => None,
+                };
 
                 // An out-parameter's declared type describes what the
                 // callee *writes* through the reference, not what the
@@ -625,7 +629,7 @@ impl Backend {
                 }
 
                 // Skip if parameter has no type hint.
-                let param_type = match &param.type_hint {
+                let param_type = match self_bound_type.or(param.type_hint.as_ref()) {
                     Some(t) if !t.is_untyped() && !t.is_mixed() => t,
                     _ => continue,
                 };

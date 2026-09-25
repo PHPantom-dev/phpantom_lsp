@@ -681,7 +681,7 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
 /// Whether PHP stores an array key written as this string as an integer:
 /// a decimal integer with no sign on zero, no leading zeros, and no
 /// surrounding whitespace, within the platform integer range.
-fn is_canonical_int_key(key: &str) -> bool {
+pub(crate) fn is_canonical_int_key(key: &str) -> bool {
     let digits = key.strip_prefix('-').unwrap_or(key);
     !digits.is_empty()
         && digits.bytes().all(|b| b.is_ascii_digit())

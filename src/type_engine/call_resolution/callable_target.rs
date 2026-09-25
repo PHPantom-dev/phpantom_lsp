@@ -35,9 +35,9 @@ impl Backend {
         method_name: &str,
         args_text: Option<&str>,
         rctx: &ResolutionCtx<'_>,
-    ) -> (MethodInfo, crate::atom::AtomSet) {
+    ) -> (MethodInfo, crate::atom::AtomMap<Option<PhpType>>) {
         let mut bound = declared.clone();
-        let mut self_bound_params = crate::atom::AtomSet::default();
+        let mut self_bound_params = crate::atom::AtomMap::default();
 
         let Some(at) = args_text else {
             return (bound, self_bound_params);
@@ -51,6 +51,13 @@ impl Backend {
                 &declared.template_bindings,
                 &declared.parameters,
                 &split_args,
+                &|tpl| {
+                    declared
+                        .template_param_bounds
+                        .get(tpl)
+                        .or_else(|| owner.template_param_bounds.get(tpl))
+                        .cloned()
+                },
             );
         }
 
@@ -379,6 +386,7 @@ impl Backend {
                         &func.template_bindings,
                         &func.parameters,
                         &split_args.iter().map(String::as_str).collect::<Vec<_>>(),
+                        &|tpl| func.template_param_bounds.get(tpl).cloned(),
                     ),
                     ..Default::default()
                 };
@@ -442,6 +450,12 @@ impl Backend {
                     &ctor.template_bindings,
                     &ctor.parameters,
                     &split_args,
+                    &|tpl| {
+                        ctor.template_param_bounds
+                            .get(tpl)
+                            .or_else(|| merged.template_param_bounds.get(tpl))
+                            .cloned()
+                    },
                 );
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);

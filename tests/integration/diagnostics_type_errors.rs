@@ -5446,12 +5446,16 @@ function takesNamedBox(NamedBox $box): void {}
 takesNamedBox(new NamedBox(new User()));
 takesNamedBox(new NamedBox(new AnonymousUser()));
 "#;
+    // The constructor call that binds `T` to `AnonymousUser` is reported
+    // too, since the bound is what its argument has to satisfy.
     let diags = collect(php);
     let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
-        msgs.len(),
-        1,
-        "Expected exactly one type error for NamedBox<AnonymousUser>, got: {msgs:?}"
+        msgs,
+        [
+            "Argument 1 ($box) expects NamedBox<User>, got NamedBox<AnonymousUser>",
+            "Argument 1 ($value) expects HasName, got AnonymousUser",
+        ],
     );
 }
 
@@ -12242,4 +12246,212 @@ function g() {
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── Array shapes against typed arrays and other shapes ──────────────
+
+#[test]
+fn a_shape_key_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 'one']);
+f(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn a_list_shape_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list{string} $b */
+function f(array $b): void {}
+f([null]);
+f(['x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_empty_array_is_not_a_non_empty_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param non-empty-list<int> $c */
+function f(array $c): void {}
+/** @param non-empty-array<string, int> $c */
+function g(array $c): void {}
+f([]);
+g([]);
+f([1]);
+g(['a' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_a_string_key_is_not_a_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list<string> $d */
+function f(array $d): void {}
+/** @param array<int, string> $d */
+function g(array $d): void {}
+/** @param array<string, string> $d */
+function h(array $d): void {}
+f(['x', 'k' => 'y']);
+g(['x', 'k' => 'y']);
+h(['x', 'k' => 'y']);
+f(['x', 'y']);
+g([3 => 'x', 'y']);
+h(['k' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_extra_keys_still_satisfies_a_narrower_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 1, 'buz' => 'x']);
+"#;
+    assert!(!has_type_error(&collect(php)));
+}
+
+// ── A subclass binding its parent's template ────────────────────────
+
+#[test]
+fn a_subclass_that_binds_its_parents_template_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ class Box {}
+/** @extends Box<int> */ final class IntBox extends Box {}
+/** @extends Box<string> */ final class StringBox extends Box {}
+/** @param Box<string> $box */ function f(Box $box): void {}
+f(new IntBox());
+f(new StringBox());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_interface_binding_through_implements_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ interface Source {}
+/**
+ * @template T
+ * @extends Source<T>
+ */
+interface Named extends Source {}
+/** @implements Named<int> */ final class IntSource implements Named {}
+/** @param Source<string> $s */ function f(Source $s): void {}
+/** @param Source<int> $s */ function g(Source $s): void {}
+f(new IntSource());
+g(new IntSource());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── A template's bound at the call that binds it ────────────────────
+
+#[test]
+fn an_argument_outside_a_function_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/**
+ * @template T of array
+ * @param T $a
+ */
+function g($a): void {}
+g(1);
+g([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_argument_outside_a_class_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T of array */
+final class Collection {
+    /** @param T $items */
+    public function __construct(public $items) {}
+}
+new Collection(1);
+new Collection([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_enclosing_templates_class_string_satisfies_a_bounded_template() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?Node {
+        return $this->first($type);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn a_bound_check_ignores_templates_another_argument_binds() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {}
+/**
+ * @template TNode of Node
+ * @template TValue
+ */
+interface Collector {}
+final class Emitted {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function __construct(string $type, mixed $data) {}
+}
+final class Scope {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function emit(string $type, mixed $data): void {
+        new Emitted($type, $data);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
 }

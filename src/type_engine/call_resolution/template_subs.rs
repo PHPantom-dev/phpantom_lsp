@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use crate::Backend;
-use crate::atom::{Atom, AtomSet, atom};
+use crate::atom::{Atom, AtomMap, atom};
 use crate::class_lookup::is_self_or_static;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::variable::rhs_resolution::{
@@ -1189,11 +1189,59 @@ pub(crate) fn build_call_template_subs(
 ///
 /// A template two arguments both bind is not covered: those disagree with
 /// each other rather than with themselves, which is a real check.
+///
+/// The substitution is circular, but a template's `of` bound is not: it
+/// is what the argument had to satisfy to bind the template at all. Each
+/// parameter maps to its declared type with the templates only it binds
+/// replaced by their bounds, or to `None` when none of those templates
+/// declares one, since then there is nothing to check. Every other
+/// template the declaration binds becomes `mixed`: another argument
+/// decides it, and that argument's own check is where the two can
+/// disagree.
 pub(crate) fn self_bound_template_params(
     bindings: &[(Atom, Atom)],
     parameters: &[ParameterInfo],
     arg_texts: &[&str],
-) -> AtomSet {
+    bound_of: &dyn Fn(&Atom) -> Option<PhpType>,
+) -> AtomMap<Option<PhpType>> {
+    let self_bound = exclusively_bound_templates(bindings, parameters, arg_texts);
+    let mut result = AtomMap::default();
+    for (tpl_name, param_name) in &self_bound {
+        let bounds = result.entry(*param_name).or_insert_with(HashMap::new);
+        if let Some(bound) = bound_of(tpl_name) {
+            bounds.insert(tpl_name.to_string(), bound);
+        }
+    }
+    result
+        .into_iter()
+        .map(|(param_name, bounds): (Atom, HashMap<String, PhpType>)| {
+            if bounds.is_empty() {
+                return (param_name, None);
+            }
+            let declared = parameters
+                .iter()
+                .find(|p| p.name == param_name.as_str())
+                .and_then(|p| p.type_hint.as_ref());
+            let checked = declared.map(|hint| {
+                let mut bound_subs: HashMap<String, PhpType> = bindings
+                    .iter()
+                    .map(|(tpl_name, _)| (tpl_name.to_string(), PhpType::mixed()))
+                    .collect();
+                bound_subs.extend(bounds);
+                hint.substitute(&bound_subs)
+            });
+            (param_name, checked)
+        })
+        .collect()
+}
+
+/// The `(template, parameter)` bindings the call fills, keeping only the
+/// templates exactly one filled parameter binds.
+fn exclusively_bound_templates(
+    bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    arg_texts: &[&str],
+) -> Vec<(Atom, Atom)> {
     let bound = crate::call_args::bind_text_args_to_params(parameters, arg_texts);
     let was_passed = |param_name: &Atom| {
         parameters
@@ -1206,13 +1254,11 @@ pub(crate) fn self_bound_template_params(
         .filter(|(_, param_name)| was_passed(param_name))
         .collect();
 
-    let mut result = AtomSet::default();
-    for (tpl_name, param_name) in &filled {
-        if filled.iter().filter(|(t, _)| t == tpl_name).count() == 1 {
-            result.insert(*param_name);
-        }
-    }
-    result
+    filled
+        .iter()
+        .filter(|(tpl_name, _)| filled.iter().filter(|(t, _)| t == tpl_name).count() == 1)
+        .map(|binding| **binding)
+        .collect()
 }
 
 /// Resolve an array literal argument's first element to a type.

@@ -22,90 +22,6 @@ No outstanding items.
 
 ## Type comparison
 
-### B412. An array shape argument is only checked on its values, and only against a typed array
-**Impact: Medium · Complexity: Medium**
-
-```php
-declare(strict_types=1);
-/** @param array{foo: int} $a  @param list{string} $b  @param non-empty-list<int> $c  @param list<string> $d */
-function f(array $a, array $b, array $c, array $d): void {}
-f(['foo' => 'one'], [null], [], ['x', 'k' => 'y']); // all four should be reported, none is
-```
-
-When a shape argument fails the shape-superset rule in `is_type_compatible`
-(a key the parameter requires holds the wrong type), nothing rejects it: it
-falls through to the "typed array → `ArrayShape`: MAYBE" rule, which answers
-yes for any array-like argument, shapes included. The "`ArrayShape` → typed
-array" rule compares only the entries' values with the parameter's value
-type. The keys are never checked, so a string key passes for a `list<T>`
-or an `array<string, V>` with an int key. An empty shape counts as a
-`non-empty-list` or `non-empty-array` because no entries means no failures.
-A shape literal is a complete, known value, so all three are definite
-mismatches rather than MAYBEs.
-
-Leave the extra-key question alone. `array{foo: int}` accepting a shape
-that also has `buz` is the deliberate "shapes are open by convention" rule.
-
-Found running the php-typing-conformance suite
-(`arrays_shape_sealed_by_default.php` line 36, `arrays_non_empty_list.php`,
-`regressions_array_element_null_subtraction.php`,
-`regressions_list_or_map_union_rejects_hybrid.php`). PHPStan, Psalm and
-mago report all four.
-
-**Where to look:** the `ArrayShape` rules in
-`src/diagnostics/type_errors/compatibility.rs` (shape superset, shape →
-typed array, typed array → shape).
-
-### B413. A subclass that binds its parent's template satisfies every parameterisation of the parent
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @template T */ class Box {}
-/** @extends Box<int> */ final class IntBox extends Box {}
-/** @param Box<string> $box */ function f(Box $box): void {}
-f(new IntBox()); // should be reported, is not
-/** @var Box<int> $b */ $b = new Box();
-f($b);           // reported
-```
-
-The same-base generic rule compares `Box<int>` with `Box<string>`
-argument by argument. `IntBox` has no type arguments of its own, though,
-so it reaches the nominal fallback, which only asks whether `IntBox`
-extends `Box`. The argument's `@extends`/`@implements` binding for the
-parameter's base class should be substituted first, then judged by the
-generic rule.
-
-Found running the php-typing-conformance suite
-(`generics_extends_implements.php`). PHPStan, Psalm and mago report it.
-
-**Where to look:** the same-base generic covariance block in
-`src/diagnostics/type_errors/compatibility.rs`, with the ancestor's
-bindings from the inheritance merge.
-
-### B414. A template's `of` bound is not checked at the call that binds it
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T of array */
-final class Collection { /** @param T $items */ public function __construct(public $items) {} }
-new Collection(1); // should be reported, is not
-
-/** @template T of array  @param T $a */
-function g($a): void {}
-g(1);              // should be reported, is not
-```
-
-A parameter typed by a bounded template is checked against nothing, so an
-argument outside the bound binds `T` to it silently. The bound should be
-the parameter type the argument has to satisfy, as it already is when
-nothing binds `T`.
-
-Found running the php-typing-conformance suite
-(`generics_template_bound_array.php`). PHPStan, Psalm and mago report it.
-
-**Where to look:** template substitution for argument checks in
-`src/diagnostics/type_errors/`.
-
 ### B415. A closure's parameter types are not checked against a `callable(…)` parameter
 **Impact: Low-Medium · Complexity: Medium** (depends on [T13](type-inference.md#t13-closure-variables-lose-callable-signature-detail))
 
@@ -193,6 +109,28 @@ Found porting PHPStan's `nsrt/bug-13365.php`; the assertions are
 `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 ## Reachability
+
+### B417. An argument in a branch a `!== null` test rules out is still checked
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+function takesNode(Node $n): void {}
+function f(?Node $x): void {
+    if ($x instanceof Node) { return; }
+    if ($x !== null) { takesNode($x); } // reported: expects Node, got null
+}
+```
+
+With `$x` down to `null`, `strip_null_from_scope` marks the branch
+unreachable, but the argument check inside it still resolves `$x` as
+`null` and reports it. A branch nothing can enter should either resolve
+its variables to `never` or not be checked at all. `get_class()` on a
+property narrowed the same way reports `expects object, got null`, which
+is how it turned up in phpstan-src (`src/PhpDoc/TypeNodeResolver.php`).
+
+**Where to look:** `strip_null_from_scope` in
+`type_engine/variable/forward_walk/cond_narrowing/scope_edits.rs` and how
+the argument diagnostics treat an unreachable scope.
 
 ### B379. The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after
 **Impact: Medium · Complexity: Medium**
@@ -533,6 +471,36 @@ it is too slow under the runner (see
 
 ## Symbol resolution
 
+### B418. `Foo::class` of a class in the file's own namespace can stay unqualified
+**Impact: Medium · Complexity: Medium**
+
+```php
+namespace Acme\Model\Events;
+
+use Illuminate\Database\Eloquent\Model;
+
+final class EventSubcategory extends Model {
+    public function event(): BelongsTo {
+        // reported: expects class-string<Model>, got class-string<Event>
+        return $this->belongsTo(Event::class, 'event_id');
+    }
+}
+```
+
+`Event` is `Acme\Model\Events\Event`, a model in the same directory and
+namespace, and no `use` names it. In a full-project `analyze` of a
+Laravel app the argument resolves to the unqualified `class-string<Event>`,
+which means the `::class` arm in `rhs_resolution/property_access.rs`
+found no class and fell back to the spelling. The bare `Event` then loads
+as Laravel's global `Event` facade alias, which is not a `Model`.
+Analysing only that directory resolves it correctly, so it depends on
+what else the run has loaded first. No standalone reproduction yet.
+
+**Where to look:** the `::class` arm of `Access::ClassConstant` in
+`type_engine/variable/rhs_resolution/property_access.rs`, and the
+namespace-relative lookup `type_hint_to_classes_typed` does against the
+facade alias fallback in `resolution.rs`.
+
 ### B403. `new` of a class that cannot be loaded has no type
 **Impact: Medium · Complexity: Low-Medium**
 
@@ -656,6 +624,29 @@ it is too slow under the runner (see
 [P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
 
 ## Array types
+
+### B419. Writing through a key of unknown type makes the keys `int|string`
+**Impact: Low · Complexity: Low**
+
+```php
+/** @return array<string, string> */
+function f(mixed $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r; // reported: non-empty-array<int|string, string> is incompatible
+}
+```
+
+A key whose type is unknown is `array-key`, which the type comparison
+treats as benevolent because nobody measured it. Written through an
+array, it comes out as a plain `int|string` union instead, which both
+halves have to satisfy, so a `string`-keyed return or parameter rejects
+it. Showed up in phpstan-src
+(`build/PHPStan/Build/TurboAttributeCollector.php`, a key read off
+`ReflectionAttribute::newInstance()`).
+
+**Where to look:** the key type recorded by the keyed-write arm in
+`type_engine/variable/array_shape_writes.rs`.
 
 ### B390. A literal argument bound to a function template is widened
 **Impact: Low-Medium · Complexity: Medium**
