@@ -33,24 +33,24 @@ function (): void {
 	 */
 	$timelines = [];
 
-	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map( // SKIP: a closure's return type is read from its declaration, not its body
+	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map(
 		$timelines,
 		static function (Timeline $timeline): Timeline {
 			return $timeline;
 		},
 	));
-	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map( // SKIP: a closure's return type is read from its declaration, not its body
+	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map(
 		$timelines,
 		static function ($timeline) {
 			return $timeline;
 		},
 	));
 
-	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map( // SKIP: a closure's return type is read from its declaration, not its body
+	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map(
 		$timelines,
 		static fn (Timeline $timeline): Timeline => $timeline,
 	));
-	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map( // SKIP: a closure's return type is read from its declaration, not its body
+	assertType('array<int, Bug7281\\Timeline<Bug7281\\Percentage>>', map(
 		$timelines,
 		static fn ($timeline) => $timeline,
 	));

@@ -595,7 +595,10 @@ pub(super) fn build_constructor_template_subs(
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
     let bound = crate::call_args::bind_text_args_to_params(&ctor.parameters, &arg_refs);
 
-    for (tpl_name, param_name) in &ctor.template_bindings {
+    for (tpl_name, param_name) in crate::type_engine::call_resolution::callable_bindings_last(
+        &ctor.template_bindings,
+        &ctor.parameters,
+    ) {
         let param_idx = match ctor
             .parameters
             .iter()
@@ -643,7 +646,12 @@ pub(super) fn build_constructor_template_subs(
             TemplateBindingMode::CallableReturnType => {
                 if let Some(bound) =
                     crate::type_engine::call_resolution::bind_callable_return_template(
-                        arg_text, param_hint, tpl_name, rctx,
+                        arg_text,
+                        param_hint,
+                        tpl_name,
+                        &subs,
+                        &ctor.template_bindings,
+                        rctx,
                     )
                 {
                     subs.insert(tpl_name.to_string(), bound);
@@ -660,10 +668,11 @@ pub(super) fn build_constructor_template_subs(
                 }
             }
             TemplateBindingMode::CallableParamType(position) => {
-                if let Some(param_type) =
-                    crate::type_engine::call_resolution::bind_callable_param_template(
-                        arg_text, position, rctx,
-                    )
+                if !subs.contains_key(tpl_name.as_str())
+                    && let Some(param_type) =
+                        crate::type_engine::call_resolution::bind_callable_param_template(
+                            arg_text, position, rctx,
+                        )
                 {
                     subs.insert(tpl_name.to_string(), param_type);
                 }

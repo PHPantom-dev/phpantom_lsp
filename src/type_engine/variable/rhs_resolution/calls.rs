@@ -54,6 +54,7 @@ fn apply_template_binding_mode(
     arg_text: &str,
     walker_types: Option<ArgWalkerTypes<'_>>,
     param_hint: Option<&PhpType>,
+    bindings: &[(crate::atom::Atom, crate::atom::Atom)],
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) {
     // Only consulted where the text-driven resolver came back empty, so a
@@ -82,7 +83,7 @@ fn apply_template_binding_mode(
         }
         TemplateBindingMode::CallableReturnType => {
             if let Some(bound) = crate::type_engine::call_resolution::bind_callable_return_template(
-                arg_text, param_hint, tpl_name, rctx,
+                arg_text, param_hint, tpl_name, subs, bindings, rctx,
             ) {
                 insert_or_union(subs, tpl_name.to_string(), bound);
             }
@@ -99,11 +100,13 @@ fn apply_template_binding_mode(
         }
         TemplateBindingMode::CallableParamType(position) => {
             // `@param Closure(T): void $cb` — extract the closure's
-            // parameter type annotation at the given position.
-            if let Some(param_type) =
-                crate::type_engine::call_resolution::bind_callable_param_template(
-                    arg_text, position, rctx,
-                )
+            // parameter type annotation at the given position, unless
+            // another argument already bound the template.
+            if !subs.contains_key(tpl_name)
+                && let Some(param_type) =
+                    crate::type_engine::call_resolution::bind_callable_param_template(
+                        arg_text, position, rctx,
+                    )
             {
                 insert_or_union(subs, tpl_name.to_string(), param_type);
             }
@@ -269,7 +272,10 @@ pub(crate) fn build_function_template_subs(
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
     let bound = crate::call_args::bind_text_args_to_params(&func_info.parameters, &arg_refs);
 
-    for (tpl_name, param_name) in &func_info.template_bindings {
+    for (tpl_name, param_name) in crate::type_engine::call_resolution::callable_bindings_last(
+        &func_info.template_bindings,
+        &func_info.parameters,
+    ) {
         let param_idx = match func_info
             .parameters
             .iter()
@@ -352,6 +358,7 @@ pub(crate) fn build_function_template_subs(
                 arg_text,
                 walker_types,
                 param_hint,
+                &func_info.template_bindings,
                 rctx,
             );
             if subs.get(tpl_name.as_str()) != before.as_ref() {

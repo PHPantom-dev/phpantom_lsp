@@ -102,7 +102,6 @@ unlikely to move the needle for most users.
 | B374 | [`instanceof` against a class that cannot be loaded clears the variable's type](todo/bugs.md#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type) | Medium      | Medium      |
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
 | B387 | [`foreach` over `SplObjectStorage` swaps its keys and values](todo/bugs.md#b387-foreach-over-splobjectstorage-swaps-its-keys-and-values) | Medium      | Low-Medium  |
-| B391 | [A closure's return type is read from its declaration, not its body](todo/bugs.md#b391-a-closures-return-type-is-read-from-its-declaration-not-its-body) | Medium      | Medium-High |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
 | B369 | [`isset($arr[$k])` does not narrow `$k` to the keys the array has](todo/bugs.md#b369-issetarrk-does-not-narrow-k-to-the-keys-the-array-has) | Low-Medium  | Medium      |
 | B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |

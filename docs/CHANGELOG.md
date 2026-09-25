@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A closure's return type comes from what its body returns.** A closure handed to a generic function such as `map($boxes, fn (Box $b): Box => $b)` now keeps the `Box<stdClass>` its body returns rather than the bare `Box` it declares, and an untyped `fn ($b) => $b` receives the element type the call hands it instead of `mixed`. `array_map()` likewise keeps the array shape a callback declared `: array` returns.
 - **A method declared `: never` stays `never` when it overrides an interface.** `EmptyIterator::key()` used to take `Iterator`'s `@return TKey|null` and read as `mixed|null`.
 - **`@var` above a `global` statement types only what the statement imports.** A nameless `/** @var int */` types the single variable a `global $foo;` brings in, and a `@var` naming some other variable no longer changes that variable's type.
 - **Stacked `@var` docblocks above an assignment all apply.** When `/** @var Foo[] $items */` sits above another `@var` docblock rather than directly above `$items = [];`, it still gives `$items` its type instead of losing to the assigned value.

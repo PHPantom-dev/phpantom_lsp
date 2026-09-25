@@ -14703,9 +14703,9 @@ function run(): void {
 }
 
 /// A callable whose return type *is* the template binds the whole return
-/// type, so a closure annotated `: array` still binds a bare `array` there.
-/// Decomposition must not reach into a return type that has nothing to
-/// decompose.
+/// type: the `array<int, string>` the closure's body returns (narrowing its
+/// `: array` annotation), not that array's key or value.  Decomposition must
+/// not reach into a return type that has nothing to decompose.
 #[test]
 fn hover_bare_template_callable_return_binds_whole_type() {
     let backend = create_test_backend();
@@ -14737,9 +14737,52 @@ function run(): void {
     let hover = hover_at(&backend, uri, content, 20, 5).expect("expected hover on $flat");
     let text = hover_text(&hover);
     assert!(
-        text.contains("Coll<array-key, array>"),
+        text.contains("Coll<array-key, array<int, string>>"),
         "a bare template return should bind the whole annotated type, got: {text}"
     );
+}
+
+/// A closure passed to a user-defined generic function returns what its body
+/// produces, with its parameters typed from the callable hint.  The typed
+/// closure's `: Box` annotation is narrowed by the `Box<stdClass>` its body
+/// returns, and the untyped one's `$b` receives that same element type.  The
+/// callback is written before the array it maps, so the binding cannot rely
+/// on `@param` order.
+#[test]
+fn hover_generic_callable_return_reads_closure_body() {
+    let backend = create_test_backend();
+    let uri = "file:///generic_map_body.php";
+    let content = r#"<?php
+/** @template T */
+final class Box {}
+
+/**
+ * @template T
+ * @template U
+ * @param callable(T): U $fn
+ * @param array<int, T> $a
+ * @return array<int, U>
+ */
+function mapAll(callable $fn, array $a): array { return []; }
+
+function run(): void {
+    /** @var array<int, Box<stdClass>> $boxes */
+    $boxes = [];
+    $typed = mapAll(fn (Box $b): Box => $b, $boxes);
+    $untyped = mapAll(fn ($b) => $b, $boxes);
+    $typed;
+    $untyped;
+}
+"#;
+
+    for (line, name) in [(18, "$typed"), (19, "$untyped")] {
+        let hover = hover_at(&backend, uri, content, line, 5).expect("expected hover");
+        let text = hover_text(&hover);
+        assert!(
+            text.contains("array<int, Box<stdClass>>"),
+            "{name} should keep the element's generic argument, got: {text}"
+        );
+    }
 }
 
 /// A subject that names a generic class without arguments must read its

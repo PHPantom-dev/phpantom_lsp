@@ -715,8 +715,10 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         && !declared.is_untyped()
     {
         // Only a class-like declaration can be narrowed by a hierarchy
-        // relation, so a scalar one skips the body walk entirely.
-        if declared.is_scalar_leaf() {
+        // relation, so a scalar one skips the body walk entirely. A bare
+        // `array` is the exception: the body can return a shape or a
+        // generic array that the keyword cannot spell.
+        if declared.is_scalar_leaf() && !declared.is_bare_array() {
             return Some(declared);
         }
         let seed = args

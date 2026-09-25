@@ -644,28 +644,6 @@ Binding `T` from a literal argument generalises it to its base type.
 Found porting PHPStan's `nsrt/generic-generalization.php`; the
 assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-### B391. A closure's return type is read from its declaration, not its body
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-/** @template T  @template U  @param array<int, T> $a  @param callable(T): U $fn  @return array<int, U> */
-function map(array $a, callable $fn): array { return []; }
-/** @var array<int, Box<stdClass>> $boxes */
-map($boxes, fn (Box $b): Box => $b); // should be array<int, Box<stdClass>>, is array<int, Box>
-map($boxes, fn ($b) => $b);          // should be array<int, Box<stdClass>>, is array<int, mixed>
-array_map(function (array $a): array { return $a; }, $shapes); // keeps array, loses the shape
-```
-
-A closure passed to a user-defined generic function binds the callable's
-return template from its native return type alone, and its untyped
-parameters are not typed from the callable's parameters. `array_map` infers
-both for untyped closures, but it too prefers a declared `: array` over the
-narrower shape the body returns.
-
-Found porting PHPStan's `nsrt/bug-7281.php`, `nsrt/closure-types.php`;
-the assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
-
 ### B392. Template defaults are ignored
 **Impact: Low-Medium · Complexity: Medium**
 

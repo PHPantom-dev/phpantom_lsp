@@ -84,6 +84,6 @@ pub(crate) use target_cache::{
 };
 pub(crate) use template_subs::{
     array_literal_shape_type, bind_callable_param_template, bind_callable_return_template,
-    build_call_template_subs, evaluate_constant_operands, finish_template_subs,
-    type_operator_bound_literal,
+    build_call_template_subs, callable_bindings_last, evaluate_constant_operands,
+    finish_template_subs, type_operator_bound_literal,
 };

@@ -92,7 +92,9 @@ impl Backend {
         // prefix is stripped off the value.
         let bound = crate::call_args::bind_text_args_to_params(&method.parameters, arg_texts);
 
-        for (tpl_name, param_name) in &method.template_bindings {
+        for (tpl_name, param_name) in
+            callable_bindings_last(&method.template_bindings, &method.parameters)
+        {
             let param_idx = match method
                 .parameters
                 .iter()
@@ -482,9 +484,14 @@ impl Backend {
                     }
                 }
                 TemplateBindingMode::CallableReturnType => {
-                    if let Some(bound) =
-                        bind_callable_return_template(arg_text, param_hint, tpl_name, ctx)
-                    {
+                    if let Some(bound) = bind_callable_return_template(
+                        arg_text,
+                        param_hint,
+                        tpl_name,
+                        &subs,
+                        &method.template_bindings,
+                        ctx,
+                    ) {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
                             tpl_name.to_string(),
@@ -497,20 +504,11 @@ impl Backend {
                     // (`mapWithKeys()`, `mapToGroups()`) — bind from the
                     // key (0) or value (1) of the callback's array-shaped
                     // return, not the whole return type. A bare `: array`
-                    // annotation carries no key/value information, so
-                    // fall back to the literal array the body returns
+                    // annotation carries no key/value information, but the
+                    // inferred return is narrowed by the body's own array
                     // (e.g. `fn ($o): array => ['x' => $o]`).
                     let extracted = Self::infer_closure_return_type(arg_text, ctx)
-                        .and_then(|ret_type| extract_array_position(&ret_type, position))
-                        .or_else(|| {
-                            let body =
-                                crate::completion::source::helpers::extract_closure_body_expr_text(
-                                    arg_text,
-                                )?;
-                            let resolved =
-                                Self::resolve_closure_body_type(arg_text, body, None, ctx)?;
-                            extract_array_position(&resolved, position)
-                        });
+                        .and_then(|ret_type| extract_array_position(&ret_type, position));
                     if let Some(extracted) = extracted {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -522,7 +520,9 @@ impl Backend {
                 TemplateBindingMode::CallableParamType(position) => {
                     // `@param Closure(T): void $cb` — extract the closure's
                     // parameter type annotation at the given position.
-                    if let Some(param_type) = bind_callable_param_template(arg_text, position, ctx)
+                    if !subs.contains_key(tpl_name.as_str())
+                        && let Some(param_type) =
+                            bind_callable_param_template(arg_text, position, ctx)
                     {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
                             &mut subs,
@@ -868,13 +868,9 @@ impl Backend {
 
     /// Infer a closure/arrow-function argument's effective return type.
     ///
-    /// Three sources are tried in turn: an explicit `: ReturnType`
-    /// annotation, generator `yield` inference, and finally the body
-    /// expression resolved through the shared type resolver (an arrow
-    /// `fn() => EXPR`, or the first `return EXPR;` of a full closure body).
-    /// The body-resolution fallback lets template params bind from
-    /// unannotated closures like `Cache::remember($k, $ttl, fn() => new
-    /// Order())`.
+    /// See [`infer_closure_return_type_seeded`](Self::infer_closure_return_type_seeded);
+    /// this is the variant for a call site that knows nothing about what
+    /// the closure's parameters receive.
     ///
     /// Returns `None` when the text is not a closure literal or nothing can
     /// be inferred.
@@ -882,28 +878,59 @@ impl Backend {
         arg_text: &str,
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
-        crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-            // A `: ReturnType` annotation is raw source text, so its class
-            // names are still spelled as the file writes them (`Support\Pen`
-            // behind a `use App\Support;`).  A template bound from it is
-            // compared against types that arrived fully qualified, so the
-            // spelling has to be canonicalised before it is bound.
-            .map(|ty| crate::util::resolve_php_type_names(&ty, ctx.class_loader))
-            .or_else(|| {
-                crate::completion::source::helpers::infer_generator_type_from_closure_yields(
-                    arg_text,
-                )
-            })
-            .or_else(|| {
-                let body =
-                    crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-                // A body that resolves to `mixed` says nothing about the
-                // template, and binding it hides the template's own bound
-                // (`@template TNewKey of array-key`), which is strictly more
-                // informative.  Leave the template unbound instead.
-                Self::resolve_closure_body_type(arg_text, body, None, ctx)
-                    .filter(|ty| !ty.is_mixed())
-            })
+        Self::infer_closure_return_type_seeded(arg_text, &[], ctx)
+    }
+
+    /// Infer a closure/arrow-function argument's effective return type,
+    /// with its parameters seeded from `param_seeds` (one per position;
+    /// see [`resolve_closure_body_type`](Self::resolve_closure_body_type)).
+    ///
+    /// The body expression (an arrow `fn() => EXPR`, or the first `return
+    /// EXPR;` of a full closure body) is resolved through the shared type
+    /// resolver.  A closure really returns what its body produces narrowed
+    /// by what it declares, so an explicit `: ReturnType` annotation only
+    /// wins when the body resolves to something that is not a subtype of
+    /// it.  A scalar annotation cannot be narrowed by anything the body
+    /// resolves to, so it skips the body walk.  An unannotated closure
+    /// tries generator `yield` inference before its body.  The body
+    /// fallback lets template params bind from unannotated closures like
+    /// `Cache::remember($k, $ttl, fn() => new Order())`.
+    pub(crate) fn infer_closure_return_type_seeded(
+        arg_text: &str,
+        param_seeds: &[Option<PhpType>],
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        let body_type = || {
+            let body =
+                crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
+            // A body that resolves to `mixed` says nothing about the
+            // template, and binding it hides the template's own bound
+            // (`@template TNewKey of array-key`), which is strictly more
+            // informative.  Leave the template unbound instead.
+            Self::resolve_closure_body_type(arg_text, body, param_seeds, ctx)
+                .filter(|ty| !ty.is_mixed())
+        };
+        let Some(declared) =
+            crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
+        else {
+            return crate::completion::source::helpers::infer_generator_type_from_closure_yields(
+                arg_text,
+            )
+            .or_else(body_type);
+        };
+        // A `: ReturnType` annotation is raw source text, so its class
+        // names are still spelled as the file writes them (`Support\Pen`
+        // behind a `use App\Support;`).  A template bound from it is
+        // compared against types that arrived fully qualified, so the
+        // spelling has to be canonicalised before it is bound.
+        let declared = crate::util::resolve_php_type_names(&declared, ctx.class_loader);
+        if declared.is_scalar_leaf() && !declared.is_bare_array() {
+            return Some(declared);
+        }
+        let narrowed = body_type().filter(|body| {
+            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+        });
+        Some(narrowed.unwrap_or(declared))
     }
 
     /// Infer a closure/arrow-function argument's return type from its
@@ -921,30 +948,31 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let body = crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-        Self::resolve_closure_body_type(arg_text, body, Some(param_type), ctx)
+        Self::resolve_closure_body_type(arg_text, body, &[Some(param_type.clone())], ctx)
     }
 
-    /// Resolve an unannotated closure's body expression to a type,
-    /// seeding the closure's own typed parameters into variable
-    /// resolution.
+    /// Resolve a closure's body expression to a type, seeding the
+    /// closure's own parameters into variable resolution.
     ///
     /// A body expression rooted at a closure parameter (e.g.
     /// `fn(Decimal $carry, $op) => $carry->add(...)`) cannot resolve
     /// through outer-scope assignment scanning because the parameter is
     /// declared in the closure's own signature.  This injects a
-    /// `scope_var_resolver` that answers parameter lookups from the
-    /// declared type hints and delegates everything else to the
-    /// resolution the body would otherwise get (the outer scope
-    /// resolver when present, assignment scanning otherwise).
+    /// `scope_var_resolver` that answers parameter lookups and delegates
+    /// everything else to the resolution the body would otherwise get
+    /// (the outer scope resolver when present, assignment scanning
+    /// otherwise).
     ///
-    /// `first_param_seed` supplies the type of the first parameter when
-    /// the closure declares none and the call site knows what it
-    /// receives (see
-    /// [`infer_closure_return_type_from_body`](Self::infer_closure_return_type_from_body)).
+    /// `param_seeds` holds, per position, what the call site hands that
+    /// parameter when it knows (`array_map($cb, $users)` hands `$cb` a
+    /// `User`).  An untyped parameter takes its seed; a typed one takes it
+    /// only when the seed is a subtype of the declared hint, as a
+    /// `Timeline<Percentage>` is of `Timeline`, and otherwise keeps the
+    /// hint.
     fn resolve_closure_body_type(
         closure_text: &str,
         body: &str,
-        first_param_seed: Option<&PhpType>,
+        param_seeds: &[Option<PhpType>],
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let typed_params: Vec<(String, PhpType)> =
@@ -952,10 +980,28 @@ impl Backend {
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
-                .filter_map(|(index, (name, ty))| match ty {
-                    Some(t) => Some((name, t)),
-                    None if index == 0 => first_param_seed.map(|t| (name, t.clone())),
-                    None => None,
+                .filter_map(|(index, (name, declared))| {
+                    let seed = param_seeds.get(index).and_then(Option::as_ref);
+                    // The parameter hint is raw source text, so it carries
+                    // the file's own spelling of the class name; canonicalise
+                    // it so the seeded type matches one resolved any other
+                    // way.
+                    let declared =
+                        declared.map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+                    let ty = match (declared, seed) {
+                        (Some(declared), Some(seed))
+                            if crate::class_lookup::is_subtype_of_typed(
+                                seed,
+                                &declared,
+                                ctx.class_loader,
+                            ) =>
+                        {
+                            seed.clone()
+                        }
+                        (Some(declared), _) => declared,
+                        (None, seed) => seed?.clone(),
+                    };
+                    Some((name, ty))
                 })
                 .collect();
         if typed_params.is_empty() {
@@ -981,10 +1027,6 @@ impl Backend {
         let param_types: HashMap<String, Vec<ResolvedType>> = typed_params
             .into_iter()
             .map(|(name, ty)| {
-                // The parameter hint is raw source text, so it carries the
-                // file's own spelling of the class name; canonicalise it so
-                // the seeded type matches one resolved any other way.
-                let ty = crate::util::resolve_php_type_names(&ty, ctx.class_loader);
                 // Each alternative of a union is seeded on its own so it
                 // keeps its own generic arguments. Two instantiations of the
                 // same class (`Builder<A>|Builder<B>`) resolve to one class,
@@ -1599,33 +1641,44 @@ fn literal_array_key_text(key_text: &str) -> Option<String> {
         .then(|| key_text.to_string())
 }
 
-/// Bind the template a `@param callable(...): …` hint names in its return
-/// type, from the closure argument written at the call site.
+/// `bindings` in the order they should be bound: those read off a
+/// callable-typed parameter come after all the rest.
 ///
-/// The closure's own return type comes from its annotation, its generator
-/// yields, or (unannotated) its body.  Two things then stand between that
-/// type and the template:
-///
-/// The annotation may be less specific than what the closure actually
-/// returns.  `fn ($c): array => arrStr($c)` says only `array` while
-/// `arrStr()` declares `array<int, string>`, so a hint that asks for
-/// `array<TKey, TValue>` has nothing to take a key or a value from.  When
-/// the declared return has structure to fill and the closure's own is the
-/// opaque `array` keyword, the body is resolved instead.
-///
-/// And the template is rarely the whole return type: `array<TKey, TValue>`,
-/// `list<TValue>`, and Laravel's `Collection<TKey, TValue>|array<TKey,
-/// TValue>` each name it at a position inside a larger shape.  The inferred
-/// type is matched against that shape so each template binds to its own
-/// part rather than to the whole return type.
+/// A callable argument's return type is inferred with its parameters
+/// seeded from the templates the other arguments bound, and a template it
+/// names in a parameter position only binds when nothing else did, so both
+/// need every other argument bound first, whatever order the `@param` tags
+/// are written in.
+pub(crate) fn callable_bindings_last<'a>(
+    bindings: &'a [(Atom, Atom)],
+    params: &'a [ParameterInfo],
+) -> impl Iterator<Item = &'a (Atom, Atom)> {
+    let is_callable = move |binding: &&(Atom, Atom)| {
+        params
+            .iter()
+            .find(|p| p.name == binding.1.as_str())
+            .and_then(|p| p.type_hint.as_ref())
+            .is_some_and(|h| h.callable_param_types().is_some())
+    };
+    bindings
+        .iter()
+        .filter(move |b| !is_callable(b))
+        .chain(bindings.iter().filter(is_callable))
+}
+
 /// Bind a template parameter that a `@param Closure(T): void` hint names in
 /// the callback's *parameter* list, reading the type off the closure
 /// argument's own annotation at `position`.
 ///
 /// The annotation is raw source text, so it carries the file's spelling of
 /// the class rather than its FQCN (`Support\Pen` behind a `use App\Support;`).
-/// A template bound from it is compared against — and unioned with — types
-/// that arrived fully qualified, so the spelling is canonicalised here.
+/// A template bound from it is compared against types that arrived fully
+/// qualified, so the spelling is canonicalised here.
+///
+/// A parameter position is contravariant: the closure accepting a
+/// `Timeline` says nothing about the `Timeline<Percentage>` the call hands
+/// it.  Callers therefore only bind from here when no other argument bound
+/// the template (see [`callable_bindings_last`]).
 pub(crate) fn bind_callable_param_template(
     arg_text: &str,
     position: usize,
@@ -1640,34 +1693,70 @@ pub(crate) fn bind_callable_param_template(
     ))
 }
 
+/// Bind the template a `@param callable(...): …` hint names in its return
+/// type, from the closure argument written at the call site.
+///
+/// A closure's return type is what its body produces, narrowed by what it
+/// declares (PHPStan's `intersectButNotNever`).  `fn (Timeline $t): Timeline
+/// => $t` handed a `Timeline<Percentage>` returns `Timeline<Percentage>`,
+/// and `fn ($c): array => arrStr($c)` returns the `array<int, string>` that
+/// `arrStr()` declares.  The body is resolved with each closure parameter
+/// seeded from the hint's own parameter types wherever the templates they
+/// name are already in `bound`, so an untyped `fn ($t) => $t` receives what
+/// the call hands it.  An annotation the body cannot narrow (a scalar, or a
+/// body that resolves to something unrelated) stands as written, and an
+/// unannotated closure falls back to its generator yields.
+///
+/// The template is rarely the whole return type: `array<TKey, TValue>`,
+/// `list<TValue>`, and Laravel's `Collection<TKey, TValue>|array<TKey,
+/// TValue>` each name it at a position inside a larger shape.  The inferred
+/// type is matched against that shape so each template binds to its own
+/// part rather than to the whole return type.
+///
+/// `bindings` is the callee's full template binding list, which is how an
+/// unbound template in the hint's parameter types is told apart from a
+/// class name.
 pub(crate) fn bind_callable_return_template(
     arg_text: &str,
     param_hint: Option<&PhpType>,
     tpl_name: &str,
+    bound: &HashMap<String, PhpType>,
+    bindings: &[(Atom, Atom)],
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let declared_ret = param_hint.and_then(|h| h.callable_return_type());
-    let mut ret_type = Backend::infer_closure_return_type(arg_text, ctx);
-
-    // `callable(): T` binds the whole return type, so a bare `array` is the
-    // right answer there and there is no shape to decompose against.  Any
-    // richer declared return has parts the bare keyword cannot fill.
-    let has_shape =
-        declared_ret.is_some_and(|d| !matches!(d.kind(), TypeKind::Named(n) if &**n == tpl_name));
-
-    if has_shape
-        && ret_type.as_ref().is_some_and(PhpType::is_bare_array)
-        && let Some(body_type) =
-            crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)
-                .and_then(|body| Backend::resolve_closure_body_type(arg_text, body, None, ctx))
-                .filter(|ty| !ty.is_mixed() && !ty.is_bare_array())
-    {
-        ret_type = Some(body_type);
-    }
-
-    let ret_type = ret_type?;
+    let seeds = callable_param_seeds(param_hint, bound, bindings);
+    let ret_type = Backend::infer_closure_return_type_seeded(arg_text, &seeds, ctx)?;
     let bound = declared_ret.and_then(|declared| unify_template(declared, &ret_type, tpl_name));
     Some(bound.unwrap_or(ret_type))
+}
+
+/// The types a callable hint promises each of its parameters, with the
+/// callee's already-bound templates substituted in.
+///
+/// A position whose hint still names an unbound template has nothing
+/// concrete to promise and is left `None`.
+fn callable_param_seeds(
+    param_hint: Option<&PhpType>,
+    bound: &HashMap<String, PhpType>,
+    bindings: &[(Atom, Atom)],
+) -> Vec<Option<PhpType>> {
+    let Some(params) = param_hint.and_then(|h| h.callable_param_types()) else {
+        return Vec::new();
+    };
+    params
+        .iter()
+        .map(|p| {
+            let names_unbound = bindings.iter().any(|(t, _)| {
+                !bound.contains_key(t.as_str())
+                    && crate::type_engine::variable::rhs_resolution::type_contains_name(
+                        &p.type_hint,
+                        t,
+                    )
+            });
+            (!names_unbound).then(|| p.type_hint.substitute(bound))
+        })
+        .collect()
 }
 
 /// Bind a template parameter by walking a parameter hint and an argument

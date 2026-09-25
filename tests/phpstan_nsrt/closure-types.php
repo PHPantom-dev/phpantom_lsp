@@ -19,7 +19,7 @@ class Foo
 
 			return $a;
 		}, $this->arrayShapes);
-		assertType('array<int, array{foo: string, bar: int}>', $a); // SKIP: a closure's return type is read from its declaration, not its body
+		assertType('array<int, array{foo: string, bar: int}>', $a);
 
 		$b = array_map(function ($b) {
 			assertType('array{foo: string, bar: int}', $b);
