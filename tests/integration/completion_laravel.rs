@@ -15821,3 +15821,204 @@ class MPFilterTest {
         labels
     );
 }
+
+/// A `builder-of<static>` written inside a `Closure(…)` parameter types
+/// the closure's argument, the way the `Closure(TFactory)` beside it
+/// already does. `static` binds to the model the call is made on, and the
+/// model's own builder is what the closure receives.
+#[tokio::test]
+async fn a_closure_parameter_typed_builder_of_seeds_the_closure() {
+    let user = r#"<?php
+namespace App\Models;
+use Closure;
+use Illuminate\Database\Eloquent\Model;
+
+class User extends Model {
+    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }
+
+    /**
+     * @param (Closure(builder-of<static>): mixed)|null $query
+     * @param (Closure(factory-of<static>): mixed)|null $factory
+     */
+    public static function randomOrFactory(?Closure $query = null, ?Closure $factory = null): mixed
+    {
+        return null;
+    }
+
+    public function callers(): void
+    {
+        User::randomOrFactory(
+            fn ($q) => $q->userOnly(),
+            fn ($f) => $f->factoryOnly(),
+        );
+    }
+}
+"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", user),
+        (
+            "src/Models/UserBuilder.php",
+            "<?php namespace App\\Models; class UserBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function userOnly() {} }",
+        ),
+        (
+            "database/factories/UserFactory.php",
+            "<?php namespace Database\\Factories; class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function factoryOnly() {} }",
+        ),
+    ]);
+
+    for (needle, expected) in [("$q->", "userOnly"), ("$f->", "factoryOnly")] {
+        let offset = user.find(needle).unwrap() + needle.len();
+        let line = user[..offset].matches('\n').count() as u32;
+        let character = (offset - user[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32;
+        let items = complete_at(&backend, &dir, "src/Models/User.php", user, line, character).await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "{needle} should offer {expected}, got: {:?}",
+            method_names(&items)
+        );
+    }
+}
+
+/// The shape a real application writes it in: the annotation lives on a
+/// generic trait the model composes, `static` therefore means the model
+/// the call names rather than the trait, the model's builder comes from
+/// `@use HasBuilder<…>`, and the call is made from another file entirely.
+#[tokio::test]
+async fn builder_of_static_on_a_trait_binds_the_model_the_call_names() {
+    let has_builder = r#"<?php
+namespace App\Concerns;
+/**
+ * @template TBuilder of \Illuminate\Database\Eloquent\Builder
+ * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ */
+trait HasBuilder {}
+"#;
+    let has_factory = r#"<?php
+namespace App\Concerns;
+use Closure;
+use Illuminate\Database\Eloquent\Factories\Factory;
+/**
+ * @template TFactory of Factory
+ * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ */
+trait HasFactory
+{
+    /**
+     * @param (Closure(builder-of<static>): mixed)|null $query
+     * @param (Closure(TFactory): TFactory)|null $factory
+     */
+    public static function randomOrFactory(?Closure $query = null, ?Closure $factory = null): mixed
+    {
+        return null;
+    }
+}
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use App\Concerns\HasBuilder;
+use App\Concerns\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class User extends Model {
+    /** @use HasBuilder<\App\Models\UserBuilder> */
+    use HasBuilder;
+    /** @use HasFactory<\Database\Factories\UserFactory> */
+    use HasFactory;
+
+    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }
+}
+"#;
+    let caller = r#"<?php
+namespace App\Models;
+
+final class DivisionFactory
+{
+    public function forHead(): void
+    {
+        User::randomOrFactory(
+            function ($q) { $q->eagleOnly(); return $q; },
+            fn ($f) => $f->factoryOnly(),
+        );
+    }
+}
+"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/HasBuilder.php", has_builder),
+        ("src/Concerns/HasFactory.php", has_factory),
+        ("src/Models/User.php", user),
+        (
+            "src/Models/UserBuilder.php",
+            "<?php namespace App\\Models; class UserBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function eagleOnly() {} }",
+        ),
+        (
+            "database/factories/UserFactory.php",
+            "<?php namespace Database\\Factories; class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function factoryOnly() {} }",
+        ),
+        ("src/Models/DivisionFactory.php", caller),
+    ]);
+
+    let position_after = |needle: &str| {
+        let offset = caller.find(needle).unwrap() + needle.len();
+        Position {
+            line: caller[..offset].matches('\n').count() as u32,
+            character: (offset - caller[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32,
+        }
+    };
+
+    for (needle, expected) in [("$q->", "eagleOnly"), ("$f->", "factoryOnly")] {
+        let at = position_after(needle);
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/DivisionFactory.php",
+            caller,
+            at.line,
+            at.character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "{needle} should offer {expected}, got: {:?}",
+            method_names(&items)
+        );
+    }
+
+    // The forward walker seeds the closure for every consumer, so the
+    // same binding has to carry hover and go-to-definition, not just the
+    // completion list.
+    let uri = Url::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
+    let on_method = position_after("$q->eagle");
+    let targets = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, on_method.line, on_method.character)
+            .await,
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.uri.as_str().ends_with("/UserBuilder.php")),
+        "go-to-definition on the closure's method should reach UserBuilder, got {targets:?}"
+    );
+
+    // On the variable itself, in the body — not the parameter it was
+    // declared as.
+    let on_var = position_after("return $");
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: on_var,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on the closure parameter");
+    let text = match hover.contents {
+        HoverContents::Markup(markup) => markup.value,
+        other => panic!("expected markup hover, got {other:?}"),
+    };
+    assert!(
+        text.contains("UserBuilder"),
+        "hover on the closure parameter should name UserBuilder, got: {text}"
+    );
+}
