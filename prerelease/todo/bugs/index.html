@@ -1315,17 +1315,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B397. <code>static</code> inside a generic type is left unbound on a <code>Class::</code> access
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2319,17 +2308,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B397. <code>static</code> inside a generic type is left unbound on a <code>Class::</code> access
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2972,21 +2950,6 @@ back to a branch without comparing against the argument or receiver.</p>
 <p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>, <code>nsrt/template-default.php</code>;
 the assertions are <code>// SKIP</code> in the ported copies under
 <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access">B397. <code>static</code> inside a generic type is left unbound on a <code>Class::</code> access<a class="headerlink" href="#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="x">    /** @return array&lt;static&gt; */ public static function all() {}</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="x">    /** @var array&lt;static&gt; */ public static $items;</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="x">}</span>
-<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="x">class Bar extends Foo {}</span>
-<a id="__codelineno-33-6" name="__codelineno-33-6" href="#__codelineno-33-6"></a><span class="x">Foo::all();   // should be array&lt;Foo&gt;, is array&lt;static()&gt;</span>
-<a id="__codelineno-33-7" name="__codelineno-33-7" href="#__codelineno-33-7"></a><span class="x">Bar::$items;  // should be array&lt;Bar&gt;, is array&lt;static(Bar)&gt;</span>
-</code></pre></div>
-<p>Instance calls bind a nested <code>static</code>; static calls and static property reads
-leave it open (or empty) instead of fixing it to the named class.</p>
-<p>Found porting PHPStan's <code>nsrt/static-methods.php</code>,
-<code>nsrt/static-properties.php</code>; the assertions are <code>// SKIP</code> in the ported
-copies under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
