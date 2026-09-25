@@ -564,9 +564,13 @@ pub(crate) fn process_assignment_expr<'b>(
         }
 
         // Chain assignments: `$a = $b = expr` — the RHS is itself an
-        // assignment expression.  Process it first so that the inner
-        // variable (`$b`) gets its type before we resolve the outer one.
-        if matches!(assignment.rhs, Expression::Assignment(_)) {
+        // assignment expression, possibly parenthesized (`$a = ($b =
+        // expr)`).  Process it first so that the inner variable (`$b`)
+        // gets its type before we resolve the outer one.
+        if matches!(
+            crate::parser::unwrap_parens(assignment.rhs),
+            Expression::Assignment(_)
+        ) {
             process_assignment_expr(assignment.rhs, scope, ctx);
         }
 
@@ -985,8 +989,9 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
 ) -> Vec<ResolvedType> {
     // Chain assignment: `$a = $b = expr` — the value of an assignment
     // expression is the value of its RHS.  Recurse into the inner RHS
-    // so that `$a` resolves to the same type as `$b`.
-    if let Expression::Assignment(assignment) = rhs
+    // so that `$a` resolves to the same type as `$b`.  The RHS may be
+    // parenthesized (`$a = ($b = expr)`), so unwrap before matching.
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
         && assignment.operator.is_assign()
     {
         return resolve_rhs_with_scope(assignment.rhs, scope, ctx);
@@ -995,7 +1000,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // Compound assignment as RHS: `$a = ($x /= 2)` — the value of the
     // compound assignment is the result after the operation.  Infer the
     // type from the operator kind.
-    if let Expression::Assignment(assignment) = rhs
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
         && !assignment.operator.is_assign()
     {
         use mago_syntax::cst::assignment::AssignmentOperator;

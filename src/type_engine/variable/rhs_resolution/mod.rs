@@ -532,8 +532,105 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
         Expression::Call(Call::Method(_) | Call::NullSafeMethod(_)) => {
             resolve_method_chain(expr, ctx)
         }
+        Expression::Assignment(assignment) => resolve_assignment_as_value(assignment, ctx),
         _ => resolve_rhs_expression_inner(expr, ctx),
     }
+}
+
+/// Resolve an assignment expression used as a value, not just a
+/// statement: `$x = ($y = 1)`, `$x = $a ?? ($y = 1) ?? 1`.
+///
+/// PHP assignment is itself an expression whose value is whatever ends
+/// up in the target. Plain `=` yields the RHS's own value; the other
+/// operators combine it with the target's current value the same way a
+/// statement-level compound assignment does, so an operand position
+/// (`??` chain, ternary, match arm) gets the same answer a top-level
+/// `$y = expr;` statement would.
+///
+/// Recording the target itself, so a later read of `$y` sees this
+/// write, is the forward walker's job (`process_nested_assignments` /
+/// `process_assignment_expr`), not this read-only pipeline's.
+fn resolve_assignment_as_value<'b>(
+    assignment: &'b Assignment<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    use mago_syntax::cst::assignment::AssignmentOperator;
+    match assignment.operator {
+        AssignmentOperator::Assign(_) => resolve_rhs_expression(assignment.rhs, ctx),
+        AssignmentOperator::Coalesce(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            let combined = coalesce_assign_value(lhs_types, rhs_types);
+            if combined.is_empty() {
+                vec![ResolvedType::from_type_string(PhpType::mixed())]
+            } else {
+                combined
+            }
+        }
+        AssignmentOperator::Concat(_) => vec![ResolvedType::from_type_string(PhpType::string())],
+        AssignmentOperator::Modulo(_)
+        | AssignmentOperator::LeftShift(_)
+        | AssignmentOperator::RightShift(_)
+        | AssignmentOperator::BitwiseAnd(_)
+        | AssignmentOperator::BitwiseOr(_)
+        | AssignmentOperator::BitwiseXor(_) => vec![ResolvedType::from_type_string(PhpType::int())],
+        AssignmentOperator::Addition(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(infer_addition_result_type(
+                &lhs_types, &rhs_types,
+            ))]
+        }
+        AssignmentOperator::Subtraction(_)
+        | AssignmentOperator::Multiplication(_)
+        | AssignmentOperator::Division(_)
+        | AssignmentOperator::Exponentiation(_) => {
+            let op_kind = match assignment.operator {
+                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
+                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
+                _ => ArithmeticOpKind::Other,
+            };
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(
+                infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind),
+            )]
+        }
+    }
+}
+
+/// The value a `??=` used as a value leaves behind: the target's current
+/// type with `null` stripped, unioned with the fallback's type.
+///
+/// Mirrors the forward walker's own `coalesce_assign_value` (in
+/// `forward_walk::assignment`), which combines the same pair for a
+/// statement-level `??=` target. That copy folds the result into a
+/// mutable `ScopeState`; this one only answers "what does this
+/// expression evaluate to" for a caller that treats the assignment as
+/// one operand among others, so it works from two already-resolved
+/// `Vec<ResolvedType>` instead.
+fn coalesce_assign_value(
+    lhs_types: Vec<ResolvedType>,
+    rhs_types: Vec<ResolvedType>,
+) -> Vec<ResolvedType> {
+    let mut combined: Vec<ResolvedType> = lhs_types
+        .into_iter()
+        .filter(|rt| !rt.type_string.is_null())
+        .map(|mut rt| {
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+            rt
+        })
+        .collect();
+    ResolvedType::extend_unique(&mut combined, rhs_types);
+    let class_backed: Vec<PhpType> = combined
+        .iter()
+        .filter(|rt| rt.class_info.is_some())
+        .map(|rt| rt.type_string.clone())
+        .collect();
+    combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
+    combined
 }
 
 /// Strip wrappers that cannot change the type of the expression they

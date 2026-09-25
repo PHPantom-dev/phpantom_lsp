@@ -140,7 +140,6 @@ unlikely to move the needle for most users.
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |
 | B408 | [An assignment inside an argument to `new` is not seen](todo/bugs.md#b408-an-assignment-inside-an-argument-to-new-is-not-seen) | Low         | Low         |
 | B411 | [Arithmetic on float literals is not folded](todo/bugs.md#b411-arithmetic-on-float-literals-is-not-folded) | Low         | Low         |
-| B417 | [An assignment used as a value does not resolve outside a bare RHS](todo/bugs.md#b417-an-assignment-used-as-a-value-does-not-resolve-outside-a-bare-rhs) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

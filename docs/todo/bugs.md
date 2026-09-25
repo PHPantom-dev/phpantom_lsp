@@ -863,36 +863,3 @@ Psalm accepts the call.
 
 **Where to look:** `object_cast_type` in
 `type_engine/variable/rhs_resolution/mod.rs`.
-
-### B417. An assignment used as a value does not resolve outside a bare RHS
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(): void {
-    $x = ($y = 1);
-    // $x and $y both resolve to nothing (not even `mixed`).
-}
-function g(): void {
-    $x = 0 ?? ($y = 1);
-    // $x resolves fine (`0`); $y's assignment inside the `??` operand
-    // is never seen, so the RHS of the whole chain silently widens to
-    // `mixed` beside it.
-}
-```
-
-`resolve_rhs_expression` (the shared pipeline in
-`type_engine/variable/rhs_resolution/mod.rs`, used by ternaries, `??`
-chains, match arms, and every other operand position) has no arm for
-`Expression::Assignment` at all, parenthesized or not. The only place an
-assignment resolves as a value is `resolve_rhs_with_scope`'s dedicated
-chain-assignment special case (`$a = $b = expr`), which is reached solely
-from the top-level RHS of a plain `$var = …;` statement and does not
-unwrap a `Parenthesized` wrapper first, so `$a = ($b = expr)` misses it
-too.
-
-Found while porting PHPStan's `nsrt/falsey-coalesce.php`: `$x = $a ??
-($y=1) ?? 1;` needs `($y=1)` to resolve to `1` inside the `??` chain, and
-because `resolve_rhs_expression` cannot resolve it, the chain adds
-`mixed`. Two assertions stay `// SKIP` in the ported copy under
-`tests/phpstan_nsrt/falsey-coalesce.php` because of this
-(`maybeNullableVarAssign`, `notExistsAssign`).
