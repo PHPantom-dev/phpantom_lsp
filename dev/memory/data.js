@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790373177288,
+  "lastUpdate": 1790375246490,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31517,6 +31517,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "b01f20febf63871a07ea28fa6540401872214c20",
+          "message": "Renaming a variable no longer re-indexes the project\n\nEvery rename, Find References, and incoming-call request called\nensure_workspace_indexed_for_request, which re-walked the workspace\nand re-inferred every Blade template even after the index had\nfinished. A local `$foo` therefore cost as much as the index itself,\nand the next rename of the same name cost the same.\n\nA finished index is now reused. Watched-file notifications still\napply later creates and edits. An explicit refresh remains for a\nfile the watcher never reported.",
+          "timestamp": "2026-09-25T17:12:55-05:00",
+          "tree_id": "01a12542c8317fc81ce1bbda171f172e2d13b15b",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b01f20febf63871a07ea28fa6540401872214c20"
+        },
+        "date": 1790375237873,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 72.9,
             "unit": "MiB"
           }
         ]
