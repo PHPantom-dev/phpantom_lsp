@@ -393,11 +393,13 @@ pub(crate) fn process_foreach<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // Bind the value variable (and optionally the key variable).
     match &foreach.target {
@@ -509,7 +511,7 @@ pub(crate) fn process_foreach<'b>(
         .is_some_and(|it| it.is_empty_array_shape())
     {
         let exit_frame = ExitFrameGuard::push();
-        walk_body_forward(body_stmts.iter().copied(), scope, ctx);
+        walk_body_forward(body_stmts.iter().copied(), scope, &loop_body_ctx);
         exit_frame.pop();
         *scope = pre_loop_scope;
         return;
@@ -523,7 +525,7 @@ pub(crate) fn process_foreach<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| {

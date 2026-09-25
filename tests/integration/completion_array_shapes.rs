@@ -5031,8 +5031,10 @@ async fn test_push_style_single_type_member_access() {
     }
 }
 
-/// `$arr = []; $arr[] = new User(); $arr[] = new AdminUser(); $arr[0]->`
-/// should resolve to members from both User and AdminUser.
+/// A push inside a loop cannot know how many times it runs, so pushing
+/// different types onto the same accumulator widens it to a list rather
+/// than tracking each push as its own positional slot: every element reads
+/// back as the union of everything ever pushed.
 #[tokio::test]
 async fn test_push_style_union_type_member_access() {
     let backend = create_test_backend();
@@ -5050,8 +5052,10 @@ async fn test_push_style_union_type_member_access() {
         "    public function grantPermission(string $perm): void {}\n",
         "}\n",
         "$arr = [];\n",
-        "$arr[] = new User();\n",
-        "$arr[] = new AdminUser();\n",
+        "do {\n",
+        "    $arr[] = new User();\n",
+        "    $arr[] = new AdminUser();\n",
+        "} while (false);\n",
         "$arr[0]->\n",
     );
 
@@ -5069,7 +5073,7 @@ async fn test_push_style_union_type_member_access() {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 13,
+                line: 15,
                 character: 10,
             },
         },
@@ -5373,10 +5377,13 @@ async fn test_push_style_inside_class_method() {
     }
 }
 
-/// Push with initial non-empty array: `$arr = [new User()]; $arr[] = new AdminUser();`
-/// String-keyed literal entries are absent, but the initial array has positional
-/// entries. Push inference should still work since positional entries don't
-/// produce string keys.
+/// Push with initial non-empty array, inside a loop so the push cannot know
+/// how many times it runs and widens the whole array to a list instead of
+/// tracking the pushed value as its own positional slot: `$arr = [new
+/// User()]; do { $arr[] = new AdminUser(); } while (false);`. String-keyed
+/// literal entries are absent, but the initial array has positional
+/// entries. Push inference should still work since positional entries
+/// don't produce string keys.
 #[tokio::test]
 async fn test_push_style_with_initial_positional_array() {
     let backend = create_test_backend();
@@ -5392,7 +5399,9 @@ async fn test_push_style_with_initial_positional_array() {
         "    public function grantPermission(string $perm): void {}\n",
         "}\n",
         "$arr = [new User()];\n",
-        "$arr[] = new AdminUser();\n",
+        "do {\n",
+        "    $arr[] = new AdminUser();\n",
+        "} while (false);\n",
         "$arr[0]->\n",
     );
 
@@ -5410,7 +5419,7 @@ async fn test_push_style_with_initial_positional_array() {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 10,
+                line: 12,
                 character: 10,
             },
         },

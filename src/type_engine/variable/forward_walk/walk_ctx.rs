@@ -42,6 +42,19 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// When a function body contains `global $x;`, the walker looks up
     /// `$x` in this map to seed the local scope with the top-level type.
     pub top_level_scope: Option<AtomMap<Vec<ResolvedType>>>,
+    /// Whether the statement currently being walked sits lexically inside a
+    /// loop body (`for`/`foreach`/`while`/`do-while`, at any nesting depth).
+    ///
+    /// The fixed-point walk re-walks a loop body a handful of times to
+    /// converge, not once per actual runtime iteration, so a statement
+    /// inside one runs a statically unknowable number of times. Array
+    /// writes read this to decide whether a `[]` append may keep a tracked
+    /// shape's precise arity (safe outside a loop, where it runs exactly
+    /// once) or must widen straight to the collection type it is building
+    /// (required inside one, or the shape would grow by one entry per
+    /// re-walk instead of settling). See
+    /// `array_shape_writes::merge_nested_array_write`.
+    pub in_loop: bool,
 }
 
 impl<'a> ForwardWalkCtx<'a> {
@@ -77,6 +90,7 @@ impl<'a> ForwardWalkCtx<'a> {
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
         }
     }
 
@@ -98,6 +112,25 @@ impl<'a> ForwardWalkCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
+            in_loop: self.in_loop,
+        }
+    }
+
+    /// Return a copy of this context marked as walking inside a loop body
+    /// (or not). See [`ForwardWalkCtx::in_loop`].
+    pub(crate) fn with_in_loop(&self, in_loop: bool) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            current_class: self.current_class,
+            all_classes: self.all_classes,
+            content: self.content,
+            cursor_offset: self.cursor_offset,
+            class_loader: self.class_loader,
+            backend: self.backend,
+            loaders: self.loaders,
+            resolved_class_cache: self.resolved_class_cache,
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            top_level_scope: self.top_level_scope.clone(),
+            in_loop,
         }
     }
 

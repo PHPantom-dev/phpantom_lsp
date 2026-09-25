@@ -615,11 +615,13 @@ function test(
 }
 
 /// Writing an array literal states its contents, so the values it names
-/// survive into its type. Mutating one afterwards does not: a push or a
-/// keyed write says the array is being built up rather than written out,
-/// and the value arriving there stands in for however many more follow.
+/// survive into its type. A keyed write afterwards does not: it says the
+/// array is being built up rather than written out, and the value arriving
+/// there stands in for however many more follow. A straight-line `[]`
+/// append is different — it runs exactly once, so it keeps the shape's
+/// arity and the exact value it wrote, the same as construction.
 #[test]
-fn collection_tracking_widens_at_mutation_but_not_at_construction() {
+fn collection_tracking_widens_at_a_keyed_write_but_not_construction_or_a_straight_line_push() {
     let content = r#"<?php
 /**
  * @param Iterator<int, 'draft'> $iterator
@@ -680,7 +682,7 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$pushed"),
-        "non-empty-list<string>"
+        "array{'left'|'right'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$written"),
@@ -1099,15 +1101,19 @@ function test() {
 
 // ── List tracking: push assignments ─────────────────────────────────
 
-/// `$items = []; $items[] = new User();`
-/// The unified pipeline should produce `list<User>`.
+/// `$items = []; do { $items[] = new User(); } while (false);`
+/// A push inside a loop cannot know how many times it runs, so the
+/// unified pipeline should produce `list<User>` rather than a tracked
+/// shape.
 #[test]
 fn resolve_var_list_from_push_assignments() {
     let content = r#"<?php
 class User { public string $name; }
 function test() {
     $items = [];
-    $items[] = new User();
+    do {
+        $items[] = new User();
+    } while (false);
     $items[0]->
 }
 "#;
@@ -1146,14 +1152,17 @@ function test() {
     );
 }
 
-/// Multiple push assignments with different types should union.
+/// Multiple push assignments inside a loop, with different types, should
+/// union into the list element type.
 #[test]
 fn resolve_var_list_from_push_union() {
     let content = r#"<?php
 function test() {
     $items = [];
-    $items[] = 'hello';
-    $items[] = 42;
+    do {
+        $items[] = 'hello';
+        $items[] = 42;
+    } while (false);
     $items[0]
 }
 "#;
@@ -1178,14 +1187,17 @@ function test() {
     );
 }
 
-/// Push of the same type should not duplicate.
+/// Repeated pushes of the same type inside a loop should not duplicate the
+/// list's element type.
 #[test]
 fn resolve_var_list_push_deduplicates() {
     let content = r#"<?php
 function test() {
     $items = [];
-    $items[] = 'a';
-    $items[] = 'b';
+    do {
+        $items[] = 'a';
+        $items[] = 'b';
+    } while (false);
     $items[0]
 }
 "#;
@@ -1210,16 +1222,19 @@ function test() {
     );
 }
 
-/// Reassignment resets push tracking: `$x = []; $x[] = 1; $x = []; $x[] = 'a';`
-/// should produce `list<string>`, not `list<int|string>`.
+/// Reassignment resets push tracking inside a loop: pushing an `int` before
+/// reassigning `$x` back to `[]` and pushing a `string` should produce
+/// `list<string>`, not `list<int|string>`.
 #[test]
 fn resolve_var_reassignment_resets_push_tracking() {
     let content = r#"<?php
 function test() {
     $x = [];
-    $x[] = 1;
-    $x = [];
-    $x[] = 'hello';
+    do {
+        $x[] = 1;
+        $x = [];
+        $x[] = 'hello';
+    } while (false);
     $x[0]
 }
 "#;

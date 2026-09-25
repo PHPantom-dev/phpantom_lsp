@@ -782,6 +782,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 resolved_class_cache: ctx.resolved_class_cache,
                 enclosing_return_type: None,
                 top_level_scope: None,
+                in_loop: false,
             };
             let mut tl_scope = super::forward_walk::ScopeState::new();
             super::forward_walk::walk_top_level_for_globals(
@@ -938,6 +939,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: None,
+            in_loop: false,
         };
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
@@ -1206,6 +1208,7 @@ fn try_resolve_in_function(
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: enclosing_ret,
         top_level_scope: ctx.top_level_scope.clone(),
+        in_loop: false,
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -1359,6 +1362,7 @@ fn resolve_variable_in_members<'b>(
                         resolved_class_cache: ctx.resolved_class_cache,
                         enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
+                        in_loop: false,
                     };
                     let method_name_str = bytes_to_str(method.name.value).to_string();
                     let is_static = method.modifiers.contains_static();
@@ -1425,6 +1429,7 @@ fn resolve_variable_in_property_hooks(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -1481,6 +1486,7 @@ fn resolve_abstract_method_param(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
         };
 
         let trait_prototype =

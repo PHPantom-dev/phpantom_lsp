@@ -116,7 +116,6 @@ unlikely to move the needle for most users.
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
 | B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |
 | B372 | [A condition stored in a variable loses its narrowing](todo/bugs.md#b372-a-condition-stored-in-a-variable-loses-its-narrowing) | Low-Medium  | Medium      |
-| B381 | [Appending to an array shape turns it into a list](todo/bugs.md#b381-appending-to-an-array-shape-turns-it-into-a-list) | Low-Medium  | Medium      |
 | B386 | [Array functions flatten the shapes they are given](todo/bugs.md#b386-array-functions-flatten-the-shapes-they-are-given) | Low-Medium  | Medium      |
 | B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
 | B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |

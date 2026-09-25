@@ -994,6 +994,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         resolved_class_cache: diag_ctx.resolved_class_cache,
         enclosing_return_type: None,
         top_level_scope: None,
+        in_loop: false,
     };
 
     let mut top_level_scope = ScopeState::new();
@@ -1333,6 +1334,7 @@ impl<'a> DiagnosticWalkCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: None,
+            in_loop: false,
         }
     }
 }
@@ -1462,6 +1464,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: None,
         top_level_scope: None,
+        in_loop: false,
     };
 
     for member in anon.members.iter() {

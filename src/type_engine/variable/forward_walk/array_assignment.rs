@@ -278,6 +278,7 @@ fn apply_array_write<'b>(
         &base_type,
         &write_keys,
         &value_php_type,
+        ctx.in_loop,
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
 

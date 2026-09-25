@@ -657,33 +657,6 @@ it is too slow under the runner (see
 
 ## Array types
 
-### B381. Appending to an array shape turns it into a list
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$a[] = 'one';  // should be array{'one'}, is non-empty-list<string>
-$b = [1, 2, 3];
-$b[] = null;   // should be array{1, 2, 3, null}, is non-empty-list<1|2|3|null>
-```
-
-`$v[] = x` outside a loop could extend a sealed shape by one positional
-entry. The widening to a list (and of literals to their base type) is
-deliberate in `merge_push_type` / the append arm of
-`merge_nested_array_write` in `type_engine/variable/array_shape_writes.rs`,
-to keep appends inside loops from growing the shape without bound, so this
-needs a decision on whether straight-line appends may keep the shape.
-
-Letting every append onto a shape extend it (the way a keyed shape already
-does) is not enough on its own: the loop walker's re-walks each add an
-entry, so `$d = []; foreach ($xs as $x) { $d[] = $x; }` comes out as
-`array{}|array{int, int, int}`. The loop join has to generalize shapes that
-differ only in length back to a list, or appends inside a loop body have to
-keep the list treatment.
-
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
-
 ### B390. A literal argument bound to a function template is widened
 **Impact: Low-Medium · Complexity: Medium**
 

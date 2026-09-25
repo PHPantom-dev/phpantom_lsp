@@ -77,10 +77,20 @@ pub(super) enum ArrayWriteKey {
 /// so `$rows[$id][] = $name` starting from `array{}` produces
 /// `array<int, list<string>>`. Appending to a shape that tracks literal
 /// keys adds the entry PHP's next free integer key would take.
+///
+/// `in_loop` says whether this write sits lexically inside a loop body.
+/// The forward walker re-walks a loop body to a fixed point rather than
+/// simulating its actual iteration count, so an append inside one runs an
+/// unknowable number of times; `in_loop` keeps such an append widening
+/// straight to the `list<T>`/`array<K, V>` it is building instead of
+/// growing a tracked shape (or a pile of different-length shape variants)
+/// by one entry per re-walk. Outside a loop the write runs exactly once,
+/// so it keeps the shape's arity — see [`append_to_shape`].
 pub(super) fn merge_nested_array_write(
     base: &PhpType,
     keys: &[ArrayWriteKey],
     value_type: &PhpType,
+    in_loop: bool,
 ) -> PhpType {
     // Every level a write descends through holds at least the entry the
     // write put there, so the result is non-empty even when the tracked
@@ -90,13 +100,14 @@ pub(super) fn merge_nested_array_write(
     // it. A write on only some paths gives the promise back at the branch
     // join, where `array{} | non-empty-array<K, V>` widens to
     // `array<K, V>`.
-    merge_nested_array_write_inner(base, keys, value_type).non_empty_array_form()
+    merge_nested_array_write_inner(base, keys, value_type, in_loop).non_empty_array_form()
 }
 
 fn merge_nested_array_write_inner(
     base: &PhpType,
     keys: &[ArrayWriteKey],
     value_type: &PhpType,
+    in_loop: bool,
 ) -> PhpType {
     debug_assert!(!keys.is_empty());
     match &keys[0] {
@@ -105,7 +116,8 @@ fn merge_nested_array_write_inner(
                 merge_shape_key(base, key, value_type)
             } else {
                 let inner_base = shape_slot_base(base, key);
-                let inner_merged = merge_nested_array_write(&inner_base, &keys[1..], value_type);
+                let inner_merged =
+                    merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop);
                 merge_shape_key(base, key, &inner_merged)
             }
         }
@@ -124,7 +136,12 @@ fn merge_nested_array_write_inner(
                 let inner_merged = if keys.len() == 1 {
                     value_type.clone()
                 } else {
-                    merge_nested_array_write(&entries[index].value_type, &keys[1..], value_type)
+                    merge_nested_array_write(
+                        &entries[index].value_type,
+                        &keys[1..],
+                        value_type,
+                        in_loop,
+                    )
                 };
                 let mut updated: Vec<ShapeEntry> = entries.to_vec();
                 updated[index].value_type = inner_merged.widen_scalar_literals();
@@ -135,22 +152,20 @@ fn merge_nested_array_write_inner(
                 value_type.clone()
             } else {
                 let inner_base = keyed_slot_base(base);
-                merge_nested_array_write(&inner_base, &keys[1..], value_type)
+                merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop)
             };
             merge_keyed_type(base, key_type, &inner_merged)
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
             // A shape that tracks literal keys keeps them, and the append
-            // lands on the next free integer key beside them. A positional
-            // shape (`[$a, $b]`) has no such keys and takes the general
-            // mutation treatment instead: the arity a literal spelled out
-            // stops describing an array that is still being appended to,
-            // all the more so from inside a loop, where the number of
-            // appends is not the number of times the walker sees the
-            // statement.
+            // lands on the next free integer key beside them. Outside a
+            // loop a purely positional shape keeps its arity the same way;
+            // inside one it takes the general mutation treatment instead,
+            // because the number of appends the walker sees is not the
+            // number of times the statement actually runs.
             if let TypeKind::ArrayShape(entries) = base.kind()
-                && entries.iter().any(|entry| entry.key.is_some())
+                && (!in_loop || entries.iter().any(|entry| entry.key.is_some()))
             {
                 return append_to_shape(base, entries, value_type);
             }
@@ -194,9 +209,13 @@ pub(super) fn apply_nested_array_unset(base: &PhpType, keys: &[Option<String>]) 
 /// Extend a tracked shape with the entry a `[]` append writes.
 ///
 /// PHP hands an append the next free integer key, so the shape keeps every
-/// key it already tracks and gains one more. When that index is not
-/// knowable — an optional integer-keyed entry may or may not be there, and
-/// shifts every index after it — the shape widens to `array<K, V>` instead.
+/// key it already tracks and gains one more, holding on to the exact value
+/// written the same way an array literal's own entries do — a shape is
+/// only worth tracking at all because it is exact, and unlike a mutation
+/// onto a generic `array<K, V>` pair this keeps the shape's arity rather
+/// than folding into a wider domain. When that index is not knowable — an
+/// optional integer-keyed entry may or may not be there, and shifts every
+/// index after it — the shape widens to `array<K, V>` instead.
 fn append_to_shape(base: &PhpType, entries: &[ShapeEntry], value_type: &PhpType) -> PhpType {
     let Some(index) = next_append_index(entries) else {
         return merge_keyed_type(base, &PhpType::int(), value_type);
@@ -208,7 +227,7 @@ fn append_to_shape(base: &PhpType, entries: &[ShapeEntry], value_type: &PhpType)
     let mut merged = entries.to_vec();
     merged.push(ShapeEntry {
         key: (index != positional_count).then(|| index.to_string()),
-        value_type: value_type.widen_scalar_literals(),
+        value_type: value_type.clone(),
         optional: false,
     });
     let shape = PhpType::array_shape(merged);

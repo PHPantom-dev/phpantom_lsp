@@ -382,7 +382,7 @@ function test() {
 }
 
 #[test]
-fn hover_preserves_scalar_literals_through_a_collection_but_widens_a_push() {
+fn hover_preserves_scalar_literals_through_a_collection_and_a_straight_line_push() {
     let backend = create_test_backend();
     let uri = "file:///literal-hover.php";
     let content = r#"<?php
@@ -419,8 +419,34 @@ function test(bool $flag): void {
 
     let pushed = hover_at(&backend, uri, content, 7, 42).expect("hover on $pushed");
     assert!(
-        hover_text(&pushed).contains("$pushed = non-empty-list<string>"),
-        "a push after construction should widen the stored values: {}",
+        hover_text(&pushed).contains("$pushed = array{'draft', 'asc'|'desc'}"),
+        "a straight-line push runs exactly once, so it keeps the shape's arity and the value it wrote: {}",
+        hover_text(&pushed)
+    );
+}
+
+/// A loop cannot know how many times it actually runs, so a push inside one
+/// widens straight to the list it is building instead of growing a shape by
+/// one entry per re-walk of the fixed point.
+#[test]
+fn hover_widens_a_push_inside_a_loop() {
+    let backend = create_test_backend();
+    let uri = "file:///loop-push.php";
+    let content = r#"<?php
+/** @param list<string> $words */
+function test(array $words): void {
+    $pushed = [];
+    foreach ($words as $word) {
+        $pushed[] = $word;
+    }
+    echo $pushed;
+}
+"#;
+
+    let pushed = hover_at(&backend, uri, content, 7, 10).expect("hover on $pushed");
+    assert!(
+        hover_text(&pushed).contains("$pushed = list<string>"),
+        "a push inside a loop should widen to the list it accumulates, not grow a shape: {}",
         hover_text(&pushed)
     );
 }
@@ -487,9 +513,9 @@ function test(string $key): void {
 
     let groups = hover_at(&backend, uri, content, 12, 16).expect("hover on $groups");
     assert!(
-        hover_text(&groups).contains("$groups = array{pens: non-empty-list<Pen>}"),
-        "an append below a key refines what that key holds instead of \
-         leaving the literal it was initialised with: {}",
+        hover_text(&groups).contains("$groups = array{pens: array{Pen, Pen}}"),
+        "an append below a key refines what that key holds, and outside a \
+         loop it keeps that entry's arity rather than widening to a list: {}",
         hover_text(&groups)
     );
 
@@ -10367,7 +10393,7 @@ function run(bool $c): void {
 }
 
 #[test]
-fn hover_push_style_produces_list() {
+fn hover_push_style_keeps_shape_outside_a_loop() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let content = r#"<?php
@@ -10381,12 +10407,13 @@ function run(): void {
 }
 "#;
 
-    // Hover on `$items` at line 7. Push-style should produce list<Pen>.
+    // Hover on `$items` at line 7. A straight-line push runs exactly once,
+    // so it keeps the shape's arity instead of widening to `list<Pen>`.
     let hover = hover_at(&backend, uri, content, 7, 5).expect("expected hover on $items");
     let text = hover_text(&hover);
     assert!(
-        text.contains("list<Pen>"),
-        "Push-style assignment should produce list<Pen>, got: {}",
+        text.contains("array{Pen}"),
+        "Push-style assignment outside a loop should produce array{{Pen}}, got: {}",
         text
     );
 }

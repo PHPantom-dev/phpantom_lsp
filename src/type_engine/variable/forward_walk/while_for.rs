@@ -51,11 +51,13 @@ pub(crate) fn process_while<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // Record a snapshot after condition processing (same reasoning as
     // the corresponding snapshot in `process_if`).
@@ -83,7 +85,7 @@ pub(crate) fn process_while<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| {
@@ -199,11 +201,13 @@ pub(crate) fn process_for<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = match &for_stmt.body {
@@ -227,7 +231,7 @@ pub(crate) fn process_for<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| match point {
@@ -350,6 +354,8 @@ pub(crate) fn process_do_while<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    let loop_body_ctx = ctx.with_in_loop(true);
+
     let exit_frame = ExitFrameGuard::push();
     walk_loop_body_to_fixed_point(
         &body_stmts,
@@ -358,8 +364,8 @@ pub(crate) fn process_do_while<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
-            discovery_ctx: ctx,
+            ctx: &loop_body_ctx,
+            discovery_ctx: &loop_body_ctx,
         },
         |next_scope, point| match point {
             // The condition is tested after the body and the loop only

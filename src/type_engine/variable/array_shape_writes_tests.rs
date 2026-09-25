@@ -3,7 +3,7 @@ use super::{
     normalize_array_key_type,
 };
 use crate::atom::atom;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, ShapeEntry};
 
 #[test]
 fn collection_key_normalization_preserves_non_numeric_string_domains() {
@@ -49,7 +49,8 @@ fn collection_key_normalization_preserves_non_numeric_string_domains() {
 #[test]
 fn element_writes_refine_the_type_they_are_written_into() {
     let write = |base: &str, keys: Vec<ArrayWriteKey>, value: &str| {
-        merge_nested_array_write(&PhpType::parse(base), &keys, &PhpType::parse(value)).to_string()
+        merge_nested_array_write(&PhpType::parse(base), &keys, &PhpType::parse(value), false)
+            .to_string()
     };
     let shape = |key: &str| ArrayWriteKey::Shape(key.to_string());
 
@@ -65,15 +66,15 @@ fn element_writes_refine_the_type_they_are_written_into() {
     );
     // The same append one level down refines that entry rather than
     // leaving the value it was initialised with. The entry is a literal's
-    // positional shape, so appending to it gives up the arity that literal
-    // spelled out.
+    // positional shape, and a straight-line append keeps its arity,
+    // extending it by the one entry PHP appends.
     assert_eq!(
         write(
             "array{rows: array{'first'}}",
             vec![shape("rows"), ArrayWriteKey::Append],
             "string",
         ),
-        "array{rows: non-empty-list<string>}"
+        "array{rows: array{'first', string}}"
     );
     // A dynamic key may land on any entry, so the shape widens instead of
     // standing still.
@@ -122,6 +123,67 @@ fn element_writes_refine_the_type_they_are_written_into() {
             "string",
         ),
         "non-empty-array<string, list<string>>"
+    );
+}
+
+/// A straight-line `[]` append keeps the shape's arity and the exact value
+/// it wrote, the same as an array literal's own entries — only a write
+/// inside a loop body (`in_loop: true`) widens straight to the list it is
+/// building, since the fixed-point walk cannot know how many times the
+/// statement actually runs.
+#[test]
+fn straight_line_append_keeps_the_shape_and_its_literals() {
+    assert_eq!(
+        merge_nested_array_write(
+            &PhpType::array_shape(Vec::new()),
+            &[ArrayWriteKey::Append],
+            &PhpType::literal_string_raw("'one'"),
+            false,
+        ),
+        PhpType::array_shape(vec![ShapeEntry {
+            key: None,
+            value_type: PhpType::literal_string_raw("'one'"),
+            optional: false,
+        }])
+    );
+
+    let literal_entry = |value_type: PhpType| ShapeEntry {
+        key: None,
+        value_type,
+        optional: false,
+    };
+    let three_literals = PhpType::array_shape(vec![
+        literal_entry(PhpType::literal_int("1")),
+        literal_entry(PhpType::literal_int("2")),
+        literal_entry(PhpType::literal_int("3")),
+    ]);
+    assert_eq!(
+        merge_nested_array_write(
+            &three_literals,
+            &[ArrayWriteKey::Append],
+            &PhpType::null(),
+            false,
+        ),
+        PhpType::array_shape(vec![
+            literal_entry(PhpType::literal_int("1")),
+            literal_entry(PhpType::literal_int("2")),
+            literal_entry(PhpType::literal_int("3")),
+            literal_entry(PhpType::null()),
+        ])
+    );
+
+    // The same append, marked as sitting inside a loop body, cannot know
+    // how many times it actually runs, so it widens straight to the list
+    // instead of growing the shape by one entry per re-walk.
+    assert_eq!(
+        merge_nested_array_write(
+            &three_literals,
+            &[ArrayWriteKey::Append],
+            &PhpType::null(),
+            true
+        )
+        .to_string(),
+        "non-empty-list<1|2|3|null>"
     );
 }
 
