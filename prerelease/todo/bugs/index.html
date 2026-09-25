@@ -952,23 +952,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1618,23 +1601,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1786,18 +1752,7 @@ so the <code>SomeClass</code> members of that half are lost. Found porting Psalm
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file">B347. A <code>Class::CONST</code> operand resolves to the first same-named class in the file<a class="headerlink" href="#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>In a file with several braced <code>namespace</code> blocks that each declare an <code>A</code>,
-a method's <code>@return key-of&lt;A::FOO&gt;</code> is evaluated against the first <code>A</code> in
-the file, whichever block the method is declared in. The operand reaches
-<code>constant_operand_shape</code> unqualified, and <code>find_class_by_name</code> matches the
-short name. Class names in the same position already resolve against the
-block they are used in; the class half of a constant operand has to be
-qualified the same way (against the declaring file's namespace and <code>use</code>
-imports) before the type leaves its declaration. Rare outside test
-fixtures. Found porting Psalm's <code>KeyOfArrayTest</code>; two assertions are
-<code>// SKIP</code> in <code>tests/psalm_assertions/key_of_array.php</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="docblock-handling">Docblock handling<a class="headerlink" href="#docblock-handling" title="Permanent link">&para;</a></h2>
