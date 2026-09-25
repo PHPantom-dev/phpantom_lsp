@@ -82,36 +82,31 @@ impl Backend {
         self.ensure_workspace_indexed_with_progress(None);
     }
 
-    /// Ensure the workspace index is built, forwarding indexing
-    /// progress into the current request's progress sink when one is
-    /// attached (go-to-implementation, find-references, type
-    /// hierarchy).
+    /// Ensure the workspace index is ready for an editor request.
     ///
-    /// The indexing pass maps into 0..80 of the request's progress
-    /// bar; the per-file reference/implementor scans that follow
-    /// report into the remaining 80..100.
+    /// Waits for the initial index when it is still running, and reuses a
+    /// finished one. Rename, Find References, and incoming calls call this
+    /// before reading the file the request is about, because that first
+    /// pass can rewrite a Blade template's virtual PHP. It does not walk
+    /// the workspace again afterwards: doing so re-inferred every template
+    /// on every request, so renaming a local variable cost as much as the
+    /// index itself, and the next rename cost the same. Watched-file
+    /// notifications apply later changes.
+    ///
+    /// The indexing pass maps into 0..80 of the request's progress bar; the
+    /// per-file scans that follow report into the remaining 80..100.
     pub(crate) fn ensure_workspace_indexed_for_request(&self) {
-        match self.request_progress.as_deref() {
-            Some(state) => {
-                let forward = |percentage: u32, message: String| {
-                    state.set_percentage(percentage.min(100) * 4 / 5, message);
-                };
-                self.ensure_workspace_indexed_with_progress(Some(&forward));
-            }
-            None => self.ensure_workspace_indexed(),
-        }
+        self.ensure_workspace_index_ready_for_request();
     }
 
     /// Wait for the initial workspace index when necessary, but reuse a
     /// completed index without refreshing the filesystem.
     ///
-    /// Internal consumers such as declaration CodeLens and cached reference
-    /// counts call this once per symbol. Explicit Find References and rename
-    /// requests use
+    /// Declaration CodeLens, cached reference counts, and the editor
+    /// requests that call
     /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request)
-    /// once at their entry point, before reading the file the request is
-    /// about, so they retain the existing on-demand refresh that discovers
-    /// files created without a watcher notification.
+    /// all share this path. A finished index is the one the background pass
+    /// published; watched-file notifications keep it current.
     pub(crate) fn ensure_workspace_index_ready_for_request(&self) {
         match self.request_progress.as_deref() {
             Some(state) => {
@@ -258,10 +253,10 @@ impl Backend {
         // ── Phase 2: workspace directory scan ───────────────────────────
         //
         // The initial pass discovers every PHP and resource file. Watched-file
-        // notifications apply later changes incrementally. Explicit reference
-        // requests may still refresh this walk to discover a file created
-        // without a watcher event; per-symbol internal consumers only wait for
-        // the initial pass and reuse it.
+        // notifications apply later changes incrementally. Editor requests
+        // reuse a finished index rather than walking again; only an explicit
+        // refresh (`ensure_workspace_indexed`) rediscovers a file the watcher
+        // never reported.
         let workspace_root = self.workspace.workspace_root.read().clone();
         let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
         let (phase2_work, resource_work) = if let Some(root) = workspace_root.clone() {
