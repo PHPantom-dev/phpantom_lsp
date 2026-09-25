@@ -1326,17 +1326,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B398. <code>self</code> inside an object shape is not bound to the declaring class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2341,17 +2330,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B398. <code>self</code> inside an object shape is not bound to the declaring class
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3009,19 +2987,6 @@ leave it open (or empty) instead of fixing it to the named class.</p>
 <p>Found porting PHPStan's <code>nsrt/static-methods.php</code>,
 <code>nsrt/static-properties.php</code>; the assertions are <code>// SKIP</code> in the ported
 copies under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class">B398. <code>self</code> inside an object shape is not bound to the declaring class<a class="headerlink" href="#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-34-1" name="__codelineno-34-1" href="#__codelineno-34-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-34-2" name="__codelineno-34-2" href="#__codelineno-34-2"></a><span class="x">    /** @param object{foo: self} $o */</span>
-<a id="__codelineno-34-3" name="__codelineno-34-3" href="#__codelineno-34-3"></a><span class="x">    public function f($o): void { $o-&gt;foo; } // should be Foo, is self</span>
-<a id="__codelineno-34-4" name="__codelineno-34-4" href="#__codelineno-34-4"></a><span class="x">    /** @return object{foo: self} */</span>
-<a id="__codelineno-34-5" name="__codelineno-34-5" href="#__codelineno-34-5"></a><span class="x">    public function g(): object {}</span>
-<a id="__codelineno-34-6" name="__codelineno-34-6" href="#__codelineno-34-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>The keyword survives into the shape's property type, so reading it later
-names whatever class is asking. Found porting PHPStan's <code>nsrt/object-shape.php</code>;
-the three assertions are <code>// SKIP</code> in <code>tests/phpstan_nsrt/object-shape.php</code>
-(they used to pass only because the runner accepted <code>self</code> for any class).</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
