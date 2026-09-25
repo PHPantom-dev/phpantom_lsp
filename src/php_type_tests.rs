@@ -1157,6 +1157,46 @@ fn parse_model_property_nested_in_array() {
     );
 }
 
+#[test]
+fn parse_laravel_model_type_operators() {
+    for name in ["builder-of", "collection-of", "factory-of", "relation-of"] {
+        let ty = PhpType::parse(&format!("array<{name}<User|Post>>"));
+        assert_eq!(
+            ty,
+            PhpType::generic(
+                "array",
+                vec![PhpType::generic(
+                    name,
+                    vec![PhpType::union(vec![
+                        PhpType::named(atom("User")),
+                        PhpType::named(atom("Post")),
+                    ])],
+                )],
+            ),
+        );
+    }
+    assert_eq!(
+        PhpType::parse("builder-of<User, 'posts.comments'>"),
+        PhpType::generic(
+            "builder-of",
+            vec![
+                PhpType::named(atom("User")),
+                PhpType::literal_string_raw("'posts.comments'")
+            ]
+        ),
+    );
+    assert_eq!(
+        PhpType::parse("relation-of<User, 'posts.comments'>"),
+        PhpType::generic(
+            "relation-of",
+            vec![
+                PhpType::named(atom("User")),
+                PhpType::literal_string_raw("'posts.comments'"),
+            ]
+        )
+    );
+}
+
 // ─── extract_value_type tests ───────────────────────────────────────────
 
 #[test]

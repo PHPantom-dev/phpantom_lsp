@@ -1595,6 +1595,9 @@ impl Backend {
                 if let Some(collection) = laravel.custom_collection.take() {
                     laravel.custom_collection = Some(collection.resolve_names(&resolver));
                 }
+                if let Some(factory) = laravel.custom_factory.take() {
+                    laravel.custom_factory = Some(factory.resolve_names(&resolver));
+                }
 
                 // Resolve custom builder class name to FQN.
                 if let Some(builder) = laravel.custom_builder.take() {

@@ -488,6 +488,16 @@ pub(crate) fn is_subtype_of_typed(
         return true;
     }
 
+    if crate::virtual_members::laravel::has_model_type_operator(subtype)
+        || crate::virtual_members::laravel::has_model_type_operator(supertype)
+    {
+        let sub = crate::virtual_members::laravel::expand_model_type(subtype, class_loader);
+        let sup = crate::virtual_members::laravel::expand_model_type(supertype, class_loader);
+        if &sub != subtype || &sup != supertype {
+            return is_subtype_of_typed(&sub, &sup, class_loader);
+        }
+    }
+
     // ── Union subtype: every member must be a subtype ───────────
     if let TypeKind::Union(members) = subtype.kind() {
         return members

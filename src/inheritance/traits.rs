@@ -76,7 +76,12 @@ pub(crate) fn merge_traits_into(
             && extends_eloquent_model(merged, class_loader)
         {
             let model_fqn = merged.fqn();
-            let factory_fqn = model_to_factory_fqn(&model_fqn);
+            let factory_fqn = merged
+                .laravel()
+                .and_then(|l| l.custom_factory.as_ref())
+                .and_then(|ty| ty.base_name())
+                .map(str::to_owned)
+                .unwrap_or_else(|| model_to_factory_fqn(&model_fqn));
             if class_loader(&factory_fqn).is_some() {
                 for param in &trait_info.template_params {
                     trait_subs.insert(param.to_string(), PhpType::named(atom(&factory_fqn)));

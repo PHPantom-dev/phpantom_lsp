@@ -315,6 +315,41 @@ class Demo
         BlogAuthor::factory($count)->create()->first();       // → BlogAuthor|null
     }
 
+    // ── Model PHPDoc types ──────────────────────────────────────────────────
+    // The Laravel PHPStan extensions let a docblock name a model and have the
+    // class it works through inferred: its builder, its collection, its
+    // factory, or one of its relationships. Each resolves to whatever the
+    // model actually uses, so a custom collection or builder survives, and a
+    // model naming none of them gets the framework's own class.
+
+    /**
+     * @param builder-of<BlogAuthor> $query
+     * @param collection-of<BlogAuthor> $authors
+     * @param factory-of<BlogAuthor> $factory
+     */
+    public function modelDocblockTypes($query, $authors, $factory): void
+    {
+        $query->get()->emails();              // → AuthorCollection
+        $authors->byName();                   // → AuthorCollection
+        $factory->makeOne()->displayName;     // → BlogAuthor
+    }
+
+    /**
+     * A relation path names the relationship itself, one segment at a time:
+     * `posts` is BlogAuthor::posts(), and `posts.author` follows it on to
+     * BlogPost::author(). The builder form ends on the related model instead.
+     *
+     * @param relation-of<BlogAuthor, 'posts'> $posts
+     * @param relation-of<BlogAuthor, 'posts.author'> $writer
+     * @param builder-of<BlogAuthor, 'posts'> $postQuery
+     */
+    public function relationDocblockTypes($posts, $writer, $postQuery): void
+    {
+        $posts->getResults()->first()?->getTitle();   // HasMany<BlogPost> → BlogPost
+        $writer->getResults()->displayName;           // BelongsTo<BlogAuthor> → BlogAuthor
+        $postQuery->get()->first()?->getSlug();       // Builder<BlogPost> → BlogPost
+    }
+
 
     // ── Custom Eloquent Collections ─────────────────────────────────────────
 

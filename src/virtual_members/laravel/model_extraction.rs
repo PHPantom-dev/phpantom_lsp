@@ -214,10 +214,9 @@ fn extract_laravel_table_attribute(
 ///
 /// Checks three sources in priority order:
 ///
-/// 1. `#[UseEloquentBuilder(CustomBuilder::class)]` attribute on the class.
-/// 2. `/** @use HasBuilder<CustomBuilder> */` in `use_generics`.
-/// 3. A `newEloquentBuilder()` method override whose return type names the
-///    custom builder class.
+/// 1. A `newEloquentBuilder()` override with a concrete return type.
+/// 2. `#[UseEloquentBuilder(CustomBuilder::class)]` on the class.
+/// 3. `/** @use HasBuilder<CustomBuilder> */` in `use_generics`.
 fn extract_custom_builder(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     use_generics: &[(Atom, Vec<PhpType>)],
@@ -239,10 +238,8 @@ fn extract_custom_builder(
 /// Determine the custom collection class for an Eloquent model.
 ///
 /// Checks the same three sources [`extract_custom_builder`] does, in the
-/// same order: `#[CollectedBy(CustomCollection::class)]`,
-/// `/** @use HasCollection<CustomCollection> */`, and a `newCollection()`
-/// override. The attribute takes priority because it is the newer Laravel
-/// API.
+/// same order: `newCollection()`, `#[CollectedBy(CustomCollection::class)]`,
+/// and `/** @use HasCollection<CustomCollection> */`.
 fn extract_custom_collection(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     use_generics: &[(Atom, Vec<PhpType>)],
@@ -279,6 +276,15 @@ fn extract_customisation(
     factory_method: &str,
     defaults: &[&str],
 ) -> Option<PhpType> {
+    if let Some(method) = methods.iter().find(|m| m.name == factory_method)
+        && let Some(return_type) = method.return_type.as_ref()
+        && let Some(base) = return_type.base_name()
+        && !base.is_empty()
+        && !defaults.contains(&base)
+    {
+        return Some(return_type.clone());
+    }
+
     if let Some(name) = extract_class_constant_attribute(attribute_lists, content, attr_name) {
         return Some(PhpType::named(atom(&name)));
     }
@@ -290,16 +296,7 @@ fn extract_customisation(
         }
     }
 
-    // `base_name()` strips the leading `\` and any generic parameters,
-    // giving a name the defaults can be compared against.
-    let method = methods.iter().find(|m| m.name == factory_method)?;
-    let return_type = method.return_type.as_ref()?;
-    let base = return_type.base_name()?;
-    if base.is_empty() || defaults.contains(&base) {
-        return None;
-    }
-
-    Some(return_type.clone())
+    None
 }
 
 /// Extract the model class explicitly configured on a Laravel factory.
@@ -370,6 +367,84 @@ fn extract_factory_model<'a>(
     }
 
     None
+}
+
+fn extract_class_property<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    property: &str,
+) -> Option<PhpType> {
+    for member in members {
+        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
+            plain,
+        )) = member
+        else {
+            continue;
+        };
+        if !plain.modifiers.iter().any(|modifier| modifier.is_static()) {
+            continue;
+        }
+        for item in plain.items.iter() {
+            if bytes_to_str(item.variable().name).trim_start_matches('$') != property {
+                continue;
+            }
+            let class_like::property::PropertyItem::Concrete(concrete) = item else {
+                continue;
+            };
+            if let Expression::Access(Access::ClassConstant(access)) = concrete.value
+                && matches!(&access.constant, ClassLikeConstantSelector::Identifier(identifier)
+                    if bytes_to_str(identifier.value).eq_ignore_ascii_case("class"))
+                && let Expression::Identifier(identifier) = access.class
+            {
+                return Some(PhpType::named(atom(bytes_to_str(identifier.value()))));
+            }
+            if let Expression::Literal(Literal::String(literal)) = concrete.value
+                && let Some(name) = literal.value.and_then(literal_bytes_to_str)
+            {
+                return Some(PhpType::named(atom(&format!(
+                    "\\{}",
+                    name.trim_start_matches('\\')
+                ))));
+            }
+        }
+    }
+    None
+}
+
+fn extract_class_return_from_body<'a>(
+    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    method_name: &str,
+) -> Option<PhpType> {
+    let method = members.find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name) =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let value = block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })?;
+    let name = match value {
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Identifier(id) => Some(bytes_to_str(id.value())),
+            _ => None,
+        },
+        Expression::Call(Call::StaticMethod(call)) => match (&call.class, &call.method) {
+            (Expression::Identifier(id), ClassLikeMemberSelector::Identifier(method))
+                if bytes_to_str(method.value).eq_ignore_ascii_case("new") =>
+            {
+                Some(bytes_to_str(id.value()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }?;
+    Some(PhpType::named(atom(name)))
 }
 
 /// A `(column_name, cast_type)` pair.
@@ -1071,11 +1146,40 @@ pub(crate) fn extract_laravel_metadata<'a>(
 ) -> LaravelMetadata {
     let factory_model = extract_factory_model(class.members.iter());
 
-    let custom_collection =
-        extract_custom_collection(&class.attribute_lists, use_generics, methods, content);
+    let custom_collection = extract_class_return_from_body(class.members.iter(), "newCollection")
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Collection" && name != "Illuminate\\Database\\Eloquent\\Collection"
+            })
+        })
+        .or_else(|| {
+            extract_custom_collection(&class.attribute_lists, use_generics, methods, content)
+        });
 
-    let custom_builder =
-        extract_custom_builder(&class.attribute_lists, use_generics, methods, content);
+    let custom_builder = extract_class_return_from_body(class.members.iter(), "newEloquentBuilder")
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Builder" && name != "Illuminate\\Database\\Eloquent\\Builder"
+            })
+        })
+        .or_else(|| extract_custom_builder(&class.attribute_lists, use_generics, methods, content));
+
+    let custom_factory = methods
+        .iter()
+        .find(|m| m.name == "newFactory")
+        .and_then(|m| m.return_type.as_ref())
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Factory" && name != "Illuminate\\Database\\Eloquent\\Factories\\Factory"
+            })
+        })
+        .cloned()
+        .or_else(|| extract_class_return_from_body(class.members.iter(), "newFactory"))
+        .or_else(|| extract_class_property(class.members.iter(), "factory"))
+        .or_else(|| {
+            extract_class_constant_attribute(&class.attribute_lists, content, b"UseFactory")
+                .map(|name| PhpType::named(atom(&name)))
+        });
 
     let policy_class = extract_use_policy_attribute(&class.attribute_lists, content);
 
@@ -1156,6 +1260,7 @@ pub(crate) fn extract_laravel_metadata<'a>(
         .flatten();
 
     LaravelMetadata {
+        custom_factory,
         factory_model,
         custom_collection,
         casts_definitions,
