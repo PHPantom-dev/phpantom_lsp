@@ -4623,3 +4623,51 @@ trait HasFactory
         "the operator should be resolved, not reported as itself: {messages:?}"
     );
 }
+
+/// A `@template TFactory of Factory` the class declares is ruled out by
+/// `! $x instanceof Factory` exactly as its bound would be: every value of
+/// the parameter is a `Factory`, which is what the bound says.
+///
+/// One written on a trait and read through `static::` inside that trait
+/// has nothing to bind it, so the alternative reaches narrowing under its
+/// own name. Narrowing kept it, and the return-type check then substituted
+/// the bound and reported a `Factory` the guard had already excluded.
+#[test]
+fn an_instanceof_guard_rules_out_a_template_bounded_by_the_checked_class() {
+    let php = r#"<?php
+namespace App;
+
+class Collection {}
+class Factory {}
+
+/** @template TFactory of Factory */
+trait HasFactory
+{
+    /** @return static|TFactory */
+    public static function make(): static|Collection|Factory
+    {
+        return null;
+    }
+
+    /** @return static|Collection */
+    public static function caller(): static|Collection
+    {
+        $model = static::make();
+
+        if (! $model instanceof Factory) {
+            return $model;
+        }
+
+        return new Collection();
+    }
+}
+"#;
+    let messages: Vec<String> = messages_with_code(&collect(php), "type_mismatch_return")
+        .into_iter()
+        .filter(|m| !m.starts_with("Return type null"))
+        .collect();
+    assert!(
+        messages.is_empty(),
+        "the guard rules the template out, so the return satisfies the declared type: {messages:?}"
+    );
+}
