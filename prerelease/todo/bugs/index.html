@@ -1409,17 +1409,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b410-a-void-calls-result-is-typed-void-instead-of-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B410. A <code>void</code> call's result is typed <code>void</code> instead of <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2474,17 +2463,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b410-a-void-calls-result-is-typed-void-instead-of-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B410. A <code>void</code> call's result is typed <code>void</code> instead of <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -3177,16 +3155,6 @@ nothing to the result; <code>resolve_null_coalesce_chain</code> treats it as an
 unresolvable operand and adds <code>mixed</code>.</p>
 <p>Found porting PHPStan's <code>nsrt/falsey-coalesce.php</code>; the assertions are
 <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b410-a-void-calls-result-is-typed-void-instead-of-null">B410. A <code>void</code> call's result is typed <code>void</code> instead of <code>null</code><a class="headerlink" href="#b410-a-void-calls-result-is-typed-void-instead-of-null" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-38-1" name="__codelineno-38-1" href="#__codelineno-38-1"></a><span class="x">function f(\EmptyIterator $it): void {</span>
-<a id="__codelineno-38-2" name="__codelineno-38-2" href="#__codelineno-38-2"></a><span class="x">    $x = $it-&gt;rewind(); // should be null, is void</span>
-<a id="__codelineno-38-3" name="__codelineno-38-3" href="#__codelineno-38-3"></a><span class="x">}</span>
-</code></pre></div>
-<p>A variable never holds <code>void</code>; the value of a <code>void</code> call is <code>null</code>.</p>
-<p>Found porting PHPStan's <code>nsrt/emptyiterator.php</code>,
-<code>nsrt/template-default.php</code>; the assertions are <code>// SKIP</code> in the ported
-copies under <code>tests/phpstan_nsrt/</code>.</p>
 
 
 
