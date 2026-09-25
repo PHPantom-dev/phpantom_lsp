@@ -1,0 +1,3086 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/prerelease/todo/test-porting/">
+      
+      
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>Test Porting Plan - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#test-porting-plan" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Test Porting Plan
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#principles" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Principles
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpstan-type-scope-policy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPStan Type Scope Policy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phpstan-asserttype-fixture-runner" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPStan assertType Fixture Runner
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#completed-phases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Completed Phases
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-4-harder-ports-second-round" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4: Harder Ports (Second Round)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 4: Harder Ports (Second Round)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#4a-mago-issue-regressions-done-1422-ported-8-triaged-out" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4A. Mago Issue Regressions — DONE (14/22 ported, 8 triaged out)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4c-psalm-non-assertion-patterns-done-78-ported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        4C. Psalm Non-Assertion Patterns — DONE (7/8 ported)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-4-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 4: done
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-5-requires-new-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 5: Requires New Features
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 5: Requires New Features">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#5a-closures-and-callables-blocked-closure-type-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5A. Closures and Callables (blocked: closure type inference)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5b-enum-case-types-blocked-enumcase-as-instance-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5B. Enum Case Types (blocked: <code>Enum::CASE</code> as instance type)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5c-phpdoc-inheritance-blocked-staticthis-use-aliases" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5C. PHPDoc Inheritance (blocked: <code>static()</code>/<code>$this()</code>, use aliases)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5d-conditional-return-types-blocked-runner-limitation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5D. Conditional Return Types (blocked: runner limitation)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5e-array-shape-functions-blocked-partial-shape-assertions-relevant-rest-not" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5E. Array Shape Functions (blocked: partial — shape assertions relevant, rest not)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5f-regex-match-shapes-blocked-regex-pattern-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5F. Regex Match Shapes (blocked: regex pattern parsing)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5h-callableclosure-inference-blocked-closure-type-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5H. Callable/Closure Inference (blocked: closure type inference)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5i-function-return-type-stubs-blocked-function-specific-return-type-providers" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5I. Function Return Type Stubs (blocked: function-specific return type providers)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5j-array-function-return-types-blocked-function-stubs" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5J. Array Function Return Types (blocked: function stubs)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5k-constant-expression-evaluation-blocked-compile-time-constant-folding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5K. Constant Expression Evaluation (blocked: compile-time constant folding)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5l-extract-psalms-literal-typed-assertions-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5L. Extract Psalm's literal-typed assertions — DONE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5g-un-skip-psalm-assertions-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        5G. Un-SKIP Psalm Assertions — DONE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-6-php-lsp-test-infrastructure-patterns-not-test-content" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 6: php-lsp Test Infrastructure (patterns, not test content)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 6: php-lsp Test Infrastructure (patterns, not test content)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#6a-caret-annotation-dsl-for-diagnostics-and-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6A. Caret-annotation DSL for diagnostics and references
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6b-wire-protocol-smoke-suite" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6B. Wire-protocol smoke suite
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6c-pinned-corpus-location-snapshots-evaluate" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6C. Pinned-corpus location snapshots — EVALUATE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6d-regression-probes-from-php-lsps-july-august-2026-bug-fix-log-done" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        6D. Regression probes from php-lsp's July-August 2026 bug-fix log — DONE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-7-zed-laravel-laravel-lsp-laravel-behavior-ports" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 7: zed-laravel <code>laravel-lsp</code> (Laravel behavior ports)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phase 7: zed-laravel laravel-lsp (Laravel behavior ports)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#7a-direct-overlap-done-265-tests-ported-41-ignored-as-known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7A. Direct overlap — DONE (265 tests ported, 41 ignored as known gaps)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7b-partial-overlap-done-64-tests-ported-10-ignored-as-known-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7B. Partial overlap — DONE (64 tests ported, 10 ignored as known gaps)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#7c-skip-features-phpantom-doesnt-have" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        7C. Skip — features PHPantom doesn't have
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phase-7-done-7c-revisits-per-feature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 7: done (7C revisits per feature)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-8-bladestan-compiled-corpora-ready-as-a-gap-report" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 8: Bladestan compiled corpora — READY (as a gap report)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phase-9-phpstan-nsrt-sweep-done-344-files-2496-running-assertions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phase 9: PHPStan <code>nsrt/</code> sweep — DONE (344 files, 2,496 running assertions)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#existing-test-evaluation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Existing Test Evaluation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Summary
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/test-porting.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="test-porting-plan">Test Porting Plan<a class="headerlink" href="#test-porting-plan" title="Permanent link">&para;</a></h1>
+<p>This document tracks the plan for porting tests from reference projects
+(Mago, Larastan, PHPStan, Psalm) into PHPantom's integration test suite.
+The goal is to use battle-tested test cases from mature PHP analysis tools
+to find gaps and mistakes in our type engine, diagnostics, and LSP
+features.</p>
+<h2 id="principles">Principles<a class="headerlink" href="#principles" title="Permanent link">&para;</a></h2>
+<ol>
+<li>
+<p><strong>Mago first, then Larastan, then PHPStan.</strong> Mago tests are
+   standalone PHP, closest to our architecture, and easiest to convert.
+   Larastan tests require more judgment. PHPStan tests are gospel but
+   need a fixture runner.</p>
+</li>
+<li>
+<p><strong>Trust levels differ by source.</strong> Mago tests are generally
+   trustworthy unless surprising. Larastan tests need case-by-case
+   evaluation (they do runtime analysis that does not always align with
+   sound static analysis). PHPStan and Psalm tests are the gold
+   standard — Psalm is equally rigorous, with clean assertion-based
+   tests that map directly to type resolution accuracy.</p>
+</li>
+<li>
+<p><strong>Skip or replace, don't duplicate.</strong> When a ported test covers the
+   same ground as an existing PHPantom test, either skip the port or
+   replace the existing test if the ported version is better.</p>
+</li>
+<li>
+<p><strong>Tests must be adapted, not copied verbatim.</strong> Reference tests use
+   their own harnesses (<code>@mago-expect</code>, PHPStan's <code>assertType()</code>). Each
+   must be translated into PHPantom's <code>create_test_backend()</code> pattern
+   or a new fixture runner format.</p>
+</li>
+<li>
+<p><strong>File per concern.</strong> Ported tests go into existing test files when
+   the feature area matches (e.g. narrowing tests into
+   <code>completion_guard_clauses.rs</code> or <code>completion_variables.rs</code>). When a
+   batch of ported tests introduces a new concern, create a new file.</p>
+</li>
+</ol>
+<hr />
+<h2 id="phpstan-type-scope-policy">PHPStan Type Scope Policy<a class="headerlink" href="#phpstan-type-scope-policy" title="Permanent link">&para;</a></h2>
+<p>PHPantom is an LSP, not a linter. We proxy PHPStan for linter-grade
+diagnostics. When evaluating PHPStan tests for porting, apply these
+rules:</p>
+<table>
+<thead>
+<tr>
+<th>PHPStan type</th>
+<th>PHPantom treatment</th>
+<th>Port tests?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>non-empty-string</code>, <code>non-falsy-string</code>, <code>lowercase-string</code>, <code>uppercase-string</code>, <code>numeric-string</code></td>
+<td>Treat as <code>string</code>. Must not trigger unknown-type diagnostics.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>non-empty-array</code>, <code>non-empty-list</code></td>
+<td>Treat as <code>array</code>/<code>list</code>.</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>int&lt;min, max&gt;</code>, <code>positive-int</code>, <code>negative-int</code></td>
+<td>Treat as <code>int</code>.</td>
+<td>No</td>
+</tr>
+<tr>
+<td>Literal strings (<code>'foo'</code>), literal ints (<code>1</code>), literal floats (<code>1.0</code>)</td>
+<td>Full support. Port the upstream expectation verbatim.</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td>Literal bools (<code>true</code>, <code>false</code>)</td>
+<td>Treat as <code>bool</code> (<code>LiteralValue</code> has no bool variant).</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>Enum::CASE</code> (literal enum case)</td>
+<td>Treat as instance of the enum class.</td>
+<td><strong>Yes</strong> (needs implementation)</td>
+</tr>
+<tr>
+<td>Array shapes (<code>array{key: type}</code>)</td>
+<td>Full support (drives array key completion).</td>
+<td><strong>Yes</strong></td>
+</tr>
+<tr>
+<td><code>preg_match</code> group shapes</td>
+<td>Infer <code>$matches</code> shape from regex (array key completion).</td>
+<td><strong>Yes</strong> (needs implementation: regex pattern parsing)</td>
+</tr>
+<tr>
+<td>Closure/callable types (<code>Closure(T): U</code>)</td>
+<td>Relevant for completion on closure return values.</td>
+<td><strong>Yes</strong> (needs implementation: closure type inference)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Rule of thumb:</strong> If a test's assertions are exclusively about
+narrowing <code>string</code> to <code>non-empty-string</code> or <code>int</code> to <code>positive-int</code>,
+skip it. If it tests something that affects completion, hover, or
+go-to-definition (shapes, enum cases, closure returns), port it.</p>
+<p><strong>Scalar literals were previously out of scope</strong> and expectations were
+rewritten to the base type on the way in (<code>'foo'</code> → <code>string</code>). The type
+engine now preserves scalar literals through expression resolution, so
+that rewrite no longer matches either the upstream corpus or PHPantom.
+Port literal expectations verbatim instead. Two categories of
+already-ported downgrade remain, because the engine still widens them:
+literal bools (a deliberate scope decision, above) and class constants
+(<code>self::INTEGER_CONSTANT</code> resolves to <code>int</code> where PHPStan says <code>1</code> — see
+T34 in <a href="../type-inference/">type-inference.md</a>).</p>
+<hr />
+<h2 id="phpstan-asserttype-fixture-runner">PHPStan assertType Fixture Runner<a class="headerlink" href="#phpstan-asserttype-fixture-runner" title="Permanent link">&para;</a></h2>
+<p>The runner lives in <code>tests/assert_type_runner.rs</code> and is registered as
+a <code>datatest_stable</code> harness in <code>Cargo.toml</code>. It picks up <code>.php</code> files
+from <code>tests/phpstan_nsrt/</code> and <code>tests/psalm_assertions/</code>.</p>
+<p><strong>How it works:</strong></p>
+<ol>
+<li>Parses all <code>assertType('expected', expr)</code> calls via text scanning.</li>
+<li>Transforms each call into <code>$__phpantom_assert_N = expr;</code> so the
+   expression result is assigned to a hoverable variable.</li>
+<li>Opens the transformed source in a test backend.</li>
+<li>Hovers on each <code>$__phpantom_assert_N</code> to resolve the type.</li>
+<li>Normalizes both sides (<code>?T</code> → <code>T|null</code>, FQN shortening, union
+   member sorting, literal quote style, <code>self</code> acceptance) before
+   comparing.</li>
+</ol>
+<p>Lines with <code>// SKIP</code> are skipped. <code>assertNativeType</code> calls are ignored.
+Commented-out lines (starting with <code>//</code>) are ignored.</p>
+<p>The backend is built with the full embedded stubs, at the default PHP
+version (8.5), so builtin functions and classes resolve the way they do for
+a user. (It used to load a handful of hand-written class stubs and no
+function stubs at all, which made every builtin call resolve to nothing and
+let <code>mixed</code> expectations pass for the wrong reason.) A fixture whose
+upstream header says <code>// lint &lt; 8.x</code> is out of scope for that reason.</p>
+<p><strong>Matching is exact.</strong> Normalization covers cosmetic spellings only
+(positional shape keys, PHPStan's template-scope suffix, <code>callable(): mixed</code>,
+<code>mixed[]</code>, redundant parentheses, <code>mixed</code> absorbing a union, and the like),
+so a scalar literal never satisfies an expectation written as its base type.
+A bare <code>self</code> from PHPantom no longer matches any expected class.
+When PHPantom is <em>more</em> precise than the source corpus, record the
+precise type and add a comment saying so (the ported Psalm files use
+"PHPantom is more precise than Psalm here"). When it is <em>less</em> precise,
+keep the upstream expectation and mark the line <code>// SKIP</code>, so the gap
+shows up as a known gap rather than being absorbed silently.</p>
+<p>PHPantom keeps a string literal's source spelling, so <code>"hello"</code> and
+<code>'hello'</code> are both possible actual types; the runner canonicalizes quote
+style, which lets upstream expectations (always single-quoted) port
+unchanged.</p>
+<p><strong>Psalm extraction:</strong> <code>scripts/extract_psalm_tests.php</code> parses Psalm's
+PHP test classes and emits standalone <code>.php</code> files in
+<code>tests/psalm_assertions/</code> with <code>assertType()</code> calls. Run with <code>--all</code>
+to regenerate all files.</p>
+<hr />
+<h2 id="completed-phases">Completed Phases<a class="headerlink" href="#completed-phases" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Source</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Mago (easy, ~100 files)</td>
+<td><strong>Done.</strong> All portable patterns ported.</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Larastan (easy, ~15 files)</td>
+<td><strong>Done.</strong> All portable patterns ported.</td>
+</tr>
+<tr>
+<td>3</td>
+<td>PHPStan (actionable, ~26 files)</td>
+<td><strong>Done.</strong> All bugs filed during porting (B23, B40-B48) fixed.</td>
+</tr>
+<tr>
+<td>3.5A</td>
+<td>Psalm (clearly relevant)</td>
+<td><strong>Done.</strong> 19 files, 116 running assertions, 5 bugs filed (B1-B5).</td>
+</tr>
+<tr>
+<td>3.5B</td>
+<td>Psalm (partial)</td>
+<td><strong>Done.</strong> 2 files kept (23 running assertions), 4 deferred to Phase 5.</td>
+</tr>
+<tr>
+<td>4B</td>
+<td>Trait resolution (Mago, 6 files)</td>
+<td><strong>Done.</strong> 6 tests ported to <code>completion_traits.rs</code>, all passing.</td>
+</tr>
+<tr>
+<td>5G</td>
+<td>Un-SKIP Psalm assertions</td>
+<td><strong>Done.</strong> Targeted SKIP markers removed; all fixture assertions now pass. Four SKIPs added later, tracked in 5G.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="phase-4-harder-ports-second-round">Phase 4: Harder Ports (Second Round)<a class="headerlink" href="#phase-4-harder-ports-second-round" title="Permanent link">&para;</a></h2>
+<h3 id="4a-mago-issue-regressions-done-1422-ported-8-triaged-out">4A. Mago Issue Regressions — DONE (14/22 ported, 8 triaged out)<a class="headerlink" href="#4a-mago-issue-regressions-done-1422-ported-8-triaged-out" title="Permanent link">&para;</a></h3>
+<p>352 files (333 unique issues). Each file has <code>@mago-expect</code> annotations
+indicating which Mago diagnostic rule it tests. Unlike PHPStan's
+<code>assertType()</code> files, these don't directly assert types — they assert
+"Mago emits warning X." Porting requires reading each file,
+identifying the underlying type resolution pattern, and writing a
+PHPantom test for that pattern.</p>
+<p><strong>Bulk skip (~250 files):</strong> Linter-only rules (<code>redundant-condition</code>,
+<code>impossible-condition</code>, <code>unused-*</code>, <code>missing-*</code>, <code>incorrect-*-casing</code>,
+<code>less-specific-*</code>, <code>unreachable-*</code>, <code>unhandled-thrown-type</code>,
+<code>experimental-usage</code>, etc.) plus out-of-scope rules (literal types,
+<code>non-empty-*</code>, integer ranges). No type resolution value for an LSP.</p>
+<p><strong>Individually triaged (~100 files):</strong> Read each file, identified the
+underlying type resolution pattern, checked against existing PHPantom
+tests. Results:</p>
+<p><strong>Already covered (skip, 5 patterns):</strong>
+- <code>class-string&lt;T&gt;</code> dynamic instantiation (627)
+- Nullsafe chain resolution (731)
+- <code>static</code> return through inheritance (880)
+- <code>#[Deprecated]</code> attribute (1541)
+- Array built in loop then accessed (1574)</p>
+<p><strong>Portable patterns with missing/partial coverage (22 patterns):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Issue</th>
+<th>Pattern</th>
+<th>Test area</th>
+<th>Coverage</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>275</td>
+<td><code>array_column()</code> return type inference</td>
+<td><code>completion_variables</code></td>
+<td>Blocked (function return type provider, overlaps 5I/5J)</td>
+</tr>
+<tr>
+<td>362</td>
+<td>Generic class implementing <code>ArrayAccess</code>/<code>IteratorAggregate</code></td>
+<td><code>completion_generics</code></td>
+<td>Blocked (<a href="../type-inference/#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it">T42</a>)</td>
+</tr>
+<tr>
+<td>448</td>
+<td><code>??</code> narrows nullable to non-null type</td>
+<td><code>completion_variables</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>523</td>
+<td>Unsealed array shapes with <code>...</code> spread syntax</td>
+<td><code>completion_array_shapes</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>557</td>
+<td><code>isset()</code> narrowing on optional array shape keys</td>
+<td><code>completion_variables</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>570</td>
+<td>Compound <code>isset()</code> on nested optional shape keys</td>
+<td><code>completion_array_shapes</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>623</td>
+<td>Union of array shapes — key access</td>
+<td><code>completion_array_shapes</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>676</td>
+<td>Dependent template bounds (T bounded by another template S)</td>
+<td>—</td>
+<td>Skip (diagnostic-only: <code>template-constraint-violation</code>, no completion/hover value; same family as 1355)</td>
+</tr>
+<tr>
+<td>712</td>
+<td>Generic <code>ArrayAccess</code> with concrete type annotation</td>
+<td>—</td>
+<td>Skip (diagnostic-only: <code>invalid-array-index</code>/<code>invalid-array-access-assignment-value</code>, no completion/hover value)</td>
+</tr>
+<tr>
+<td>964</td>
+<td><code>static</code> return preserving generic substitution from caller</td>
+<td><code>completion_generics</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1002</td>
+<td>Intersection types with <code>UnitEnum</code> resolving <code>::cases()</code></td>
+<td><code>completion_enums</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1025</td>
+<td><code>?-&gt;</code> branch narrowing (null not narrowed in else)</td>
+<td><code>completion_array_shapes</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1031</td>
+<td>Closure param type inference from <code>array_filter</code> signature</td>
+<td><code>completion_variables</code></td>
+<td>Blocked (closure param inference, overlaps 5A)</td>
+</tr>
+<tr>
+<td>1038</td>
+<td>Switch statement type narrowing</td>
+<td><code>completion_guard_clauses</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1040</td>
+<td><code>@phpstan-import-type</code> combined with <code>@template-implements</code></td>
+<td><code>completion_type_aliases</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1045</td>
+<td><code>array_walk</code> callback parameter type inference</td>
+<td><code>completion_variables</code></td>
+<td>Blocked (closure param inference, overlaps 5A)</td>
+</tr>
+<tr>
+<td>1061</td>
+<td>Enum implementing generic interface with <code>@implements</code></td>
+<td><code>completion_enums</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1064/1070</td>
+<td><code>@psalm-require-extends</code>/<code>@require-implements</code> trait member resolution</td>
+<td><code>completion_traits</code></td>
+<td><strong>Ported</strong> (property-hook member via <code>$this-&gt;</code>); the <code>self::</code>/<code>static::</code> half is blocked (<a href="../completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13</a>)</td>
+</tr>
+<tr>
+<td>1093</td>
+<td>Array shape narrowing via <code>array_key_exists</code> check</td>
+<td><code>completion_array_shapes</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>1116</td>
+<td>Nested <code>@psalm-import-type</code> alias resolution</td>
+<td><code>completion_type_aliases</code></td>
+<td><strong>Ported</strong></td>
+</tr>
+<tr>
+<td>870</td>
+<td><code>@type</code> alias used inside <code>@extends</code></td>
+<td><code>completion_generics</code></td>
+<td>Blocked (<a href="../type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved">T43</a>)</td>
+</tr>
+<tr>
+<td>830</td>
+<td><code>array_filter</code> with first-class callables</td>
+<td><code>completion_variables</code></td>
+<td>Blocked (first-class callables + assert-if-true narrowing, overlaps 5A/5J)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Blocked (need new features, moved to Phase 5):</strong>
+- 1226: PHP 8.4 property hooks type resolution
+- 1355: Template constraint violation diagnostic</p>
+<p><strong>Ported (14 patterns):</strong>
+- <code>completion_array_shapes</code> — 6 tests (523, 557, 570, 623, 1025, 1093)
+- <code>completion_generics</code> — 2 tests (964, and the dual-template <code>self&lt;K, V&gt;</code>
+  static-factory half of 362 that turned out already broken — see T42)
+- <code>completion_variables</code> — 1 test (448)
+- <code>completion_guard_clauses</code> — 1 test (1038)
+- <code>completion_enums</code> — 2 tests (1061, 1002)
+- <code>completion_type_aliases</code> — 2 tests (1040, 1116)
+- <code>completion_traits</code> — 1 test (1064/1070, property-hook half)</p>
+<p>Porting 1040 and 1116 surfaced a real completion bug (not a missing
+feature): array key completion on a <code>@var</code>/<code>@param</code>-annotated variable
+whose type is a <em>named</em> <code>@phpstan-type</code>/<code>@psalm-type</code> alias (rather than
+an inline <code>array{...}</code> shape) returned nothing at all, and a chain of
+aliases referencing each other by name only expanded the first hop.
+Both are fixed in <code>completion/array_shape.rs</code> (see the CHANGELOG entry)
+and the two ported tests exercise the fix directly.</p>
+<p><strong>Remaining (8 patterns), all blocked on something other than test
+content:</strong>
+- <code>completion_generics</code> — 362 (<a href="../type-inference/#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it">T42</a>), 870 (<a href="../type-inference/#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved">T43</a>)
+- <code>completion_variables</code> — 275, 1031, 1045, 830 (function return type providers / closure param inference, overlap Phase 5)
+- <code>completion_traits</code> — the <code>self::</code>/<code>static::</code> half of 1064/1070 (<a href="../completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13</a>)
+- skipped outright, no LSP value: 676, 712</p>
+<h3 id="4c-psalm-non-assertion-patterns-done-78-ported">4C. Psalm Non-Assertion Patterns — DONE (7/8 ported)<a class="headerlink" href="#4c-psalm-non-assertion-patterns-done-78-ported" title="Permanent link">&para;</a></h3>
+<p>The eight valid-code files have no <code>$var =&gt; 'Type'</code> assertions, so each
+snippet was hand-ported into an <code>assertType()</code> fixture in
+<code>tests/psalm_assertions/</code> stating the type the snippet implies (a getter or
+concrete subclass was added where upstream's classes were empty). Cases
+whose result is out of scope under the type policy above (<code>non-empty-*</code>,
+<code>numeric-string</code>, a literal bool narrowed out of <code>bool</code>) were left out.</p>
+<table>
+<thead>
+<tr>
+<th>Psalm file</th>
+<th>Fixture</th>
+<th style="text-align: right;">Assertions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Template/TraitTemplateTest.php</code></td>
+<td><code>template_trait_template.php</code></td>
+<td style="text-align: right;">16</td>
+</tr>
+<tr>
+<td><code>Template/NestedTemplateTest.php</code></td>
+<td><code>template_nested_template.php</code></td>
+<td style="text-align: right;">14</td>
+</tr>
+<tr>
+<td><code>Template/ClassStringMapTest.php</code></td>
+<td><code>template_class_string_map.php</code></td>
+<td style="text-align: right;">5</td>
+</tr>
+<tr>
+<td><code>ConstValuesTest.php</code></td>
+<td><code>const_values.php</code></td>
+<td style="text-align: right;">7 (5 SKIP)</td>
+</tr>
+<tr>
+<td><code>KeyOfArrayTest.php</code></td>
+<td><code>key_of_array.php</code></td>
+<td style="text-align: right;">9 (2 SKIP)</td>
+</tr>
+<tr>
+<td><code>VariadicTest.php</code></td>
+<td><code>variadic.php</code></td>
+<td style="text-align: right;">8</td>
+</tr>
+<tr>
+<td><code>TypeReconciliation/ReconcilerTest.php</code></td>
+<td><code>type_reconciliation_reconciler.php</code></td>
+<td style="text-align: right;">30 (15 SKIP)</td>
+</tr>
+<tr>
+<td><code>ReturnTypeProvider/ArraySliceTest.php</code></td>
+<td>not ported</td>
+<td style="text-align: right;">—</td>
+</tr>
+</tbody>
+</table>
+<p><code>ArraySliceTest</code> has one case, and its only observable type is
+<code>array_slice()</code>'s return. The runner now loads the function stubs, so it is
+worth retrying alongside 5J.</p>
+<p>Porting fixed seven engine bugs (vendor <code>@param</code> tags ignored in the body,
+variadics typed as lists, nested generic trait <code>@use</code> not substituted, a
+template named like a class read as that class in return checks, and three
+<code>key-of</code> gaps) plus a runner bug that corrupted every block after a
+multi-line <code>assertType()</code>. The rest are <code>// SKIP</code> and filed: B343-B347 in
+<a href="../bugs/">bugs.md</a> and the broadened T26 in
+<a href="../type-inference/">type-inference.md</a>.</p>
+<h3 id="phase-4-done">Phase 4: done<a class="headerlink" href="#phase-4-done" title="Permanent link">&para;</a></h3>
+<hr />
+<h2 id="phase-5-requires-new-features">Phase 5: Requires New Features<a class="headerlink" href="#phase-5-requires-new-features" title="Permanent link">&para;</a></h2>
+<p>These tests are portable once the corresponding feature is implemented
+in PHPantom. Each group lists the blocking feature.</p>
+<h3 id="5a-closures-and-callables-blocked-closure-type-inference">5A. Closures and Callables (blocked: closure type inference)<a class="headerlink" href="#5a-closures-and-callables-blocked-closure-type-inference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>closure-return-type.php</code></td>
+<td>20</td>
+<td>Closure return type resolution</td>
+</tr>
+<tr>
+<td><code>closure-argument-type.php</code></td>
+<td>11</td>
+<td>Closure argument inference</td>
+</tr>
+<tr>
+<td><code>first-class-callables.php</code></td>
+<td>16</td>
+<td><code>$obj-&gt;method(...)</code> syntax</td>
+</tr>
+<tr>
+<td><code>arrow-function-types.php</code></td>
+<td>9</td>
+<td>Arrow function types</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5b-enum-case-types-blocked-enumcase-as-instance-type">5B. Enum Case Types (blocked: <code>Enum::CASE</code> as instance type)<a class="headerlink" href="#5b-enum-case-types-blocked-enumcase-as-instance-type" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enum-from.php</code></td>
+<td>30</td>
+<td><code>Enum::from()</code> / <code>::tryFrom()</code></td>
+</tr>
+<tr>
+<td><code>enum-in-array.php</code></td>
+<td>32</td>
+<td>Enum values in <code>in_array()</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="5c-phpdoc-inheritance-blocked-staticthis-use-aliases">5C. PHPDoc Inheritance (blocked: <code>static()</code>/<code>$this()</code>, use aliases)<a class="headerlink" href="#5c-phpdoc-inheritance-blocked-staticthis-use-aliases" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>methodPhpDocs-implicitInheritance.php</code></td>
+<td>68</td>
+<td>Implicit PHPDoc inheritance</td>
+</tr>
+<tr>
+<td><code>method-phpDocs-inheritdoc.php</code></td>
+<td>68</td>
+<td><code>{@inheritdoc}</code> resolution</td>
+</tr>
+</tbody>
+</table>
+<h3 id="5d-conditional-return-types-blocked-runner-limitation">5D. Conditional Return Types (blocked: runner limitation)<a class="headerlink" href="#5d-conditional-return-types-blocked-runner-limitation" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>conditional-types.php</code></td>
+<td>44</td>
+<td><code>($x is string ? int : float)</code></td>
+</tr>
+<tr>
+<td><code>conditional-types-inference.php</code></td>
+<td>17</td>
+<td>Conditional type param inference</td>
+</tr>
+</tbody>
+</table>
+<p>Blocked until runner supports assertions inside anonymous functions, or
+tests are restructured into class methods. The feature itself is in
+scope and partially working.</p>
+<h3 id="5e-array-shape-functions-blocked-partial-shape-assertions-relevant-rest-not">5E. Array Shape Functions (blocked: partial — shape assertions relevant, rest not)<a class="headerlink" href="#5e-array-shape-functions-blocked-partial-shape-assertions-relevant-rest-not" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>array-functions.php</code></td>
+<td>177</td>
+<td>Broad array function coverage</td>
+</tr>
+<tr>
+<td><code>array-merge.php</code> + variants</td>
+<td>~67</td>
+<td><code>array_merge()</code> shapes</td>
+</tr>
+</tbody>
+</table>
+<p>These files mix shape assertions (relevant for array key completion)
+with <code>non-empty-*</code>/literal assertions (out of scope). Partial porting
+possible once someone triages which assertions are shape-related.</p>
+<h3 id="5f-regex-match-shapes-blocked-regex-pattern-parsing">5F. Regex Match Shapes (blocked: regex pattern parsing)<a class="headerlink" href="#5f-regex-match-shapes-blocked-regex-pattern-parsing" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>PHPStan file (nsrt/)</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>preg_match_shapes.php</code></td>
+<td>230</td>
+<td><code>$matches</code> array shape from regex</td>
+</tr>
+</tbody>
+</table>
+<p>Direct LSP value: array key completion on <code>preg_match</code> results. Needs
+regex pattern parsing to infer group names and counts.</p>
+<h3 id="5h-callableclosure-inference-blocked-closure-type-inference">5H. Callable/Closure Inference (blocked: closure type inference)<a class="headerlink" href="#5h-callableclosure-inference-blocked-closure-type-inference" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Psalm file</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>CallableTest.php</code></td>
+<td>32</td>
+<td>Callable parameter type propagation, closure return inference</td>
+</tr>
+</tbody>
+</table>
+<p>30/32 assertions failed during 3.5B extraction. Almost all require
+inferring closure parameter types from callable signatures and
+propagating generic type arguments through higher-order functions.
+Overlaps with 5A (closures).</p>
+<p><strong>When unblocked:</strong> Run
+<code>php scripts/extract_psalm_tests.php &lt;psalm-checkout&gt;/tests/CallableTest.php</code>,
+curate the output (add SKIP markers to remaining failures), and move the
+result into <code>tests/psalm_assertions/</code>.</p>
+<h3 id="5i-function-return-type-stubs-blocked-function-specific-return-type-providers">5I. Function Return Type Stubs (blocked: function-specific return type providers)<a class="headerlink" href="#5i-function-return-type-stubs-blocked-function-specific-return-type-providers" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Psalm file</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FunctionCallTest.php</code></td>
+<td>72</td>
+<td><code>explode</code>, <code>parse_url</code>, <code>hash_init</code>, <code>array_column</code>, etc.</td>
+</tr>
+</tbody>
+</table>
+<p>0/72 assertions passed. These test return types of specific built-in
+PHP functions that require per-function return type providers (not
+just stub signatures). Many also need conditional return types based
+on argument values.</p>
+<p><strong>When unblocked:</strong> Run
+<code>php scripts/extract_psalm_tests.php &lt;psalm-checkout&gt;/tests/FunctionCallTest.php</code>,
+curate the output, and move into <code>tests/psalm_assertions/</code>.</p>
+<h3 id="5j-array-function-return-types-blocked-function-stubs">5J. Array Function Return Types (blocked: function stubs)<a class="headerlink" href="#5j-array-function-return-types-blocked-function-stubs" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Psalm file</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ArrayFunctionCallTest.php</code></td>
+<td>88</td>
+<td><code>array_filter</code>, <code>array_keys</code>, <code>array_merge</code>, <code>array_map</code>, etc.</td>
+</tr>
+</tbody>
+</table>
+<p>The superlinear hover-scaling bug that used to time out extraction on
+the 1095-line generated file is fixed (it is gone from <code>bugs.md</code>, and a
+fresh run confirms it: the fixture now runs in ~8s instead of timing out
+at 126s). That was never the real blocker, though — re-running the
+suite today gets 36/168 assertions passing and 132/168 failing, almost
+all of them wanting a specific array function's return type provider
+(<code>array_filter</code>, <code>array_map</code>, <code>array_merge</code>, etc. losing precision to
+<code>mixed</code>/<code>array&lt;array-key, mixed&gt;</code>) rather than a resolution bug. Overlaps
+with 5E.</p>
+<p><strong>When unblocked:</strong> Run
+<code>php scripts/extract_psalm_tests.php &lt;psalm-checkout&gt;/tests/ArrayFunctionCallTest.php</code>,
+curate the output, and move into <code>tests/psalm_assertions/</code>.</p>
+<h3 id="5k-constant-expression-evaluation-blocked-compile-time-constant-folding">5K. Constant Expression Evaluation (blocked: compile-time constant folding)<a class="headerlink" href="#5k-constant-expression-evaluation-blocked-compile-time-constant-folding" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Psalm file</th>
+<th>Assertions</th>
+<th>What it tests</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ConstantTest.php</code></td>
+<td>14</td>
+<td>Class constant types, bitwise const expressions, magic constants</td>
+</tr>
+</tbody>
+</table>
+<p>2/14 passed (trivial cases). Requires evaluating constant expressions
+at analysis time (bitwise ops on constants, string concatenation with
+<code>PHP_EOL</code>, <code>self::A | self::B</code>, magic constants like <code>__CLASS__</code>).</p>
+<p><strong>When unblocked:</strong> Run
+<code>php scripts/extract_psalm_tests.php &lt;psalm-checkout&gt;/tests/ConstantTest.php</code>,
+curate the output, and move into <code>tests/psalm_assertions/</code>.</p>
+<h3 id="5l-extract-psalms-literal-typed-assertions-done">5L. Extract Psalm's literal-typed assertions — DONE<a class="headerlink" href="#5l-extract-psalms-literal-typed-assertions-done" title="Permanent link">&para;</a></h3>
+<p><code>filterAssertions()</code> in <code>scripts/extract_psalm_tests.php</code> no longer drops
+assertions whose expected type is a bare literal int or string (literal
+bools are still filtered — PHPantom has no <code>LiteralValue</code> bool variant).</p>
+<p>Re-running the extraction for all 22 already-ported source files against
+the current <code>references/psalm</code> checkout, with only the filter changed,
+produced <strong>byte-for-byte identical output</strong> to the unrelaxed filter (verified
+by diffing both runs against the same checkout state). None of these
+files' Psalm test providers assert a bare literal as the whole type;
+where PHPantom is more precise than Psalm's own <code>int</code>/<code>float</code>
+expectation (e.g. <code>binary_operation.php</code>'s bitwise/shift folding), that
+was already hand-curated to the literal value in an earlier phase,
+independent of this filter. So there was nothing to curate into the
+existing fixture files.</p>
+<p>The relaxation is still worth keeping: it stops future extractions from
+silently dropping literal assertions once a literal-heavy source (5I, 5K)
+is unblocked.</p>
+<h3 id="5g-un-skip-psalm-assertions-done">5G. Un-SKIP Psalm Assertions — DONE<a class="headerlink" href="#5g-un-skip-psalm-assertions-done" title="Permanent link">&para;</a></h3>
+<p>The SKIP markers this phase targeted are gone and all fixture assertions
+pass. Four SKIPs were reintroduced afterwards, when removing the runner's
+literal-widening leniency exposed assertions PHPantom did not satisfy;
+those have since been cleared as their linked items landed, so no
+assertion in the ported corpus is skipped today.</p>
+<hr />
+<h2 id="phase-6-php-lsp-test-infrastructure-patterns-not-test-content">Phase 6: php-lsp Test Infrastructure (patterns, not test content)<a class="headerlink" href="#phase-6-php-lsp-test-infrastructure-patterns-not-test-content" title="Permanent link">&para;</a></h2>
+<p>php-lsp (a Rust PHP language server, https://github.com/jorgsowa/php-lsp)
+has little test <em>content</em> worth porting (its type assertions are
+thinner than what Phases 1-5 already cover, and it has no
+framework-aware semantics to steal). What is
+worth porting is two pieces of test <em>infrastructure</em> from its suite,
+plus one pattern to evaluate.</p>
+<h3 id="6a-caret-annotation-dsl-for-diagnostics-and-references">6A. Caret-annotation DSL for diagnostics and references<a class="headerlink" href="#6a-caret-annotation-dsl-for-diagnostics-and-references" title="Permanent link">&para;</a></h3>
+<p><strong>Status: Ready to port · Complexity: Medium</strong></p>
+<p>php-lsp's diagnostics and references tests annotate expectations
+inline in the PHP source instead of asserting positions in Rust code:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$undefined-&gt;method();</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">// ^^^^^^^ error: Undefined variable $undefined</span>
+</code></pre></div>
+<p>and <code>// ^^^ ref</code> / <code>// ^^^ def</code> markers for reference tests. The
+harness parses the carets into expected ranges and diffs them against
+server output, so a fixture is self-documenting and adding a case
+never touches Rust code.</p>
+<p>PHPantom's fixture runner (<code>tests/fixture_runner.rs</code>) already does
+data-driven fixtures but position expectations live in the Rust side.
+Port the caret parser into the fixture runner as an additional
+assertion mode for <code>diagnostics_*</code> and reference fixtures.</p>
+<p><strong>References (php-lsp's own repo layout):</strong>
+- <code>tests/navigation/references/basic.rs</code> (caret DSL usage)
+- <code>tests/analysis/feature_diagnostics_type_errors.rs</code>
+- <code>tests/common/server.rs</code> (the <code>check_*</code> helpers that render responses
+  to stable snapshot strings)</p>
+<h3 id="6b-wire-protocol-smoke-suite">6B. Wire-protocol smoke suite<a class="headerlink" href="#6b-wire-protocol-smoke-suite" title="Permanent link">&para;</a></h3>
+<p><strong>Status: Ready to port · Complexity: Medium-High</strong></p>
+<p>All 9,762 PHPantom tests go through <code>create_test_backend()</code> internal
+APIs, so a regression at the protocol layer (capability negotiation,
+UTF-16 position encoding, response shape, <code>initialize</code> option
+parsing) is invisible to the suite. php-lsp's harness spins up the
+real server through <code>tower_lsp::LspService</code> over in-memory duplex
+streams with real Content-Length JSON-RPC framing and drives it as an
+editor would (<code>initialize</code> handshake, <code>didOpen</code>, request, assert on
+the raw response).</p>
+<p>Port the harness (~400 lines: php-lsp's <code>tests/common/client.rs</code>
+<code>spawn_server</code>/<code>frame</code>/<code>read_msg</code>, and the handshake helpers in
+PHPantom's <code>tests/common/server.rs:255-287</code>) and add a <em>small</em> smoke suite
+(one round-trip per advertised capability, plus position-encoding
+edge cases). This is not a migration target for existing tests — the
+internal-API tests stay; the wire suite covers only what they cannot
+see.</p>
+<h3 id="6c-pinned-corpus-location-snapshots-evaluate">6C. Pinned-corpus location snapshots — EVALUATE<a class="headerlink" href="#6c-pinned-corpus-location-snapshots-evaluate" title="Permanent link">&para;</a></h3>
+<p><strong>Status: Evaluate · Complexity: Medium</strong></p>
+<p>php-lsp clones real framework source (Laravel, 1,609 files; a Symfony
+demo) and snapshot-tests exact <code>file:line:col</code> results for
+navigation, hover, and completion against it (tests are <code>#[ignore]</code>d
+and <code>#[serial]</code>, run on demand). <code>projects/analyze-triage.md</code> already
+covers <em>diagnostics</em> over real codebases, but those projects are
+private and the triage is manual; nothing today pins <em>navigation and
+hover</em> results to exact locations on a large public corpus.</p>
+<p>If adopted, use an already-public corpus we ship (<code>projects/pdepend</code>
+or <code>projects/phpmd</code>) or a pinned Laravel framework tag, and gate the
+suite behind <code>#[ignore]</code> like php-lsp does. Evaluate whether the
+maintenance cost (snapshots break on corpus re-pin) is worth the
+regression coverage beyond what the fixture suites already give.</p>
+<h3 id="6d-regression-probes-from-php-lsps-july-august-2026-bug-fix-log-done">6D. Regression probes from php-lsp's July-August 2026 bug-fix log — DONE<a class="headerlink" href="#6d-regression-probes-from-php-lsps-july-august-2026-bug-fix-log-done" title="Permanent link">&para;</a></h3>
+<p>One probe per bug class, each added to the existing file for its feature:</p>
+<table>
+<thead>
+<tr>
+<th>Bug class</th>
+<th>Probes</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Semi-reserved keyword as a member name</td>
+<td><code>definition_members.rs</code>, <code>hover.rs</code>, <code>document_highlight.rs</code></td>
+<td>Already correct</td>
+</tr>
+<tr>
+<td>PHPDoc-only tokens misresolving</td>
+<td><code>hover.rs</code>, <code>definition_type_hints.rs</code></td>
+<td><strong>Fixed:</strong> a template used in a docblock (<code>@param T $x</code> under <code>@template T</code>) resolved to a same-named class for hover and go-to-definition</td>
+</tr>
+<tr>
+<td>CRLF/Unicode range conversion</td>
+<td><code>references.rs</code>, <code>rename_member.rs</code></td>
+<td>Already correct</td>
+</tr>
+<tr>
+<td>Find References from an enum case's declaration</td>
+<td><code>references.rs</code></td>
+<td>Already correct</td>
+</tr>
+<tr>
+<td><code>parent::CONST</code> owner resolution</td>
+<td><code>definition_members.rs</code>, <code>hover.rs</code>, <code>references.rs</code></td>
+<td>Already correct</td>
+</tr>
+</tbody>
+</table>
+<p>A member search counts a redeclaring child's constant as part of the same
+family (as an override is for a method), so Find References on
+<code>Base::LIMIT</code> also lists <code>self::LIMIT</code> in a child that redeclares it. That
+is the existing design, not a <code>parent::</code> bug, and the probe asserts the
+owner matching rather than exclusivity.</p>
+<hr />
+<h2 id="phase-7-zed-laravel-laravel-lsp-laravel-behavior-ports">Phase 7: zed-laravel <code>laravel-lsp</code> (Laravel behavior ports)<a class="headerlink" href="#phase-7-zed-laravel-laravel-lsp-laravel-behavior-ports" title="Permanent link">&para;</a></h2>
+<p>zed-laravel (https://github.com/mike-bronner/zed-laravel) is a
+tree-sitter-based Laravel LSP for Zed (MIT, ~2,800 tests). Unlike the
+type-assertion suites of Phases 1-5, its tests are <em>behavior specs</em>:
+magic-member classification, string-key resolution targets, navigation
+locations. They are written as inline-PHP + tempdir PSR-4 fixtures
+(model source in a string, <code>composer.json</code> with a PSR-4 map, assert on
+the resolved result), which maps almost 1:1 onto PHPantom's
+<code>create_psr4_workspace()</code> pattern — the <em>content</em> ports cleanly even
+though the harness differs.</p>
+<p><strong>Trust level:</strong> their engine is heuristic (tree-sitter pattern
+matching, no type resolution), so expectations are not gospel. Verify
+surprising cases against the Laravel runtime
+(<code>examples/laravel/assertions.php</code>) before porting. Where their
+expected behavior conflicts with type-engine-correct behavior, ours
+wins — file the divergence upstream instead of porting the test.</p>
+<p><strong>Porting is gap-driven, not wholesale.</strong> <code>completion_laravel.rs</code>
+alone has 253 tests with heavy overlap. For each area below, diff
+their cases against our existing coverage and port only the gaps
+(principle 3: skip or replace, don't duplicate).</p>
+<h3 id="7a-direct-overlap-done-265-tests-ported-41-ignored-as-known-gaps">7A. Direct overlap — DONE (265 tests ported, 41 ignored as known gaps)<a class="headerlink" href="#7a-direct-overlap-done-265-tests-ported-41-ignored-as-known-gaps" title="Permanent link">&para;</a></h3>
+<p>Every module in the direct-overlap list was gap-diffed against our
+coverage and only the missing cases were ported, into one file per
+concern:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th style="text-align: right;">Tests</th>
+<th>Their module(s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>laravel_eloquent_magic.rs</code></td>
+<td style="text-align: right;">23</td>
+<td><code>member_resolver</code>, <code>generic_type_parsing</code>, <code>query_chain_completion_handler</code></td>
+</tr>
+<tr>
+<td><code>laravel_route_names.rs</code></td>
+<td style="text-align: right;">39</td>
+<td><code>route_discovery</code>, <code>route_name_locator</code>, <code>route_outline</code>, <code>route_hover</code></td>
+</tr>
+<tr>
+<td><code>laravel_view_names.rs</code></td>
+<td style="text-align: right;">19</td>
+<td><code>view_var_index</code>, <code>view_declaration_locator</code></td>
+</tr>
+<tr>
+<td><code>laravel_config_values.rs</code></td>
+<td style="text-align: right;">18</td>
+<td><code>config</code>, <code>config_lookup</code>, <code>config_key_locator</code></td>
+</tr>
+<tr>
+<td><code>laravel_translation_keys.rs</code></td>
+<td style="text-align: right;">38</td>
+<td><code>translation_lookup</code>, <code>vendor_translations</code>, <code>translation_key_locator</code>, translation namespace tests</td>
+</tr>
+<tr>
+<td><code>laravel_env_keys.rs</code></td>
+<td style="text-align: right;">16</td>
+<td><code>env_key_locator</code></td>
+</tr>
+<tr>
+<td><code>laravel_facade_resolution.rs</code></td>
+<td style="text-align: right;">14</td>
+<td><code>facade_resolver</code>, <code>naming</code> (component tags)</td>
+</tr>
+<tr>
+<td><code>composer_autoload_edge_cases.rs</code></td>
+<td style="text-align: right;">9</td>
+<td><code>composer_autoload</code>, FQCN/autoload containment tests</td>
+</tr>
+<tr>
+<td><code>laravel_migration_columns.rs</code></td>
+<td style="text-align: right;">9</td>
+<td><code>migration_index</code> (static parsing only)</td>
+</tr>
+<tr>
+<td><code>blade_preprocessing.rs</code></td>
+<td style="text-align: right;">51</td>
+<td><code>blade_props</code>, <code>blade_embedded_php</code>, <code>blade_directive_tokens</code>, <code>blade_loops</code>, <code>blade_php_block</code>, loop/slot/directive context tests</td>
+</tr>
+<tr>
+<td><code>position_encoding_robustness.rs</code></td>
+<td style="text-align: right;">29</td>
+<td><code>byte_offset_panic_hardening</code> (from 7B), <code>class_locator_and_properties</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>tests/route_binding_resolution</code> turned out to be Livewire-only and was
+skipped. Where their heuristic expectation disagreed with the framework
+(e.g. <code>orWhereFoo</code> as a dynamic finder, <code>$loop</code> inside <code>@while</code>, a
+first-wins duplicate <code>.env</code> key, an unregistered <code>ns::</code> translation
+namespace), the Laravel runtime's behaviour was ported instead.</p>
+<p>The port fixed the gaps that were small enough to fix in place (route
+group <code>as()</code> and replace semantics, a name ahead of the registration verb,
+migration index calls read as columns, <code>lang_path()</code> namespaces, the last
+duplicate <code>.env</code> value, Blade's <code>\B@</code> directive boundary, empty config
+strings). The rest are filed in <a href="../bugs/">bugs.md</a> (B335-B356) and L24,
+and their tests are <code>#[ignore = "known gap: …"]</code>d so the suite stays
+green while the gap stays visible: un-ignore a test when its entry lands.</p>
+<h3 id="7b-partial-overlap-done-64-tests-ported-10-ignored-as-known-gaps">7B. Partial overlap — DONE (64 tests ported, 10 ignored as known gaps)<a class="headerlink" href="#7b-partial-overlap-done-64-tests-ported-10-ignored-as-known-gaps" title="Permanent link">&para;</a></h3>
+<p>All ten modules were gap-diffed. Most of their ~280 cases test their own
+markdown rendering, helpers, or lens anchoring, or are already covered;
+<code>vendor_member_prover</code> backs a dead-code diagnostic PHPantom does not have
+and ported nothing. The gaps went into the existing file per concern:</p>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th style="text-align: right;">Tests</th>
+<th>Their module(s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>rename_variable.rs</code></td>
+<td style="text-align: right;">18</td>
+<td><code>php_variable_rename</code></td>
+</tr>
+<tr>
+<td><code>rename_symbols.rs</code></td>
+<td style="text-align: right;">5</td>
+<td><code>php_variable_rename</code>, <code>class_rename</code> (new-name validation, vendor refusal)</td>
+</tr>
+<tr>
+<td><code>rename_class.rs</code></td>
+<td style="text-align: right;">2</td>
+<td><code>class_rename</code></td>
+</tr>
+<tr>
+<td><code>laravel_eloquent_magic.rs</code></td>
+<td style="text-align: right;">15</td>
+<td><code>hover</code>, <code>method_name_completion</code>, <code>completion_format</code></td>
+</tr>
+<tr>
+<td><code>definition_laravel.rs</code></td>
+<td style="text-align: right;">5</td>
+<td><code>code_lens</code>, <code>references</code></td>
+</tr>
+<tr>
+<td><code>hover.rs</code>, <code>laravel_translation_keys.rs</code>, <code>docblock_types.rs</code></td>
+<td style="text-align: right;">3</td>
+<td><code>hover</code>, <code>completion_format</code></td>
+</tr>
+<tr>
+<td><code>laravel_view_names.rs</code>, <code>laravel_route_names.rs</code></td>
+<td style="text-align: right;">5</td>
+<td><code>references</code></td>
+</tr>
+<tr>
+<td><code>implementation.rs</code>, <code>type_hierarchy.rs</code>, <code>src/diagnostics/cross_file.rs</code></td>
+<td style="text-align: right;">7</td>
+<td><code>class_hierarchy_index</code></td>
+</tr>
+<tr>
+<td><code>document_symbols_blade.rs</code></td>
+<td style="text-align: right;">4</td>
+<td><code>document_symbols</code></td>
+</tr>
+</tbody>
+</table>
+<p>The port fixed the gaps small enough to fix in place: variable rename leaking
+into a closure without <code>use</code> and from a top-level script into functions,
+<code>global $x</code> rename, invalid new names, a bare <code>: HasMany</code> relationship
+losing its related model, scope/accessor/relationship docblocks on hover,
+<code>whereId</code> from the implicit primary key, a <code>scopeWhereX</code> losing
+go-to-definition to the <code>x</code> column, translation hover ignoring
+<code>app.locale</code>, go-to-implementation from a trait's abstract method, saves
+not requeueing grandchildren, and the legacy <code>&lt;x-slot name="…"&gt;</code> outline
+label. The rest are filed as B360-B366 with <code>#[ignore = "known gap: …"]</code>
+tests.</p>
+<p>Left for a maintainer decision rather than filed: code lenses for route,
+config, translation, env, and view declarations; route declarations in the
+<code>routes/*.php</code> outline; <code>@include</code>/<code>@props</code>/<code>@extends</code> in the Blade outline;
+find-references on component tags; an "overrides" lens on a property that
+redeclares a parent's; and what renaming from a <code>use … as Alias</code> alias
+should rename (today it renames the class, keeping the alias).</p>
+<h3 id="7c-skip-features-phpantom-doesnt-have">7C. Skip — features PHPantom doesn't have<a class="headerlink" href="#7c-skip-features-phpantom-doesnt-have" title="Permanent link">&para;</a></h3>
+<p>Not test ports; if any become sprint items, revisit their suites as
+the spec: Livewire (~80 across modules), <code>alpine</code> (45),
+<code>folio_discovery</code> (42), Flux/Inertia/slot navigation, <code>blade_var_rename</code>
+(54), <code>column_rename</code> (18), <code>middleware_binding_locator</code> (19),
+<code>validation_rules</code> (3), artisan <code>command_*</code> (~30), live-DB <code>database</code>
+(94).</p>
+<p><strong>Skip — their infrastructure:</strong> <code>salsa_impl</code> (138), disk caches,
+<code>file_watcher</code>, <code>pattern_indexer</code>, <code>reindex</code> — Salsa-specific, nothing
+transfers.</p>
+<h3 id="phase-7-done-7c-revisits-per-feature">Phase 7: done (7C revisits per feature)<a class="headerlink" href="#phase-7-done-7c-revisits-per-feature" title="Permanent link">&para;</a></h3>
+<hr />
+<h2 id="phase-8-bladestan-compiled-corpora-ready-as-a-gap-report">Phase 8: Bladestan compiled corpora — READY (as a gap report)<a class="headerlink" href="#phase-8-bladestan-compiled-corpora-ready-as-a-gap-report" title="Permanent link">&para;</a></h2>
+<p><strong>Complexity: Low for the script</strong></p>
+<p>Bladestan is the PHPStan extension for Blade template analysis, and
+PHPantom implements the same contract model by design. Its test suite is
+ported in full.</p>
+<p>What remains here is a different kind of material: the compiled output
+Bladestan left behind in three of the sample projects, which is a gap
+report rather than a test port. (If you do revisit the suite itself, work
+from the full actively maintained checkout, not <code>projects/bladestan</code> —
+that one is a stale, minimal copy kept only for <code>analyze</code> diagnostic
+triage, per <code>CLAUDE.local.md</code>.)</p>
+<p>It writes that output to <code>.bladestan/__templates__/</code> inside the project
+it analysed, one PHP file per view, which makes the tree a ready-made
+answer key for "what does this template have in scope":</p>
+<table>
+<thead>
+<tr>
+<th>Project</th>
+<th style="text-align: right;">Compiled views</th>
+<th>Blade source roots</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>projects/luxplus-backoffice</code></td>
+<td style="text-align: right;">559</td>
+<td><code>resources/backoffice/views</code>, <code>resources/views</code></td>
+</tr>
+<tr>
+<td><code>projects/luxplus-website</code></td>
+<td style="text-align: right;">547</td>
+<td><code>resources/webshop/views</code>, <code>resources/kiosk/views</code>, <code>resources/views</code></td>
+</tr>
+<tr>
+<td><code>projects/luxplus-site-manager</code></td>
+<td style="text-align: right;">5</td>
+<td><code>resources/views</code></td>
+</tr>
+</tbody>
+</table>
+<p>(These are private codebases. Keep their names in this file and out of
+anything committed, and anonymize any snippet that becomes a test
+fixture.)</p>
+<p><strong>Pairing a compiled file with its source.</strong>
+<code>.bladestan/bladestan-manifest.json</code> is the index: <code>templates</code> maps a
+view name to <code>{source, sourceHash, output}</code>, where <code>output</code> is relative
+to <code>.bladestan/</code> and <code>source</code> is <em>absolute</em>. Both <code>source</code> and the
+top-level <code>projectRoot</code> are paths on the machine Bladestan ran on, not
+paths under <code>projects/</code>, so strip the <code>projectRoot</code> prefix off <code>source</code>
+and rejoin it onto the local project directory. Every entry in all three
+projects rebases cleanly that way, so a mismatch means a stale manifest
+rather than a path edge case. The compiled file's own
+<code>// @bladestan-source:</code> header carries the same absolute path and needs
+the same treatment.</p>
+<p><strong>The answer key</strong> is the run of <code>/** @var T $x */</code> lines between that
+header and the first statement, in Bladestan's own priority order:
+signature, then component-body scope, then view-composer data, then
+shared variables. <code>$errors</code> and <code>$__env</code> correspond to what our prologue
+declares; <code>$app</code> appears in all 1,111 compiled files and is Bladestan
+reading the view factory's shared variables.</p>
+<p><strong>What to expect from a run.</strong> The last comparison predates
+backing-class member injection, shared/composer variables, and <code>$this</code> in
+a Livewire view, all of which supplied the bulk of what it flagged, so
+the run is worth repeating from scratch rather than reading against those
+numbers. The known gap it will <em>not</em> catch is
+<a href="../blade/#bl22-a-template-never-learns-anything-from-the-templates-that-render-it">BL22</a>:
+a partial rendered only from other templates still gets nothing from
+their <code>@include</code>/<code>@each</code> call sites.</p>
+<p><strong>Caveats when reading a difference as a defect.</strong> Bladestan strips the
+signature docblock and re-emits it, so its <code>@var</code> block is the <em>whole</em>
+scope; ours is split between the prologue and the docblock left in the
+template, and the comparison has to account for both. <code>@extends</code> does
+not contribute to the body in either tool (it is a call-site concern),
+so a parent layout's variables are legitimately absent from a child's
+block. And the trees are only as fresh as the last Bladestan run: check
+<code>sourceHash</code> against the local file before trusting an entry.</p>
+<p>If the comparison becomes a checked-in script under <code>scripts/</code>, it has to
+take the project directory as an argument. Hardcoding any path above
+would put a private project name in the public repo.</p>
+<hr />
+<h2 id="phase-9-phpstan-nsrt-sweep-done-344-files-2496-running-assertions">Phase 9: PHPStan <code>nsrt/</code> sweep — DONE (344 files, 2,496 running assertions)<a class="headerlink" href="#phase-9-phpstan-nsrt-sweep-done-344-files-2496-running-assertions" title="Permanent link">&para;</a></h2>
+<p>Every file in PHPStan's <code>tests/PHPStan/Analyser/nsrt/</code> (1,425, including the
+<code>foreach/</code>, <code>json-decode/</code>, <code>throw-points/</code>, and <code>traits/</code> subdirectories)
+was run through the runner, and every file that passed at least 60% of at
+least four assertions was ported into <code>tests/phpstan_nsrt/</code>, which went from
+32 to 376 files.</p>
+<ul>
+<li><strong>Ported verbatim (223 files):</strong> every assertion passes. Files whose only
+  assertions are <code>mixed</code>/<code>*ERROR*</code> were left out, since those pass even when
+  hover returns nothing.</li>
+<li><strong>Curated (121 files):</strong> each failing assertion was triaged. Out-of-scope
+  ones under the type policy above were deleted (285), spellings PHPantom
+  prints differently but equivalently, or answers where it is the more
+  precise of the two, were rewritten with a comment (15), and real gaps are
+  <code>// SKIP</code> (154) and filed as B368-B411 in <a href="../bugs/">bugs.md</a>.</li>
+</ul>
+<p>Porting fixed the gaps small enough to fix in place: a <code>@return</code> member the
+native return type rules out (<code>static|false</code> on <code>: DateTimeImmutable</code>, a
+<code>null</code> on a non-nullable return, the array half of
+<code>IteratorAggregate::getIterator()</code>), a <code>static</code>-typed property or <code>__get()</code>
+read through a variable, <code>func_get_args()</code>, a <code>(bool)</code> cast on <code>preg_match()</code>,
+a <code>self</code> hint shown instead of its class, a by-reference inference pass that
+cost statements × locals, and the stub version filter rescanning each stub
+file per symbol (the rest of that is P66).</p>
+<p><strong>Left for follow-up:</strong></p>
+<ul>
+<li><code>if.php</code> is curated but not ported: it takes 53 s in a debug build until
+  <a href="../performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65</a>
+  lands. The curated copy is easy to regenerate from the upstream file.</li>
+<li><code>properties.php</code> needs its companion <code>Analyser/data/properties-defined.php</code>,
+  which declares the class it reads, and the two use different imports under
+  the same unbraced namespace.</li>
+<li>The ~1,000 files below the 60% line, most of them blocked on Phase 5
+  features or dominated by out-of-scope types.</li>
+<li><strong><code>tests/PHPStan/Analyser/data/</code></strong> is a second assertType corpus
+  (<code>NodeScopeResolverTest</code> yields it alongside <code>nsrt/</code>), not yet surveyed.</li>
+</ul>
+<hr />
+<h2 id="existing-test-evaluation">Existing Test Evaluation<a class="headerlink" href="#existing-test-evaluation" title="Permanent link">&para;</a></h2>
+<p>PHPantom has ~14,460 tests (<code>#[test]</code> + <code>#[tokio::test]</code> functions,
+counted 2026-09-23 — up from the 9,762 this section previously recorded;
+re-count before trusting these numbers again, since they drift fast).
+When porting tests from reference projects, compare against existing
+tests in these high-overlap areas:</p>
+<table>
+<thead>
+<tr>
+<th>Area</th>
+<th>Existing tests</th>
+<th>Expected overlap with ports</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>completion_variables.rs</code></td>
+<td>291</td>
+<td>High overlap with Mago narrowing tests</td>
+</tr>
+<tr>
+<td><code>completion_guard_clauses.rs</code></td>
+<td>29</td>
+<td>Moderate overlap with Mago narrowing</td>
+</tr>
+<tr>
+<td><code>completion_generics.rs</code></td>
+<td>147</td>
+<td>High overlap with Mago + PHPStan generics</td>
+</tr>
+<tr>
+<td><code>completion_laravel.rs</code></td>
+<td>302</td>
+<td>High overlap with Larastan tests</td>
+</tr>
+<tr>
+<td><code>completion_mixins.rs</code></td>
+<td>34</td>
+<td>Moderate overlap with Mago magic members</td>
+</tr>
+<tr>
+<td><code>completion_array_shapes.rs</code></td>
+<td>118</td>
+<td>Moderate overlap with Mago + PHPStan arrays</td>
+</tr>
+<tr>
+<td><code>completion_ternary.rs</code></td>
+<td>24</td>
+<td>Some overlap with Mago ternary tests</td>
+</tr>
+<tr>
+<td><code>completion_match_expression.rs</code></td>
+<td>12</td>
+<td>Some overlap with Mago match tests</td>
+</tr>
+<tr>
+<td><code>completion_enums.rs</code></td>
+<td>40</td>
+<td>Some overlap with PHPStan enum tests</td>
+</tr>
+<tr>
+<td><code>hover.rs</code></td>
+<td>430</td>
+<td>High overlap with PHPStan assertType tests</td>
+</tr>
+<tr>
+<td><code>diagnostics_type_errors.rs</code></td>
+<td>474</td>
+<td>Moderate overlap with Mago diagnostics</td>
+</tr>
+<tr>
+<td><code>diagnostics_unknown_members.rs</code></td>
+<td>394</td>
+<td>Some overlap with Mago null-access tests</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="summary">Summary<a class="headerlink" href="#summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Source</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Mago (easy)</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td>Larastan (easy)</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>PHPStan (actionable)</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>3.5</td>
+<td>Psalm (relevant + partial)</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>4A</td>
+<td>Mago issue regressions (22 patterns)</td>
+<td><strong>Done</strong> (14/22 ported, 8 blocked on non-test-porting work — see T42/T43/C13 and Phase 5)</td>
+</tr>
+<tr>
+<td>4B</td>
+<td>Trait resolution (Mago)</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>4C</td>
+<td>Psalm non-assertion patterns (8 files)</td>
+<td><strong>Done</strong> (7/8 ported, SKIPs pending B343-B347/T26)</td>
+</tr>
+<tr>
+<td>5G</td>
+<td>Un-SKIP Psalm assertions</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>5A-5F, 5H-5K</td>
+<td>Requires new features (~10 groups)</td>
+<td>Blocked (see sections above)</td>
+</tr>
+<tr>
+<td>5L</td>
+<td>Extract Psalm's literal-typed assertions</td>
+<td><strong>Done</strong></td>
+</tr>
+<tr>
+<td>6A</td>
+<td>php-lsp caret-annotation DSL (infrastructure)</td>
+<td>Ready</td>
+</tr>
+<tr>
+<td>6B</td>
+<td>php-lsp wire-protocol smoke suite (infrastructure)</td>
+<td>Ready</td>
+</tr>
+<tr>
+<td>6C</td>
+<td>Pinned-corpus location snapshots</td>
+<td>Evaluate</td>
+</tr>
+<tr>
+<td>6D</td>
+<td>Regression probes from php-lsp's bug-fix log (5 bug classes)</td>
+<td><strong>Done</strong> (1 bug fixed, 4 already correct)</td>
+</tr>
+<tr>
+<td>7A</td>
+<td>zed-laravel direct-overlap behavior ports</td>
+<td><strong>Done</strong> (265 tests, 41 ignored pending B335-B356/L24)</td>
+</tr>
+<tr>
+<td>7B</td>
+<td>zed-laravel partial-overlap areas</td>
+<td><strong>Done</strong> (64 tests, 10 ignored pending B360-B366)</td>
+</tr>
+<tr>
+<td>7C</td>
+<td>zed-laravel feature-gap suites</td>
+<td>Skip (revisit per feature)</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Bladestan compiled corpora as an answer key</td>
+<td>Ready to re-run (watch for BL22 leftovers); the test suite itself is fully ported</td>
+</tr>
+<tr>
+<td>9</td>
+<td>PHPStan <code>nsrt/</code> sweep with full stubs</td>
+<td><strong>Done</strong> (344 files, 154 SKIPs pending B368-B411; <code>if.php</code> waits on P65)</td>
+</tr>
+<tr>
+<td><strong>Remaining</strong></td>
+<td></td>
+<td>6A/6B infrastructure, 6C evaluation, 8 re-run, PHPStan <code>Analyser/data/</code> survey</td>
+</tr>
+</tbody>
+</table>
+<p>The session estimates assume one session = one focused work block where
+the agent ports tests, runs CI, and resolves failures. Actual time will
+vary based on how many existing tests overlap (reducing work) and how
+many type engine bugs the ported tests uncover (increasing work, but
+that is the whole point).</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
