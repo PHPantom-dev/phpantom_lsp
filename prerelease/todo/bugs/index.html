@@ -1373,23 +1373,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b416-object-of-a-non-empty-array-loses-stdclass" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B416. <code>(object)</code> of a non-empty array loses <code>stdClass</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2405,23 +2388,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b416-object-of-a-non-empty-array-loses-stdclass" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B416. <code>(object)</code> of a non-empty array loses <code>stdClass</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -3061,22 +3027,7 @@ the three assertions are <code>// SKIP</code> in <code>tests/phpstan_nsrt/object
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b416-object-of-a-non-empty-array-loses-stdclass">B416. <code>(object)</code> of a non-empty array loses <code>stdClass</code><a class="headerlink" href="#b416-object-of-a-non-empty-array-loses-stdclass" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-35-1" name="__codelineno-35-1" href="#__codelineno-35-1"></a><span class="x">/** @param object{foo: int}&amp;\stdClass $s */</span>
-<a id="__codelineno-35-2" name="__codelineno-35-2" href="#__codelineno-35-2"></a><span class="x">function f(object $s): void {}</span>
-<a id="__codelineno-35-3" name="__codelineno-35-3" href="#__codelineno-35-3"></a><span class="x">f((object) [&#39;foo&#39; =&gt; 1]); // reported: expects object{foo: int}&amp;stdClass, got object{foo: int}</span>
-</code></pre></div>
-<p>Casting an array to an object always produces a <code>stdClass</code>. <code>object_cast_type</code>
-returns bare <code>stdClass</code> for <code>(object) []</code> and for anything it cannot read,
-but for a shape or a scalar it returns only the <code>object{…}</code> shape. The result
-should be <code>object{…}&amp;stdClass</code>, so it keeps <code>stdClass</code>'s class identity (and
-the dynamic properties that come with it) alongside the known keys.</p>
-<p>Found running the php-typing-conformance suite
-(<code>phpdoc_advanced_object_shape_variants.php</code>). Every other column except
-Psalm accepts the call.</p>
-<p><strong>Where to look:</strong> <code>object_cast_type</code> in
-<code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
+<p>No outstanding items.</p>
 
 
 
