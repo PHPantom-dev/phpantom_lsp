@@ -864,20 +864,35 @@ Psalm accepts the call.
 **Where to look:** `object_cast_type` in
 `type_engine/variable/rhs_resolution/mod.rs`.
 
-### B409. `??` on an undefined or null-only left side gives `mixed`
-**Impact: Low · Complexity: Low**
+### B417. An assignment used as a value does not resolve outside a bare RHS
+**Impact: Low · Complexity: Medium**
 
 ```php
 function f(): void {
-    $x = $a ?? 1; // $a is never assigned; should be 1, is mixed
-    if (rand(0, 1)) { $b = null; }
-    $y = $b ?? 2; // should be 2, is mixed
+    $x = ($y = 1);
+    // $x and $y both resolve to nothing (not even `mixed`).
+}
+function g(): void {
+    $x = 0 ?? ($y = 1);
+    // $x resolves fine (`0`); $y's assignment inside the `??` operand
+    // is never seen, so the RHS of the whole chain silently widens to
+    // `mixed` beside it.
 }
 ```
 
-An operand that is undefined, or `null` wherever it is defined, contributes
-nothing to the result; `resolve_null_coalesce_chain` treats it as an
-unresolvable operand and adds `mixed`.
+`resolve_rhs_expression` (the shared pipeline in
+`type_engine/variable/rhs_resolution/mod.rs`, used by ternaries, `??`
+chains, match arms, and every other operand position) has no arm for
+`Expression::Assignment` at all, parenthesized or not. The only place an
+assignment resolves as a value is `resolve_rhs_with_scope`'s dedicated
+chain-assignment special case (`$a = $b = expr`), which is reached solely
+from the top-level RHS of a plain `$var = …;` statement and does not
+unwrap a `Parenthesized` wrapper first, so `$a = ($b = expr)` misses it
+too.
 
-Found porting PHPStan's `nsrt/falsey-coalesce.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+Found while porting PHPStan's `nsrt/falsey-coalesce.php`: `$x = $a ??
+($y=1) ?? 1;` needs `($y=1)` to resolve to `1` inside the `??` chain, and
+because `resolve_rhs_expression` cannot resolve it, the chain adds
+`mixed`. Two assertions stay `// SKIP` in the ported copy under
+`tests/phpstan_nsrt/falsey-coalesce.php` because of this
+(`maybeNullableVarAssign`, `notExistsAssign`).

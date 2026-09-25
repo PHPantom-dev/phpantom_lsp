@@ -1121,8 +1121,11 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx =
-        ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()));
+    let scope_contains = |var_name: &str| -> bool { scope_locals.contains_key(&atom(var_name)) };
+    let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+        scope_contains_resolver: Some(&scope_contains),
+        ..ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()))
+    };
 
     let result = super::super::rhs_resolution::resolve_rhs_expression(rhs, &var_ctx);
     if !result.is_empty() {

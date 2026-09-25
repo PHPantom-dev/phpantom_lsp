@@ -579,7 +579,14 @@ fn resolve_null_coalesce_chain<'b>(
             _ => false,
         };
         let lhs_results = resolve_rhs_expression(current.lhs, ctx);
-        if lhs_results.is_empty() {
+        if lhs_results.is_empty() && operand_is_null_only(current.lhs, ctx) {
+            // A bare variable with no entry in scope has not been
+            // assigned on any path reaching this point, so it is
+            // undefined here — which PHP evaluates as `null` (with a
+            // notice), not "could be anything".  It contributes nothing
+            // to the union, the same as a resolved-but-stripped `null`
+            // a few lines down.
+        } else if lhs_results.is_empty() {
             // A genuinely unresolvable operand. At runtime it could hold
             // any value, so represent it as `mixed` and keep unioning
             // the rest of the chain.
@@ -605,6 +612,28 @@ fn resolve_null_coalesce_chain<'b>(
             }
         }
     }
+}
+
+/// Whether an empty-resolving `??` operand is a bare variable that was
+/// never assigned on any path reaching this point, rather than one that
+/// was assigned but whose type the resolver failed to work out.
+///
+/// `resolve_rhs_expression` returns an empty `Vec` for both: the forward
+/// walker's `ScopeState` answers an unassigned name and an
+/// assigned-but-unresolved one the same way through `scope_var_resolver`
+/// (see `ScopeState::snapshot_resolver`).  `scope_contains_resolver` is
+/// the one signal that tells them apart, so this only fires when it is
+/// available; a caller without a forward-walker scope (e.g. the
+/// backward-scan cold path) keeps the existing `mixed`-widening
+/// behaviour.
+fn operand_is_null_only(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> bool {
+    let Expression::Variable(Variable::Direct(dv)) = peel_type_transparent(expr) else {
+        return false;
+    };
+    let Some(contains) = ctx.scope_contains_resolver else {
+        return false;
+    };
+    !contains(bytes_to_str(dv.name))
 }
 
 /// Turn a branch that resolved to nothing into `mixed`.

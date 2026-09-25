@@ -71,7 +71,7 @@ function maybeNullableVarAssign():void {
 	$x = $a ?? ($y=1) ?? 1;
 
 	assertVariableCertainty(TrinaryLogic::createYes(), $x);
-	assertType('1', $x); // SKIP: ?? on an undefined or null-only left side gives mixed
+	assertType('1', $x); // SKIP: an assignment used as a value does not resolve outside a bare RHS
 	assertVariableCertainty(TrinaryLogic::createMaybe(), $a);
 	assertType('null', $a);
 	assertVariableCertainty(TrinaryLogic::createMaybe(), $y);
@@ -82,7 +82,7 @@ function notExistsAssign():void {
 	$x = $a ?? ($y=1) ?? 1;
 
 	assertVariableCertainty(TrinaryLogic::createYes(), $x);
-	assertType('1', $x); // SKIP: ?? on an undefined or null-only left side gives mixed
+	assertType('1', $x); // SKIP: an assignment used as a value does not resolve outside a bare RHS
 	assertVariableCertainty(TrinaryLogic::createNo(), $a);
 	assertType('*ERROR*', $a);
 	assertVariableCertainty(TrinaryLogic::createMaybe(), $y);

@@ -57,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`??` on a left side that is never assigned, or only ever `null`, no longer widens to `mixed`.** `$x = $a ?? 1;` with `$a` never assigned now reads as `1`, matching what PHP actually evaluates it to.
 - **`array_map()` with a callback that takes no parameters keeps the callback's return type.** `array_map(fn () => new Foo(), $items)` is now `list<Foo>` instead of a bare `array`.
 - **A by-reference `foreach` updates the array it walks.** After `foreach ($list as &$value) { $value = 'x'; }`, `$list` holds the values the loop wrote through the reference. A `break` keeps the entries the loop never reached.
 - **Writing to an integer key of an array shape keeps the shape.** `$arr[1] = 'x'` on an `array{1: string, 2: int}` updates that entry instead of widening the whole value to `array<int, string|int>`.
