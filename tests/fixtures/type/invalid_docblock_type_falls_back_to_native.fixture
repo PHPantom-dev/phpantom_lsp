@@ -1,0 +1,16 @@
+// test: a PHPDoc type that does not parse is discarded, not shown verbatim
+// feature: hover
+// Adapted from PHPStan nsrt/properties.php
+// expect_absent: invalidType
+---
+<?php
+
+class A {
+    /** @var [$invalidType] */
+    private $p;
+
+    public function f(): void {
+        $p = $this->p;
+        echo $<>p;
+    }
+}

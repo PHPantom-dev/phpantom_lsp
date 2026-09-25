@@ -17,8 +17,14 @@ impl PhpType {
     /// types like `BelongsTo<Category, covariant $this>` become
     /// `Generic("BelongsTo", [Named("Category"), Named("$this")])`.
     pub fn parse(input: &str) -> PhpType {
+        Self::try_parse(input).unwrap_or_else(|| PhpType::raw(input))
+    }
+
+    /// Like [`PhpType::parse`], but returns `None` when `input` is not a
+    /// valid type instead of keeping it as raw text.
+    pub fn try_parse(input: &str) -> Option<PhpType> {
         if input.is_empty() {
-            return PhpType::untyped();
+            return Some(PhpType::untyped());
         }
 
         // `static(Foo)` / `$this(Foo)` is how a bounded late-static type is
@@ -27,14 +33,14 @@ impl PhpType {
         if input.contains('(')
             && let Some((cleaned, bounds)) = replace_late_static_bounds(input)
         {
-            return parse_type_text(&cleaned).substitute(&bounds);
+            return Some(parse_type_text(&cleaned)?.substitute(&bounds));
         }
 
         parse_type_text(input)
     }
 }
 
-fn parse_type_text(input: &str) -> PhpType {
+fn parse_type_text(input: &str) -> Option<PhpType> {
     // Replace known hyphenated pseudo-types (e.g. `model-property`)
     // with underscore placeholders so Mago can parse the surrounding
     // type structure.  The placeholders are restored in the result.
@@ -49,8 +55,8 @@ fn parse_type_text(input: &str) -> PhpType {
 
     let arena = LocalArena::new();
     match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
-        Ok(ty) => restore_hyphenated_keywords(convert(effective, &ty)),
-        Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
+        Ok(ty) => Some(restore_hyphenated_keywords(convert(effective, &ty))),
+        Err(_) => try_parse_hyphenated_generic(input),
     }
 }
 

@@ -17,7 +17,7 @@ class Foo
 	{
 		/** @var int */
 		global $foo;
-		assertType('int', $foo); // SKIP: @var above a global statement is misapplied
+		assertType('int', $foo);
 	}
 
 	public function doBar(): void
@@ -47,7 +47,7 @@ class Foo
 		/** @var int $baz */
 		global $lorem;
 		assertType('mixed', $lorem);
-		assertType('\'foo\'', $baz); // SKIP: @var above a global statement is misapplied
+		assertType('\'foo\'', $baz);
 	}
 
 	public function doIpsum(): void
@@ -68,7 +68,7 @@ class Foo
 		global $lorem;
 
 		assertType('mixed', $lorem);
-		assertType('*ERROR*', $baz); // SKIP: @var above a global statement is misapplied
+		assertType('*ERROR*', $baz);
 	}
 
 	public function doSit(): void
@@ -90,7 +90,7 @@ class Foo
 		/** @var \stdClass[] $slots */
 		$itemSlots = [];
 
-		assertType('array<stdClass>', $itemSlots); // SKIP: only the nearest of several stacked @var docblocks applies
+		assertType('array<stdClass>', $itemSlots);
 		assertType('array<stdClass>', $slots);
 	}
 

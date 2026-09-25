@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A method declared `: never` stays `never` when it overrides an interface.** `EmptyIterator::key()` used to take `Iterator`'s `@return TKey|null` and read as `mixed|null`.
+- **`@var` above a `global` statement types only what the statement imports.** A nameless `/** @var int */` types the single variable a `global $foo;` brings in, and a `@var` naming some other variable no longer changes that variable's type.
+- **Stacked `@var` docblocks above an assignment all apply.** When `/** @var Foo[] $items */` sits above another `@var` docblock rather than directly above `$items = [];`, it still gives `$items` its type instead of losing to the assigned value.
+- **A PHPDoc type that does not parse is ignored.** A malformed annotation such as `@var [$x]` falls back to the declared type (or `mixed`) instead of showing the broken text as the type.
+- **`@phpstan-method` and `@psalm-method` win over `@method` wherever they appear in the docblock.** Before, the vendor-prefixed tag only won when it came after the plain one.
 - **A `@return` tag no longer adds a value the declared return type rules out.** A stub written for an older PHP that says `@return static|false` on a method declared `: DateTimeImmutable` used to report `DateTimeImmutable|false`, and `IteratorAggregate::getIterator()` reported an array alongside its `Traversable`. The part of the tag the signature allows is kept, generics included, and the rest is dropped, since PHP enforces the signature. The same goes for a `null` in the tag when the declared type is not nullable.
 - **A value typed `self` shows the class it names.** A parameter or `@var` typed `self` used to show the bare keyword on hover; it now names the class, which is also what makes it right in a file that declares several classes.
 - **`func_get_args()` returns a `list<mixed>`, and `(bool) preg_match(…)` narrows the matches array** the way the bare call already did.

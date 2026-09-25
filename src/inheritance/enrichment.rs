@@ -56,8 +56,16 @@ fn ancestor_has_richer_type(effective: &Option<PhpType>, native: &Option<PhpType
 /// type. The child's *native* hint still has the last word: an override
 /// declaring `: array` cannot return the `string` half of an interface's
 /// `@return array|string`, so the inherited union is restricted to what the
-/// override's own declaration allows.
+/// override's own declaration allows. A native `never` allows nothing to be
+/// returned, so there is nothing an ancestor's docblock could refine.
 fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option<PhpType> {
+    if existing
+        .native_return_type
+        .as_ref()
+        .is_some_and(PhpType::is_never)
+    {
+        return None;
+    }
     if !(existing.return_type.is_none() && ancestor.return_type.is_some()
         || lacks_docblock_override(&existing.return_type, &existing.native_return_type)
             && ancestor_has_richer_type(&ancestor.return_type, &ancestor.native_return_type))

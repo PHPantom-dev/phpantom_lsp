@@ -11,7 +11,7 @@ use crate::atom::{Atom, AtomMap, atom};
 
 use super::tag_kind::TagKind;
 
-use super::parser::{DocblockInfo, parse_docblock_for_tags};
+use super::parser::{DocblockInfo, parse_docblock_for_tags, vendor_rank};
 use super::tags::sanitise_and_parse_docblock_type;
 use super::type_strings::split_type_token;
 use crate::php_type::PhpType;
@@ -97,17 +97,32 @@ pub fn extract_method_tags(docblock: &str) -> Vec<MethodInfo> {
 /// parser reuses that [`DocblockInfo`] instead of re-parsing the text.
 pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
     let mut results: Vec<MethodInfo> = Vec::new();
-    // Track which method names came from vendor-prefixed tags
-    // (@psalm-method / @phpstan-method) so they can override
-    // bare @method tags with the same name.
-    let mut vendor_names: std::collections::HashSet<crate::atom::Atom> =
-        std::collections::HashSet::new();
+
+    // A vendor-prefixed tag (`@phpstan-method`, then `@psalm-method`, …)
+    // overrides a less authoritative one declaring the same method,
+    // wherever the two appear in the docblock.
+    let mut best_rank: AtomMap<u8> = AtomMap::default();
+    for tag in info.tags_by_kind(TagKind::Method) {
+        if let Some(method) = tag.value.as_method()
+            && !method.name.is_empty()
+        {
+            let rank = best_rank.entry(atom(&method.name)).or_insert(u8::MAX);
+            *rank = (*rank).min(vendor_rank(tag));
+        }
+    }
 
     for tag in info.tags_by_kind(TagKind::Method) {
         let Some(method) = tag.value.as_method() else {
             continue;
         };
         if method.name.is_empty() {
+            continue;
+        }
+        let method_atom = atom(&method.name);
+        if best_rank
+            .get(&method_atom)
+            .is_some_and(|&best| vendor_rank(tag) > best)
+        {
             continue;
         }
 
@@ -174,9 +189,6 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             compute_template_bindings_from_params(&parameters, &tpl_names)
         };
 
-        let method_atom = atom(&method.name);
-        let is_vendor_tag = tag.vendor.is_some();
-
         results.push(MethodInfo {
             name: method_atom,
             name_offset: 0,
@@ -208,29 +220,6 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             is_pure: false,
             is_impure: false,
         });
-
-        if is_vendor_tag {
-            vendor_names.insert(method_atom);
-        }
-    }
-
-    // Deduplicate: if a method name has a vendor-prefixed entry
-    // (@psalm-method / @phpstan-method), remove bare @method entries
-    // with the same name. Since vendor tags come after bare tags in
-    // document order, keep the last occurrence for duplicated names.
-    if !vendor_names.is_empty() {
-        let mut seen: std::collections::HashSet<crate::atom::Atom> =
-            std::collections::HashSet::new();
-        // Iterate in reverse so that later (vendor) entries are kept.
-        results.reverse();
-        results.retain(|m| {
-            if vendor_names.contains(&m.name) {
-                seen.insert(m.name)
-            } else {
-                true
-            }
-        });
-        results.reverse();
     }
 
     results

@@ -24,8 +24,9 @@ pub(crate) fn process_statement<'b>(
     // An expression statement runs its own `@var` handling, which has
     // extra rules (the LHS is left alone while the cursor sits in the
     // RHS, a scalar RHS blocks a class override).  Every other statement
-    // kind only ever sees standalone annotations.
-    if !matches!(stmt, Statement::Expression(_)) {
+    // kind only ever sees standalone annotations, and `global` restricts
+    // those to the variables it imports.
+    if !matches!(stmt, Statement::Expression(_) | Statement::Global(_)) {
         let stmt_offset = stmt.span().start.offset;
         if apply_standalone_var_docblocks(stmt_offset, scope, ctx) {
             // The diagnostic scope snapshot at this offset was recorded
@@ -123,19 +124,25 @@ pub(crate) fn process_statement<'b>(
             walk_body_forward(ns.statements().iter(), scope, ctx);
         }
         Statement::Global(global) => {
+            let mut imported: Vec<&str> = Vec::with_capacity(global.variables.len());
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
-                    let var_name = bytes_to_str(dv.name).to_string();
+                    let var_name = bytes_to_str(dv.name);
+                    imported.push(var_name);
                     if let Some(top_scope) = &ctx.top_level_scope {
-                        if let Some(types) = top_scope.get(&atom(&var_name)) {
-                            scope.set(&var_name, types.clone());
+                        if let Some(types) = top_scope.get(&atom(var_name)) {
+                            scope.set(var_name, types.clone());
                         } else {
-                            scope.set_empty(&var_name);
+                            scope.set_empty(var_name);
                         }
                     } else {
-                        scope.set_empty(&var_name);
+                        scope.set_empty(var_name);
                     }
                 }
+            }
+            let stmt_offset = stmt.span().start.offset;
+            if apply_global_var_docblocks(stmt_offset, &imported, scope, ctx) {
+                record_scope_snapshot(stmt_offset, scope);
             }
         }
         Statement::Return(ret) => {

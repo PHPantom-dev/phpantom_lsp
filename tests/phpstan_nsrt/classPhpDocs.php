@@ -24,7 +24,7 @@ class Foo
     {
         assertType('string', $this->string());
         assertType('array<string>', $this->arrayOfStrings());
-        assertType('array<string, int>', $this->arrayOfInts()); // SKIP: @phpstan-method does not outrank @method
+        assertType('array<string, int>', $this->arrayOfInts());
         assertType('mixed', $this->overrodeMethod());
         assertType('mixed', static::overrodeStaticMethod());
     }

@@ -1816,17 +1816,19 @@ pub fn get_docblock_info_for_node(
 /// cases, matching the sanitisation logic in [`resolve_effective_type_typed`].
 ///
 /// Returns `None` when the string is completely unrecoverable (e.g.
-/// `"<garbage"` with no base type).
+/// `"<garbage"` with no base type) or is not a valid type at all (e.g.
+/// `"[$x]"`).  Like PHPStan, an invalid type is discarded rather than
+/// kept as raw text, so the declaration falls back to its native type.
 pub fn sanitise_and_parse_docblock_type(raw: &str) -> Option<PhpType> {
     if crate::docblock::type_strings::has_unclosed_delimiters(raw) {
         let base = recover_base_type(raw);
         if base.is_empty() {
             None
         } else {
-            Some(PhpType::parse(base))
+            PhpType::try_parse(base)
         }
     } else {
-        Some(PhpType::parse(raw))
+        PhpType::try_parse(raw)
     }
 }
 

@@ -125,16 +125,11 @@ unlikely to move the needle for most users.
 | B384 | [A `foreach` by-reference write does not change the array's element type](todo/bugs.md#b384-a-foreach-by-reference-write-does-not-change-the-arrays-element-type) | Low         | Medium      |
 | B385 | [Assigning through `ArrayAccess` does not replace an offset's narrowing](todo/bugs.md#b385-assigning-through-arrayaccess-does-not-replace-an-offsets-narrowing) | Low         | Low-Medium  |
 | B388 | [`DOMNamedNodeMap::item()` ignores the map's node type](todo/bugs.md#b388-domnamednodemapitem-ignores-the-maps-node-type) | Low         | Low         |
-| B389 | [A native `never` return is overridden by the docblock](todo/bugs.md#b389-a-native-never-return-is-overridden-by-the-docblock) | Low         | Low         |
 | B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
 | B395 | [`key-of<array<V>>` is `int` instead of `int\|string`](todo/bugs.md#b395-key-ofarrayv-is-int-instead-of-intstring) | Low         | Low         |
 | B396 | [A conditional type on `$this` or in `@param-out` is not evaluated](todo/bugs.md#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated) | Low         | Medium      |
 | B398 | [`self` inside an object shape is not bound to the declaring class](todo/bugs.md#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class) | Low         | Low-Medium  |
-| B399 | [`@var` above a `global` statement is misapplied](todo/bugs.md#b399-var-above-a-global-statement-is-misapplied) | Low         | Low-Medium  |
-| B400 | [Only the nearest of several stacked `@var` docblocks applies](todo/bugs.md#b400-only-the-nearest-of-several-stacked-var-docblocks-applies) | Low         | Low         |
-| B401 | [An invalid PHPDoc type is shown verbatim](todo/bugs.md#b401-an-invalid-phpdoc-type-is-shown-verbatim) | Low         | Low-Medium  |
-| B402 | [`@phpstan-method` does not outrank `@method`](todo/bugs.md#b402-phpstan-method-does-not-outrank-method) | Low         | Low         |
 | B405 | [A closure called through `->call()`, or a callable held in a variable, is not resolved](todo/bugs.md#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved) | Low         | Medium      |
 | B406 | [Closure variadics are lists or untyped, and a `null` default does not always make a parameter nullable](todo/bugs.md#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable) | Low         | Low         |
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |

@@ -630,21 +630,6 @@ Found porting PHPStan's `nsrt/bug-13214.php`; the assertions are
 
 ## Docblock handling
 
-### B389. A native `never` return is overridden by the docblock
-**Impact: Low · Complexity: Low**
-
-```php
-function f(\EmptyIterator $it): void {
-    $it->key(); // should be never, is mixed|null
-}
-```
-
-`EmptyIterator::key()` is declared `: never`; the inherited `@return mixed`
-should not win over it.
-
-Found porting PHPStan's `nsrt/emptyiterator.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
 ### B390. A literal argument bound to a function template is widened
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -814,89 +799,6 @@ The keyword survives into the shape's property type, so reading it later
 names whatever class is asking. Found porting PHPStan's `nsrt/object-shape.php`;
 the three assertions are `// SKIP` in `tests/phpstan_nsrt/object-shape.php`
 (they used to pass only because the runner accepted `self` for any class).
-
-### B399. `@var` above a `global` statement is misapplied
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function a() {
-    /** @var int */
-    global $foo;
-    $foo; // should be int, has no type
-}
-function b() {
-    $baz = 'foo';
-    /** @var int $baz */
-    global $lorem;
-    $baz; // should be 'foo', is int
-}
-```
-
-A nameless `@var` should type the single global it precedes, and a named one
-applies only to a variable the statement imports.
-
-Found porting PHPStan's `nsrt/bug-4500.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B400. Only the nearest of several stacked `@var` docblocks applies
-**Impact: Low · Complexity: Low**
-
-```php
-/** @var \stdClass[] $items */
-/** @var \stdClass[] $slots */
-$items = [];
-$items; // should be array<stdClass>, is array{}
-```
-
-The docblock naming the assigned variable is ignored unless it is the one
-directly above the statement.
-
-Found porting PHPStan's `nsrt/bug-4500.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B401. An invalid PHPDoc type is shown verbatim
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-class A {
-    /** @var [$invalidType] */
-    private $p;
-    public function f() { $this->p; } // should be mixed, is [$invalidType]
-}
-```
-
-A tag whose type does not parse (`[$x]`, `array[array]`) is kept as raw text
-instead of being discarded for the native type. Found triaging PHPStan's
-`nsrt/properties.php`, which is not ported yet (it needs its companion
-`data/properties-defined.php`).
-
-### B402. `@phpstan-method` does not outrank `@method`
-**Impact: Low · Complexity: Low**
-
-```php
-/**
- * @phpstan-method array<string, int> ints()
- * @method array ints()
- */
-class Foo { public function __call($n, $a) {} }
-(new Foo)->ints(); // should be array<string, int>, is array
-```
-
-The last tag wins; the vendor-prefixed one should, as it already does for
-`@return` and `@param`.
-
-Found porting PHPStan's `nsrt/classPhpDocs.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-## Laravel
-
-No outstanding items.
-
-## Blade
-
-No outstanding items.
-
-## Miscellaneous
 
 ### B409. `??` on an undefined or null-only left side gives `mixed`
 **Impact: Low · Complexity: Low**

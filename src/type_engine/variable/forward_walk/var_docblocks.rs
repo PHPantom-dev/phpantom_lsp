@@ -48,10 +48,10 @@ pub(crate) fn try_process_inline_var_override<'b>(
     // variables (e.g. `/** @var App $app  @var array{…} $params */`).
     let multi = parse_var_docblock_pairs(doc_text);
     if !multi.is_empty() {
-        // The blocks further back run first, so a name this docblock also
-        // declares ends up carrying the type written closest to the
-        // expression.
-        apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+        // A name this docblock declares carries the type written closest
+        // to the expression, so the blocks further back skip it.
+        let mut declared: Vec<String> = multi.iter().map(|(name, _)| name.clone()).collect();
+        apply_var_docblock_stack(&trimmed[..doc_start], scope, ctx, |_| true, &mut declared);
         // When the cursor is inside the RHS of an assignment, skip
         // overriding the LHS variable so that hover/completion on the
         // RHS sees the pre-override type.  E.g.:
@@ -91,13 +91,14 @@ pub(crate) fn try_process_inline_var_override<'b>(
         // The @var sets `$items` in scope (done above), and the caller
         // must also process `$item = array_shift($items)`.
         //
-        // When any @var name matches the LHS, return NamedVar so the
-        // caller skips the assignment (the @var type is authoritative).
+        // When any @var name in the stack of docblocks matches the LHS,
+        // return NamedVar so the caller skips the assignment (the @var
+        // type is authoritative).
         if let Expression::Assignment(assignment) = expr
             && let Expression::Variable(Variable::Direct(dv)) = assignment.lhs
         {
-            let lhs_name = bytes_to_str(dv.name).to_string();
-            if !multi.iter().any(|(n, _)| *n == lhs_name) {
+            let lhs_name = bytes_to_str(dv.name);
+            if !declared.iter().any(|n| n == lhs_name) {
                 return VarOverrideResult::None;
             }
         }
@@ -165,11 +166,25 @@ pub(crate) fn apply_preceding_var_docblocks(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    apply_var_docblock_stack(before, scope, ctx, |_| true, &mut Vec::new())
+}
+
+/// [`apply_preceding_var_docblocks`], restricted to the variables `applies`
+/// accepts.
+///
+/// Every name applied is pushed onto `declared`.  The blocks are visited
+/// nearest first, so a name already in `declared` (from a nearer block, or
+/// seeded by the caller) is not overwritten by a further one that repeats
+/// it.
+fn apply_var_docblock_stack(
+    before: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    applies: impl Fn(&str) -> bool,
+    declared: &mut Vec<String>,
+) -> bool {
     let mut applied = false;
     let mut remaining = trim_trailing_line_comments(before);
-    // The blocks are visited nearest first, so a name a nearer one already
-    // declared is not overwritten by a further one that repeats it.
-    let mut declared: Vec<String> = Vec::new();
     // Keep scanning as long as the preceding text ends with a docblock.
     while let Some(doc_text) = trailing_docblock(remaining) {
         let doc_start = remaining.len() - doc_text.len();
@@ -179,7 +194,7 @@ pub(crate) fn apply_preceding_var_docblocks(
             break;
         }
         for (var_name, php_type) in &vars {
-            if declared.iter().any(|seen| seen == var_name) {
+            if !applies(var_name) || declared.iter().any(|seen| seen == var_name) {
                 continue;
             }
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
@@ -280,6 +295,41 @@ pub(crate) fn apply_standalone_var_docblocks(
         return false;
     }
     apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
+}
+
+/// Apply the `@var` docblocks above a `global` statement to the variables
+/// it imports.
+///
+/// A named `@var` types only a variable the statement imports; one naming
+/// anything else is not about this statement.  A nameless `@var` is
+/// unambiguous only when a single variable is imported.
+///
+/// Returns whether any `@var` annotation was applied.
+pub(crate) fn apply_global_var_docblocks(
+    stmt_offset: u32,
+    imported: &[&str],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let offset = (stmt_offset as usize).min(ctx.content.len());
+    if offset == 0 {
+        return false;
+    }
+    let before = &ctx.content[..offset];
+    if let [only] = imported
+        && let Some(php_type) = find_preceding_nameless_var_cast(ctx.content, offset)
+    {
+        let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+        scope.set(only, resolved);
+        return true;
+    }
+    apply_var_docblock_stack(
+        before,
+        scope,
+        ctx,
+        |name| imported.contains(&name),
+        &mut Vec::new(),
+    )
 }
 
 /// Look up a standalone `/** @var Type */` docblock (no variable name)
