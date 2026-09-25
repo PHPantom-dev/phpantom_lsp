@@ -58,7 +58,6 @@ contributor even though it's short.
 | D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
 | D27  | [Destructuring offsets an array cannot have is not reported](todo/diagnostics.md#d27-destructuring-offsets-an-array-cannot-have-is-not-reported) | Low | Medium |
 | T13  | [Closure variables lose callable signature detail](todo/type-inference.md#t13-closure-variables-lose-callable-signature-detail) | Low-Medium | Medium-High |
-| B415 | [A closure's parameter types are not checked against a `callable(…)` parameter](todo/bugs.md#b415-a-closures-parameter-types-are-not-checked-against-a-callable-parameter) (depends on T13) | Low-Medium | Medium |
 | D26  | [Reading a typed property that nothing initialises is not reported](todo/diagnostics.md#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported) | Low-Medium | Medium-High |
 | L1  | [Facade completion](todo/laravel.md#l1-facade-completion-upstream-method-generator-improvement) (upstream `facade-documenter` PRs)                              | High        | High        |
 | E2  | [Project-level stubs as type resolution source](todo/external-stubs.md#e2-project-level-stubs-as-resolution-source) (depends on E1)                             | Medium      | High        |
@@ -108,11 +107,10 @@ unlikely to move the needle for most users.
 | B368 | [A narrowed member read or call result survives a call that can change it](todo/bugs.md#b368-a-narrowed-member-read-or-call-result-survives-a-call-that-can-change-it) | Medium      | Medium-High |
 | B374 | [`instanceof` against a class that cannot be loaded clears the variable's type](todo/bugs.md#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type) | Medium      | Medium      |
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
-| B387 | [`foreach` over `SplObjectStorage` swaps its keys and values](todo/bugs.md#b387-foreach-over-splobjectstorage-swaps-its-keys-and-values) | Medium      | Low-Medium  |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
+| B420 | [A value typed as a model's base collection has the custom collection's class but not its type](todo/bugs.md#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type) | Low-Medium  | Medium      |
 | B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |
 | B372 | [A condition stored in a variable loses its narrowing](todo/bugs.md#b372-a-condition-stored-in-a-variable-loses-its-narrowing) | Low-Medium  | Medium      |
-| B386 | [Array functions flatten the shapes they are given](todo/bugs.md#b386-array-functions-flatten-the-shapes-they-are-given) | Low-Medium  | Medium      |
 | B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
 | B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |
 | B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |
@@ -123,7 +121,6 @@ unlikely to move the needle for most users.
 | B377 | [A type guard on an array offset does not narrow the array](todo/bugs.md#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array) | Low         | Medium      |
 | B378 | [`count($a) == count($b)` does not give `$b` `$a`'s length](todo/bugs.md#b378-counta--countb-does-not-give-b-as-length) | Low         | Medium      |
 | B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
-| B388 | [`DOMNamedNodeMap::item()` ignores the map's node type](todo/bugs.md#b388-domnamednodemapitem-ignores-the-maps-node-type) | Low         | Low         |
 | B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
 | B395 | [`key-of<array<V>>` is `int` instead of `int\|string`](todo/bugs.md#b395-key-ofarrayv-is-int-instead-of-intstring) | Low         | Low         |

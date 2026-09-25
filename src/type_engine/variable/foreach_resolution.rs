@@ -62,6 +62,9 @@ impl<'a> IterableCtx<'a> {
 /// the union of its positional values), then the generics of the class it
 /// names, then each member of a union individually.
 pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
+    if let Some(vt) = generic_traversal_value_type(iter_type, ctx.class_loader) {
+        return Some(vt);
+    }
     if let Some(vt) = iter_type.iterable_element_type() {
         return Some(vt);
     }
@@ -92,6 +95,9 @@ pub(crate) fn iteration_value_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -
 /// all; a type that resolves but names no key type answers with the whole
 /// key domain PHP allows, and the caller falls back to the same.
 pub(crate) fn iteration_key_type(iter_type: &PhpType, ctx: &IterableCtx<'_>) -> Option<PhpType> {
+    if let Some((Some(kt), _)) = declared_traversal_of_generic(iter_type, ctx.class_loader) {
+        return Some(kt);
+    }
     if let Some(kt) = key_domain(iter_type) {
         // Benevolent when part of the domain is ours rather than the
         // array's: holding a `substr($key, …)` to the `int` branch of a
@@ -135,6 +141,67 @@ fn key_domain(ty: &PhpType) -> Option<PhpType> {
         }
         _ => ty.iterable_key_type(),
     }
+}
+
+/// The `(key, value)` a generic class type iterates as, read from the
+/// traversal binding the class declares for itself.
+///
+/// A generic's own arguments follow the class's template list, not the
+/// `<TKey, TValue>` iteration convention: `SplObjectStorage<Order, int>`
+/// iterates as `Iterator<int, Order>`, while its `ArrayAccess` side is the
+/// one keyed by `Order`.  So when the class says how it traverses
+/// (`@implements Iterator<…>`, `IteratorAggregate<…>` or `Traversable<…>`),
+/// that binding answers with the generic's arguments substituted in, and
+/// only a class that says nothing leaves the positional reading to the
+/// caller.  A single-argument binding names the value alone.
+fn declared_traversal_of_generic(
+    iter_type: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<(Option<PhpType>, PhpType)> {
+    let generic = match iter_type.kind() {
+        TypeKind::Generic(generic) => generic,
+        TypeKind::Nullable(inner) => return declared_traversal_of_generic(inner, class_loader),
+        _ => return None,
+    };
+    let name = generic.name.as_str();
+    if crate::php_type::is_array_like_name(name) || crate::php_type::is_builtin_non_class_type(name)
+    {
+        return None;
+    }
+    let class = class_loader(name)?;
+    if class.template_params.len() != generic.args.len() {
+        return None;
+    }
+    let (_, binding) = class
+        .implements_generics
+        .iter()
+        .chain(class.extends_generics.iter())
+        .find(|(bound, _)| {
+            matches!(
+                short_name(bound),
+                "Iterator" | "IteratorAggregate" | "Traversable"
+            )
+        })?;
+    let subs: HashMap<String, PhpType> = class
+        .template_params
+        .iter()
+        .map(|param| param.to_string())
+        .zip(generic.args.iter().cloned())
+        .collect();
+    match binding.as_slice() {
+        [value] => Some((None, value.substitute(&subs))),
+        [key, value, ..] => Some((Some(key.substitute(&subs)), value.substitute(&subs))),
+        [] => None,
+    }
+}
+
+/// The value a generic class type iterates as, when the class declares
+/// its traversal binding.  See [`declared_traversal_of_generic`].
+pub(crate) fn generic_traversal_value_type(
+    iter_type: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    declared_traversal_of_generic(iter_type, class_loader).map(|(_, value)| value)
 }
 
 /// Resolve the element type of an iterable via class inheritance.

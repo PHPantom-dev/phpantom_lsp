@@ -101,10 +101,10 @@ function dummy3(array $ints): void
 
 function dummy4(\DateTimeInterface $dateA, ?\DateTimeInterface $dateB): void
 {
-	assertType('array{0: DateTimeInterface, 1?: DateTimeInterface}', array_filter([$dateA, $dateB])); // SKIP: array functions flatten the shapes they are given
+	assertType('array{0: DateTimeInterface, 1?: DateTimeInterface}', array_filter([$dateA, $dateB]));
 	assertType('DateTimeInterface', min(array_filter([$dateA, $dateB])));
 	assertType('DateTimeInterface', max(array_filter([$dateA, $dateB])));
-	assertType('array{0?: DateTimeInterface}', array_filter([$dateB])); // SKIP: array functions flatten the shapes they are given
+	assertType('array{0?: DateTimeInterface}', array_filter([$dateB]));
 	assertType('DateTimeInterface', min(array_filter([$dateB])));
 	assertType('DateTimeInterface', max(array_filter([$dateB])));
 }
@@ -120,10 +120,10 @@ class HelloWorld
 		$numbers = getFoo();
 
 		assertType('0|1|2|3|4|5|6|7|8|9', min($numbers));
-		assertType('0', min([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])); // SKIP: array functions flatten the shapes they are given
+		assertType('0', min([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
 
 		assertType('0|1|2|3|4|5|6|7|8|9', max($numbers));
-		assertType('9', max([0, 1, 2, 3, 4, 5, 6, 7, 8, 9])); // SKIP: array functions flatten the shapes they are given
+		assertType('9', max([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]));
 	}
 }
 

@@ -27,6 +27,7 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "SimpleXMLElement" => patch_simple_xml_element(class),
         "ReflectionClass" => patch_reflection_class(class),
         "ReflectionObject" => patch_reflection_object(class),
+        "DOMNamedNodeMap" => patch_dom_named_node_map(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -354,6 +355,24 @@ fn patch_array_iterator(class: &mut ClassInfo) {
 
         class.methods.make_mut()[ctor_idx] = std::sync::Arc::new(ctor);
     }
+}
+
+/// Type `DOMNamedNodeMap::item()` by the map's node type.
+///
+/// The class is `@template-covariant TNode of DOMNode` and its siblings
+/// (`getNamedItem()`, `getNamedItemNS()`, `getIterator()`) hand back
+/// `TNode`, but `item()` is declared `DOMNode|null`, so an element's
+/// `attributes->item(0)` loses the `DOMAttr` every other accessor keeps.
+fn patch_dom_named_node_map(class: &mut ClassInfo) {
+    let Some(idx) = class.methods.iter().position(|m| m.name.as_str() == "item") else {
+        return;
+    };
+    let mut method = (*class.methods[idx]).clone();
+    method.return_type = Some(PhpType::union(vec![
+        PhpType::named(atom("TNode")),
+        PhpType::null(),
+    ]));
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
 }
 
 /// Give `SimpleXMLElement::asXML()` / `saveXML()` a conditional return type

@@ -39,6 +39,32 @@ impl Backend {
         let mut bound = declared.clone();
         let mut self_bound_params = crate::atom::AtomMap::default();
 
+        // A parameter naming the base Eloquent collection of a concrete
+        // model is handed that model's own collection, the same rewrite
+        // every return type gets.
+        let rewrite = |param: &ParameterInfo| {
+            param.type_hint.as_ref().and_then(|hint| {
+                crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
+                    hint,
+                    rctx.class_loader,
+                )
+            })
+        };
+        if let Some((first, first_hint)) = bound
+            .parameters
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| rewrite(p).map(|hint| (i, hint)))
+        {
+            let params = bound.parameters.make_mut();
+            params[first].type_hint = Some(first_hint);
+            for param in params.iter_mut().skip(first + 1) {
+                if let Some(hint) = rewrite(param) {
+                    param.type_hint = Some(hint);
+                }
+            }
+        }
+
         let Some(at) = args_text else {
             return (bound, self_bound_params);
         };

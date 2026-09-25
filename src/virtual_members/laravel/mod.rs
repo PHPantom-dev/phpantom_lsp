@@ -409,6 +409,12 @@ pub(crate) fn try_swap_custom_collection(
 /// keeps `<model>`, and a non-generic subclass (the common
 /// `@extends Collection<int, Model>` shape) becomes a bare class name.
 ///
+/// Only a collection Laravel *produces* is rewritten: the type itself when
+/// it is a return, and the parameters of a callback it hands one to.  A
+/// callback's own return is something the caller has to produce, so the
+/// declared base type stands there, as it does for a parameter (see
+/// [`replace_eloquent_collections_in_param_type`]).
+///
 /// Returns `None` when nothing was rewritten, so callers on the hot path
 /// keep their existing type without allocating a copy.
 pub(crate) fn replace_eloquent_collections_in_type(
@@ -418,7 +424,24 @@ pub(crate) fn replace_eloquent_collections_in_type(
     if !mentions_eloquent_collection(ty) {
         return None;
     }
-    rewrite_eloquent_collections(ty, class_loader)
+    rewrite_eloquent_collections(ty, true, class_loader)
+}
+
+/// [`replace_eloquent_collections_in_type`] for a parameter type.
+///
+/// A parameter is a demand on the caller, and narrowing it to the custom
+/// collection would reject a plain `Collection<int, Customer>` the code
+/// built itself.  What the callee hands back through it is produced, so
+/// only a callback's parameters are rewritten:
+/// `chunk(100, fn (CustomerCollection $c) => …)`.
+pub(crate) fn replace_eloquent_collections_in_param_type(
+    ty: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if !mentions_eloquent_collection(ty) {
+        return None;
+    }
+    rewrite_eloquent_collections(ty, false, class_loader)
 }
 
 /// Cheap pre-check for [`replace_eloquent_collections_in_type`].
@@ -426,7 +449,7 @@ pub(crate) fn replace_eloquent_collections_in_type(
 /// Walking the tree twice is still cheaper than cloning it: the vast
 /// majority of return types never name the Eloquent collection, and this
 /// pass allocates nothing.
-fn mentions_eloquent_collection(ty: &PhpType) -> bool {
+pub(super) fn mentions_eloquent_collection(ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Generic(g) => {
             is_eloquent_collection_name(&g.name) || g.args.iter().any(mentions_eloquent_collection)
@@ -435,6 +458,16 @@ fn mentions_eloquent_collection(ty: &PhpType) -> bool {
             members.iter().any(mentions_eloquent_collection)
         }
         TypeKind::Nullable(inner) | TypeKind::Array(inner) => mentions_eloquent_collection(inner),
+        TypeKind::Callable(callable) => {
+            callable
+                .params
+                .iter()
+                .any(|p| mentions_eloquent_collection(&p.type_hint))
+                || callable
+                    .return_type
+                    .as_ref()
+                    .is_some_and(mentions_eloquent_collection)
+        }
         _ => false,
     }
 }
@@ -443,33 +476,66 @@ fn is_eloquent_collection_name(name: &str) -> bool {
     name.trim_start_matches('\\') == ELOQUENT_COLLECTION_FQN
 }
 
+/// Rewrite the Eloquent collections in `ty`, swapping only those in a
+/// produced position.  `produced` flips at each callable's parameter list,
+/// since a callback's parameters are produced by whoever calls it.
 fn rewrite_eloquent_collections(
     ty: &PhpType,
+    produced: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     match ty.kind() {
         TypeKind::Generic(g) if is_eloquent_collection_name(&g.name) => {
+            if !produced {
+                return None;
+            }
             let model = g.args.last()?.base_name()?;
             let collection = custom_collection_for_model(model, class_loader)?;
             Some(collection_type_for(&collection, &g.args, class_loader))
         }
         TypeKind::Generic(g) => {
-            let args = rewrite_members(&g.args, class_loader)?;
+            let args = rewrite_members(&g.args, produced, class_loader)?;
             Some(PhpType::generic_atom(g.name, args))
         }
-        TypeKind::Union(members) => Some(PhpType::union(rewrite_members(members, class_loader)?)),
+        TypeKind::Union(members) => Some(PhpType::union(rewrite_members(
+            members,
+            produced,
+            class_loader,
+        )?)),
         TypeKind::Intersection(members) => Some(PhpType::intersection(rewrite_members(
             members,
+            produced,
             class_loader,
         )?)),
         TypeKind::Nullable(inner) => Some(PhpType::nullable(rewrite_eloquent_collections(
             inner,
+            produced,
             class_loader,
         )?)),
         TypeKind::Array(inner) => Some(PhpType::array_of(rewrite_eloquent_collections(
             inner,
+            produced,
             class_loader,
         )?)),
+        TypeKind::Callable(callable) => {
+            let mut rewritten = (**callable).clone();
+            let mut changed = false;
+            for param in &mut rewritten.params {
+                if let Some(new) =
+                    rewrite_eloquent_collections(&param.type_hint, !produced, class_loader)
+                {
+                    param.type_hint = new;
+                    changed = true;
+                }
+            }
+            if let Some(ret) = &rewritten.return_type
+                && let Some(new) = rewrite_eloquent_collections(ret, produced, class_loader)
+            {
+                rewritten.return_type = Some(new);
+                changed = true;
+            }
+            changed.then(|| TypeKind::Callable(Box::new(rewritten)).into())
+        }
         _ => None,
     }
 }
@@ -477,18 +543,21 @@ fn rewrite_eloquent_collections(
 /// Rewrite a list of type members, returning `None` when none changed.
 fn rewrite_members(
     members: &[PhpType],
+    produced: bool,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<Vec<PhpType>> {
     let mut changed = false;
     let rewritten: Vec<PhpType> = members
         .iter()
-        .map(|m| match rewrite_eloquent_collections(m, class_loader) {
-            Some(new) => {
-                changed = true;
-                new
-            }
-            None => m.clone(),
-        })
+        .map(
+            |m| match rewrite_eloquent_collections(m, produced, class_loader) {
+                Some(new) => {
+                    changed = true;
+                    new
+                }
+                None => m.clone(),
+            },
+        )
         .collect();
     changed.then_some(rewritten)
 }

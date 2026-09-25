@@ -246,7 +246,7 @@ function probe(array $names, array $weights, int $count, mixed $anything): void 
         &[
             ("$letter", "string"),
             ("$widest", "string"),
-            ("$mixedNumbers", "int|float"),
+            ("$mixedNumbers", "1"),
             ("$lightest", "float"),
             ("$bounded", "int"),
             ("$unknown", "mixed"),

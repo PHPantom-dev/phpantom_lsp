@@ -154,6 +154,14 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
         crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
     }
+
+    fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
+        crate::type_engine::types::narrowing::split_type_by_guard_name(
+            guard,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
+    }
 }
 
 impl Backend {

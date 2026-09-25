@@ -57,7 +57,7 @@ class Foo
 	{
 		$params3 = array_merge($params1, $params2);
 
-		assertType('array{return: int, stdout: string, stderr: string}', $params3); // SKIP: array functions flatten the shapes they are given
+		assertType('array{return: int, stdout: string, stderr: string}', $params3);
 	}
 
 }

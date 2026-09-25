@@ -24,8 +24,8 @@ class X {}
 function genericExample(SplObjectStorage $splObjectStorage): void
 {
 	foreach ($splObjectStorage as $key => $value) {
-		assertType('int', $key); // SKIP: foreach over SplObjectStorage swaps its keys and values
-		assertType('Bug13985\X', $value); // SKIP: foreach over SplObjectStorage swaps its keys and values
+		assertType('int', $key);
+		assertType('Bug13985\X', $value);
 	}
 	assertType('int', $splObjectStorage->getInfo());
 

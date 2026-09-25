@@ -14,7 +14,8 @@ use std::sync::Arc;
 
 use crate::class_lookup::is_subtype_of_typed;
 use crate::php_type::{
-    LiteralValue, PhpType, ShapeEntry, TypeKind, int_literal_is_within_range, is_array_like_name,
+    CallableType, LiteralValue, PhpType, ShapeEntry, TypeKind, int_literal_is_within_range,
+    is_array_like_name,
 };
 use crate::types::{ClassInfo, Visibility};
 
@@ -310,6 +311,55 @@ fn may_name_same_class(a: &PhpType, b: &PhpType) -> bool {
     crate::util::short_name(name_a).eq_ignore_ascii_case(crate::util::short_name(name_b))
 }
 
+/// The first parameter of `arg_sig` that rejects a value `param_sig`
+/// promises to pass it, as `(zero-based position, passed type, accepted
+/// type)`.
+///
+/// Parameters are contravariant, so the check runs from the
+/// specification's type to the closure's.  A closure that declares no
+/// parameters here is one whose list was never recorded, and a position
+/// the closure has no parameter for simply drops the value (PHP ignores
+/// surplus arguments to a closure), so neither is a rejection.
+pub(crate) fn first_rejected_callable_param<'a>(
+    arg_sig: &'a CallableType,
+    param_sig: &'a CallableType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> Option<(usize, &'a PhpType, &'a PhpType)> {
+    let accepting = &arg_sig.params;
+    if accepting.is_empty() {
+        return None;
+    }
+    let accepting_at = |i: usize| {
+        accepting
+            .get(i)
+            .or_else(|| accepting.last().filter(|last| last.variadic))
+    };
+    for (i, passed) in param_sig.params.iter().enumerate() {
+        // A variadic specification parameter fills every closure
+        // parameter from its position on.
+        let positions = if passed.variadic {
+            i..accepting.len().max(i + 1)
+        } else {
+            i..i + 1
+        };
+        for pos in positions {
+            let Some(accepts) = accepting_at(pos) else {
+                break;
+            };
+            if !is_type_compatible(
+                &passed.type_hint,
+                &accepts.type_hint,
+                class_loader,
+                strict_types,
+            ) {
+                return Some((pos, &passed.type_hint, &accepts.type_hint));
+            }
+        }
+    }
+    None
+}
+
 /// Check if an argument type is compatible with a parameter type.
 ///
 /// Returns `true` if the argument type can be passed to the parameter
@@ -518,12 +568,15 @@ pub(crate) fn is_type_compatible(
     // ── Callable specification ↔ callable specification ─────────
     // Both sides carry a signature, so the return type — covariant,
     // like any other value the caller receives back — is a real
-    // constraint to check.  It is also the half we can trust: a closure
-    // arrives here with a return type only when one was declared or
-    // resolved from its body, and with none at all when neither was
-    // possible.  Its parameter list is not recorded on the resolved type
-    // at all, so an empty `params` means "unknown", not "takes nothing",
-    // and parameters therefore stay a MAYBE.
+    // constraint to check.  A closure arrives here with a return type
+    // only when one was declared or resolved from its body, and with
+    // none at all when neither was possible.
+    //
+    // The parameters are contravariant: every value the specification
+    // promises to pass has to be accepted by the closure's parameter in
+    // that position.  An empty `params` on the argument means the list
+    // was not recorded (a first-class callable, a bare `Closure`), not
+    // "takes nothing", so it stays a MAYBE.
     //
     // This has to come before the bare-`callable` rule below, which
     // treats any two callable-ish types as compatible and would
@@ -531,12 +584,14 @@ pub(crate) fn is_type_compatible(
     if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
         (arg_type.kind(), param_type.kind())
     {
-        return match (&arg_sig.return_type, &param_sig.return_type) {
-            (Some(arg_return), Some(param_return)) => {
-                is_type_compatible(arg_return, param_return, class_loader, strict_types)
-            }
-            _ => true,
-        };
+        if let (Some(arg_return), Some(param_return)) =
+            (&arg_sig.return_type, &param_sig.return_type)
+            && !is_type_compatible(arg_return, param_return, class_loader, strict_types)
+        {
+            return false;
+        }
+        return first_rejected_callable_param(arg_sig, param_sig, class_loader, strict_types)
+            .is_none();
     }
     // Skip when param type is `callable` and arg type is Closure, callable, string, array,
     // or any object-like type (which might implement `__invoke`).
