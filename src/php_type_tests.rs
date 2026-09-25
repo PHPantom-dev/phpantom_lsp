@@ -1157,6 +1157,50 @@ fn parse_model_property_nested_in_array() {
     );
 }
 
+/// `view-string` is a string, not a class and not an unknown pseudo-type
+/// degraded to `mixed`, so a parameter declaring it still reads as the
+/// string it is everywhere a string is expected.
+#[test]
+fn view_string_is_a_string_subtype() {
+    let view_string = PhpType::parse("view-string");
+    assert_eq!(view_string, PhpType::named(atom("view-string")));
+    assert!(view_string.is_string_subtype());
+    assert!(view_string.is_subtype_of(&PhpType::string()));
+    assert!(PhpType::literal_string_raw("'users.profile'").is_subtype_of(&view_string));
+    // A plain `string` is not known to name a template.
+    assert!(!PhpType::string().is_subtype_of(&view_string));
+}
+
+/// Which spellings demand a template name. A union that also admits a
+/// plain `string` says nothing a bare `string` does not, so demanding a
+/// template of it would report code the declaration permits.
+#[test]
+fn view_string_demanding_types() {
+    for demanding in [
+        "view-string",
+        "?view-string",
+        "view-string|null",
+        "view-string|\\Illuminate\\View\\View",
+    ] {
+        assert!(
+            PhpType::parse(demanding).is_view_string(),
+            "{demanding} should demand a template name"
+        );
+    }
+    for permissive in [
+        "string",
+        "view-string|string",
+        "non-empty-string",
+        "array<view-string>",
+        "int",
+    ] {
+        assert!(
+            !PhpType::parse(permissive).is_view_string(),
+            "{permissive} should not demand a template name"
+        );
+    }
+}
+
 #[test]
 fn parse_laravel_model_type_operators() {
     for name in ["builder-of", "collection-of", "factory-of", "relation-of"] {

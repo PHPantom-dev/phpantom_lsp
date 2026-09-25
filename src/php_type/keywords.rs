@@ -89,6 +89,9 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             | "uppercase-string"
             | "non-empty-uppercase-string"
             | "non-empty-literal-string"
+            // The Laravel PHPStan extensions' name for a string that
+            // names a Blade template.
+            | "view-string"
             // ── Class-string variants ───────────────────────────────
             | "trait-string"
             | "enum-string"
@@ -336,6 +339,7 @@ pub(crate) fn is_scalar_name(name: &str) -> bool {
             | "trait-string"
             | "enum-string"
             | "model-property"
+            | "view-string"
             | "numeric-string"
             | "non-empty-string"
             | "non-empty-lowercase-string"

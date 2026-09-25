@@ -1315,6 +1315,7 @@ impl PhpType {
                     | "interface-string"
                     | "trait-string"
                     | "enum-string"
+                    | "view-string"
                     | "lowercase-string"
                     | "non-empty-lowercase-string"
                     | "uppercase-string"
@@ -1330,6 +1331,31 @@ impl PhpType {
             ),
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this type demands a string that names a Blade template:
+    /// the Laravel PHPStan extensions' `view-string`, on its own or as
+    /// the only string-like member of a union.
+    ///
+    /// `?view-string` and `view-string|null` both count — `null` is not a
+    /// string the check could be wrong about — and so does a union with a
+    /// non-string alternative such as `view-string|\Illuminate\View\View`,
+    /// where a string argument still has to name a template. A union that
+    /// also admits a plain `string` does not: the annotation then says
+    /// nothing a bare `string` does not already say, so demanding a
+    /// template of it would report code the declaration permits.
+    pub fn is_view_string(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(name) => name.eq_ignore_ascii_case("view-string"),
+            TypeKind::Nullable(inner) => inner.is_view_string(),
+            TypeKind::Union(members) => {
+                members.iter().any(PhpType::is_view_string)
+                    && !members
+                        .iter()
+                        .any(|m| !m.is_view_string() && m.is_string_subtype())
             }
             _ => false,
         }

@@ -181,6 +181,26 @@ check(
     \App\Models\BlogPost::query()->getModel() instanceof \App\Models\BlogPost
 );
 
+// ─── view-string ────────────────────────────────────────────────────────────
+
+// `view-string` lives only in the docblock: PHP sees the native `string`
+// hint, so `Demo::renderTemplate()` is an ordinary string parameter at
+// runtime and the extra promise costs nothing there.
+$renderTemplate = new ReflectionMethod(\App\Demo::class, 'renderTemplate');
+check(
+    'Demo::renderTemplate() declares a plain string parameter',
+    (string) $renderTemplate->getParameters()[0]->getType() === 'string'
+);
+
+// The promise it does make is that the argument names a template, so the
+// names the demo passes have to be templates this project ships.
+foreach (['welcome' => 'resources/views', 'theme.dashboard' => 'resources/theme/views'] as $view => $root) {
+    check(
+        "view-string argument '$view' names a template under $root",
+        is_file(__DIR__ . '/' . $root . '/' . str_replace('.', '/', $view) . '.blade.php')
+    );
+}
+
 // ─── Accessor methods ───────────────────────────────────────────────────────
 
 // Legacy accessor

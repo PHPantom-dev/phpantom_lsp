@@ -664,6 +664,35 @@ impl Backend {
                     param_type
                 };
 
+                // A `view-string` parameter demands a name some Blade
+                // template answers to, which the compatibility layer
+                // cannot judge: the project's templates settle it, not
+                // the type. Report the name rather than the type, the
+                // same way a `view('…')` call naming nothing is reported,
+                // and let anything that is not a literal through — a
+                // variable may well hold a real view name.
+                if effective_param_type.is_view_string()
+                    && let TypeKind::Literal(lit) = arg_type.kind()
+                    && let Some(view) = lit.string_content()
+                {
+                    if self.view_string_literal_is_unknown(&view)
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
+                            content,
+                            resolved_arg.start,
+                            resolved_arg.end,
+                        )
+                    {
+                        out.push(make_diagnostic(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            "invalid_laravel_view",
+                            format!("Unknown view: '{view}'"),
+                        ));
+                    }
+                    continue;
+                }
+
                 // The compatibility layer treats an array shape as an open
                 // description — a key it does not mention may still be
                 // there at runtime — which is right for a shape inferred
