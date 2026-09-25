@@ -103,7 +103,6 @@ unlikely to move the needle for most users.
 | B343 | [A `switch` case does not narrow a literal union](todo/bugs.md#b343-a-switch-case-does-not-narrow-a-literal-union) | Low-Medium  | Medium      |
 | B344 | [The falsy branch of a truthiness check keeps the object half](todo/bugs.md#b344-the-falsy-branch-of-a-truthiness-check-keeps-the-object-half) | Low         | Low-Medium  |
 | B346 | [`instanceof` on a class-or-interface union drops the intersection](todo/bugs.md#b346-instanceof-on-a-class-or-interface-union-drops-the-intersection) | Low         | Medium      |
-| B347 | [A `Class::CONST` operand resolves to the first same-named class in the file](todo/bugs.md#b347-a-classconst-operand-resolves-to-the-first-same-named-class-in-the-file) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

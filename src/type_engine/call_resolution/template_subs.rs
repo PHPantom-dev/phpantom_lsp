@@ -1326,9 +1326,18 @@ pub(crate) fn type_operator_bound_literal(
 pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let value = match name.rsplit_once("::") {
         Some((class_part, const_name)) => {
+            // `class_part` is a source-level reference, so an unqualified
+            // name must resolve against the declaring class's namespace
+            // before falling back to the global scope — otherwise a file
+            // with several braced `namespace` blocks that each declare the
+            // same short class name always picks the first one, regardless
+            // of which block actually declared the operand.
             let class_name =
                 crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
-                    .unwrap_or_else(|| class_part.to_string());
+                    .unwrap_or_else(|| {
+                        let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+                        crate::util::resolve_source_class_name(class_part, ns, ctx.class_loader)
+                    });
             let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
                 .cloned()
                 .or_else(|| (ctx.class_loader)(&class_name))?;

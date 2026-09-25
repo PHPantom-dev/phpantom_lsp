@@ -31,7 +31,7 @@ namespace PsalmTest_key_of_array_2 {
         }
     }
 
-    assertType("'bar'", (new A())->getKey()); // SKIP: the operand's class resolves to the first `A` in the file
+    assertType("'bar'", (new A())->getKey());
 }
 
 // Test: allKeysOfAssociativeArrayPossible
@@ -50,7 +50,7 @@ namespace PsalmTest_key_of_array_3 {
         }
     }
 
-    assertType("'adams'|'bar'", (new A())->getKey(true)); // SKIP: the operand's class resolves to the first `A` in the file
+    assertType("'adams'|'bar'", (new A())->getKey(true));
 }
 
 // Test: keyOfAsArray

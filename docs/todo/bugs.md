@@ -97,19 +97,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B347. A `Class::CONST` operand resolves to the first same-named class in the file
-**Impact: Low · Complexity: Medium**
-
-In a file with several braced `namespace` blocks that each declare an `A`,
-a method's `@return key-of<A::FOO>` is evaluated against the first `A` in
-the file, whichever block the method is declared in. The operand reaches
-`constant_operand_shape` unqualified, and `find_class_by_name` matches the
-short name. Class names in the same position already resolve against the
-block they are used in; the class half of a constant operand has to be
-qualified the same way (against the declaring file's namespace and `use`
-imports) before the type leaves its declaration. Rare outside test
-fixtures. Found porting Psalm's `KeyOfArrayTest`; two assertions are
-`// SKIP` in `tests/psalm_assertions/key_of_array.php`.
+No outstanding items.
 
 ## Array types
 
