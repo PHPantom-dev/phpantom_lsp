@@ -118,6 +118,10 @@ pub(crate) fn is_keyword_type(name: &str) -> bool {
             | "class"
             // ── PHPStan lenient-union wrapper ───────────────────────
             | "__benevolent"
+            | "builder-of"
+            | "collection-of"
+            | "factory-of"
+            | "relation-of"
     )
 }
 

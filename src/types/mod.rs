@@ -1573,6 +1573,8 @@ pub struct CastSources {
 /// classes carry no overhead beyond a single struct value.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LaravelMetadata {
+    /// Factory selected by a model's `newFactory()`, `$factory`, or `#[UseFactory]`.
+    pub custom_factory: Option<PhpType>,
     /// Model class explicitly configured by a Laravel factory's `$model`
     /// property.
     ///
@@ -1585,11 +1587,9 @@ pub struct LaravelMetadata {
     ///
     /// Detected from three Laravel mechanisms:
     ///
-    /// 1. The `#[CollectedBy(CustomCollection::class)]` attribute on the
-    ///    model class.
-    /// 2. The `/** @use HasCollection<CustomCollection> */` docblock
-    ///    annotation on a `use HasCollection;` trait usage.
-    /// 3. A `newCollection()` method override returning a custom type.
+    /// 1. A `newCollection()` method override returning a custom type.
+    /// 2. The `#[CollectedBy(CustomCollection::class)]` attribute on the model.
+    /// 3. The `/** @use HasCollection<CustomCollection> */` annotation.
     ///
     /// When set, the `LaravelModelProvider` replaces
     /// `\Illuminate\Database\Eloquent\Collection` with this class in
@@ -1713,11 +1713,9 @@ pub struct LaravelMetadata {
     ///
     /// Detected from three Laravel mechanisms:
     ///
-    /// 1. The `#[UseEloquentBuilder(CustomBuilder::class)]` attribute on
-    ///    the model class (Laravel 11+).
-    /// 2. The `/** @use HasBuilder<CustomBuilder> */` docblock
-    ///    annotation on a `use HasBuilder;` trait usage.
-    /// 3. A `newEloquentBuilder()` method override returning a custom type.
+    /// 1. A `newEloquentBuilder()` method override returning a custom type.
+    /// 2. The `#[UseEloquentBuilder(CustomBuilder::class)]` attribute.
+    /// 3. The `/** @use HasBuilder<CustomBuilder> */` annotation.
     ///
     /// When set, the `LaravelModelProvider` uses this class instead of
     /// the standard `Illuminate\Database\Eloquent\Builder` for
