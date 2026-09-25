@@ -309,7 +309,7 @@ fn resolve_return_and_push(
                 } else {
                     ty.substitute(template_bounds)
                 };
-                ty.resolve_names(&|name: &str| {
+                let ty = ty.resolve_names(&|name: &str| {
                     if name.contains("__anonymous@") {
                         return name.to_string();
                     }
@@ -318,7 +318,13 @@ fn resolve_return_and_push(
                     } else {
                         name.to_string()
                     }
-                })
+                });
+                // A Laravel model operator is a name for a class too, and
+                // this is where names become classes. Leaving it for the
+                // comparison alone would report the operator's own
+                // spelling back at the reader, who wrote a type that does
+                // name something.
+                crate::virtual_members::laravel::expand_model_type(&ty, class_loader)
             };
 
             // A standalone `/** @var Type */` docblock (no variable name)
@@ -750,6 +756,8 @@ fn process_class_member(
         function_loader,
         backend,
     );
+    let declared_return =
+        crate::virtual_members::laravel::expand_model_type(&declared_return, class_loader);
 
     let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
     let loaders = owned_loaders.loaders();
