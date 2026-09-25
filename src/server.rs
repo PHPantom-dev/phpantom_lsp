@@ -482,8 +482,9 @@ impl LanguageServer for Backend {
         });
         let uri_clone = uri.clone();
         let result = run_blocking_cancel_safe("references", move || {
-            // Ahead of reading the file: the refresh can rewrite a
-            // template's virtual PHP (see `Backend::find_references`).
+            // Ahead of reading the file: the initial index can rewrite a
+            // template's virtual PHP (see `Backend::find_references`). A
+            // finished index is reused.
             backend.ensure_workspace_indexed_for_request();
             backend.handle_with_position("references", &uri_clone, position, |content, pos| {
                 backend
@@ -644,8 +645,9 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         let outcome = run_blocking_cancel_safe("rename", move || {
-            // Ahead of reading the file: the refresh can rewrite a
-            // template's virtual PHP (see `Backend::find_references`).
+            // Ahead of reading the file: the initial index can rewrite a
+            // template's virtual PHP (see `Backend::find_references`). A
+            // finished index is reused.
             backend.ensure_workspace_indexed_for_request();
             backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
                 Some(backend.handle_rename(&uri_clone, content, pos, &new_name))
@@ -864,8 +866,9 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         let backend = self.clone_for_blocking();
         Ok(run_blocking_cancel_safe("incoming_calls", move || {
-            // Ahead of reading the file: the refresh can rewrite a
-            // template's virtual PHP (see `Backend::find_references`).
+            // Ahead of reading the file: the initial index can rewrite a
+            // template's virtual PHP (see `Backend::find_references`). A
+            // finished index is reused.
             backend.ensure_workspace_indexed_for_request();
             backend.incoming_calls_impl(&params.item)
         })
