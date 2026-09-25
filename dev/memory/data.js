@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790375246490,
+  "lastUpdate": 1790376683877,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31551,6 +31551,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 72.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "da94b1303a97af1ef6f81731061030318554194b",
+          "message": "A local rename no longer re-infers every Blade template\n\nDropping the request refresh entirely missed a file created without\na watcher event, which Find References is required to discover. The\nwalk stays for that. What it must not do is re-type every template\nwhen the walk finds nothing new: that was the repeated cost.\n\nA local variable is file-scoped, so rename does not start the walk\nat all. A property stored as a variable span still does.",
+          "timestamp": "2026-09-25T17:34:52-05:00",
+          "tree_id": "5037d963c25d8963e8d08df5f92f4731b50a0836",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/da94b1303a97af1ef6f81731061030318554194b"
+        },
+        "date": 1790376675129,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 74.4,
             "unit": "MiB"
           }
         ]
