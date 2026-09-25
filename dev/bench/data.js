@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790365041262,
+  "lastUpdate": 1790372868892,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Benchmarks": [
@@ -178175,6 +178175,198 @@ window.BENCHMARK_DATA = {
             "name": "diagnostics/fixture/method_chain",
             "value": 2.386,
             "range": "± 0.015",
+            "unit": "ms"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "7a353af5447ca76e4957793d9e0b40e4c4eca52f",
+          "message": "An `instanceof` guard rules out a template bounded by the checked class\n\n`@template TFactory of Factory` on a class or trait, returned as one\nalternative of a union, survived `! $x instanceof Factory`. The value\nkept an alternative the guard had already excluded, so a `return` the\ndeclared type accepts was reported as a mismatch naming a `Factory` the\ncode had just ruled out.\n\nA parameter nothing binds is erased to its bound, since every value of\nit satisfies the bound. The erasure reached the class the alternative is\ncompared by, but not the name it is carried under, and an `instanceof`\ncheck filters by the classes an alternative carries. An alternative that\nnames a class only in its type string is therefore invisible to it: the\ncheck can neither keep it nor rule it out. Writing the bound out by hand\n(`static|Factory`) always narrowed correctly, which is what isolates the\nfault to the name rather than to the narrowing.\n\nThe exclusion now resolves such an alternative to the class it names\nbefore filtering. One that names no class at all — `int`, `null`, a\nclass the project does not ship — is left as it was, since the check\nproves nothing about it.\n\nPresent since well before the model operators; a `mixed` elsewhere in\nthe union used to collapse it and hide the report, which is why it\nsurfaced on a Laravel model trait once `collection-of<…>` resolved to a\nclass of its own.",
+          "timestamp": "2026-09-25T16:37:14-05:00",
+          "tree_id": "f5ad5ff6c61978120b9ea004e220f0bc42bdbaa9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7a353af5447ca76e4957793d9e0b40e4c4eca52f"
+        },
+        "date": 1790372861360,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "cold_start_completion",
+            "value": 3.853,
+            "range": "± 0.142",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_simple_class",
+            "value": 0.047,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_5",
+            "value": 0.098,
+            "range": "± 0.015",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_10",
+            "value": 0.148,
+            "range": "± 0.019",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_inheritance_depth/depth_20",
+            "value": 0.231,
+            "range": "± 0.021",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/100_classes",
+            "value": 0.241,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/500_classes",
+            "value": 0.998,
+            "range": "± 0.032",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_classmap_size/1000_classes",
+            "value": 1.94,
+            "range": "± 0.085",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_generics_and_mixins",
+            "value": 0.109,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_with_narrowing",
+            "value": 0.061,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_5_method_chain",
+            "value": 0.059,
+            "range": "± 0.008",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_cross_file_type_hint",
+            "value": 0.066,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_carbon_class",
+            "value": 3.699,
+            "range": "± 0.116",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_yii_deep_hierarchy",
+            "value": 0.23,
+            "range": "± 0.05",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_large_file",
+            "value": 0.268,
+            "range": "± 0.011",
+            "unit": "ms"
+          },
+          {
+            "name": "completion_short_file",
+            "value": 0.066,
+            "range": "± 0.009",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/short",
+            "value": 0.054,
+            "range": "± 0.012",
+            "unit": "ms"
+          },
+          {
+            "name": "variable_completion/long",
+            "value": 0.121,
+            "range": "± 0.014",
+            "unit": "ms"
+          },
+          {
+            "name": "hover_method_call",
+            "value": 0.081,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "goto_definition_method",
+            "value": 0.073,
+            "range": "± 0.005",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/100_lines",
+            "value": 0.163,
+            "range": "± 0.006",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/500_lines",
+            "value": 0.963,
+            "range": "± 0.01",
+            "unit": "ms"
+          },
+          {
+            "name": "update_ast_parse_time/2000_lines",
+            "value": 5.47,
+            "range": "± 0.261",
+            "unit": "ms"
+          },
+          {
+            "name": "reparse_500_line_file",
+            "value": 0.992,
+            "range": "± 0.031",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_generic_objects",
+            "value": 0.033,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_new_objects",
+            "value": 0.032,
+            "range": "± 0.001",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/lots_of_missing_methods",
+            "value": 28.165,
+            "range": "± 0.921",
+            "unit": "ms"
+          },
+          {
+            "name": "diagnostics/fixture/method_chain",
+            "value": 2.065,
+            "range": "± 0.03",
             "unit": "ms"
           }
         ]
