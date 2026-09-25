@@ -21,12 +21,13 @@ impl Backend {
     /// referenced.  When `include_declaration` is true the declaration
     /// site itself is included in the results.
     ///
-    /// Waits for the initial workspace index but does not refresh it.  The
-    /// request entry points wait the same way, *before* reading `content`:
-    /// that first pass re-infers Blade templates, which rewrites their
-    /// virtual PHP, so a template's `content` and `position` read ahead of
-    /// it would no longer be the text its symbol map describes.  A finished
-    /// index is reused; watched-file notifications keep it current.
+    /// Waits for the initial workspace index but does not refresh it.  A
+    /// user command that should also discover files created without a
+    /// watcher event runs [`Self::ensure_workspace_indexed_for_request`]
+    /// itself, *before* it reads `content`: a refresh that parses new files
+    /// re-infers Blade templates, which can rewrite their virtual PHP, so a
+    /// template's `content` and `position` read ahead of it would no longer
+    /// be the text its symbol map describes.
     pub fn find_references(
         &self,
         uri: &str,

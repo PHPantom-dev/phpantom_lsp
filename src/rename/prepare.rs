@@ -142,6 +142,33 @@ impl Backend {
         Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
     }
 
+    /// Whether this rename can reach a file that is not open.
+    ///
+    /// A variable and `$this` are scoped to the current file, so the
+    /// refresh that discovers a file created without a watcher event has
+    /// nothing to find for them. A property declaration is stored as a
+    /// variable span, and that one does cross files.
+    pub(crate) fn rename_needs_workspace_refresh(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> bool {
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return false;
+        };
+        match &span.kind {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
+                matches!(
+                    self.lookup_var_def_kind_at(uri, name, span.start),
+                    Some(crate::symbol_map::VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span.start)
+            }
+            SymbolKind::SelfStaticParent(crate::symbol_map::SelfStaticParentKind::This) => false,
+            _ => true,
+        }
+    }
+
     /// Handle `textDocument/rename`.
     ///
     /// Produces a `WorkspaceEdit` that renames every occurrence of the

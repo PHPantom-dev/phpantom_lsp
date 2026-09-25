@@ -482,9 +482,8 @@ impl LanguageServer for Backend {
         });
         let uri_clone = uri.clone();
         let result = run_blocking_cancel_safe("references", move || {
-            // Ahead of reading the file: the initial index can rewrite a
-            // template's virtual PHP (see `Backend::find_references`). A
-            // finished index is reused.
+            // Ahead of reading the file: a refresh that parses new files can
+            // rewrite a template's virtual PHP (see `Backend::find_references`).
             backend.ensure_workspace_indexed_for_request();
             backend.handle_with_position("references", &uri_clone, position, |content, pos| {
                 backend
@@ -645,10 +644,23 @@ impl LanguageServer for Backend {
         let backend = self.clone_for_blocking();
         let uri_clone = uri.clone();
         let outcome = run_blocking_cancel_safe("rename", move || {
-            // Ahead of reading the file: the initial index can rewrite a
-            // template's virtual PHP (see `Backend::find_references`). A
-            // finished index is reused.
-            backend.ensure_workspace_indexed_for_request();
+            // The initial index can rewrite a template's virtual PHP, so
+            // wait for it before reading the file. A local variable is
+            // file-scoped and does not pay the refresh that discovers a
+            // file the watcher missed. A cross-file rename still does, and
+            // that refresh can rewrite a template, so the rename itself is
+            // read after it.
+            backend.ensure_workspace_index_ready_for_request();
+            let needs_refresh = backend
+                .handle_with_position("rename", &uri_clone, position, |content, pos| {
+                    Some(backend.rename_needs_workspace_refresh(&uri_clone, content, pos))
+                })
+                .ok()
+                .flatten()
+                .unwrap_or(false);
+            if needs_refresh {
+                backend.ensure_workspace_indexed_for_request();
+            }
             backend.handle_with_position("rename", &uri_clone, position, |content, pos| {
                 Some(backend.handle_rename(&uri_clone, content, pos, &new_name))
             })
@@ -866,9 +878,8 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
         let backend = self.clone_for_blocking();
         Ok(run_blocking_cancel_safe("incoming_calls", move || {
-            // Ahead of reading the file: the initial index can rewrite a
-            // template's virtual PHP (see `Backend::find_references`). A
-            // finished index is reused.
+            // Ahead of reading the file: a refresh that parses new files can
+            // rewrite a template's virtual PHP (see `Backend::find_references`).
             backend.ensure_workspace_indexed_for_request();
             backend.incoming_calls_impl(&params.item)
         })

@@ -84,29 +84,38 @@ impl Backend {
 
     /// Ensure the workspace index is ready for an editor request.
     ///
-    /// Waits for the initial index when it is still running, and reuses a
-    /// finished one. Rename, Find References, and incoming calls call this
-    /// before reading the file the request is about, because that first
-    /// pass can rewrite a Blade template's virtual PHP. It does not walk
-    /// the workspace again afterwards: doing so re-inferred every template
-    /// on every request, so renaming a local variable cost as much as the
-    /// index itself, and the next rename cost the same. Watched-file
-    /// notifications apply later changes.
+    /// Waits for the initial index when it is still running. A finished
+    /// index is refreshed only far enough to parse a file created without
+    /// a watcher notification: files already indexed are left alone, and a
+    /// refresh that finds nothing new does not re-infer every Blade
+    /// template. That re-inference is what made a local rename cost as
+    /// much as the index itself, and the next rename cost the same.
+    ///
+    /// Called before reading the file the request is about, because the
+    /// initial pass can rewrite a Blade template's virtual PHP.
     ///
     /// The indexing pass maps into 0..80 of the request's progress bar; the
     /// per-file scans that follow report into the remaining 80..100.
     pub(crate) fn ensure_workspace_indexed_for_request(&self) {
-        self.ensure_workspace_index_ready_for_request();
+        match self.request_progress.as_deref() {
+            Some(state) => {
+                let forward = |percentage: u32, message: String| {
+                    state.set_percentage(percentage.min(100) * 4 / 5, message);
+                };
+                self.ensure_workspace_indexed_with_progress(Some(&forward));
+            }
+            None => self.ensure_workspace_indexed(),
+        }
     }
 
     /// Wait for the initial workspace index when necessary, but reuse a
     /// completed index without refreshing the filesystem.
     ///
-    /// Declaration CodeLens, cached reference counts, and the editor
-    /// requests that call
-    /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request)
-    /// all share this path. A finished index is the one the background pass
-    /// published; watched-file notifications keep it current.
+    /// Declaration CodeLens and cached reference counts call this once per
+    /// symbol. Editor requests use
+    /// [`ensure_workspace_indexed_for_request`](Self::ensure_workspace_indexed_for_request),
+    /// which still discovers a file the watcher never reported, but does
+    /// not repeat the Blade re-inference of a refresh that found nothing.
     pub(crate) fn ensure_workspace_index_ready_for_request(&self) {
         match self.request_progress.as_deref() {
             Some(state) => {
@@ -223,6 +232,10 @@ impl Backend {
         }
 
         let start = std::time::Instant::now();
+        // A refresh of a finished index must not re-infer every Blade
+        // template when the walk finds nothing new. Captured before the
+        // pass publishes `workspace_indexed`, which it does either way.
+        let already_indexed = self.workspace_indexed.load(Ordering::Acquire);
         self.report_workspace_index_progress(progress, 1, "Preparing workspace index");
         let existing_uris: HashSet<String> = self.symbol_maps.read().keys().cloned().collect();
 
@@ -253,10 +266,9 @@ impl Backend {
         // ── Phase 2: workspace directory scan ───────────────────────────
         //
         // The initial pass discovers every PHP and resource file. Watched-file
-        // notifications apply later changes incrementally. Editor requests
-        // reuse a finished index rather than walking again; only an explicit
-        // refresh (`ensure_workspace_indexed`) rediscovers a file the watcher
-        // never reported.
+        // notifications apply later changes incrementally. A refresh of a
+        // finished index still walks, so a file created without a watcher
+        // event is parsed, but it does not re-read files already indexed.
         let workspace_root = self.workspace.workspace_root.read().clone();
         let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
         let (phase2_work, resource_work) = if let Some(root) = workspace_root.clone() {
@@ -398,7 +410,20 @@ impl Backend {
             // `view()` call sites; with the whole workspace indexed,
             // re-run call-site inference and re-parse the templates
             // whose inferred variable set changed.
-            self.refresh_blade_injected_vars();
+            //
+            // A later refresh that parsed nothing has nothing new for that
+            // inference to see. Running it anyway re-types every template,
+            // which is most of what a rename used to wait on after the
+            // index had already finished.
+            let discovered_new_files =
+                !phase1_uris.is_empty() || !phase2_work.is_empty() || !resource_work.is_empty();
+            if !already_indexed || discovered_new_files {
+                self.refresh_blade_injected_vars();
+            } else {
+                tracing::info!(
+                    "ensure_workspace_indexed: skipping Blade re-inference; refresh found no new files"
+                );
+            }
         }
         self.report_workspace_index_progress(progress, 100, "Workspace index ready");
         *self.workspace_index_status.lock() = None;
