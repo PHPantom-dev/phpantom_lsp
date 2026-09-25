@@ -18,15 +18,19 @@ pub(super) fn exclude_classes_in_scope(
     scope: &mut ScopeState,
 ) -> bool {
     let had_types = !scope.get(var_name).is_empty();
-    let mut results = split_iterable_alternatives(scope.get(var_name), |hint| {
+    let resolve = |hint: PhpType| {
         crate::type_engine::type_resolution::resolved_types_for_hint(
             hint,
             &var_ctx.current_class.name,
             var_ctx.all_classes,
             var_ctx.class_loader,
         )
-    })
-    .unwrap_or_else(|| scope.get(var_name).to_vec());
+    };
+    let mut results = split_iterable_alternatives(scope.get(var_name), resolve)
+        .unwrap_or_else(|| scope.get(var_name).to_vec());
+    if let Some(named) = resolve_class_naming_alternatives(&results, resolve) {
+        results = named;
+    }
     for cls in classes {
         ResolvedType::apply_narrowing(&mut results, |class_list| {
             narrowing::apply_instanceof_exclusion(cls, var_ctx, class_list)
@@ -38,6 +42,55 @@ pub(super) fn exclude_classes_in_scope(
     }
     scope.set(var_name, results);
     false
+}
+
+/// `types` with every alternative that names a class only in its type
+/// string replaced by the class it names, or `None` when none does.
+///
+/// An `instanceof` check filters a subject by the classes its entries
+/// carry, so an alternative naming one only in its type string is
+/// invisible to it: the check can neither keep it nor rule it out.
+///
+/// A `@template T of Foo` that nothing binds arrives exactly like that.
+/// Resolution erases it to its bound for the class dimension — every
+/// value of the parameter is a `Foo`, which is what the bound says — but
+/// the type string keeps the parameter's own name, and the name is what
+/// decides whether the alternative is carried beside the class or by it.
+/// So `! $x instanceof Foo` left the parameter standing, and the value
+/// kept an alternative the guard had ruled out.
+///
+/// An alternative that names no class at all (`int`, `null`, a class the
+/// project does not ship) is left exactly as it was: an `instanceof`
+/// check proves nothing about it, and replacing it with nothing would
+/// erase what the scope already knew.
+fn resolve_class_naming_alternatives(
+    types: &[ResolvedType],
+    resolve: impl Fn(PhpType) -> Vec<ResolvedType>,
+) -> Option<Vec<ResolvedType>> {
+    let named: Vec<Option<Vec<ResolvedType>>> = types
+        .iter()
+        .map(|rt| {
+            if rt.class_info.is_some() {
+                return None;
+            }
+            let resolved: Vec<ResolvedType> = resolve(rt.type_string.clone())
+                .into_iter()
+                .filter(|r| r.class_info.is_some())
+                .collect();
+            (!resolved.is_empty()).then_some(resolved)
+        })
+        .collect();
+    if named.iter().all(Option::is_none) {
+        return None;
+    }
+    let mut out = Vec::with_capacity(types.len());
+    for (rt, named) in types.iter().zip(named) {
+        match named {
+            Some(resolved) => ResolvedType::extend_unique(&mut out, resolved),
+            None => out.push(rt.clone()),
+        }
+    }
+    Some(out)
 }
 
 /// `types` with each `iterable` alternative spelled out as the
