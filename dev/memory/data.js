@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790357251426,
+  "lastUpdate": 1790357326395,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31245,6 +31245,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "47e31197f19e1f5378571882dd6090d443e17644",
+          "message": "Appending to an array outside a loop keeps its shape",
+          "timestamp": "2026-09-25T19:12:00+02:00",
+          "tree_id": "bfb1a92bdd29969cc3ec80ecc7e8e1e93e16a211",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/47e31197f19e1f5378571882dd6090d443e17644"
+        },
+        "date": 1790357318255,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.3,
             "unit": "MiB"
           }
         ]
