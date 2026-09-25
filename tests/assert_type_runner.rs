@@ -33,270 +33,6 @@ use std::path::Path;
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
-static UNIT_ENUM_STUB: &str = r#"<?php
-interface UnitEnum
-{
-    /** @return static[] */
-    public static function cases(): array;
-    public readonly string $name;
-}
-"#;
-
-static BACKED_ENUM_STUB: &str = r#"<?php
-interface BackedEnum extends UnitEnum
-{
-    public static function from(int|string $value): static;
-    public static function tryFrom(int|string $value): ?static;
-    public readonly int|string $value;
-}
-"#;
-
-static GENERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TSend
- * @template TReturn
- */
-final class Generator
-{
-    /** @return TReturn */
-    public function getReturn(): mixed {}
-}
-"#;
-
-static NO_REWIND_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- */
-class NoRewindIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Traversable $iterator) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-}
-"#;
-
-static ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface Iterator extends Traversable
-{
-    /** @return TValue */
-    public function current(): mixed;
-    /** @return TKey */
-    public function key(): mixed;
-    public function next(): void;
-    public function rewind(): void;
-    public function valid(): bool;
-}
-"#;
-
-static ITERATOR_AGGREGATE_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface IteratorAggregate extends Traversable
-{
-    /** @return Traversable<TKey, TValue>|array<TValue> */
-    public function getIterator(): Traversable|array;
-}
-"#;
-
-static ITERATOR_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @mixin TIterator
- */
-class IteratorIterator implements Iterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Traversable $iterator) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-    public function next(): void {}
-    public function rewind(): void {}
-    public function valid(): bool {}
-}
-"#;
-
-static SPL_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @implements Iterator<TKey, TValue>
- */
-class ArrayIterator implements Iterator
-{
-    /** @param array<TKey, TValue> $array */
-    public function __construct(array $array = []) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-    public function next(): void {}
-    public function rewind(): void {}
-    public function valid(): bool {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class CachingIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator) {}
-    public function hasNext(): bool {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class InfiniteIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator) {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class LimitIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator, int $offset = 0, int $limit = -1) {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class CallbackFilterIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator, callable $callback) {}
-}
-
-/**
- * @template TValue
- */
-class SplDoublyLinkedList
-{
-    /** @param TValue $value */
-    public function add(int $index, mixed $value): void {}
-    /** @return TValue */
-    public function bottom(): mixed {}
-}
-
-/**
- * @template TKey of object
- * @template TValue
- */
-class SplObjectStorage
-{
-    /** @return TValue */
-    public function offsetGet(object $object): mixed {}
-}
-
-/**
- * @template TKey of array-key
- * @template TValue
- */
-class ArrayObject
-{
-    /** @param array<TKey, TValue> $array */
-    public function __construct(array $array = []) {}
-    /** @return ArrayIterator<TKey, TValue> */
-    public function getIterator(): ArrayIterator {}
-}
-"#;
-
-static TRAVERSABLE_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface Traversable {}
-"#;
-
-static DATE_INTERVAL_STUB: &str = r#"<?php
-class DateInterval
-{
-    public function __construct(string $duration) {}
-}
-"#;
-
-static DATE_TIME_IMMUTABLE_STUB: &str = r#"<?php
-class DateTimeImmutable
-{
-    public function __construct(string $datetime = "now") {}
-    public function sub(DateInterval $interval): static {}
-    public function modify(string $modifier): DateTimeImmutable|false {}
-}
-"#;
-
-static EXCEPTION_STUB: &str =
-    "<?php\nclass Exception {}\nclass LogicException extends Exception {}\n";
-
-static WEAK_REFERENCE_STUB: &str = r#"<?php
-class WeakReference
-{
-    public static function create(object $object): WeakReference {}
-    /** @return Exception|null */
-    public function get(): ?object {}
-}
-"#;
-
-static DOM_DOCUMENT_STUB: &str = "<?php\nclass DOMDocument {}\n";
-
-static DOM_ELEMENT_STUB: &str = r#"<?php
-class DOMElement
-{
-    public ?DOMDocument $ownerDocument;
-    public function __construct(string $qualifiedName, string $value = "", string $namespace = "") {}
-}
-"#;
-
-static SIMPLE_XML_ELEMENT_STUB: &str = r#"<?php
-class SimpleXMLElement
-{
-    public function __construct(string $data) {}
-    public function __get(string $name): SimpleXMLElement {}
-}
-"#;
-
-static STDCLASS_STUB: &str = "<?php\nclass stdClass {}\n";
-
-static ARRAY_FUNCTION_STUB: &str = r#"<?php
-/**
- * @return array<int, string>
- */
-function range(string $start, string $end): array {}
-"#;
-
 // ─── Assertion extraction ───────────────────────────────────────────────────
 
 /// A single `assertType('expected', expr)` call found in the source.
@@ -752,7 +488,189 @@ fn normalize_type(ty: &str) -> String {
         }
     }
 
-    result
+    canonicalize_union_spelling(&drop_sequential_shape_keys(&strip_template_scopes(&result)))
+}
+
+/// Remove the scope PHPStan appends to a template type's name
+/// (`T (method Foo::bar(), argument)`, `T of array (class Foo, parameter)`).
+fn strip_template_scopes(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(pos) = [" (class ", " (method ", " (function "]
+        .iter()
+        .filter_map(|marker| rest.find(marker))
+        .min()
+    {
+        out.push_str(&rest[..pos]);
+        // The scope can itself hold parentheses (`method Foo::bar()`), so
+        // find the `)` that closes the one opened at `pos + 1`.
+        let mut depth = 0i32;
+        let close = rest[pos + 1..].char_indices().find_map(|(i, ch)| {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+            None
+        });
+        match close {
+            Some(close) => rest = &rest[pos + 1 + close + 1..],
+            None => {
+                rest = &rest[pos..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Split `ty` at the `|` separators that are not nested inside brackets,
+/// braces, parentheses, or quotes.
+fn split_top_level_union(ty: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut start = 0;
+    for (i, ch) in ty.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' | '>' | ')' | ']' => depth -= 1,
+            '|' if depth == 0 => {
+                parts.push(&ty[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&ty[start..]);
+    parts
+}
+
+/// Canonicalize spellings of the same type that PHPStan and PHPantom
+/// print differently: `callable(): mixed` is `callable`, `mixed[]` and
+/// `array<int|string, V>` are `array` and `array<V>`, `(A|B)` is `A|B`,
+/// a union with `mixed` in it is `mixed`, and `array{}` beside a wider
+/// `array` member adds nothing.
+fn canonicalize_union_spelling(ty: &str) -> String {
+    let mut ty = ty.trim();
+    while ty.starts_with('(')
+        && ty.ends_with(')')
+        && split_top_level_union(&ty[1..ty.len() - 1]).len() > 1
+        && ty[1..ty.len() - 1].chars().filter(|&c| c == '(').count()
+            == ty[1..ty.len() - 1].chars().filter(|&c| c == ')').count()
+    {
+        ty = &ty[1..ty.len() - 1];
+    }
+    let canonical_member = |member: &str| -> String {
+        let member = member.trim();
+        match member {
+            "callable():mixed" => "callable".to_string(),
+            "Closure():mixed" => "Closure".to_string(),
+            "mixed[]" | "array<mixed>" | "array<mixed, mixed>" => "array".to_string(),
+            _ => {
+                for prefix in ["array<int|string, ", "array<array-key, "] {
+                    if let Some(rest) = member.strip_prefix(prefix) {
+                        return format!("array<{rest}");
+                    }
+                }
+                member.to_string()
+            }
+        }
+    };
+    let members: Vec<String> = split_top_level_union(ty)
+        .into_iter()
+        .map(canonical_member)
+        .collect();
+    if members.len() > 1 && members.iter().any(|m| m == "mixed") {
+        return "mixed".to_string();
+    }
+    let has_wider_array = members
+        .iter()
+        .any(|m| m == "array" || m.starts_with("array<"));
+    let kept: Vec<String> = members
+        .into_iter()
+        .filter(|m| !(has_wider_array && m == "array{}"))
+        .collect();
+    kept.join("|")
+}
+
+/// Rewrite every `array{0:A,1:B}` whose keys run 0, 1, 2, … with none
+/// optional to the positional `array{A,B}` spelling PHPStan prints.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`], where
+/// shape entries are separated by a bare `,` and keyed as `key:value`.
+fn drop_sequential_shape_keys(ty: &str) -> String {
+    const OPEN: &str = "array{";
+    let Some(start) = ty.find(OPEN) else {
+        return ty.to_string();
+    };
+    let body_start = start + OPEN.len();
+    // Find the matching `}` and split the body at its top-level commas.
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut entries: Vec<&str> = Vec::new();
+    let mut entry_start = body_start;
+    let mut body_end = None;
+    for (i, ch) in ty[body_start..].char_indices() {
+        let i = body_start + i;
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' if depth == 0 => {
+                entries.push(&ty[entry_start..i]);
+                body_end = Some(i);
+                break;
+            }
+            '}' | '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                entries.push(&ty[entry_start..i]);
+                entry_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let Some(body_end) = body_end else {
+        return ty.to_string();
+    };
+
+    let positional: Option<Vec<&str>> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let (key, value) = entry.split_once(':')?;
+            (key == index.to_string()).then_some(value)
+        })
+        .collect();
+    let body = match positional {
+        Some(values) if !values.is_empty() => values.join(","),
+        _ => ty[body_start..body_end].to_string(),
+    };
+    format!(
+        "{}{}{}}}{}",
+        &ty[..start],
+        OPEN,
+        drop_sequential_shape_keys(&body),
+        drop_sequential_shape_keys(&ty[body_end + 1..])
+    )
 }
 
 /// Compare expected (PHPStan) type with actual (PHPantom hover) type.
@@ -762,6 +680,12 @@ fn types_match(expected: &str, actual: &str) -> bool {
     let na = normalize_type(actual);
 
     if ne == na {
+        return true;
+    }
+
+    // `*ERROR*` is PHPStan's type for an expression it cannot resolve;
+    // PHPantom's counterpart is `mixed`.
+    if ne == "*ERROR*" && na == "mixed" {
         return true;
     }
 
@@ -788,14 +712,6 @@ fn types_match(expected: &str, actual: &str) -> bool {
     ne_parts.sort();
     na_parts.sort();
     if ne_parts == na_parts {
-        return true;
-    }
-
-    // PHPantom may display `self` where PHPStan resolves to the class name.
-    // Accept `self` as matching any class name (since we can't resolve the
-    // enclosing class from the runner context).
-    if na == "self" || na_short == "self" {
-        // `self` can match any expected class type.
         return true;
     }
 
@@ -934,37 +850,7 @@ fn extract_type_from_hover(hover_text: &str, var_name: &str) -> Option<String> {
 // ─── Test runner ────────────────────────────────────────────────────────────
 
 fn create_assert_type_backend() -> Backend {
-    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
-    class_stubs.insert("UnitEnum", UNIT_ENUM_STUB);
-    class_stubs.insert("BackedEnum", BACKED_ENUM_STUB);
-    class_stubs.insert("Generator", GENERATOR_STUB);
-    class_stubs.insert("NoRewindIterator", NO_REWIND_ITERATOR_STUB);
-    class_stubs.insert("Iterator", ITERATOR_STUB);
-    class_stubs.insert("IteratorAggregate", ITERATOR_AGGREGATE_STUB);
-    class_stubs.insert("IteratorIterator", ITERATOR_ITERATOR_STUB);
-    class_stubs.insert("ArrayIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("CachingIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("InfiniteIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("LimitIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("CallbackFilterIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("SplDoublyLinkedList", SPL_ITERATOR_STUB);
-    class_stubs.insert("SplObjectStorage", SPL_ITERATOR_STUB);
-    class_stubs.insert("ArrayObject", SPL_ITERATOR_STUB);
-    class_stubs.insert("Traversable", TRAVERSABLE_STUB);
-    class_stubs.insert("DateInterval", DATE_INTERVAL_STUB);
-    class_stubs.insert("DateTimeImmutable", DATE_TIME_IMMUTABLE_STUB);
-    class_stubs.insert("Exception", EXCEPTION_STUB);
-    class_stubs.insert("LogicException", EXCEPTION_STUB);
-    class_stubs.insert("WeakReference", WEAK_REFERENCE_STUB);
-    class_stubs.insert("DOMDocument", DOM_DOCUMENT_STUB);
-    class_stubs.insert("DOMElement", DOM_ELEMENT_STUB);
-    class_stubs.insert("SimpleXMLElement", SIMPLE_XML_ELEMENT_STUB);
-    class_stubs.insert("stdClass", STDCLASS_STUB);
-
-    let mut func_stubs: HashMap<&'static str, &'static str> = HashMap::new();
-    func_stubs.insert("range", ARRAY_FUNCTION_STUB);
-
-    Backend::new_test_with_all_stubs(class_stubs, func_stubs, HashMap::new())
+    Backend::new_test_with_full_stubs()
 }
 
 fn fixture_uri(path: &Path) -> String {

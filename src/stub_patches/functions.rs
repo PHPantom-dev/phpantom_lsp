@@ -32,6 +32,7 @@ pub fn apply_function_stub_patches(func: &mut FunctionInfo) {
         "hrtime" => patch_hrtime(func),
         "microtime" => patch_microtime(func),
         "getenv" => patch_getenv(func),
+        "func_get_args" => func.return_type = Some(PhpType::list(PhpType::mixed())),
         "mb_convert_encoding" => patch_mb_convert_encoding(func),
         "abs" => patch_abs(func),
         "var_export" => patch_var_export(func),

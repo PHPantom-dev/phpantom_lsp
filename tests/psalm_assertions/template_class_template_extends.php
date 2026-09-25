@@ -424,7 +424,10 @@ namespace PsalmTest_template_class_template_extends_10 {
 
     $i = (new SomeIterator())->getIterator();
 
-    assertType('Traversable<int, Foo>|array<Foo>', $i);
+    // PHPantom is more precise than Psalm here: `getIterator()` is declared
+    // `: Traversable`, so the `TValue[]` half of the stub's
+    // `@return Traversable<TKey, TValue>|TValue[]` can never be returned.
+    assertType('Traversable<int, Foo>', $i);
 }
 
 // Test: extendClassThatParameterizesTemplatedParent

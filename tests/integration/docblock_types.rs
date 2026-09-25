@@ -2371,3 +2371,117 @@ function f($items) {
         &[("$copy", "array<int, Widget>|Widget")],
     );
 }
+
+/// A `@return` member the native class return type can never hold is
+/// dropped, keeping the rest of the docblock: PHP enforces the signature,
+/// so the `false` written for an older runtime cannot come back.
+#[test]
+fn return_docblock_member_the_native_class_cannot_hold_is_dropped() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Clock {
+    /** @return static|false */
+    public function tick(): Clock { return $this; }
+    /** @return array<int, Clock>|false */
+    public function all(): Clock { return $this; }
+}
+function f(Clock $c) {
+    $next = $c->tick();
+    $all = $c->all();
+}
+",
+        &[("$next", "Clock"), ("$all", "Clock")],
+    );
+}
+
+/// The generic half of a stub's `@return Traversable<TKey, TValue>|TValue[]`
+/// survives on a native `Traversable` return; only the array half goes.
+#[test]
+fn return_docblock_keeps_the_generic_member_its_native_class_allows() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Item {}
+/** @implements IteratorAggregate<int, Item> */
+class Items implements IteratorAggregate {
+    public function getIterator(): Traversable { yield new Item; }
+}
+function f(Items $items) {
+    $it = $items->getIterator();
+}
+",
+        &[("$it", "Traversable<int, Item>")],
+    );
+}
+
+/// A native return that is not a class (`mixed` here) keeps a docblock
+/// describing scalars.
+#[test]
+fn return_docblock_scalars_refine_a_native_mixed() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Box {
+    /** @return int|null|bool */
+    public function get(): mixed { return null; }
+}
+function f(Box $b) {
+    $v = $b->get();
+}
+",
+        &[("$v", "int|null|bool")],
+    );
+}
+
+/// A property typed `static` read through a receiver whose class is fixed
+/// resolves to that class, as a method returning `static` does; read through
+/// `$this` it stays open.  The same holds for a magic `__get()` returning
+/// `static`.
+#[test]
+fn static_typed_property_binds_to_the_receiver() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Node {
+    /** @var static */
+    public $next;
+    /** @return static */
+    public function __get(string $name) { return $this; }
+    public function inside() {
+        $own = $this->next;
+    }
+}
+function f(Node $n) {
+    $declared = $n->next;
+    $magic = $n->anything;
+}
+",
+        &[
+            ("$own", "static(Node)"),
+            ("$declared", "Node"),
+            ("$magic", "Node"),
+        ],
+    );
+}
+
+/// A `null` in a `@return` tag is dropped when the native return type does
+/// not accept it.
+#[test]
+fn return_docblock_null_the_native_class_rejects_is_dropped() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Foo {
+    /** @return static|null */
+    public function copy(): self { return $this; }
+    /** @return ?Foo */
+    public function other(): Foo { return $this; }
+    /** @return static|null */
+    public function maybe(): ?self { return null; }
+}
+class Bar extends Foo {}
+function f(Bar $b) {
+    $copy = $b->copy();
+    $other = $b->other();
+    $maybe = $b->maybe();
+}
+",
+        &[("$copy", "Bar"), ("$other", "Foo"), ("$maybe", "Bar|null")],
+    );
+}

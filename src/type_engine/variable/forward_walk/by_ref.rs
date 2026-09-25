@@ -404,16 +404,19 @@ pub(crate) fn process_pass_by_ref<'b>(
     // types like `Type &$param`).
     let scope_resolver = scope.snapshot_resolver();
 
-    // Collect all variable names that appear as arguments in this
-    // expression, including ones not yet in scope.
-    let mut all_var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    // Only a variable passed directly as an argument of this call can be
+    // written through a by-reference parameter, so those are the only
+    // candidates, whether or not they are in scope yet.  Visiting every
+    // local instead would redo the callee lookup once per variable and
+    // make a long body cost statements × locals.
+    let mut arg_var_names: Vec<String> = Vec::new();
     for arg_var in extract_call_arg_variables(expr) {
-        if !all_var_names.contains(&arg_var) {
-            all_var_names.push(arg_var);
+        if !arg_var_names.contains(&arg_var) {
+            arg_var_names.push(arg_var);
         }
     }
 
-    for var_name in all_var_names {
+    for var_name in arg_var_names {
         let var_ctx = ctx.var_ctx_for_with_scope(
             &var_name,
             ctx.cursor_offset,

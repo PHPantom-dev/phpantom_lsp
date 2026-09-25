@@ -98,6 +98,50 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B368 | [A narrowed member read or call result survives a call that can change it](todo/bugs.md#b368-a-narrowed-member-read-or-call-result-survives-a-call-that-can-change-it) | Medium      | Medium-High |
+| B374 | [`instanceof` against a class that cannot be loaded clears the variable's type](todo/bugs.md#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type) | Medium      | Medium      |
+| B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
+| B387 | [`foreach` over `SplObjectStorage` swaps its keys and values](todo/bugs.md#b387-foreach-over-splobjectstorage-swaps-its-keys-and-values) | Medium      | Low-Medium  |
+| B391 | [A closure's return type is read from its declaration, not its body](todo/bugs.md#b391-a-closures-return-type-is-read-from-its-declaration-not-its-body) | Medium      | Medium-High |
+| B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
+| B369 | [`isset($arr[$k])` does not narrow `$k` to the keys the array has](todo/bugs.md#b369-issetarrk-does-not-narrow-k-to-the-keys-the-array-has) | Low-Medium  | Medium      |
+| B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |
+| B372 | [A condition stored in a variable loses its narrowing](todo/bugs.md#b372-a-condition-stored-in-a-variable-loses-its-narrowing) | Low-Medium  | Medium      |
+| B381 | [Appending to an array shape turns it into a list](todo/bugs.md#b381-appending-to-an-array-shape-turns-it-into-a-list) | Low-Medium  | Medium      |
+| B386 | [Array functions flatten the shapes they are given](todo/bugs.md#b386-array-functions-flatten-the-shapes-they-are-given) | Low-Medium  | Medium      |
+| B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
+| B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |
+| B397 | [`static` inside a generic type is left unbound on a `Class::` access](todo/bugs.md#b397-static-inside-a-generic-type-is-left-unbound-on-a-class-access) | Low-Medium  | Low-Medium  |
+| B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |
+| B371 | [A check compared to `true`, or `array_key_exists()` with a non-literal key, does not narrow](todo/bugs.md#b371-a-check-compared-to-true-or-array_key_exists-with-a-non-literal-key-does-not-narrow) | Low         | Low-Medium  |
+| B373 | [`is_a()` narrowing ignores `allow_string`, class-string variables, and a narrower subject](todo/bugs.md#b373-is_a-narrowing-ignores-allow_string-class-string-variables-and-a-narrower-subject) | Low         | Medium      |
+| B375 | [`@phpstan-assert-if-true` misses the receiver's template binding and untyped subjects](todo/bugs.md#b375-phpstan-assert-if-true-misses-the-receivers-template-binding-and-untyped-subjects) | Low         | Medium      |
+| B376 | [`ReflectionClass::isSubclassOf()` does not narrow the reflected class](todo/bugs.md#b376-reflectionclassissubclassof-does-not-narrow-the-reflected-class) | Low         | Low-Medium  |
+| B377 | [A type guard on an array offset does not narrow the array](todo/bugs.md#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array) | Low         | Medium      |
+| B378 | [`count($a) == count($b)` does not give `$b` `$a`'s length](todo/bugs.md#b378-counta--countb-does-not-give-b-as-length) | Low         | Medium      |
+| B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
+| B382 | [Writing an integer key into an integer-keyed shape widens the shape](todo/bugs.md#b382-writing-an-integer-key-into-an-integer-keyed-shape-widens-the-shape) | Low         | Low         |
+| B383 | [Joining `array{}` with a non-empty list loses the element type](todo/bugs.md#b383-joining-array-with-a-non-empty-list-loses-the-element-type) | Low         | Low-Medium  |
+| B384 | [A `foreach` by-reference write does not change the array's element type](todo/bugs.md#b384-a-foreach-by-reference-write-does-not-change-the-arrays-element-type) | Low         | Medium      |
+| B385 | [Assigning through `ArrayAccess` does not replace an offset's narrowing](todo/bugs.md#b385-assigning-through-arrayaccess-does-not-replace-an-offsets-narrowing) | Low         | Low-Medium  |
+| B388 | [`DOMNamedNodeMap::item()` ignores the map's node type](todo/bugs.md#b388-domnamednodemapitem-ignores-the-maps-node-type) | Low         | Low         |
+| B389 | [A native `never` return is overridden by the docblock](todo/bugs.md#b389-a-native-never-return-is-overridden-by-the-docblock) | Low         | Low         |
+| B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
+| B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
+| B395 | [`key-of<array<V>>` is `int` instead of `int\|string`](todo/bugs.md#b395-key-ofarrayv-is-int-instead-of-intstring) | Low         | Low         |
+| B396 | [A conditional type on `$this` or in `@param-out` is not evaluated](todo/bugs.md#b396-a-conditional-type-on-this-or-in-param-out-is-not-evaluated) | Low         | Medium      |
+| B398 | [`self` inside an object shape is not bound to the declaring class](todo/bugs.md#b398-self-inside-an-object-shape-is-not-bound-to-the-declaring-class) | Low         | Low-Medium  |
+| B399 | [`@var` above a `global` statement is misapplied](todo/bugs.md#b399-var-above-a-global-statement-is-misapplied) | Low         | Low-Medium  |
+| B400 | [Only the nearest of several stacked `@var` docblocks applies](todo/bugs.md#b400-only-the-nearest-of-several-stacked-var-docblocks-applies) | Low         | Low         |
+| B401 | [An invalid PHPDoc type is shown verbatim](todo/bugs.md#b401-an-invalid-phpdoc-type-is-shown-verbatim) | Low         | Low-Medium  |
+| B402 | [`@phpstan-method` does not outrank `@method`](todo/bugs.md#b402-phpstan-method-does-not-outrank-method) | Low         | Low         |
+| B405 | [A closure called through `->call()`, or a callable held in a variable, is not resolved](todo/bugs.md#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved) | Low         | Medium      |
+| B406 | [Closure variadics are lists or untyped, and a `null` default does not always make a parameter nullable](todo/bugs.md#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable) | Low         | Low         |
+| B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |
+| B408 | [An assignment inside an argument to `new` is not seen](todo/bugs.md#b408-an-assignment-inside-an-argument-to-new-is-not-seen) | Low         | Low         |
+| B409 | [`??` on an undefined or null-only left side gives `mixed`](todo/bugs.md#b409--on-an-undefined-or-null-only-left-side-gives-mixed) | Low         | Low         |
+| B410 | [A `void` call's result is typed `void` instead of `null`](todo/bugs.md#b410-a-void-calls-result-is-typed-void-instead-of-null) | Low         | Low         |
+| B411 | [Arithmetic on float literals is not folded](todo/bugs.md#b411-arithmetic-on-float-literals-is-not-folded) | Low         | Low         |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |
@@ -199,7 +243,9 @@ unlikely to move the needle for most users.
 | P21 | [Offset-shifting for cached diagnostics on partial edits](todo/performance.md#p21-offset-shifting-for-cached-diagnostics-on-partial-edits)                                  | Medium      | Very High   |
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
 | P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
+| P65 | [Every call site repeats the full function lookup, hit or miss](todo/performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss) | Low-Medium  | Medium      |
 | P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
+| P66 | [Stub version filtering rescans a stub file once per symbol it declares](todo/performance.md#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares) | Low         | Low-Medium  |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |
 | P49 | [A very long method chain costs superlinear time to analyse](todo/performance.md#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse)                              | Low         | Medium      |
 | P54 | [Property narrowing re-walks the whole body once per subject](todo/performance.md#p54-property-narrowing-re-walks-the-whole-body-once-per-subject)                          | Low         | Medium      |

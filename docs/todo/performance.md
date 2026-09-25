@@ -1307,3 +1307,63 @@ the join; `closures.rs` on the first return; `loop_control.rs` per
 writes into branch scopes too, and exit and return edges are recorded at
 arbitrary nesting depth and merged at an outer fork, so a "keys the branch
 wrote" set has to be carried through nested forks.
+
+---
+
+## P65. Every call site repeats the full function lookup, hit or miss
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The forward walker asks `find_or_load_function` about the same call
+several times per statement (by-reference out-parameters, `@assert`
+narrowing, the return type), and nothing remembers the answer. A hit
+clones the whole `FunctionInfo` out of `global_functions`; a miss, which
+is every call to a function the project never declares, walks all four
+phases again, including cloning `autoload_file_paths` and building a URI
+per path. Every hover re-walks the enclosing body from its first
+statement, so the cost lands once per call site per hover.
+
+PHPStan's `nsrt/if.php` (a 545-line closure calling undeclared helpers
+such as `foo()` and `doFoo()`) measures about 70 ms per hover near its
+end in a release build, with `find_or_load_function`,
+`resolve_function_name_at`, and the `CiMap` lookups they make taking the
+top of the profile. Real code rarely calls hundreds of undeclared
+functions, but it does call the same declared ones over and over, and
+each of those pays the clone.
+
+The same file takes 53 s under the assertType runner in a debug build,
+which is why it is not among the ported fixtures in `tests/phpstan_nsrt/`
+yet; port it once this lands.
+
+Caching the resolved `Arc<FunctionInfo>` (and a negative entry) per
+request, keyed by the candidate names, would turn the repeats into
+lookups. Returning an `Arc` rather than a clone is the larger half of
+the saving on its own.
+
+**Where to look:** `find_or_load_function` in `resolution.rs`, and the
+`function_loader` closures built for `VarResolutionCtx`.
+
+---
+
+## P66. Stub version filtering rescans a stub file once per symbol it declares
+
+**Impact: Low · Complexity: Low-Medium**
+
+`set_php_version` drops every stub symbol marked `@removed` at or before
+the target version. For a file that mentions `@removed` at all,
+`is_stub_function_removed` and its class and constant counterparts locate
+each symbol with `source.find("function NAME(")` from the start of the
+file, so a stub file declaring n symbols is scanned n times. Whether a
+file mentions `@removed` is now answered once per file, which halved the
+cost, but the per-symbol search remains: building a full-stub backend in
+a debug build still spends about 0.45 s there, and every test that uses
+`new_test_with_full_stubs` (including each fixture the assertType runner
+checks) pays it. The server pays it once at startup, far less in a
+release build.
+
+Scanning each such file once for its `@removed` docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.
+
+**Where to look:** `set_php_version` in `lib.rs` and the
+`is_stub_*_removed` family in `stubs.rs`.

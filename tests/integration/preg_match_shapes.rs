@@ -390,3 +390,17 @@ function probe(string $s): void {
 "#;
     assert_assigned_types(content, &[("$shape", "array<string>")]);
 }
+
+/// A `(bool)` cast on the call is true exactly when the pattern matched, so
+/// it narrows the matches the way the bare call does.
+#[test]
+fn a_bool_cast_on_the_call_narrows_like_the_call() {
+    let content = r#"<?php
+function probe(string $s): void {
+    if ((bool) preg_match('~(\d+)~', $s, $m)) {
+        $matched = $m;
+    }
+}
+"#;
+    assert_assigned_types(content, &[("$matched", "array{0: string, 1: string}")]);
+}

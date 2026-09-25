@@ -13,7 +13,9 @@ namespace PsalmTest_method_call_1 {
     $b = (new DateTimeImmutable())->modify("+3 hours");
 
     assertType('PsalmTest_method_call_1\MyDate', $yesterday);
-    assertType('DateTimeImmutable|false', $b);
+    // Psalm's expectation is for PHP < 8.4, where `modify()` could return
+    // `false`; the runner analyses as PHP 8.5, where it throws instead.
+    assertType('DateTimeImmutable', $b);
 }
 
 // Test: magicCall

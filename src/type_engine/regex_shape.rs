@@ -126,6 +126,15 @@ pub(crate) fn preg_condition<'b>(expr: &'b Expression<'b>) -> Option<(PregCall<'
             let (call, matched) = preg_condition(unary.operand)?;
             Some((call, !matched))
         }
+        // `(bool) preg_match(…)` is true exactly when the pattern matched.
+        Expression::UnaryPrefix(unary)
+            if matches!(
+                unary.operator,
+                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+            ) =>
+        {
+            preg_condition(unary.operand)
+        }
         Expression::Binary(binary) => {
             let comparison = Comparison::of(&binary.operator)?;
             // Normalise to the call on the left, so `0 < preg_match(…)` reads

@@ -12,7 +12,7 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -363,56 +363,70 @@ pub(super) fn resolve_rhs_property_access(
                 }
             }
 
-            let owner_classes: Vec<Arc<ClassInfo>> =
-                if let Expression::Variable(Variable::Direct(dv)) = obj
-                    && dv.name == b"$this"
-                {
-                    all_classes
-                        .iter()
-                        .find(|c| c.name == current_class_name)
-                        .map(Arc::clone)
-                        .into_iter()
-                        .collect()
-                } else if let Expression::Variable(Variable::Direct(dv)) = obj {
-                    let var = bytes_to_str(dv.name).to_string();
-                    // Check match-arm narrowing override first.
-                    if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
-                        ResolvedType::into_arced_classes(overridden)
-                    } else {
-                        // When a scope_var_resolver is available (forward-walker
-                        // RHS resolution), try it first so we read from the
-                        // in-progress ScopeState instead of the diagnostic
-                        // scope cache or backward scanner.
-                        let from_scope = if let Some(resolver) = ctx.scope_var_resolver {
-                            let prefixed = if var.starts_with('$') {
-                                var.clone()
-                            } else {
-                                format!("${}", var)
-                            };
-                            resolver(&prefixed)
-                        } else {
-                            vec![]
-                        };
-                        let classes = ResolvedType::into_arced_classes(from_scope);
-                        if !classes.is_empty() {
-                            classes
-                        } else {
-                            ResolvedType::into_arced_classes(
-                                crate::type_engine::resolver::resolve_target_classes(
-                                    &var,
-                                    crate::types::AccessKind::Arrow,
-                                    &ctx.as_resolution_ctx(),
-                                ),
-                            )
-                        }
-                    }
+            // Whether late static binding is still open on the receiver, as
+            // for a method call (see `lsb_class_for_call`): `$this`, or a
+            // receiver that is itself a bound `static(X)`, keeps a property
+            // typed `static` open; any other receiver fixes it to the class
+            // it names.
+            let receiver_is_this = matches!(
+                obj,
+                Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
+            );
+            let mut receiver_open = receiver_is_this;
+            let mut owner_classes_of = |resolved: Vec<ResolvedType>| {
+                receiver_open |= resolved.iter().any(|rt| {
+                    matches!(
+                        rt.type_string.kind(),
+                        TypeKind::StaticType(_) | TypeKind::ThisType(_)
+                    )
+                });
+                ResolvedType::into_arced_classes(resolved)
+            };
+            let owner_classes: Vec<Arc<ClassInfo>> = if receiver_is_this {
+                all_classes
+                    .iter()
+                    .find(|c| c.name == current_class_name)
+                    .map(Arc::clone)
+                    .into_iter()
+                    .collect()
+            } else if let Expression::Variable(Variable::Direct(dv)) = obj {
+                let var = bytes_to_str(dv.name).to_string();
+                // Check match-arm narrowing override first.
+                if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
+                    owner_classes_of(overridden)
                 } else {
-                    // Handle non-variable object expressions like
-                    // `(new Canvas())->easel`, `getService()->prop`,
-                    // or `SomeClass::make()->prop` by recursively
-                    // resolving the expression type.
-                    ResolvedType::into_arced_classes(resolve_rhs_expression(obj, ctx))
-                };
+                    // When a scope_var_resolver is available (forward-walker
+                    // RHS resolution), try it first so we read from the
+                    // in-progress ScopeState instead of the diagnostic
+                    // scope cache or backward scanner.
+                    let from_scope = if let Some(resolver) = ctx.scope_var_resolver {
+                        let prefixed = if var.starts_with('$') {
+                            var.clone()
+                        } else {
+                            format!("${}", var)
+                        };
+                        resolver(&prefixed)
+                    } else {
+                        vec![]
+                    };
+                    let classes = owner_classes_of(from_scope);
+                    if !classes.is_empty() {
+                        classes
+                    } else {
+                        owner_classes_of(crate::type_engine::resolver::resolve_target_classes(
+                            &var,
+                            crate::types::AccessKind::Arrow,
+                            &ctx.as_resolution_ctx(),
+                        ))
+                    }
+                }
+            } else {
+                // Handle non-variable object expressions like
+                // `(new Canvas())->easel`, `getService()->prop`,
+                // or `SomeClass::make()->prop` by recursively
+                // resolving the expression type.
+                owner_classes_of(resolve_rhs_expression(obj, ctx))
+            };
 
             let mut all_resolved: Vec<ResolvedType> = Vec::new();
             for owner in &owner_classes {
@@ -423,7 +437,13 @@ pub(super) fn resolve_rhs_property_access(
                     all_classes,
                     class_loader,
                 );
-                for rt in resolved {
+                for mut rt in resolved {
+                    // A synthetic owner (`__object_shape`) leaves `self` to
+                    // the caller's context, as `replace_self_in_property_type`
+                    // does.
+                    if !receiver_open && !owner.name.starts_with("__") {
+                        rt.type_string = rt.type_string.replace_self_bound(&owner.fqn(), None);
+                    }
                     if !all_resolved
                         .iter()
                         .any(|existing| existing.type_string == rt.type_string)

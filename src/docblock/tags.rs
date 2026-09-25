@@ -1555,6 +1555,100 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     true
 }
 
+/// A declaration docblock with the members removed that its native class
+/// type can never hold, or `None` when no member survives.
+///
+/// A native `DateTimeImmutable` return is what PHP enforces, so the `false`
+/// in a `@return static|false` written for an older runtime cannot come
+/// back, and neither can the `TValue[]` in `IteratorAggregate::getIterator()`'s
+/// `@return Traversable<TKey, TValue>|TValue[]` on a native `Traversable`.
+/// PHPStan discards such a docblock outright; keeping the members the
+/// native type does allow preserves the generics it carries.  A `null` the
+/// native type does not accept goes the same way, as PHPStan also drops it.
+fn doc_members_native_can_hold<'a>(doc: &'a PhpType, native: &PhpType) -> Option<Cow<'a, PhpType>> {
+    let native_owned = native.non_null_type();
+    let native_inner = native_owned.as_ref().unwrap_or(native);
+    let native_members: &[PhpType] = match native_inner.kind() {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => members,
+        _ => std::slice::from_ref(native_inner),
+    };
+    if !native_members.iter().all(names_a_class) {
+        return Some(Cow::Borrowed(doc));
+    }
+    // A native type that does not accept `null` rules the docblock's `null`
+    // out as well: `@return static|null` on `: self` is a `static`.
+    let drops_null = !native.accepts_null();
+    let can_hold = |m: &PhpType| !is_never_an_object(m) && !(drops_null && m.is_null());
+    match doc.kind() {
+        TypeKind::Union(members) => {
+            let kept: Vec<PhpType> = members.iter().filter(|m| can_hold(m)).cloned().collect();
+            if kept.len() == members.len() {
+                Some(Cow::Borrowed(doc))
+            } else if kept.iter().all(PhpType::is_null) {
+                None
+            } else {
+                Some(Cow::Owned(PhpType::union(kept)))
+            }
+        }
+        TypeKind::Nullable(inner) if drops_null && !is_never_an_object(inner) => {
+            Some(Cow::Owned(PhpType::clone(inner)))
+        }
+        _ if !can_hold(doc) => None,
+        _ => Some(Cow::Borrowed(doc)),
+    }
+}
+
+/// Whether `ty` names one class, interface, or enum: a class name, or the
+/// `self` / `static` / `parent` keyword standing for one (not `mixed` or
+/// `object`).
+fn names_a_class(ty: &PhpType) -> bool {
+    let name = match ty.kind() {
+        TypeKind::Named(name) => name.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => return false,
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "self" | "static" | "parent"
+    ) || (crate::php_type::is_class_like_name(name) && !name.eq_ignore_ascii_case("mixed"))
+}
+
+/// Whether `ty` is a value that can never be an object (`false`, `int`,
+/// `list<Foo>`, `'literal'`, `class-string<Foo>`, …).
+///
+/// Types that can hold an object (`static`, `$this`, `object`, `callable`,
+/// `iterable`, `mixed`, a template or class name) do not count, nor do
+/// `null`, `void`, and `never`, which the caller treats separately.
+fn is_never_an_object(ty: &PhpType) -> bool {
+    fn names_a_non_object(name: &str) -> bool {
+        crate::php_type::is_scalar_name_pub(name)
+            && !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "self"
+                    | "static"
+                    | "parent"
+                    | "$this"
+                    | "object"
+                    | "callable"
+                    | "iterable"
+                    | "void"
+                    | "never"
+                    | "null"
+            )
+    }
+    match ty.kind() {
+        TypeKind::Named(name) => names_a_non_object(name),
+        TypeKind::Generic(g) => names_a_non_object(&g.name),
+        TypeKind::Array(_)
+        | TypeKind::ArrayShape(_)
+        | TypeKind::ClassString(_)
+        | TypeKind::InterfaceString(_)
+        | TypeKind::IntRange(_, _)
+        | TypeKind::Literal(_) => true,
+        _ => false,
+    }
+}
+
 /// Whether a docblock type refines the members of the native union it is
 /// written on.
 ///
@@ -1755,6 +1849,10 @@ pub fn resolve_effective_type_typed(
         (None, Some(doc)) => Some(doc.clone()),
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
+            let Some(doc) = doc_members_native_can_hold(doc, native) else {
+                return Some(native.clone());
+            };
+            let doc = doc.as_ref();
             if should_override_type_typed(doc, native) {
                 // Preserve nullability from the native hint. A `?array`
                 // native with a non-nullable `@param Foo[]` docblock still

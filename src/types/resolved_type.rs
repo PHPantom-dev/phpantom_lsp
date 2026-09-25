@@ -218,6 +218,16 @@ impl ResolvedType {
     ) -> Vec<ResolvedType> {
         if classes.len() == 1 {
             let class = classes.into_iter().next().unwrap();
+            // A bare `self` (or `?self`) names exactly the class it resolved
+            // to, so spell that class out: `self` read later in another
+            // class's context would name that class instead.  Only the bare
+            // form qualifies; in `Collection<self>` the resolved class is the
+            // collection, not the one `self` names.
+            let type_hint = match type_hint.non_null_type() {
+                Some(inner) if is_bare_self(&inner) => type_hint.replace_bare_self(&class.fqn()),
+                None if is_bare_self(&type_hint) => PhpType::named(class.fqn()),
+                _ => type_hint,
+            };
             vec![ResolvedType::from_both_arc(type_hint, class)]
         } else if matches!(&type_hint.kind(), TypeKind::Intersection(_)) {
             // Intersection types: all classes contribute members to a
@@ -795,4 +805,9 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
         return false;
     };
     parts.iter().any(|part| part.is_subset_of(cover))
+}
+
+/// Whether `ty` is the bare `self` keyword.
+fn is_bare_self(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("self"))
 }

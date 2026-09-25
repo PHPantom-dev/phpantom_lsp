@@ -555,3 +555,14 @@ function probe(Widget $widget, object $anything, \ReflectionClass $reflection): 
         ],
     );
 }
+
+/// `func_get_args()` always returns the arguments as a list.
+#[test]
+fn func_get_args_returns_a_list() {
+    let content = r#"<?php
+function probe($x = null): void {
+    $args = func_get_args();
+}
+"#;
+    assert_assigned_types(content, &[("$args", "list<mixed>")]);
+}
