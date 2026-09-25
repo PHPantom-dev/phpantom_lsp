@@ -1119,6 +1119,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D24. A <code>match</code> that does not cover every enum case is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D25. Two traits declaring the same property with different types is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D26. Reading a typed property that nothing initialises is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D27. Destructuring offsets an array cannot have is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1770,6 +1814,50 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D24. A <code>match</code> that does not cover every enum case is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D25. Two traits declaring the same property with different types is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D26. Reading a typed property that nothing initialises is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D27. Destructuring offsets an array cannot have is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2165,6 +2253,89 @@ member is out of reach.</p>
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.</p>
+<h2 id="d24-a-match-that-does-not-cover-every-enum-case-is-not-reported">D24. A <code>match</code> that does not cover every enum case is not reported<a class="headerlink" href="#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">enum Suit: string { case Hearts = &#39;H&#39;; case Spades = &#39;S&#39;; }</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">function name(Suit $s): string {</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">        Suit::Spades =&gt; &#39;spades&#39;,</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    };</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">function describe(Suit $s): string {</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">    if ($s-&gt;value === &#39;H&#39;) {</span>
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a><span class="x">        return &#39;hearts&#39;;</span>
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a><span class="x">    }</span>
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a><span class="x">    return match ($s) {          // must stay silent: only Spades reaches here</span>
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a><span class="x">        Suit::Spades =&gt; &#39;spades&#39;,</span>
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a><span class="x">    };</span>
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a><span class="x">}</span>
+</code></pre></div>
+<p>A <code>match</code> with no <code>default</code> arm throws <code>UnhandledMatchError</code> for any subject
+value no arm covers. When the subject resolves to a closed set (an enum, a
+union of enum cases, a <code>bool</code>, or a union of literals), subtract each arm's
+conditions from it and report what is left. PHPStan (<code>match.unhandled</code>),
+Psalm (<code>UnhandledMatchCondition</code>), mago and Qodana all do.</p>
+<p>The second function is part of the job, not a follow-up. The check can only
+stay quiet there if a comparison on a backed enum's <code>-&gt;value</code> narrows the
+enum itself, so <code>$s-&gt;value === 'H'</code> has to remove <code>Suit::Hearts</code> from <code>$s</code>
+on the fall-through path. Without that narrowing the check would be a new
+false positive. PHPStan and Psalm report the second function too, and the
+suite counts that against them.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_backed_enum_value_narrowing.php</code>). A quick fix to add the
+missing arms is <a href="../phpstan-actions/#h16-matchunhandled--add-missing-match-arms">H16</a> (<code>match.unhandled</code>), which could
+then attach to this diagnostic instead of only PHPStan's.</p>
+<h2 id="d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported">D25. Two traits declaring the same property with different types is not reported<a class="headerlink" href="#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">trait Left  { public string $prop; }</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">trait Right { public int $prop; }</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">final class Composed { use Left; use Right; } // fatal: Left and Right define the same property ($prop) in the composition of Composed</span>
+</code></pre></div>
+<p>PHP only allows the same property from two traits (or from a trait and
+the class) when the declarations are compatible: same visibility, same
+type, same <code>readonly</code>ness, and same default. Anything else is a
+compile-time fatal. The inheritance merge already sees both declarations;
+it keeps one and discards the other without comparing them.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_trait_property_type_conflict.php</code>). mago and Phan report it.</p>
+<p><strong>Where to look:</strong> the trait merge in <code>src/inheritance/traits.rs</code>. The
+report could sit beside the missing-method check in
+<code>src/diagnostics/implementation_errors.rs</code>.</p>
+<h2 id="d26-reading-a-typed-property-that-nothing-initialises-is-not-reported">D26. Reading a typed property that nothing initialises is not reported<a class="headerlink" href="#d26-reading-a-typed-property-that-nothing-initialises-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">final class User { public string $name; }</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$user = new User();</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">echo $user-&gt;name; // Error: must not be accessed before initialization</span>
+</code></pre></div>
+<p>A typed property without a default starts <em>uninitialized</em>, and reading it
+throws. The declaration-side check is the tractable half: flag a typed,
+non-promoted property with no default that no constructor path assigns.
+Psalm's <code>MissingConstructor</code> works this way. The read-side check needs
+definite-assignment tracking across the constructor and is the harder half.</p>
+<p>Keep it conservative. Frameworks and ORMs hydrate properties by reflection
+(Doctrine entities, serializers, <code>#[Inject]</code>), and a diagnostic that flags
+all of them is a false positive on correct code. Consider exempting classes
+whose properties carry an attribute or an ORM mapping docblock, and put the
+check behind a <code>[diagnostics]</code> toggle if a safe default can't be found.</p>
+<p>Found running the php-typing-conformance suite
+(<code>properties_uninitialized_read.php</code>). Psalm and Qodana report it.</p>
+<h2 id="d27-destructuring-offsets-an-array-cannot-have-is-not-reported">D27. Destructuring offsets an array cannot have is not reported<a class="headerlink" href="#d27-destructuring-offsets-an-array-cannot-have-is-not-reported" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">/** @return array&lt;string, int&gt; */</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">function stringKeyed(): array { return [&#39;a&#39; =&gt; 1]; }</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">[$a, $b] = stringKeyed(); // should be reported: offsets 0 and 1 cannot exist on array&lt;string, int&gt;</span>
+</code></pre></div>
+<p><code>[$a, $b] = …</code> reads offsets <code>0</code> and <code>1</code>. When the right-hand side's key type
+excludes them (string keys only, or a shape without those keys), the
+destructure yields <code>null</code> with a warning at runtime. The destructuring
+resolver already reads the key and value types. It could report a
+positional destructure of a string-keyed array, and a keyed one (<code>['x' =&gt; $x]
+= …</code>) of a shape that lacks the key.</p>
+<p>Found running the php-typing-conformance suite
+(<code>regressions_list_destructure_string_key.php</code>). PHPStan and mago report it.</p>
 
 
 
