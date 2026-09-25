@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790365389545,
+  "lastUpdate": 1790373177288,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31483,6 +31483,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "7a353af5447ca76e4957793d9e0b40e4c4eca52f",
+          "message": "An `instanceof` guard rules out a template bounded by the checked class\n\n`@template TFactory of Factory` on a class or trait, returned as one\nalternative of a union, survived `! $x instanceof Factory`. The value\nkept an alternative the guard had already excluded, so a `return` the\ndeclared type accepts was reported as a mismatch naming a `Factory` the\ncode had just ruled out.\n\nA parameter nothing binds is erased to its bound, since every value of\nit satisfies the bound. The erasure reached the class the alternative is\ncompared by, but not the name it is carried under, and an `instanceof`\ncheck filters by the classes an alternative carries. An alternative that\nnames a class only in its type string is therefore invisible to it: the\ncheck can neither keep it nor rule it out. Writing the bound out by hand\n(`static|Factory`) always narrowed correctly, which is what isolates the\nfault to the name rather than to the narrowing.\n\nThe exclusion now resolves such an alternative to the class it names\nbefore filtering. One that names no class at all — `int`, `null`, a\nclass the project does not ship — is left as it was, since the check\nproves nothing about it.\n\nPresent since well before the model operators; a `mixed` elsewhere in\nthe union used to collapse it and hide the report, which is why it\nsurfaced on a Laravel model trait once `collection-of<…>` resolved to a\nclass of its own.",
+          "timestamp": "2026-09-25T16:37:14-05:00",
+          "tree_id": "f5ad5ff6c61978120b9ea004e220f0bc42bdbaa9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7a353af5447ca76e4957793d9e0b40e4c4eca52f"
+        },
+        "date": 1790373168975,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.9,
             "unit": "MiB"
           }
         ]
