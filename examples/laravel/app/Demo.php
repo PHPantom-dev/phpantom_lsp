@@ -669,6 +669,12 @@ class Demo
         // this call site ($theme completes as string, $author as BlogAuthor).
         view('theme.dashboard', ['theme' => 'dark'])->with('author', new BlogAuthor());
 
+        // A parameter declared `view-string` asks for a template name, so
+        // its arguments are completed and checked like view()'s own — even
+        // though nothing about the call's spelling says it renders.
+        $this->renderTemplate('welcome');
+        $this->renderTemplate('theme.dashboard');
+
         // Named Routes
         route('home');
         route('admin.users.index');
@@ -786,6 +792,23 @@ class Demo
             'user' => BlogAuthor::first(),
             'posts' => BlogPost::where('published', true)->get(),
         ];
+    }
+
+    /**
+     * `view-string` is the subset of `string` that names a Blade template,
+     * the Laravel PHPStan extensions' way of saying a parameter renders
+     * what it is given. It stays a plain `string` for every other purpose,
+     * so passing a runtime value is fine; only a literal is checked.
+     *
+     * Try: type a quote inside one of the renderTemplate() calls above to
+     * complete the project's templates, and misspell one to see it
+     * reported the way a bad view() name is.
+     *
+     * @param view-string $template
+     */
+    private function renderTemplate(string $template): mixed
+    {
+        return view($template);
     }
 
 

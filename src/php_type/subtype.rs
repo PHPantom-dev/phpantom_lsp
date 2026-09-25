@@ -608,6 +608,7 @@ pub(crate) fn is_named_subtype(sub: &str, sup: &str) -> bool {
                 | "non-falsy-string"
                 | "trait-string"
                 | "enum-string"
+                | "view-string"
                 | "lowercase-string"
                 | "uppercase-string"
                 | "non-empty-lowercase-string"
@@ -842,6 +843,16 @@ pub(crate) fn literal_is_subtype_of(lit: &LiteralValue, supertype: &PhpType) -> 
                     sup_l.as_str(),
                     "string" | "literal-string" | "scalar" | "array-key"
                 ) {
+                    return true;
+                }
+
+                // Whether a literal names a Blade template is settled by
+                // the project's templates, not by the literal's own shape,
+                // and nothing reachable from here knows them. The
+                // diagnostic that does check it against the view index
+                // reports a name no template answers for; structurally,
+                // any literal string is a candidate.
+                if sup_l == "view-string" {
                     return true;
                 }
 

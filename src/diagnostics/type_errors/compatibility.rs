@@ -873,6 +873,17 @@ pub(crate) fn is_type_compatible(
         }
     }
 
+    // ── view-string: any string may name a template ─────────────
+    // The Laravel PHPStan extensions' `view-string` is the subset of
+    // `string` that names a Blade template, which only the project's
+    // templates settle — a fact this layer cannot reach. Every string
+    // is accepted here (MAYBE), and the argument diagnostic checks a
+    // literal against the view index, where that fact lives, reporting
+    // the name rather than the type.
+    if param_type.is_view_string() && (arg_type.is_string_type() || arg_type.is_string_subtype()) {
+        return true;
+    }
+
     // ── model-property<Model>: string literal validation ────────
     // The Laravel PHPStan extensions' `model-property<Model>` is a string subtype
     // representing the property names of an Eloquent model.  When
