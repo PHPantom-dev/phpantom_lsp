@@ -450,24 +450,6 @@ Binding `T` needs the named class's ancestor `OptionDefinition<…>` arguments. 
 
 Found porting PHPStan's `Rules/Methods/data/bug-4552.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
-### B467. A template default is not used when nothing binds the template
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @template T */
-interface I {
-    /** @template TResult = T
-     *  @param (callable(T): TResult)|null $a @return I<TResult> */
-    public function work(?callable $a): I;
-}
-/** @param I<string> $i */
-function x(I $i) { $i->work(null); } // should be I<string>, is I<T>
-```
-
-`@template TResult = T` gives the template a default for when no argument binds it. Here the default is itself a class template, which the receiver binds to `string`.
-
-Found porting PHPStan's `Rules/Methods/data/bug-4801.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
 ### B468. A conditional return type on `$param is not null` does not pick up a template bound by a callable argument
 **Impact: Low · Complexity: Medium-High**
 
@@ -519,8 +501,8 @@ The offset access is printed raw rather than resolved: the alias inside it is ne
 
 Found porting PHPStan's `Rules/PhpDoc/data/bug-13652.php` and `Rules/PhpDoc/data/bug-11033.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B471. An override with no docblock does not inherit the parent's method templates
-**Impact: Medium · Complexity: Medium**
+### B480. An argument outside a method template's bound binds the template anyway
+**Impact: Low · Complexity: Medium**
 
 ```php
 /** @template E of Entity */
@@ -529,13 +511,11 @@ class Repository {
     function store(Entity $entity): Entity {}
 }
 /** @extends Repository<User> */
-class UserRepository extends Repository {
-    function store(Entity $entity): Entity {}
-}
-$r->store(new User()); // should be User, is Entity
+class UserRepository extends Repository {}
+$r->store(new Article()); // should be User, is Article
 ```
 
-An override that only restates the native signature inherits the parent's docblock, including its method-level `@template` tags and the `@return F` that uses them. Here the override's native `Entity` wins.
+`Article` is an `Entity` but not a `User`, so it cannot be `F`. The call binds `F` to the argument's type regardless of the bound, where it should fall back to the bound it fails to satisfy.
 
 Found porting PHPStan's `Rules/PhpDoc/data/bug-4643.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
@@ -552,24 +532,6 @@ function testBar($callable) { bar($callable); } // should be string, is mixed
 Unifying the parameter's `callable(callable(): T): T` with the argument's signature should bind `T` from the outer return type (where the argument says `string`).
 
 Found porting PHPStan's `Rules/Functions/data/varying-acceptor.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B473. Iterating a class whose `getIterator()` declares `Iterator<V>` gives `int|string` keys
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @extends CollectionInterface<Category> */
-interface CategoryCollectionInterface extends CollectionInterface {
-    /** @phpstan-return \Iterator<Category> */
-    public function getIterator(): \Iterator;
-}
-foreach ($categories as $k => $v) {
-    $k; // should be mixed, is int|string
-}
-```
-
-A single-argument `Iterator<V>` leaves the key unbound, which is `mixed`. The key type comes out as `int|string`, as if the iteration were over an array.
-
-Found porting PHPStan's `Rules/Methods/data/bug-4415.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
 ## Miscellaneous
 

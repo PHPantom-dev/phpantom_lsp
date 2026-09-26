@@ -30,6 +30,13 @@ pub(crate) fn apply_substitution_to_method(
     for assertion in &mut method.type_assertions {
         assertion.asserted_type = assertion.asserted_type.substitute(subs);
     }
+    // `@template TResult = T` falls back to the class's `T`, which the
+    // receiver binds just as it binds `T` in the signature.
+    if !method.template_param_defaults.is_empty() {
+        for (_, default) in method.template_param_defaults.iter_mut() {
+            *default = default.substitute(subs);
+        }
+    }
     // Only copy-on-write the shared parameter list when a parameter
     // actually references a substituted name — substitution usually
     // rewrites just the return type.
@@ -181,7 +188,8 @@ pub(crate) fn apply_substitution_to_property(
 /// hundreds of parent methods, but only the handful that actually mention
 /// a template parameter need a distinct, substituted copy. The checked
 /// fields mirror [`apply_substitution_to_method`] exactly (return type,
-/// conditional return, type assertions, parameter hints).
+/// conditional return, type assertions, parameter hints, template
+/// defaults).
 pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[String]) -> bool {
     if template_params.is_empty() {
         return false;
@@ -203,6 +211,10 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
                 .as_ref()
                 .is_some_and(|h| h.references_any_template_param(template_params))
         })
+        || method
+            .template_param_defaults
+            .iter()
+            .any(|(_, d)| d.references_any_template_param(template_params))
 }
 
 /// Whether [`apply_substitution_to_property`] would rewrite `property`'s

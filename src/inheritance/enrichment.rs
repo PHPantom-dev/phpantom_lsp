@@ -112,7 +112,7 @@ fn method_enrichment_would_change(existing: &MethodInfo, ancestor: &MethodInfo) 
         return true;
     }
 
-    // Template parameters (copies bounds and bindings alongside).
+    // Template parameters (copies bounds, defaults and bindings alongside).
     if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
         return true;
     }
@@ -244,6 +244,7 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
     if existing.template_params.is_empty() && !ancestor.template_params.is_empty() {
         existing.template_params = ancestor.template_params.clone();
         existing.template_param_bounds = ancestor.template_param_bounds.clone();
+        existing.template_param_defaults = ancestor.template_param_defaults.clone();
         existing.template_bindings = ancestor.template_bindings.clone();
         // Template return types like `T` only make sense when the
         // template params are present — inherit the return type too

@@ -2378,14 +2378,15 @@ pub(super) fn resolve_owner_method_call(
     // docblock override (return_type == native_return_type).  The merged
     // method carries inherited types from interfaces/parents with template
     // substitutions already applied (e.g. `V|null` → `User|null` from
-    // `@implements Collection<string, User>`).
+    // `@implements Collection<string, User>`).  The effective type is
+    // stored name-resolved while the native hint keeps the spelling from
+    // the source, so the two are compared as types, not verbatim.
+    let echoes_native = |m: &MethodInfo| match (&m.return_type, &m.native_return_type) {
+        (Some(ret), Some(native)) => ret.equivalent(native),
+        (ret, native) => ret == native,
+    };
     let method_ref = match (owner_method, merged_method) {
-        (Some(om), Some(mm))
-            if om.return_type == om.native_return_type
-                && mm.return_type != mm.native_return_type =>
-        {
-            Some(mm)
-        }
+        (Some(om), Some(mm)) if echoes_native(om) && !echoes_native(mm) => Some(mm),
         (Some(om), _) => Some(om),
         (None, Some(mm)) => Some(mm),
         // Method not found — fall back to the magic method's return type.

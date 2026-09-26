@@ -90,7 +90,7 @@ class Category {
 
 function (CategoryCollection $c): void {
 	foreach ($c as $k => $v) {
-		assertType('mixed', $k); // SKIP: iterating a class whose getIterator() declares Iterator<V> gives int|string keys instead of mixed
+		assertType('mixed', $k);
 		assertType(Category::class, $v);
 	}
 };

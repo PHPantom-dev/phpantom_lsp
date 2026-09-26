@@ -108,7 +108,6 @@ unlikely to move the needle for most users.
 | B457 | [`array_push()` does not change the array's type](todo/bugs.md#b457-array_push-does-not-change-the-arrays-type) | Medium | Low-Medium |
 | B437 | [`self` in an inherited property's docblock names the class it is read through](todo/bugs.md#b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through) | Medium | Medium |
 | B438 | [An inline `@phpstan-var` above an assignment is ignored](todo/bugs.md#b438-an-inline-phpstan-var-above-an-assignment-is-ignored) | Medium | Medium |
-| B471 | [An override with no docblock does not inherit the parent's method templates](todo/bugs.md#b471-an-override-with-no-docblock-does-not-inherit-the-parents-method-templates) | Medium | Medium |
 | B444 | [A union of array shapes is not narrowed by comparing its tag key](todo/bugs.md#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key) | Medium | Medium-High |
 | B442 | [`$value::class` resolves to nothing](todo/bugs.md#b442-valueclass-resolves-to-nothing) | Low-Medium | Low |
 | B439 | [`@mixin` on a trait is not applied to the class that uses it](todo/bugs.md#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it) | Low-Medium | Medium |
@@ -122,8 +121,6 @@ unlikely to move the needle for most users.
 | B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
 | B479 | [A loose comparison against a literal does not narrow `mixed`](todo/bugs.md#b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed) | Low | Low-Medium |
 | B453 | [`is_callable()` on `Foo|callable(): Foo` drops the `Foo&callable` member](todo/bugs.md#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member) | Low | Low-Medium |
-| B467 | [A template default is not used when nothing binds the template](todo/bugs.md#b467-a-template-default-is-not-used-when-nothing-binds-the-template) | Low | Low-Medium |
-| B473 | [Iterating a class whose `getIterator()` declares `Iterator<V>` gives `int|string` keys](todo/bugs.md#b473-iterating-a-class-whose-getiterator-declares-iteratorv-gives-intstring-keys) | Low | Low-Medium |
 | B474 | [A magic constant resolves to its base type rather than its value](todo/bugs.md#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value) | Low | Low-Medium |
 | B479 | [`??=` on an offset whose key is not a variable leaves the offset `null`](todo/bugs.md#b479--on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null) | Low | Low-Medium |
 | B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
@@ -137,6 +134,7 @@ unlikely to move the needle for most users.
 | B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |
 | B469 | [A conditional return type whose subject is an offset of a template is not evaluated](todo/bugs.md#b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated) | Low | Medium |
 | B470 | [An offset access on a type alias is not evaluated](todo/bugs.md#b470-an-offset-access-on-a-type-alias-is-not-evaluated) | Low | Medium |
+| B480 | [An argument outside a method template's bound binds the template anyway](todo/bugs.md#b480-an-argument-outside-a-method-templates-bound-binds-the-template-anyway) | Low | Medium |
 | B472 | [A template bound through a nested callable parameter is not inferred](todo/bugs.md#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred) | Low | Medium |
 | B475 | [A variable a closure captures by reference does not take on the closure's assignments](todo/bugs.md#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments) | Low | Medium |
 | B477 | [An arrow function's return type comes from its declared hint even when the body returns something narrower](todo/bugs.md#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower) | Low | Medium |

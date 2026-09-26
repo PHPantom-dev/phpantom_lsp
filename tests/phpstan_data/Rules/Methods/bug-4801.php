@@ -20,6 +20,6 @@ interface I {
  * @param I<string> $i
  */
 function x(I $i) {
-	assertType('Bug4801\\I<string>', $i->work(null)); // SKIP: a template default (@template T = U) is not used when nothing binds the template
+	assertType('Bug4801\\I<string>', $i->work(null));
 	assertType('Bug4801\\I<int>', $i->work(fn(string $a) => (int) $a));
 }

@@ -594,13 +594,22 @@ pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
     // 1. Check implements_generics for known iterable interfaces.
+    //    A single-argument traversal binding (`IteratorAggregate<User>`)
+    //    names the value alone, which leaves the key `mixed` unless the
+    //    class's own `key()` says more.
+    let mut value_only_traversal = false;
     for (name, args) in &class.implements_generics {
         let short = short_name(name);
-        if ITERABLE_IFACE_NAMES.contains(&short) && args.len() >= 2 {
+        if !ITERABLE_IFACE_NAMES.contains(&short) {
+            continue;
+        }
+        if args.len() >= 2 {
             let key = resolve_own_template_arg(&args[0], class);
             if !is_unbounded_template_placeholder(&key) {
                 return Some(key);
             }
+        } else if args.len() == 1 && is_traversal_name(short) {
+            value_only_traversal = true;
         }
     }
 
@@ -635,11 +644,20 @@ pub(in crate::type_engine) fn extract_iterable_key_type_from_class(
     if class_directly_implements(class, class_loader, "Iterator")
         && let Some(method) = class.get_method("key")
         && let Some(return_type) = &method.return_type
+        && !(value_only_traversal
+            && (is_unsubstituted_template_param(return_type)
+                || is_unbounded_template_placeholder(return_type)))
     {
         return Some(return_type.replace_self(&class.fqn()));
     }
 
-    None
+    value_only_traversal.then(PhpType::mixed)
+}
+
+/// Whether `short` names one of the interfaces whose generic arguments
+/// describe how `foreach` traverses the object.
+fn is_traversal_name(short: &str) -> bool {
+    matches!(short, "Iterator" | "IteratorAggregate" | "Traversable")
 }
 
 /// Check whether an interface transitively extends a known iterable

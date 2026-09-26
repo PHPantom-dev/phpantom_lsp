@@ -42,14 +42,27 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> HashMap<String, PhpType> {
         // Find the method — first on the class directly, then via inheritance.
-        let method = class_info.get_method(method_name).cloned().or_else(|| {
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                class_info,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            merged.get_method(method_name).cloned()
-        });
+        // An override without a docblock of its own inherits the ancestor's
+        // `@template` tags in the merge, so a direct method that declares
+        // none is looked up again there.
+        let own = class_info.get_method(method_name);
+        let may_inherit_templates = class_info.parent_class.is_some()
+            || !class_info.interfaces.is_empty()
+            || !class_info.used_traits.is_empty();
+        let method = match own {
+            Some(m) if !m.template_params.is_empty() || !may_inherit_templates => Some(m.clone()),
+            _ => {
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    class_info,
+                    ctx.class_loader,
+                    ctx.resolved_class_cache,
+                );
+                merged
+                    .get_method(method_name)
+                    .cloned()
+                    .or_else(|| own.cloned())
+            }
+        };
 
         let method = match method {
             Some(m) if !m.template_params.is_empty() => m,
