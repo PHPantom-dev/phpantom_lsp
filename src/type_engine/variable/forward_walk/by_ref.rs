@@ -105,7 +105,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
 /// `@param-immediately-invoked-callable`.  An unresolvable callee or
 /// receiver is not proof either way, so it answers `false` and the
 /// caller falls back to widening.
-fn call_invokes_arg_immediately(
+pub(crate) fn call_invokes_arg_immediately(
     call: &Call<'_>,
     selector: &ArgSelector,
     scope: &ScopeState,
@@ -196,34 +196,73 @@ pub(crate) fn select_param<'p>(
     }
 }
 
+/// Builtin functions PHPStan's own stubs tag `@param-later-invoked-callable`
+/// (`stubs/core.stub` upstream): the callback is stashed away to run later,
+/// rather than run before the call returns.
+///
+/// Every other builtin that takes a callable — `call_user_func`,
+/// `call_user_func_array`, `array_map`, `usort`, and the rest — runs it
+/// immediately, which is the function-parameter default
+/// [`function_invokes_callable_arg_immediately`] falls back to below for a
+/// callee the function loader can still resolve even though it is not
+/// declared in the current file.
+const LATER_INVOKED_CALLABLE_FUNCTIONS: &[&str] = &[
+    "pcntl_signal",
+    "set_error_handler",
+    "set_exception_handler",
+    "spl_autoload_register",
+    "register_shutdown_function",
+    "header_register_callback",
+    "register_tick_function",
+];
+
 pub(crate) fn function_invokes_callable_arg_immediately(
     func_name: &str,
     selector: &ArgSelector,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    let func_name = crate::util::strip_fqn_prefix(func_name);
     with_parsed_program(
         ctx.content,
         "function_invokes_callable_arg",
         |program, _| {
             let mut stmts = Vec::new();
             flatten_namespaced_statements(program.statements.iter(), &mut stmts);
-            stmts.into_iter().any(|stmt| {
+            let declared = stmts.into_iter().find_map(|stmt| {
                 if let Statement::Function(func) = stmt
                     && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
                 {
-                    let Some(param) = select_param(func.parameter_list.parameters.iter(), selector)
-                    else {
-                        return false;
-                    };
-                    return !node_param_has_invocation_tag(
-                        func.name.span.start.offset as usize,
-                        ctx.content,
-                        bytes_to_str(param.variable.name),
-                        "param-later-invoked-callable",
-                    );
+                    Some(func)
+                } else {
+                    None
                 }
-                false
-            })
+            });
+            let Some(func) = declared else {
+                // Not declared in this file: a builtin still has a
+                // signature the function loader can find (backed by the
+                // embedded stubs), and only a callee that genuinely
+                // resolves is one whose immediacy has a documented
+                // default to fall back to. A name that resolves to
+                // nothing gives no signal either way, the same as an
+                // unresolvable receiver — `outer(inner(fn () use (&$x)
+                // {...}))` for undefined `outer`/`inner` stays uncertain.
+                return ctx
+                    .loaders
+                    .function_loader
+                    .is_some_and(|loader| loader(func_name, 0).is_some())
+                    && !LATER_INVOKED_CALLABLE_FUNCTIONS
+                        .iter()
+                        .any(|later_invoked| later_invoked.eq_ignore_ascii_case(func_name));
+            };
+            let Some(param) = select_param(func.parameter_list.parameters.iter(), selector) else {
+                return false;
+            };
+            !node_param_has_invocation_tag(
+                func.name.span.start.offset as usize,
+                ctx.content,
+                bytes_to_str(param.variable.name),
+                "param-later-invoked-callable",
+            )
         },
     )
 }

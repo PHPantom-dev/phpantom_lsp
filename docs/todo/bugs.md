@@ -100,31 +100,34 @@ it is too slow under the runner (see
 
 ## Narrowing
 
-### B423. A call inside an invoked closure does not invalidate what the closure captures
+### B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable
 **Impact: Low · Complexity: Medium**
 
 ```php
 while ($this->running) {
-    call_user_func(function () {
-        $this->stop();       // void, so it may change $this->running
-    });
+    $cb = function () { $this->stop(); };
+    call_user_func($cb);
     $this->running;          // should be bool, is true
 }
 ```
 
-A call on an object forgets what was proved about that object's
-properties and call results when the call returns `void`, returns
-`$this`, or is `@phpstan-impure`. The same call made inside a closure
-that runs on the spot (`(function () { … })()`, `call_user_func($cb)`,
-an immediately invoked callable parameter) should forget it for `$this`
-and for every variable the closure captures, and does not.
+The walker invalidates `$this` and `use (…)` captures for a closure
+written inline as the call's own argument, or invoked immediately where
+it is defined. A closure assigned to a variable first and passed by that
+variable is not recognised: nothing records that `$cb` still names that
+literal at the call site, so the call is walked as if the callee were
+opaque.
 
-Found porting PHPStan's `nsrt/bug-10566.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+Found porting PHPStan's `nsrt/bug-10566.php`; two of its cases stay
+`// SKIP` for this reason.
 
 **Where to look:** `type_engine/variable/forward_walk/receiver_mutation.rs`
-(`collect_call_invalidations`), and the by-reference capture handling
-the walker already runs for invoked closures.
+(`collect_closure_invalidations`), and whatever tracks the closure
+literal a plain assignment (`$cb = function () {...};`) stores, if
+anything currently does. Related to
+[B405](#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved),
+which needs the same "what closure does this variable hold" link for a
+different purpose (its return type).
 
 ## Arithmetic
 

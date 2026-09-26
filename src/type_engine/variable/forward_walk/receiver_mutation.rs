@@ -308,8 +308,32 @@ fn collect_call_invalidations<'b>(
             if let Some(object) = object {
                 collect_call_invalidations(object, scope, ctx, out);
             }
+
+            // `(function () { … })()` runs its body right here, so a
+            // state-changing call inside it reaches the same `$this` and
+            // captured variables the outer scope already tracks under
+            // those names, exactly as if the body were inlined at the
+            // call site.
+            if let Call::Function(fc) = call
+                && let Expression::Closure(closure) = crate::parser::unwrap_parens(fc.function)
+            {
+                collect_closure_invalidations(closure, scope, ctx, out);
+            }
+
+            let mut next_positional = 0usize;
             for arg in args.arguments.iter() {
-                collect_call_invalidations(arg.value(), scope, ctx, out);
+                let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
+                // A callable argument the callee is known to invoke before
+                // returning (`call_user_func($cb)`, `array_map($cb, …)`)
+                // runs the same way; one it merely stores away for later
+                // is not provably run at all, so it is left alone here.
+                if let Expression::Closure(closure) = arg_expr
+                    && call_invokes_arg_immediately(call, &selector, scope, ctx)
+                {
+                    collect_closure_invalidations(closure, scope, ctx, out);
+                } else {
+                    collect_call_invalidations(arg_expr, scope, ctx, out);
+                }
             }
 
             match call {
@@ -398,6 +422,163 @@ fn collect_call_invalidations<'b>(
                     }
                 }
             }
+        }
+        _ => {}
+    }
+}
+
+/// Walk a closure body that is provably invoked before the enclosing call
+/// returns for the calls inside it, feeding into the same collector as if
+/// the body were inlined at the call site.
+///
+/// `$this` is captured implicitly (unless the closure is `static`) and a
+/// `use (…)` variable by name, so both are exactly the scope keys the
+/// outer scope already tracks under; no capture translation is needed.
+/// But a bare variable inside the closure body that names neither is not
+/// a capture at all, only a same-spelled local of its own (PHP closures
+/// see no outer variable without `use`) — `function () { $s = new
+/// self(); $s->stop(); }` calls `stop()` on a fresh object, not whatever
+/// the caller's `$s` was, so an invalidation on anything but a captured
+/// name is dropped rather than applied to the outer scope's variable of
+/// the same spelling.
+fn collect_closure_invalidations<'b>(
+    closure: &'b Closure<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    out: &mut Vec<Invalidation>,
+) {
+    let mut captured: Vec<String> = closure
+        .use_clause
+        .as_ref()
+        .map(|use_clause| {
+            use_clause
+                .variables
+                .iter()
+                .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+    if closure.r#static.is_none() {
+        captured.push("$this".to_string());
+    }
+    if captured.is_empty() {
+        return;
+    }
+
+    let mut closure_out = Vec::new();
+    collect_call_invalidations_in_stmts(
+        closure.body.statements.as_slice(),
+        scope,
+        ctx,
+        &mut closure_out,
+    );
+    out.extend(closure_out.into_iter().filter(|invalidation| {
+        captured.iter().any(|name| {
+            invalidation.subject == *name
+                || narrowing::key_reads_variable(&invalidation.subject, name)
+        })
+    }));
+}
+
+fn collect_call_invalidations_in_stmts<'b>(
+    stmts: &'b [Statement<'b>],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    out: &mut Vec<Invalidation>,
+) {
+    for stmt in stmts {
+        collect_call_invalidations_in_stmt(stmt, scope, ctx, out);
+    }
+}
+
+/// [`collect_call_invalidations`] for a statement, recursing into whatever
+/// nested statements and conditions it carries.  Mirrors the coverage of
+/// [`super::assignment_deps::collect_assignment_deps`], plus `return` and
+/// `echo`, which commonly carry the call a closure exists to make.
+fn collect_call_invalidations_in_stmt<'b>(
+    stmt: &'b Statement<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    out: &mut Vec<Invalidation>,
+) {
+    match stmt {
+        Statement::Expression(expr_stmt) => {
+            collect_call_invalidations(expr_stmt.expression, scope, ctx, out);
+        }
+        Statement::Return(ret) => {
+            if let Some(val) = ret.value {
+                collect_call_invalidations(val, scope, ctx, out);
+            }
+        }
+        Statement::Echo(echo) => {
+            for value in echo.values.iter() {
+                collect_call_invalidations(value, scope, ctx, out);
+            }
+        }
+        Statement::Block(block) => {
+            collect_call_invalidations_in_stmts(block.statements.as_slice(), scope, ctx, out);
+        }
+        Statement::If(if_stmt) => {
+            collect_call_invalidations(if_stmt.condition, scope, ctx, out);
+            collect_call_invalidations_in_stmts(if_stmt.body.statements(), scope, ctx, out);
+            for (condition, stmts) in if_stmt.body.else_if_clauses() {
+                collect_call_invalidations(condition, scope, ctx, out);
+                collect_call_invalidations_in_stmts(stmts, scope, ctx, out);
+            }
+            if let Some(stmts) = if_stmt.body.else_statements() {
+                collect_call_invalidations_in_stmts(stmts, scope, ctx, out);
+            }
+        }
+        Statement::Try(try_stmt) => {
+            collect_call_invalidations_in_stmts(
+                try_stmt.block.statements.as_slice(),
+                scope,
+                ctx,
+                out,
+            );
+            for catch in try_stmt.catch_clauses.iter() {
+                collect_call_invalidations_in_stmts(
+                    catch.block.statements.as_slice(),
+                    scope,
+                    ctx,
+                    out,
+                );
+            }
+            if let Some(ref finally) = try_stmt.finally_clause {
+                collect_call_invalidations_in_stmts(
+                    finally.block.statements.as_slice(),
+                    scope,
+                    ctx,
+                    out,
+                );
+            }
+        }
+        Statement::Switch(switch) => {
+            collect_call_invalidations(switch.expression, scope, ctx, out);
+            for case in switch.body.cases().iter() {
+                if let Some(condition) = case.expression() {
+                    collect_call_invalidations(condition, scope, ctx, out);
+                }
+                collect_call_invalidations_in_stmts(case.statements(), scope, ctx, out);
+            }
+        }
+        Statement::Foreach(f) => {
+            collect_call_invalidations(f.expression, scope, ctx, out);
+            collect_call_invalidations_in_stmts(f.body.statements(), scope, ctx, out);
+        }
+        Statement::While(w) => {
+            collect_call_invalidations(w.condition, scope, ctx, out);
+            collect_call_invalidations_in_stmts(w.body.statements(), scope, ctx, out);
+        }
+        Statement::For(f) => {
+            for condition in f.conditions.iter() {
+                collect_call_invalidations(condition, scope, ctx, out);
+            }
+            collect_call_invalidations_in_stmts(f.body.statements(), scope, ctx, out);
+        }
+        Statement::DoWhile(dw) => {
+            collect_call_invalidations_in_stmt(dw.statement, scope, ctx, out);
+            collect_call_invalidations(dw.condition, scope, ctx, out);
         }
         _ => {}
     }
