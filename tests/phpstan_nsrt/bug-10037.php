@@ -47,7 +47,7 @@ function (Identifier $i): void {
 	$fetcher = new PostFetcher();
 	\PHPStan\Testing\assertType('Bug10037\Identifier', $i);
 	if ($fetcher->supports($i)) {
-		\PHPStan\Testing\assertType('Bug10037\PostIdentifier', $i); // SKIP: @phpstan-assert-if-true misses the receiver's template binding and untyped subjects
+		\PHPStan\Testing\assertType('Bug10037\PostIdentifier', $i);
 		$fetcher->fetch($i);
 	} else {
 		$fetcher->fetch($i);
@@ -90,7 +90,7 @@ function ($subject): void {
 	$voter = new PostVoter();
 	\PHPStan\Testing\assertType('mixed', $subject);
 	if ($voter->supports('aaa', $subject)) {
-		\PHPStan\Testing\assertType('Bug10037\Post', $subject); // SKIP: @phpstan-assert-if-true misses the receiver's template binding and untyped subjects
+		\PHPStan\Testing\assertType('Bug10037\Post', $subject);
 		$voter->voteOnAttribute('aaa', $subject);
 	} else {
 		$voter->voteOnAttribute('aaa', $subject);

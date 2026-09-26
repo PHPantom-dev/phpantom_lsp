@@ -23,7 +23,7 @@ class HelloWorld
 		assertType('int|null', $bar);
 
 		if (in_array($bar, $foo, true) === true) {
-			assertType('int', $bar); // SKIP: a check compared to true, or array_key_exists() with a non-literal key, does not narrow
+			assertType('int', $bar);
 			return;
 		}
 		assertType('array<int>', $foo);
@@ -47,12 +47,12 @@ class HelloWorld
 		assertType("1", $bar);
 
 		if (array_key_exists($bar, $foo) === true) {
-			assertType("array{1, 2}", $foo); // SKIP: a check compared to true, or array_key_exists() with a non-literal key, does not narrow
+			assertType("array{1, 2}", $foo);
 			assertType("1", $bar);
 			return;
 		}
 
-		assertType("array{1}", $foo); // SKIP: a check compared to true, or array_key_exists() with a non-literal key, does not narrow
+		assertType("array{1}", $foo);
 		assertType("1", $bar);
 	}
 }

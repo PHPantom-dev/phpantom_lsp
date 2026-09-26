@@ -1,5 +1,16 @@
 use super::*;
 
+/// What a member path's declaration promises, ignoring anything the walk
+/// has recorded about the path itself: the type a property goes back to
+/// once a call may have written it.
+pub(crate) fn declared_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    resolve_synthetic_key_type(key, scope, ctx)
+}
+
 /// Resolve what a synthetic scope key promises, reading the scope but not
 /// writing to it.
 ///

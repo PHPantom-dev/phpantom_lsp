@@ -11,7 +11,7 @@ class Foo
 	{
 		assertType("string", $s);
 		if ($s == 'one') {
-			assertType("'one'", $s); // SKIP: a loose comparison against a literal does not narrow
+			assertType("'one'", $s);
 		} else {
 			assertType("string", $s);
 		}
@@ -23,9 +23,9 @@ class Foo
 	{
 		assertType("'one'|'two'", $s);
 		if ($s == 'one') {
-			assertType("'one'", $s); // SKIP: a loose comparison against a literal does not narrow
+			assertType("'one'", $s);
 		} else {
-			assertType("'two'", $s); // SKIP: a loose comparison against a literal does not narrow
+			assertType("'two'", $s);
 		}
 		assertType("'one'|'two'", $s);
 	}
@@ -44,7 +44,7 @@ class Foo
 	{
 		assertType('float', $f);
 		if ($f == 3.5) {
-			assertType('3.5', $f); // SKIP: a loose comparison against a literal does not narrow
+			assertType('3.5', $f);
 		} else {
 			assertType('float', $f);
 		}
@@ -56,7 +56,7 @@ class Foo
 	{
 		assertType('array', $a);
 		if ($a == []) {
-			assertType('array{}', $a); // SKIP: a loose comparison against a literal does not narrow
+			assertType('array{}', $a);
 		} else {
 		}
 		assertType('array', $a);

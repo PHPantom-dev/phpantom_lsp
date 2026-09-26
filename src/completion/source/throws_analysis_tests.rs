@@ -1168,6 +1168,7 @@ fn test_find_cross_file_propagated_throws_function_call() {
         is_polyfill: false,
         overloads: vec![],
         is_pure: false,
+        is_impure: false,
     };
 
     let class_loader = |_name: &str| -> Option<Arc<ClassInfo>> { None };
@@ -1303,6 +1304,7 @@ fn test_find_cross_file_propagated_throws_mixed_patterns() {
         is_polyfill: false,
         overloads: vec![],
         is_pure: false,
+        is_impure: false,
     };
 
     let function_loader = move |name: &str, _offset: u32| -> Option<FunctionInfo> {

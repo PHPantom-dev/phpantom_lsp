@@ -89,6 +89,6 @@ function render(?int $noteListLimit, int $count): void
 {
 	$showAllLink = $noteListLimit !== null && $count > $noteListLimit;
 	if ($showAllLink) {
-		assertType('int', $noteListLimit); // SKIP: a condition stored in a variable loses its narrowing
+		assertType('int', $noteListLimit);
 	}
 }

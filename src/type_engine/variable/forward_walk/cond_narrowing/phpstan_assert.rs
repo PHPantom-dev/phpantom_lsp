@@ -84,9 +84,17 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     &func_info.parameters,
                 ) {
                     let should_exclude = assertion.negated ^ !applies_positively;
+                    let asserted_type = narrowing::bind_call_templates(
+                        &assertion.asserted_type,
+                        &func_info.template_params,
+                        &func_info.template_bindings,
+                        &func_info.parameters,
+                        &func_call.argument_list,
+                        &build_var_ctx("", ctx, &scope_resolver),
+                    );
                     apply_assertion_to_key(
                         &arg_var,
-                        &assertion.asserted_type,
+                        &asserted_type,
                         should_exclude,
                         scope,
                         ctx,
@@ -151,16 +159,20 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     &method.parameters,
                 ) {
                     let should_exclude = assertion.negated ^ !applies_positively;
+                    let asserted_type = narrowing::bind_call_templates(
+                        &assertion.asserted_type,
+                        &method.template_params,
+                        &method.template_bindings,
+                        &method.parameters,
+                        &static_call.argument_list,
+                        &build_var_ctx("", ctx, &scope_resolver),
+                    );
                     // Resolve `self`/`static`/`$this` in the asserted type
                     // against the declaring class, not the enclosing class.
-                    let resolved_assert_type = if assertion.asserted_type.contains_self_ref() {
-                        assertion.asserted_type.replace_self(&class_info.fqn())
+                    let resolved_assert_type = if asserted_type.contains_self_ref() {
+                        asserted_type.replace_self(&class_info.fqn())
                     } else {
-                        qualify_assertion_type(
-                            &assertion.asserted_type,
-                            declaring_namespace.as_deref(),
-                            ctx,
-                        )
+                        qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
                     };
                     apply_assertion_to_key(
                         &arg_var,
@@ -230,20 +242,24 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                         continue;
                     }
                     let should_exclude = assertion.negated ^ !applies_positively;
+                    let asserted_type = narrowing::bind_call_templates(
+                        &assertion.asserted_type,
+                        &method.template_params,
+                        &method.template_bindings,
+                        &method.parameters,
+                        &method_call.argument_list,
+                        &build_var_ctx("", ctx, &scope_resolver),
+                    );
                     // Resolve `self`/`static`/`$this` in the asserted type
                     // against the *declaring* class (e.g. `Decimal`), not the
                     // enclosing class (e.g. `Monetary`).  Without this,
                     // `@phpstan-assert-if-false self<true> $this` on
                     // `Decimal::isZero()` would narrow $denominator to
                     // `Monetary` instead of `Decimal`.
-                    let resolved_type = if assertion.asserted_type.contains_self_ref() {
-                        assertion.asserted_type.replace_self(&receiver.fqn())
+                    let resolved_type = if asserted_type.contains_self_ref() {
+                        asserted_type.replace_self(&receiver.fqn())
                     } else {
-                        qualify_assertion_type(
-                            &assertion.asserted_type,
-                            declaring_namespace.as_deref(),
-                            ctx,
-                        )
+                        qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
                     };
                     if assertion.param_name == "$this" {
                         // Narrows the receiver variable itself.

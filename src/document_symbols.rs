@@ -922,6 +922,7 @@ mod tests {
             is_polyfill: false,
             overloads: vec![],
             is_pure: false,
+            is_impure: false,
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

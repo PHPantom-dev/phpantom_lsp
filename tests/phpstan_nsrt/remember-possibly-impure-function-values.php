@@ -35,7 +35,7 @@ class Foo
 		}
 
 		if ($this->impure() === 1) {
-			assertType('int', $this->impure()); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('int', $this->impure());
 		}
 	}
 
@@ -72,7 +72,7 @@ class FooStatic
 		}
 
 		if (self::impure() === 1) {
-			assertType('int', self::impure()); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('int', self::impure());
 		}
 	}
 
@@ -106,6 +106,6 @@ function test(): void
 	}
 
 	if (impure() === 1) {
-		assertType('int', impure()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', impure());
 	}
 }

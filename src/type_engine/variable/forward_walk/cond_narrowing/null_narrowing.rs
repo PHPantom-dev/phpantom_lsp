@@ -71,6 +71,10 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // against a written-out value: the equal branch holds that value, the
     // unequal one holds everything else the subject could be.
     apply_literal_identity_narrowing(condition, scope, ctx, true);
+    // `$x == 'one'` — the same, where `==` means `===` for the value.
+    apply_loose_literal_narrowing(condition, scope, ctx, true);
+    // `count($xs) === 3` — a list of that many entries.
+    apply_count_size_narrowing(condition, scope, ctx, true);
     // `$x === Land::Be` — the subject holds whatever the constant holds,
     // so a constant that cannot be null leaves no null in the subject.
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
@@ -166,6 +170,8 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // The else branch of a strict comparison against a written-out value
     // establishes the opposite of what the body did.
     apply_literal_identity_narrowing(condition, scope, ctx, false);
+    apply_loose_literal_narrowing(condition, scope, ctx, false);
+    apply_count_size_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== Land::Be`, the inverse (else/guard)
     // means the subject is that constant, so it holds whatever the
     // constant holds.

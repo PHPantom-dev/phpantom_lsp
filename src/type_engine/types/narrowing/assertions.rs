@@ -244,6 +244,27 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
     )
 }
 
+/// Rewrite a definition found on `ancestor` in terms of `class`, which
+/// binds the ancestor's templates through `@extends` / `@implements`.
+///
+/// The walk loads classes raw, so a tag written against the ancestor's own
+/// template (`@phpstan-assert-if-true T $id` on `Fetcher<T>`) reaches the
+/// call site still naming `T`; `PostFetcher`'s `@implements
+/// Fetcher<PostId>` is what says it means `PostId` there.
+fn bind_ancestor_templates(
+    class: &ClassInfo,
+    ancestor: &ClassInfo,
+    (mut method, declaring): (crate::types::MethodInfo, Atom),
+) -> (crate::types::MethodInfo, Atom) {
+    if !ancestor.template_params.is_empty() {
+        let subs = crate::inheritance::build_substitution_map(class, ancestor, &Default::default());
+        if !subs.is_empty() {
+            crate::inheritance::apply_substitution_to_method(&mut method, &subs);
+        }
+    }
+    (method, declaring)
+}
+
 /// [`find_assertion_method_in_chain`] generalised over what makes a
 /// definition the interesting one: assertion tags for the assert
 /// narrowing, a conditional return type for the `never`-branch one.
@@ -299,7 +320,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     // Parent class chain.
     if let Some(parent) = class.parent_class.as_ref()
         && let Some(parent_class) = class_loader(parent)
-        && let Some(method) = find_method_in_chain_where(
+        && let Some(found) = find_method_in_chain_where(
             &parent_class,
             method_name,
             class_loader,
@@ -308,7 +329,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
             depth + 1,
         )
     {
-        return Some(method);
+        return Some(bind_ancestor_templates(class, &parent_class, found));
     }
 
     // Implemented interfaces, last: a class that redeclares the method
@@ -317,7 +338,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     // them and `MutatingScope` implements them).
     for interface_name in &class.interfaces {
         if let Some(interface) = class_loader(interface_name)
-            && let Some(method) = find_method_in_chain_where(
+            && let Some(found) = find_method_in_chain_where(
                 &interface,
                 method_name,
                 class_loader,
@@ -326,7 +347,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
                 depth + 1,
             )
         {
-            return Some(method);
+            return Some(bind_ancestor_templates(class, &interface, found));
         }
     }
 
@@ -602,41 +623,85 @@ fn resolve_assertion_template_type(
     info: &CallAssertionInfo<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    // Check if the asserted type is a template parameter.
     let tpl_name = match asserted_type.kind() {
         TypeKind::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
         _ => return asserted_type.clone(),
     };
+    template_argument_at_call(
+        tpl_name,
+        &info.template_bindings,
+        &info.parameters,
+        info.argument_list,
+        ctx,
+    )
+    .unwrap_or_else(|| asserted_type.clone())
+}
 
+/// `asserted` with each of the callee's own `@template` parameters replaced
+/// by the class the call binds it to through a `class-string<T>` argument.
+///
+/// [`resolve_assertion_template_type`] answers the case where the tag names
+/// the template bare; a tag can also name it inside another type
+/// (`@phpstan-assert-if-true ReflectionClass<T> $this`), and the argument
+/// binds it just the same.  A template the call leaves unbound stays as
+/// written.
+pub(in crate::type_engine) fn bind_call_templates(
+    asserted: &PhpType,
+    template_params: &[Atom],
+    template_bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
+    if template_params.is_empty() {
+        return asserted.clone();
+    }
+    let mut subs = std::collections::HashMap::new();
+    for tpl in template_params {
+        if !asserted.references_any_template_param(&[tpl.to_string()]) {
+            continue;
+        }
+        if let Some(bound) =
+            template_argument_at_call(tpl, template_bindings, parameters, argument_list, ctx)
+        {
+            subs.insert(tpl.to_string(), bound);
+        }
+    }
+    if subs.is_empty() {
+        asserted.clone()
+    } else {
+        asserted.substitute(&subs)
+    }
+}
+
+/// The class a call binds the template `tpl_name` to, read off the
+/// `class-string<T>` argument its binding names.
+fn template_argument_at_call(
+    tpl_name: &str,
+    template_bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
     // Find the parameter name that binds this template param.
-    let bound_param = info
-        .template_bindings
+    let bound_param = template_bindings
         .iter()
         .find(|(tpl, _)| tpl == tpl_name)
-        .map(|(_, param)| param.as_str());
-
-    let bound_param = match bound_param {
-        Some(p) => p,
-        None => return asserted_type.clone(),
-    };
+        .map(|(_, param)| param.as_str())?;
 
     // Find the positional index of that parameter.
-    let param_idx = match info.parameters.iter().position(|p| p.name == bound_param) {
-        Some(idx) => idx,
-        None => return asserted_type.clone(),
-    };
+    let param_idx = parameters.iter().position(|p| p.name == bound_param)?;
 
     // Get the call-site argument at that position.
-    let arg_expr = match info.argument_list.arguments.iter().nth(param_idx) {
-        Some(Argument::Positional(pos)) => pos.value,
-        Some(Argument::Named(named)) => named.value,
-        None => return asserted_type.clone(),
+    let arg_expr = match argument_list.arguments.iter().nth(param_idx)? {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
     };
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
         let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
-        return PhpType::named(atom(&fqn));
+        return Some(PhpType::named(atom(&fqn)));
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
@@ -657,7 +722,7 @@ fn resolve_assertion_template_type(
                     .unwrap_class_string_inner()
                     .map(PhpType::kind)
                 {
-                    return PhpType::named(*name);
+                    return Some(PhpType::named(*name));
                 }
             }
         }
@@ -681,11 +746,11 @@ fn resolve_assertion_template_type(
                 ctx.backend,
             );
         if let Some(first) = targets.into_iter().next() {
-            return PhpType::named(atom(first.name.as_ref()));
+            return Some(PhpType::named(atom(first.name.as_ref())));
         }
     }
 
-    asserted_type.clone()
+    None
 }
 
 /// Unwrap parentheses and a single `!` prefix from a condition,

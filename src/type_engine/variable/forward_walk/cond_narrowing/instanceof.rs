@@ -32,9 +32,7 @@ pub(super) fn exclude_classes_in_scope(
         results = named;
     }
     for cls in classes {
-        ResolvedType::apply_narrowing(&mut results, |class_list| {
-            narrowing::apply_instanceof_exclusion(cls, var_ctx, class_list)
-        });
+        narrowing::exclude_instance_of(cls, var_ctx, &mut results);
         scope.record_exclusion(var_name, cls);
     }
     if results.is_empty() {
@@ -285,25 +283,27 @@ pub(super) fn commit_chain_instanceof<'b>(
                     // produces `[Foo]`; for `&& instanceof Bar` it
                     // accumulates `[Foo, Bar]`.
                     let mut single = Vec::new();
-                    ResolvedType::apply_narrowing(&mut single, |classes| {
-                        narrowing::apply_instanceof_inclusion(
+                    narrowing::include_instance_of(
+                        &extraction.class_type,
+                        extraction.exact,
+                        &var_ctx,
+                        &mut single,
+                    );
+                    if narrowed_to_unloadable_class(&single) {
+                        include_unloadable_class_in_scope(
+                            var_name,
                             &extraction.class_type,
-                            extraction.exact,
                             &var_ctx,
-                            classes,
-                        )
-                    });
-                    if !single.is_empty() {
+                            scope,
+                        );
+                        conjuncts.entry(var_name.clone()).or_default().operands += 1;
+                    } else if !single.is_empty() {
                         let entry = instanceof_results.entry(var_name.clone()).or_default();
                         ResolvedType::extend_unique(entry, single);
                         let c = conjuncts.entry(var_name.clone()).or_default();
                         c.operands += 1;
                         c.allow_string |= extraction.allow_string;
                         c.exact |= extraction.exact;
-                    } else {
-                        // Target class is unresolvable — mark variable
-                        // as empty so diagnostics suppress false positives.
-                        instanceof_results.entry(var_name.clone()).or_default();
                     }
                 }
             }
@@ -338,6 +338,29 @@ pub(super) fn commit_chain_instanceof<'b>(
     }
 
     conjuncts.into_keys().collect()
+}
+
+/// Whether an inclusion came back as a class that could not be loaded:
+/// entries that carry a name but no `ClassInfo`.
+pub(super) fn narrowed_to_unloadable_class(narrowed: &[ResolvedType]) -> bool {
+    !narrowed.is_empty() && narrowed.iter().all(|rt| rt.class_info.is_none())
+}
+
+/// Narrow `var_name` in the scope by a successful check against a class
+/// that cannot be loaded.
+///
+/// With no `ClassInfo` there is no hierarchy for
+/// [`commit_instanceof_narrowing`] to filter by, so the subject keeps the
+/// alternatives that name the class, or becomes the class when none does.
+pub(super) fn include_unloadable_class_in_scope(
+    var_name: &str,
+    class_type: &PhpType,
+    var_ctx: &VarResolutionCtx<'_>,
+    scope: &mut ScopeState,
+) {
+    let mut results = scope.get(var_name).to_vec();
+    narrowing::include_instance_of(class_type, false, var_ctx, &mut results);
+    scope.set(var_name, results);
 }
 
 /// Write the outcome of a *successful* `instanceof` check on `var_name`
@@ -438,12 +461,19 @@ pub(super) fn commit_instanceof_narrowing(
             .iter()
             .filter(|rt| rt.class_info.is_none())
             .filter_map(|rt| {
+                // A `mixed` value may be a class name as much as an object,
+                // so it keeps a string half for the class-string pass too.
                 let stringy: Vec<PhpType> = rt
                     .type_string
                     .union_members()
                     .into_iter()
-                    .filter(|m| m.is_subtype_of(&PhpType::string()))
-                    .cloned()
+                    .filter_map(|m| {
+                        if m.is_mixed() {
+                            Some(PhpType::string())
+                        } else {
+                            m.is_subtype_of(&PhpType::string()).then(|| m.clone())
+                        }
+                    })
                     .collect();
                 match stringy.len() {
                     0 => None,

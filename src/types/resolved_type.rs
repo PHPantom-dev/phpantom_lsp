@@ -813,12 +813,21 @@ fn union_member_names_class(member: &PhpType, survives: &impl Fn(&str) -> bool) 
 /// element information, so collapsing onto it would trade the only useful
 /// snapshot for the least useful one.  Two arrays that describe genuinely
 /// different values (`array<int, int>` and `array<int, string>` from
-/// separate assignments) cover neither way and both survive.
+/// separate assignments) cover neither way and both survive.  A snapshot
+/// that carries no element information either (`array{mixed, mixed}`, from
+/// a `count()` check on a bare `list`) has nothing to lose, so a bare
+/// sibling does cover it.
 fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
     covered.is_array_like()
         && cover.is_array_like()
-        && !matches!(cover.kind(), TypeKind::Named(_))
+        && (!matches!(cover.kind(), TypeKind::Named(_)) || holds_only_mixed(covered))
         && covered.is_subtype_of(cover)
+}
+
+/// Whether `ty` is a shape whose every entry is `mixed`.
+fn holds_only_mixed(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::ArrayShape(entries)
+        if !entries.is_empty() && entries.iter().all(|entry| entry.value_type.is_mixed()))
 }
 
 /// Whether an intersection produced by one branch is already covered by

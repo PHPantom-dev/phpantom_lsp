@@ -672,6 +672,10 @@ pub(crate) fn process_assignment_expr<'b>(
         }
 
         let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+        // `$show = $limit !== null && …` makes `$show` stand for what the
+        // expression proves, read off the scope the value was computed in.
+        let condition_proofs =
+            condition_implications(&lhs_name, assignment.rhs, &rhs_types, scope, ctx);
         // Reassigning the variable replaces its object identity, so any
         // property/array-access key rooted at it (seeded by an earlier
         // assignment or condition narrowing) is now stale.  Drop them
@@ -707,6 +711,13 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
         record_assertion_variable(&lhs_name, assignment.rhs, scope);
+        if !condition_proofs.is_empty() {
+            scope
+                .implied_narrowings
+                .entry(atom(&lhs_name))
+                .or_default()
+                .extend(condition_proofs);
+        }
         // `$period = $agreement?->latestPeriod()` makes `$period`'s null
         // stand for `$agreement`'s, so ruling out one rules out the other.
         record_nullsafe_origin(&lhs_name, assignment.rhs, scope);

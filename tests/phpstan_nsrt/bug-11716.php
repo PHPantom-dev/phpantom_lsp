@@ -21,14 +21,14 @@ class TypeExpression
 			\assert(isset($seenGlues[$glue]));
 			$seenGlues[$glue] = true;
 
-			assertType("'&'|'|'", $glue); // SKIP: isset() on an offset does not narrow the key to the array's keys
-			assertType("array{'|': bool, '&': bool}", $seenGlues); // SKIP: isset() on an offset does not narrow the key to the array's keys
+			assertType("'&'|'|'", $glue);
+			assertType("array{'|': bool, '&': bool}", $seenGlues);
 		} else {
 			assertType("''", $glue);
 		}
 
-		assertType("''|'&'|'|'", $glue); // SKIP: isset() on an offset does not narrow the key to the array's keys
-		assertType("array{'|': bool, '&': bool}", $seenGlues); // SKIP: isset() on an offset does not narrow the key to the array's keys
+		assertType("''|'&'|'|'", $glue);
+		assertType("array{'|': bool, '&': bool}", $seenGlues);
 
 		return array_key_first($seenGlues);
 	}
@@ -147,7 +147,7 @@ function emptyString($mixed)
     // see https://3v4l.org/XHZdr
     $arr = ['' => 1, 'a' => 2];
     if (isset($arr[$mixed])) {
-        assertType("''|'a'|null", $mixed); // SKIP: isset() on an offset does not narrow the key to the array's keys
+        assertType("''|'a'|null", $mixed);
     } else {
         assertType('mixed', $mixed); // could be mixed~(''|'a'|null)
     }
@@ -172,7 +172,7 @@ function numericString($mixed, int $i, string $s)
 
 	$arr = ['1' => 1, '2' => 2];
 	if (isset($arr[$i])) {
-		assertType("1|2", $i); // SKIP: isset() on an offset does not narrow the key to the array's keys
+		assertType("1|2", $i);
 	} else {
 		assertType('int', $i);
 	}
@@ -180,7 +180,7 @@ function numericString($mixed, int $i, string $s)
 
 	$arr = ['1' => 1, '2' => 2, 3 => 3];
 	if (isset($arr[$s])) {
-		assertType("'1'|'2'|'3'", $s); // SKIP: isset() on an offset does not narrow the key to the array's keys
+		assertType("'1'|'2'|'3'", $s);
 	} else {
 		assertType('string', $s);
 	}
@@ -189,7 +189,7 @@ function numericString($mixed, int $i, string $s)
 	$arr = ['1' => 1, '2' => 2, 3 => 3];
 	if (isset($arr[substr($s, 10)])) {
 		assertType("string", $s);
-		assertType("'1'|'2'|'3'", substr($s, 10)); // SKIP: isset() on an offset does not narrow the key to the array's keys
+		assertType("'1'|'2'|'3'", substr($s, 10));
 	} else {
 		assertType('string', $s);
 	}
@@ -207,7 +207,7 @@ function intKeys($mixed)
 
     $arr = [0 => 0, 1 => 1, 2 => 2];
     if (isset($arr[$mixed])) {
-        assertType("0|1|2|'0'|'1'|'2'|bool|float", $mixed); // SKIP: isset() on an offset does not narrow the key to the array's keys
+        assertType("0|1|2|'0'|'1'|'2'|bool|float", $mixed);
     } else {
         assertType('mixed', $mixed);
     }

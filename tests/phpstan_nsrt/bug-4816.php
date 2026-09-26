@@ -11,14 +11,16 @@ function (): void {
 
 		clearstatcache();
 
-		assertType('bool', is_dir('foo')); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('bool', is_dir('foo'));
 		assertType('bool', is_dir('bar'));
 	}
 };
 
 function (): void {
 	if (!is_dir('foo')) {
-		assertType('bool', is_dir('foo')); // SKIP: a narrowed member read or call result survives a call that can change it
+		// More precise than upstream, which reports `bool`: the failed check is
+		// remembered the way a passed one is, until the stat cache is cleared.
+		assertType('false', is_dir('foo'));
 		assertType('bool', is_dir('bar'));
 	}
 };
@@ -33,7 +35,7 @@ function (): void {
 
 	clearstatcache();
 
-	assertType('bool', is_dir('foo')); // SKIP: a narrowed member read or call result survives a call that can change it
+	assertType('bool', is_dir('foo'));
 	assertType('bool', is_dir('bar'));
 };
 
@@ -42,6 +44,8 @@ function (): void {
 		return;
 	}
 
-	assertType('bool', is_dir('foo')); // SKIP: a narrowed member read or call result survives a call that can change it
+	// More precise than upstream, which reports `bool`: the failed check is
+	// remembered the way a passed one is, until the stat cache is cleared.
+	assertType('false', is_dir('foo'));
 	assertType('bool', is_dir('bar'));
 };

@@ -24,7 +24,7 @@ function () {
 	$x = ['x' => foo()];
 
 	if (is_int($x['x'])) {
-		assertType('array{x: int}', $x); // SKIP: a type guard on an array offset does not narrow the array
+		assertType('array{x: int}', $x);
 		assertType('int', $x['x']);
 		assertType('true', is_int($x['x']));
 	} else {

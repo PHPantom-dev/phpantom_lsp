@@ -37,7 +37,6 @@ contributor even though it's short.
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
-| B369 | [`isset($arr[$k])` and `array_key_exists($k, $arr)` do not narrow `$k` to the array's keys](todo/bugs.md#b369-issetarrk-and-array_key_existsk-arr-do-not-narrow-k-to-the-arrays-keys) | Medium | Medium |
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
@@ -104,22 +103,13 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B368 | [A narrowed member read or call result survives a call that can change it](todo/bugs.md#b368-a-narrowed-member-read-or-call-result-survives-a-call-that-can-change-it) | Medium      | Medium-High |
-| B374 | [`instanceof` against a class that cannot be loaded clears the variable's type](todo/bugs.md#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type) | Medium      | Medium      |
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
+| B422 | [A class constant array holding `Foo::class` is plain `array`](todo/bugs.md#b422-a-class-constant-array-holding-fooclass-is-plain-array) | Low-Medium  | Low-Medium  |
 | B420 | [A value typed as a model's base collection has the custom collection's class but not its type](todo/bugs.md#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type) | Low-Medium  | Medium      |
-| B370 | [A loose comparison against a literal does not narrow](todo/bugs.md#b370-a-loose-comparison-against-a-literal-does-not-narrow) | Low-Medium  | Medium      |
-| B372 | [A condition stored in a variable loses its narrowing](todo/bugs.md#b372-a-condition-stored-in-a-variable-loses-its-narrowing) | Low-Medium  | Medium      |
 | B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
 | B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |
 | B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |
-| B371 | [A check compared to `true`, or `array_key_exists()` with a non-literal key, does not narrow](todo/bugs.md#b371-a-check-compared-to-true-or-array_key_exists-with-a-non-literal-key-does-not-narrow) | Low         | Low-Medium  |
-| B373 | [`is_a()` narrowing ignores `allow_string`, class-string variables, and a narrower subject](todo/bugs.md#b373-is_a-narrowing-ignores-allow_string-class-string-variables-and-a-narrower-subject) | Low         | Medium      |
-| B375 | [`@phpstan-assert-if-true` misses the receiver's template binding and untyped subjects](todo/bugs.md#b375-phpstan-assert-if-true-misses-the-receivers-template-binding-and-untyped-subjects) | Low         | Medium      |
-| B376 | [`ReflectionClass::isSubclassOf()` does not narrow the reflected class](todo/bugs.md#b376-reflectionclassissubclassof-does-not-narrow-the-reflected-class) | Low         | Low-Medium  |
-| B377 | [A type guard on an array offset does not narrow the array](todo/bugs.md#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array) | Low         | Medium      |
-| B378 | [`count($a) == count($b)` does not give `$b` `$a`'s length](todo/bugs.md#b378-counta--countb-does-not-give-b-as-length) | Low         | Medium      |
 | B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
 | B393 | [A template bound through an argument's ancestors, or by several arguments, is lost](todo/bugs.md#b393-a-template-bound-through-an-arguments-ancestors-or-by-several-arguments-is-lost) | Low         | Medium-High |
 | B394 | [A `null` default on an untyped `@param T` parameter makes it `?T`](todo/bugs.md#b394-a-null-default-on-an-untyped-param-t-parameter-makes-it-t) | Low         | Low-Medium  |
@@ -131,6 +121,7 @@ unlikely to move the needle for most users.
 | B411 | [Arithmetic on float literals is not folded](todo/bugs.md#b411-arithmetic-on-float-literals-is-not-folded) | Low         | Low         |
 | B420 | [A conditional return whose winning branch is `never` reads as the declared type](todo/bugs.md#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type) | Low         | Medium      |
 | B421 | [`(A&I)\|A` does not simplify to `A`](todo/bugs.md#b421-aia-does-not-simplify-to-a) | Low         | Medium      |
+| B423 | [A call inside an invoked closure does not invalidate what the closure captures](todo/bugs.md#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

@@ -58,6 +58,16 @@ pub(crate) struct PregOutcome {
     pub matches_all: bool,
 }
 
+/// Which of the keys read through an object a call on it invalidates.
+///
+/// See [`ScopeState::invalidate_receiver_state`].
+pub(crate) enum MemberInvalidation {
+    /// Only the recorded results of calls on it.
+    Calls,
+    /// Every key read through it, except the ones listed.
+    Members { kept: Vec<String> },
+}
+
 /// What has to be shown about a proof's holder before the proof applies.
 #[derive(Clone, Debug)]
 pub(crate) enum ProofTrigger {
@@ -399,25 +409,26 @@ impl ScopeState {
         });
     }
 
-    /// Drop what an impure call on `receiver` could have changed: every
-    /// recorded call read through it, and every check whose subject is
-    /// one.
+    /// Drop what a call on `receiver` could have changed.
     ///
     /// The receiver keeps its own type — a call does not replace the
-    /// object the variable holds — and so does a property path
-    /// (`$stmt->row`) or an element (`$stmt["id"]`) read through it.
-    /// What goes is the recorded call (`$stmt->fetch('id')`), which is
-    /// the case that matters: proving `$stmt->fetch('id') !== false`
-    /// says nothing about what the same call returns once
-    /// `$stmt->execute()` has run.
+    /// object the variable holds.  What goes depends on `members`:
     ///
-    /// Dropping the property paths as well would be sound — the callee
-    /// may write to any of them — but it costs far more than it buys.
-    /// Guard, call, use (`if (!$p->id) { throw; } $o = $p->load(); f($p->id);`)
-    /// is ordinary code, and forgetting the guard there reports a null
-    /// the program has already ruled out. PHPStan keeps property fetches
-    /// across a method call for the same reason, and Psalm keeps them
-    /// across anything it can see is pure.
+    /// - [`MemberInvalidation::Calls`] drops every recorded call read
+    ///   through it (`$stmt->fetch('id')`), and every check whose subject
+    ///   is one.  Proving `$stmt->fetch('id') !== false` says nothing about
+    ///   what the same call returns once `$stmt->execute()` has run.  A
+    ///   property path (`$stmt->row`) or an element (`$stmt["id"]`) read
+    ///   through it stays: this is what a call we cannot classify, or a
+    ///   write to one of the object's properties, costs.
+    /// - [`MemberInvalidation::Members`] also drops the property paths and
+    ///   elements, except the ones listed as kept (a readonly property
+    ///   cannot have been written).  This is for a call known to change
+    ///   state: one that returns nothing, returns `$this`, or is declared
+    ///   impure.  A call that computes a value keeps them all, which is
+    ///   what keeps guard, call, use (`if (!$p->id) { throw; } $o =
+    ///   $p->load(); f($p->id);`) working; PHPStan draws the line in the
+    ///   same place.
     ///
     /// `made` is the key of the call doing the invalidating, when it has
     /// one, and is kept. A proof about `$s->getClassReflection()` is a
@@ -425,12 +436,22 @@ impl ScopeState {
     /// the proof is about rather than an event that invalidates it —
     /// dropping it would make the guard-then-use idiom hold for exactly
     /// one use, which is not what a `@phpstan-assert` tag promises.
-    pub fn invalidate_receiver_state(&mut self, receiver: &str, made: Option<&str>) {
+    pub fn invalidate_receiver_state(
+        &mut self,
+        receiver: &str,
+        made: Option<&str>,
+        members: &MemberInvalidation,
+    ) {
         let reads_receiver = |key: &str| {
             key != receiver
                 && Some(key) != made
-                && crate::type_engine::types::narrowing::is_call_key(key)
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
+                && match members {
+                    MemberInvalidation::Calls => {
+                        crate::type_engine::types::narrowing::is_call_key(key)
+                    }
+                    MemberInvalidation::Members { kept } => !kept.iter().any(|k| k == key),
+                }
         };
         self.locals.retain(|key, _| !reads_receiver(key));
         self.non_null_implications

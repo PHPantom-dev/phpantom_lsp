@@ -2476,6 +2476,7 @@ async fn test_use_import_excludes_constants_and_functions() {
                     is_polyfill: false,
                     overloads: vec![],
                     is_pure: false,
+                    is_impure: false,
                 },
             ),
         );
@@ -2611,6 +2612,7 @@ async fn test_use_function_shows_only_functions() {
                     is_polyfill: false,
                     overloads: vec![],
                     is_pure: false,
+                    is_impure: false,
                 },
             ),
         );

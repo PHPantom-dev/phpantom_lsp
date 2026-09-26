@@ -100,276 +100,31 @@ it is too slow under the runner (see
 
 ## Narrowing
 
-### B368. A narrowed member read or call result survives a call that can change it
-**Impact: Medium · Complexity: Medium-High**
+### B423. A call inside an invoked closure does not invalidate what the closure captures
+**Impact: Low · Complexity: Medium**
 
 ```php
-class Counter {
-    private int $n = 0;
-    public function bump(): void { $this->n++; }
-    public function f(): void {
-        $this->n = 1;
-        $this->bump();
-        $this->n; // should be int, is 1
-    }
-}
-function g(Foo $foo): void {
-    assert($foo->getName() === 'foo');
-    mutate($foo);            // a void function may change $foo
-    $foo->getName();         // should be string, is 'foo'
+while ($this->running) {
+    call_user_func(function () {
+        $this->stop();       // void, so it may change $this->running
+    });
+    $this->running;          // should be bool, is true
 }
 ```
 
-Narrowing remembered for `$this->prop`, `$obj->method()`, or a call such as
-`is_file($path)` is never dropped. PHPStan forgets it after a call that may
-change the state it read: a method on the same object that returns `void`
-or `$this` or is `@phpstan-impure` (including impurity a parent declares),
-`parent::__construct()`, passing the object to a `void` or impure function,
-or `clearstatcache()` for the filesystem checks. The same missing
-invalidation is why stateful reads such as `SplFileObject::eof()` keep a
-literal `true`/`false` after the call that moves the cursor.
+A call on an object forgets what was proved about that object's
+properties and call results when the call returns `void`, returns
+`$this`, or is `@phpstan-impure`. The same call made inside a closure
+that runs on the spot (`(function () { … })()`, `call_user_func($cb)`,
+an immediately invoked callable parameter) should forget it for `$this`
+and for every variable the closure captures, and does not.
 
-Found porting PHPStan's `nsrt/bug-10566.php`, `nsrt/bug-11200.php`,
-`nsrt/bug-4351.php`, `nsrt/bug-4816.php`, `nsrt/bug-5051.php`,
-`nsrt/bug-5501.php`, `nsrt/bug-8543.php`, `nsrt/clear-stat-cache.php`,
-`nsrt/impure-constructor.php`, `nsrt/impure-method.php`,
-`nsrt/invalidate-object-argument-function.php`,
-`nsrt/invalidate-object-argument-static.php`,
-`nsrt/invalidate-object-argument.php`,
-`nsrt/remember-possibly-impure-function-values.php`; the assertions are
-`// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
+Found porting PHPStan's `nsrt/bug-10566.php`; the assertions are
+`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 **Where to look:** `type_engine/variable/forward_walk/receiver_mutation.rs`
-and the call-expression narrowing store.
-
-### B369. `isset($arr[$k])` and `array_key_exists($k, $arr)` do not narrow `$k` to the array's keys
-**Impact: Medium · Complexity: Medium**
-
-```php
-function f(string $s): void {
-    $arr = ['1' => 1, '2' => 2, 3 => 3];
-    if (isset($arr[$s])) {
-        $s; // should be '1'|'2'|'3', is string
-    }
-    $seen = ['|' => false, '&' => false];
-    assert(isset($seen[$s]));
-    $seen[$s] = true; // should stay array{'|': bool, '&': bool}
-}
-
-/** @param array<string, int> $values */
-function g(int|string $key, array $values): void {
-    if (array_key_exists($key, $values)) {
-        takesString($key); // reported: expects string, got int|string
-    }
-}
-```
-
-A successful `isset()` on an offset, or `array_key_exists()`, proves the key
-is in the array's key domain. When the keys are all known, that means one of
-them. When only the key type is declared, it means the key type. Without
-this narrowing, a later write through the same key cannot find its entry and
-widens the whole shape to `non-empty-array<string, bool>`. In the
-`array_key_exists()` case the missing narrowing is a false positive that
-PHPStan and mago do not report.
-
-Found porting PHPStan's `nsrt/bug-11716.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`. The
-`array_key_exists()` false positive was found running the
-php-typing-conformance suite (`assertions_array_key_exists_key_narrowing.php`).
-
-**Where to look:** `array_key_exists_target` in `assertions.rs` and the
-`isset` handling, both under `type_engine/variable/forward_walk/cond_narrowing/`. B371
-narrows the *array* from the same call; this entry narrows the *key*.
-
-### B370. A loose comparison against a literal does not narrow
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param 'one'|'two' $s */
-function f(string $s, float $x, string $t): void {
-    if ($s == 'one') { $s; } // should be 'one', is 'one'|'two'
-    if ($x == 3.5) { $x; }   // should be 3.5, is float
-    if (in_array($t, ['a', 'b'])) { $t; } // should be 'a'|'b', is string
-}
-```
-
-`==`, `!=`, and a non-strict `in_array()` do not narrow at all, while `===`
-does. Where both sides have the same scalar kind (a string against a
-non-numeric string literal, a float against a float), the loose comparison
-means the same as the strict one and can narrow the same way; `$a == []`
-narrows an array to `array{}`.
-
-Found porting PHPStan's `nsrt/equal.php`, `nsrt/in_array_loose.php`; the
-assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
-
-### B371. A check compared to `true`, or `array_key_exists()` with a non-literal key, does not narrow
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param array<int> $haystack  @param array{0: 1, 1?: 2} $shape */
-function f(?int $x, array $haystack, array $shape): void {
-    if (in_array($x, $haystack, true) === true) { $x; } // should be int, is ?int
-    $k = 1;
-    if (array_key_exists($k, $shape)) { $shape; } // should be array{1, 2}
-}
-```
-
-Wrapping a narrowing call in `=== true` hides it from the condition
-analysis, and `array_key_exists()` only narrows when its key is written as a
-string literal, not a variable holding a literal or an integer key.
-
-Found porting PHPStan's `nsrt/bug-3013.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-**Where to look:** `array_key_exists_target` in
-`type_engine/variable/forward_walk/cond_narrowing/assertions.rs`.
-
-### B372. A condition stored in a variable loses its narrowing
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-function f(object $c, ?int $limit, int $count, array|string $v): void {
-    $ok = $c instanceof Server ? $c->ok() : false;
-    if ($ok) { $c; } // should be Server, is object
-    $show = $limit !== null && $count > $limit;
-    if ($show) { $limit; } // should be int, is ?int
-    $isArray = is_array($v);
-    if ($isArray) { $v; } // should be array, is array|string
-}
-```
-
-`$flag = $a && $b;` followed by `if ($flag)` already narrows in some shapes;
-a ternary with a `false` arm, a `!== null` operand, and a bare type guard
-stored in a variable do not carry their narrowing to the later test.
-
-Found porting PHPStan's `nsrt/bug-1209.php`, `nsrt/bug-3190.php`,
-`nsrt/falsy-isset.php`; the assertions are `// SKIP` in the ported
-copies under `tests/phpstan_nsrt/`.
-
-### B373. `is_a()` narrowing ignores `allow_string`, class-string variables, and a narrower subject
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param class-string<Bar> $b  @param class-string<Foo> $cs */
-function f(string $s, string $b, object $o, string $cs): void {
-    if (is_a($s, Foo::class, true)) { $s; } // should be class-string<Foo>, is Foo
-    if (is_a($b, Foo::class, true)) { $b; } // should stay class-string<Bar> (Bar extends Foo)
-    if (is_a($o, $cs)) { $o; }              // should be Foo, is object
-}
-```
-
-With `allow_string` a string subject narrows to `class-string<Foo>` (and
-`mixed` to `Foo|class-string<Foo>`), not to an instance. A subject already
-narrower than the target keeps its own type, and a class argument held in a
-`class-string<Foo>` variable narrows as the literal `Foo::class` does.
-
-Found porting PHPStan's `nsrt/bug-6404.php`, `nsrt/is-a.php`; the
-assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
-
-### B374. `instanceof` against a class that cannot be loaded clears the variable's type
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @var Foo|Missing|Other $x */
-if ($x instanceof Foo) {
-} elseif ($x instanceof Missing) {
-    $x; // should be Missing, has no type
-} else {
-    $x; // should be Other, is Missing|Other
-}
-$x; // should be Foo|Missing|Other, has no type
-```
-
-`apply_instanceof_inclusion` empties the variable when the target class is
-not loadable, on purpose, so that the diagnostics engine treats it as
-untyped and stays quiet. That is diagnostic suppression through an empty
-result, which the project rules forbid: the branch should hold the named
-class even without its `ClassInfo`, and the `else` branch should drop it.
-Emptying the branch also empties the variable after the chain joins.
-
-Found porting PHPStan's `nsrt/type-elimination.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-**Where to look:** `apply_instanceof_inclusion` / `apply_instanceof_exclusion`
-in `type_engine/types/narrowing/instanceof.rs`.
-
-### B375. `@phpstan-assert-if-true` misses the receiver's template binding and untyped subjects
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @template T of Id */
-interface Fetcher {
-    /** @phpstan-assert-if-true T $id */
-    public function supports(Id $id): bool;
-}
-/** @implements Fetcher<PostId> */
-final class PostFetcher implements Fetcher { /* … */ }
-function f(Id $i, $untyped): void {
-    if ((new PostFetcher())->supports($i)) { $i; } // should be PostId, is Id
-    if ((new PostFetcher())->supports($untyped)) { $untyped; } // should be PostId, has no type
-}
-```
-
-The asserted `T` is applied at its bound instead of the receiver's
-`@implements` argument, and an argument variable with no type is not seeded
-with the asserted one.
-
-Found porting PHPStan's `nsrt/bug-10037.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B376. `ReflectionClass::isSubclassOf()` does not narrow the reflected class
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param class-string $a */
-function f(string $a): void {
-    $r = new ReflectionClass($a);
-    if ($r->isSubclassOf(Picture::class)) {
-        $r; // should be ReflectionClass<Picture>, is ReflectionClass<object>
-    }
-}
-```
-
-PHPStan narrows the template argument through the check; nothing does so here.
-
-Found porting PHPStan's `nsrt/bug-12473-types.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B377. A type guard on an array offset does not narrow the array
-**Impact: Low · Complexity: Medium**
-
-```php
-$x = ['x' => foo()]; // foo(): mixed
-if (is_int($x['x'])) {
-    $x['x']; // int
-    $x;      // should be array{x: int}, is array{x: mixed}
-}
-```
-
-The offset expression narrows, but the entry of the shape it reads is not
-written back.
-
-Found porting PHPStan's `nsrt/bug-8249.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B378. `count($a) == count($b)` does not give `$b` `$a`'s length
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param array{int, int, int} $a  @param list<mixed> $b */
-function f(array $a, array $b): void {
-    if (count($a) == count($b)) {
-        $b; // should be array{mixed, mixed, mixed}, is list<mixed>
-    }
-}
-```
-
-A list compared against a fixed-size shape's count has that many entries.
-
-Found porting PHPStan's `nsrt/list-count2.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+(`collect_call_invalidations`), and the by-reference capture handling
+the walker already runs for invoked closures.
 
 ## Arithmetic
 
@@ -544,6 +299,30 @@ it is too slow under the runner (see
 [P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
 
 ## Array types
+
+### B422. A class constant array holding `Foo::class` is plain `array`
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class Bar {
+    private const NAMES = ['a', 'b'];
+    private const FOOS = [Foo::class];
+    public function f(): void {
+        self::NAMES; // list{'a', 'b'}
+        self::FOOS;  // should be list{'Foo'}, is array
+        foreach (self::FOOS as $class) {
+            $class;  // should be 'Foo', is mixed
+        }
+    }
+}
+```
+
+A constant initialiser of string literals becomes a shape, but one whose
+elements are `::class` fetches falls back to bare `array`, so iterating
+it gives `mixed`.
+
+Found porting PHPStan's `nsrt/bug-6404.php`; the assertion is `// SKIP`
+in the ported copy under `tests/phpstan_nsrt/`.
 
 ### B419. Writing through a key of unknown type makes the keys `int|string`
 **Impact: Low · Complexity: Low**

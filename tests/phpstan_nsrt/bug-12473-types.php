@@ -25,11 +25,11 @@ function doFoo(string $a): void
 	$r = new ReflectionClass($a);
 	assertType('ReflectionClass<object>', $r);
 	if ($r->isSubclassOf(Picture::class)) {
-		assertType('ReflectionClass<Bug12473Types\\Picture>', $r); // SKIP: ReflectionClass::isSubclassOf() does not narrow the reflected class
+		assertType('ReflectionClass<Bug12473Types\\Picture>', $r);
 	} else {
 		assertType('ReflectionClass<object>', $r);
 	}
-	assertType('ReflectionClass<Bug12473Types\Picture>|ReflectionClass<object>', $r); // SKIP: ReflectionClass::isSubclassOf() does not narrow the reflected class
+	assertType('ReflectionClass<Bug12473Types\Picture>|ReflectionClass<object>', $r);
 }
 
 /**

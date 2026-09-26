@@ -118,6 +118,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
         .into_iter()
         .partition(|operand| collect_or_chain_operands(unwrap_parens(operand)).len() > 1);
 
+    // `check() === true` proves what `check()` does.
+    for operand in &operands {
+        apply_bool_comparison_narrowing(operand, true, scope, ctx);
+    }
+
     let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
     // Include variables from instanceof conditions that may not be in
     // scope yet (e.g. undeclared variables used in instanceof checks).
@@ -208,12 +213,17 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // in_array($var, $haystack, true) narrowing.
     apply_in_array_narrowing(condition, scope, ctx, false);
+    apply_loose_in_array_narrowing(condition, scope, ctx, false);
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
 
     // array_key_exists('k', $arr) narrowing on an optional shape key.
     apply_array_key_exists_narrowing(condition, scope, ctx, false);
+
+    // `isset($arr[$k])` / `array_key_exists($k, $arr)` narrowing of `$k`
+    // to the keys the array holds.
+    apply_key_domain_narrowing(condition, scope, ctx);
 
     // `if (preg_match(…, $matches))` — the body runs on a successful match,
     // so `$matches` has the keys the pattern describes.
@@ -224,6 +234,13 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // up carrying both the union of what the legs prove and the record of
     // which leg proved what.
     apply_disjunct_operand_narrowing(&disjunctions, &pinned, scope, ctx);
+
+    // A proof about `$x['k']` is a proof about the entry `$x` holds there.
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    // An impure call's result is not a fact past the evaluation that
+    // produced it.
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
 
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
@@ -366,14 +383,21 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // existing union is *filtered* down to them rather than
                 // extended with them.
                 let mut narrowed = Vec::new();
-                ResolvedType::apply_narrowing(&mut narrowed, |classes| {
-                    narrowing::apply_instanceof_inclusion(
+                narrowing::include_instance_of(
+                    &extraction.class_type,
+                    extraction.exact,
+                    &var_ctx,
+                    &mut narrowed,
+                );
+                if narrowed_to_unloadable_class(&narrowed) {
+                    include_unloadable_class_in_scope(
+                        var_name,
                         &extraction.class_type,
-                        extraction.exact,
                         &var_ctx,
-                        classes,
-                    )
-                });
+                        scope,
+                    );
+                    continue;
+                }
                 commit_instanceof_narrowing(
                     var_name,
                     narrowed,
@@ -591,6 +615,9 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 ) {
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
 
+    // `check() === true` failing proves what `!check()` does.
+    apply_bool_comparison_narrowing(condition, false, scope, ctx);
+
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
     apply_type_guard_narrowing_inverse(condition, scope, ctx);
 
@@ -609,11 +636,16 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+    apply_loose_in_array_narrowing(condition, scope, ctx, true);
 
     // Inverse `preg_match` narrowing: the else branch (and the fall-through of
     // an `if (!preg_match(…, $matches)) { return; }` guard) knows the opposite
     // outcome of the one the condition tests for.
     apply_preg_match_narrowing(condition, scope, ctx, false);
+
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
 
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it

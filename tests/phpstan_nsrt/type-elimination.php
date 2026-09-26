@@ -109,13 +109,13 @@ class Foo
 		if ($fooOrBarOrBaz instanceof Foo) {
 			// already tested
 		} elseif ($fooOrBarOrBaz instanceof Bar) {
-			assertType('TypeElimination\Bar', $fooOrBarOrBaz); // SKIP: instanceof against a class that cannot be loaded clears the type
+			assertType('TypeElimination\Bar', $fooOrBarOrBaz);
 		} else {
-			assertType('TypeElimination\Baz', $fooOrBarOrBaz); // SKIP: instanceof against a class that cannot be loaded clears the type
+			assertType('TypeElimination\Baz', $fooOrBarOrBaz);
 		}
 
 		if (!$fooOrBarOrBaz instanceof Foo) {
-			assertType('TypeElimination\Bar|TypeElimination\Baz', $fooOrBarOrBaz); // SKIP: instanceof against a class that cannot be loaded clears the type
+			assertType('TypeElimination\Bar|TypeElimination\Baz', $fooOrBarOrBaz);
 		} else {
 			assertType('TypeElimination\Foo', $fooOrBarOrBaz);
 		}

@@ -13,7 +13,7 @@ class HelloWorld
 	{
 		$isArray = is_array($value);
 		if($isArray){
-			assertType('array<mixed>', $value); // SKIP: a condition stored in a variable loses its narrowing
+			assertType('array<mixed>', $value);
 		}
 	}
 

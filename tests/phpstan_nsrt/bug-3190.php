@@ -20,7 +20,7 @@ class Deployer
 			return;
 		}
 
-		assertType(Server::class, $component); // SKIP: a condition stored in a variable loses its narrowing
+		assertType(Server::class, $component);
 	}
 
 	public function deploy2(object $component): void
@@ -60,7 +60,7 @@ class Deployer2
 	{
 		$dedicated = $component instanceof Server ? $component->isDedicated() : false;
 		if ($dedicated) {
-			assertType(Server::class, $component); // SKIP: a condition stored in a variable loses its narrowing
+			assertType(Server::class, $component);
 			return;
 		}
 	}

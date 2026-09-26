@@ -93,7 +93,7 @@ class HelloWorld
 	{
 		if (count($arrA) == count($arrB)) {
 			assertType('array{int, int, int}', $arrA);
-			assertType('array{mixed, mixed, mixed}', $arrB); // SKIP: count() equality does not carry a shape's length
+			assertType('array{mixed, mixed, mixed}', $arrB);
 		}
 		assertType('array{int, int, int}', $arrA);
 		assertType('list', $arrB);
@@ -106,7 +106,7 @@ class HelloWorld
 	function sayEqualArrayShapeReversed($arrA, array $arrB): void
 	{
 		if (count($arrA) == count($arrB)) {
-			assertType('array{mixed, mixed, mixed}', $arrA); // SKIP: count() equality does not carry a shape's length
+			assertType('array{mixed, mixed, mixed}', $arrA);
 			assertType('array{int, int, int}', $arrB);
 		}
 		assertType('list', $arrA);
@@ -125,7 +125,7 @@ class HelloWorld
 
 		if (count($arrA) == count($arrB)) {
 			assertType('array{int, int, int}', $arrA);
-			assertType('array{mixed, mixed, mixed}', $arrB); // SKIP: count() equality does not carry a shape's length
+			assertType('array{mixed, mixed, mixed}', $arrB);
 		}
 		assertType('array{int, int, int}', $arrA);
 	}
@@ -174,7 +174,7 @@ class HelloWorld
 
 		if (count($arrA, COUNT_RECURSIVE) == count($arrB)) {
 			assertType('array{int, int, int}', $arrA);
-			assertType('array{mixed, mixed, mixed}', $arrB); // SKIP: count() equality does not carry a shape's length
+			assertType('array{mixed, mixed, mixed}', $arrB);
 		}
 		assertType('array{int, int, int}', $arrA);
 	}

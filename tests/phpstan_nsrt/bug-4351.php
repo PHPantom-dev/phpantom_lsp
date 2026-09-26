@@ -31,7 +31,7 @@ class HelloWorld extends ParentC
 		assertType('Bug4351\Thing', $this->thing);
 
 		parent::__construct();
-		assertType('Bug4351\Thing|null', $this->thing); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('Bug4351\Thing|null', $this->thing);
 	}
 
 	public function doFoo(Thing $thing)

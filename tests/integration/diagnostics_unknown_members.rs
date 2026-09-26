@@ -11636,14 +11636,28 @@ class Svc {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Unresolvable instanceof target suppression
+// Unresolvable instanceof target
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// When the instanceof target class cannot be resolved (e.g. it lives
-/// in a phar), the ternary then-branch should not produce false-positive
-/// diagnostics for members that only exist on the unresolvable subclass.
+/// Assert that a member read through a subject narrowed to a class that
+/// cannot be loaded gets the "cannot verify" warning an unloadable class
+/// always gets, and never a claim that the member does not exist on the
+/// type the subject had before the check.
+fn assert_only_unverifiable(diags: &[Diagnostic], form: &str) {
+    assert!(
+        !diags.is_empty()
+            && diags.iter().all(|d| d.message
+                == "Cannot verify method 'getTypes' — subject type 'UnionType' could not be resolved"),
+        "expected only the unresolved-class warning ({form}), got: {diags:?}"
+    );
+}
+
+/// When the instanceof target class cannot be resolved (e.g. it lives in
+/// a phar), the ternary then-branch holds that class rather than the
+/// subject's declared type, so a member only the subclass declares is
+/// not reported missing.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_ternary() {
+fn instanceof_target_unresolvable_ternary_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11659,16 +11673,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (ternary), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "ternary");
 }
 
 /// Same scenario but with an if-body instead of a ternary.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_if_body() {
+fn instanceof_target_unresolvable_if_body_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11685,16 +11695,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (if-body), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "if-body");
 }
 
 /// Same scenario but with `assert($var instanceof ...)`.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_assert() {
+fn instanceof_target_unresolvable_assert_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11710,16 +11716,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (assert), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "assert");
 }
 
 /// Same scenario but with inline `&&` narrowing.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_and_chain() {
+fn instanceof_target_unresolvable_and_chain_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11732,11 +11734,7 @@ function test(Type $t): void {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (&& chain), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "&& chain");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

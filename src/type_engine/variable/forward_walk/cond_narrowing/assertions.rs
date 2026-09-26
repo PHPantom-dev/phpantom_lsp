@@ -1,9 +1,13 @@
 use super::*;
 
-/// Extract the `(base subject key, key name, negated)` of an
-/// `array_key_exists('k', $arr)` check, unwrapping parentheses and a
+use crate::php_type::ShapeEntry;
+
+/// Extract the `(base subject key, key expression, negated)` of an
+/// `array_key_exists($k, $arr)` check, unwrapping parentheses and a
 /// leading `!`.
-pub(super) fn array_key_exists_target(expr: &Expression<'_>) -> Option<(String, String, bool)> {
+pub(super) fn array_key_exists_target<'b>(
+    expr: &'b Expression<'b>,
+) -> Option<(String, &'b Expression<'b>, bool)> {
     match expr {
         Expression::Parenthesized(inner) => array_key_exists_target(inner.expression),
         Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
@@ -21,11 +25,41 @@ pub(super) fn array_key_exists_target(expr: &Expression<'_>) -> Option<(String, 
             if args.len() < 2 {
                 return None;
             }
-            let key_name = narrowing::string_literal_value(narrowing::argument_value(args[0]))?;
             let base_key = narrowing::expr_to_subject_key(narrowing::argument_value(args[1]))?;
-            Some((base_key, key_name, false))
+            Some((base_key, narrowing::argument_value(args[0]), false))
         }
         _ => None,
+    }
+}
+
+/// The array key `expr` is known to name, normalised the way PHP stores
+/// it: a written `'k'` or `3`, or a variable whose type is one literal.
+///
+/// A decimal-integer string is the integer key PHP turns it into, so
+/// `'1'` and `1` both name the key shapes record as `1`.
+pub(super) fn constant_array_key(expr: &Expression<'_>, scope: &ScopeState) -> Option<String> {
+    use mago_syntax::cst::Literal;
+    match unwrap_parens(expr) {
+        Expression::Literal(Literal::Integer(int)) => int.value.map(|v| v.to_string()),
+        Expression::Literal(Literal::String(_)) => {
+            narrowing::string_literal_value(unwrap_parens(expr))
+        }
+        other => {
+            let key = expr_to_subject(other)?;
+            let types = scope.get(&key);
+            if types.is_empty() {
+                return None;
+            }
+            match ResolvedType::types_joined(types).as_literal()? {
+                LiteralValue::Int(raw) => {
+                    crate::php_type::is_decimal_int_array_key(raw).then(|| raw.to_string())
+                }
+                literal @ LiteralValue::String(_) => {
+                    literal.string_content().map(|content| content.into_owned())
+                }
+                LiteralValue::Float(_) => None,
+            }
+        }
     }
 }
 
@@ -36,6 +70,101 @@ pub(super) fn array_key_exists_target(expr: &Expression<'_>) -> Option<(String, 
 /// the value, which is what `isset()` proves.  `array_key_exists` proves
 /// only presence, so a shape entry declared `?T` stays `?T`.
 pub(super) fn mark_array_shape_key_present(base_var: &str, key_name: &str, scope: &mut ScopeState) {
+    rewrite_shape_key(base_var, key_name, scope, |entry| {
+        Some(ShapeEntry {
+            optional: false,
+            ..entry.clone()
+        })
+    });
+}
+
+/// Drop one optional key from an array shape, once the key is known to be
+/// absent.
+///
+/// A key the shape requires is left alone: the check failing contradicts
+/// the shape, which says nothing useful about which entry to keep.
+pub(super) fn mark_array_shape_key_absent(base_var: &str, key_name: &str, scope: &mut ScopeState) {
+    rewrite_shape_key(base_var, key_name, scope, |entry| {
+        if entry.optional {
+            None
+        } else {
+            Some(entry.clone())
+        }
+    });
+}
+
+/// Carry what a condition proved about an offset (`$x["k"]`) into the
+/// entry the array's shape holds for it.
+///
+/// `is_int($x['k'])` narrows the offset's own key, but a read of `$x` still
+/// showed the entry's old type: the offset and the shape it lives in were
+/// two records of one value, and only one of them was told.  Only a proof
+/// the entry's type admits is written, so a check the shape contradicts
+/// leaves the shape to say so.
+pub(super) fn write_offset_narrowing_into_shapes(
+    condition: &Expression<'_>,
+    scope: &mut ScopeState,
+) {
+    for key in collect_condition_property_keys(condition) {
+        let Some((base, segment)) = narrowing::split_trailing_bracket(&key) else {
+            continue;
+        };
+        let Some(literal) = segment
+            .strip_prefix('"')
+            .and_then(|rest| rest.strip_suffix('"'))
+        else {
+            continue;
+        };
+        let types = scope.get(&key);
+        if types.is_empty() || !scope.contains(base) {
+            continue;
+        }
+        let narrowed = ResolvedType::types_joined(types);
+        let is_refinement = |entry: &ShapeEntry| {
+            entry.value_type != narrowed && narrowed.is_subtype_of(&entry.value_type)
+        };
+        let refines_an_entry = scope
+            .get(base)
+            .iter()
+            .any(|rt| shape_entry_at(&rt.type_string, literal).is_some_and(&is_refinement));
+        if !refines_an_entry {
+            continue;
+        }
+        rewrite_shape_key(base, literal, scope, |entry| {
+            Some(if is_refinement(entry) {
+                ShapeEntry {
+                    value_type: narrowed.clone(),
+                    ..entry.clone()
+                }
+            } else {
+                entry.clone()
+            })
+        });
+    }
+}
+
+/// The entry the shape `ty` holds under the runtime key `key`.
+fn shape_entry_at<'t>(ty: &'t PhpType, key: &str) -> Option<&'t ShapeEntry> {
+    let TypeKind::ArrayShape(entries) = ty.kind() else {
+        return None;
+    };
+    let runtime_keys = crate::php_type::runtime_shape_keys(entries)?;
+    runtime_keys
+        .iter()
+        .position(|k| k == key)
+        .map(|index| &entries[index])
+}
+
+/// Rewrite the entry an array shape holds under one runtime key, through
+/// every nullable and union layer of the scope's type for `base_var`.
+///
+/// `rewrite` returning `None` drops the entry.
+fn rewrite_shape_key(
+    base_var: &str,
+    key_name: &str,
+    scope: &mut ScopeState,
+    rewrite: impl Fn(&ShapeEntry) -> Option<ShapeEntry>,
+) {
     let types = scope.get(base_var).to_vec();
     if types.is_empty() {
         return;
@@ -43,39 +172,55 @@ pub(super) fn mark_array_shape_key_present(base_var: &str, key_name: &str, scope
     let narrowed: Vec<ResolvedType> = types
         .into_iter()
         .map(|mut rt| {
-            rt.type_string = mark_shape_key_present(&rt.type_string, key_name);
+            rt.type_string = rewrite_shape_key_in(&rt.type_string, key_name, &rewrite);
             rt
         })
         .collect();
     scope.set(base_var, narrowed);
 }
 
-/// Recursively clear the `optional` flag on one key of an array shape.
-fn mark_shape_key_present(ty: &crate::php_type::PhpType, key: &str) -> crate::php_type::PhpType {
-    use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+fn rewrite_shape_key_in(
+    ty: &PhpType,
+    key: &str,
+    rewrite: &impl Fn(&ShapeEntry) -> Option<ShapeEntry>,
+) -> PhpType {
     match ty.kind() {
         TypeKind::ArrayShape(entries) => {
-            let new_entries: Vec<ShapeEntry> = entries
-                .iter()
-                .map(|e| {
-                    if e.key.as_deref() == Some(key) {
-                        ShapeEntry {
-                            key: e.key.clone(),
-                            value_type: e.value_type.clone(),
-                            optional: false,
-                        }
-                    } else {
-                        e.clone()
+            // A positional entry occupies the index it was appended at, so
+            // `array{1, 2?}` holds its optional entry under key `1`.
+            let runtime_keys = crate::php_type::runtime_shape_keys(entries);
+            let mut new_entries: Vec<ShapeEntry> = Vec::with_capacity(entries.len());
+            let mut dropped = false;
+            for (i, e) in entries.iter().enumerate() {
+                let entry_key = match &runtime_keys {
+                    Some(keys) => Some(keys[i].as_str()),
+                    None => e.key.as_deref(),
+                };
+                if entry_key != Some(key) {
+                    new_entries.push(e.clone());
+                } else if let Some(replaced) = rewrite(e) {
+                    new_entries.push(replaced);
+                } else {
+                    dropped = true;
+                }
+            }
+            // Dropping an entry must not move the positional entries after
+            // it to a different index, so every survivor keeps its key.
+            if dropped && let Some(keys) = &runtime_keys {
+                let mut kept = keys.iter().filter(|k| k.as_str() != key);
+                for entry in &mut new_entries {
+                    if let Some(k) = kept.next() {
+                        entry.key.get_or_insert_with(|| k.clone());
                     }
-                })
-                .collect();
+                }
+            }
             PhpType::array_shape(new_entries)
         }
-        TypeKind::Nullable(inner) => PhpType::nullable(mark_shape_key_present(inner, key)),
+        TypeKind::Nullable(inner) => PhpType::nullable(rewrite_shape_key_in(inner, key, rewrite)),
         TypeKind::Union(members) => PhpType::union(
             members
                 .iter()
-                .map(|m| mark_shape_key_present(m, key))
+                .map(|m| rewrite_shape_key_in(m, key, rewrite))
                 .collect(),
         ),
         other => other.clone().into(),
@@ -151,6 +296,14 @@ pub(super) fn apply_assertion_to_key(
     seed_synthetic_key_if_needed(target, scope, ctx);
     let mut results = scope.get(target).to_vec();
     if results.is_empty() {
+        // A subject with no type yet takes the one the tag promises, the
+        // way an `instanceof` gives an untyped variable its class.  An
+        // exclusion has nothing to rule out.
+        if !should_exclude && narrowing::scalar_assert_guard_kind(asserted_type).is_none() {
+            let var_ctx = build_var_ctx(target, ctx, scope_resolver);
+            narrowing::include_instance_of(asserted_type, false, &var_ctx, &mut results);
+            scope.set(target, results);
+        }
         return;
     }
 
@@ -189,10 +342,59 @@ pub(super) fn apply_assertion_to_key(
             ResolvedType::apply_narrowing(&mut results, |classes| {
                 narrowing::apply_instanceof_inclusion(asserted_type, false, &var_ctx, classes)
             });
+            narrow_type_arguments(asserted_type, &mut results, ctx);
         }
     }
 
     if !results.is_empty() {
         scope.set(target, results);
+    }
+}
+
+/// Give entries of the asserted class the type arguments the assertion
+/// names, where those are narrower than the entry's own.
+///
+/// A class-level check keeps an entry that is already the asserted class,
+/// so `ReflectionClass<object>` stayed as it was under an assertion that
+/// it is a `ReflectionClass<Picture>`.  The arguments are the part the
+/// assertion adds, and an argument it names that does not fit inside the
+/// entry's leaves the entry alone.
+fn narrow_type_arguments(
+    asserted_type: &PhpType,
+    results: &mut [ResolvedType],
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let TypeKind::Generic(asserted) = asserted_type.kind() else {
+        return;
+    };
+    let mut replacement: Option<Vec<ResolvedType>> = None;
+    for rt in results.iter_mut() {
+        let Some(class) = rt.class_info.as_ref() else {
+            continue;
+        };
+        if !class
+            .fqn()
+            .eq_ignore_ascii_case(asserted.name.trim_start_matches('\\'))
+        {
+            continue;
+        }
+        let TypeKind::Generic(current) = rt.type_string.kind() else {
+            continue;
+        };
+        let narrower = current.args.len() == asserted.args.len()
+            && asserted
+                .args
+                .iter()
+                .zip(&current.args)
+                .all(|(a, c)| c.is_mixed() || c.is_object() || a.is_subtype_of(c))
+            && asserted.args != current.args;
+        if !narrower {
+            continue;
+        }
+        let replaced =
+            replacement.get_or_insert_with(|| ctx.resolved_types_for(asserted_type.clone()));
+        if let Some(first) = replaced.first() {
+            *rt = first.clone();
+        }
     }
 }

@@ -28,7 +28,7 @@ class Bar
 	{
 		foreach (self::FOOS as $fooClass) {
 			if (is_a($fooClass, Foo::class, true)) {
-				assertType("'Bug6404\\\\Foo'", $fooClass); // SKIP: is_a() narrowing ignores allow_string, class-string variables, and a narrower subject
+				assertType("'Bug6404\\\\Foo'", $fooClass); // SKIP: a class constant array holding Foo::class is plain array
 				assertType('int', $fooClass::getCode());
 				$this->someMap[$fooClass::getCode()] = true;
 			}
@@ -58,7 +58,7 @@ class Bar
 	{
 		foreach ($mixeds as $fooClass) {
 			if (is_a($fooClass, Foo::class, true)) {
-				assertType('Bug6404\\Foo|class-string<Bug6404\\Foo>', $fooClass); // SKIP: is_a() narrowing ignores allow_string, class-string variables, and a narrower subject
+				assertType('Bug6404\\Foo|class-string<Bug6404\\Foo>', $fooClass);
 				assertType('int', $fooClass::getCode());
 				$this->someMap[$fooClass::getCode()] = true;
 			}

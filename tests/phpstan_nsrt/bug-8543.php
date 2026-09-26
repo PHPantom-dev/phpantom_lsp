@@ -23,7 +23,7 @@ function (HelloWorld $hw): void {
 
 	$hw->invalidate();
 	assertType('1', $hw->i);
-	assertType('int', $hw->j); // SKIP: a narrowed member read or call result survives a call that can change it
+	assertType('int', $hw->j);
 
 	$hw = new HelloWorld();
 	assertType('int', $hw->i);

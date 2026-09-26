@@ -328,8 +328,11 @@ impl Backend {
                     }
 
                     // `@pure` promises the call changes nothing, which is what
-                    // lets a check recorded about an argument survive it.
+                    // lets a check recorded about an argument survive it;
+                    // `@impure` promises it changes something even though it
+                    // returns a value.
                     let is_pure = info.as_ref().is_some_and(docblock::declares_pure);
+                    let is_impure = info.as_ref().is_some_and(docblock::declares_impure);
 
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
@@ -372,6 +375,7 @@ impl Backend {
                             is_polyfill: false,
                             overloads: Vec::new(),
                             is_pure,
+                            is_impure,
                         });
                     }
                 }

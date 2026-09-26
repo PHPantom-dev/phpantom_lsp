@@ -216,7 +216,11 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
                     // its type argument rather than be downgraded (a bare
                     // `class-string` is a supertype, so `new $var` could no
                     // longer recover the concrete class).
-                    if rt.type_string.is_subtype_of(&class_string_type) {
+                    if rt.type_string.is_subtype_of(&class_string_type)
+                        || resolved_fqn
+                            .as_deref()
+                            .is_some_and(|fqn| names_only_subclasses_of(&rt.type_string, fqn, ctx))
+                    {
                         continue;
                     }
                     if rt.type_string.is_subtype_of(&PhpType::string()) || rt.type_string.is_mixed()
@@ -231,4 +235,26 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
             }
         }
     }
+}
+
+/// Whether every alternative of `ty` is a class name already known to be
+/// `fqn` or below it: a `class-string<Bar>`, or a literal naming `Bar`,
+/// when `Bar extends Foo` and the check is against `Foo`.
+///
+/// The structural subtype test cannot see a class hierarchy, so without
+/// this the guard replaced `class-string<Bar>` with the wider
+/// `class-string<Foo>` it had just proved.
+fn names_only_subclasses_of(ty: &PhpType, fqn: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
+    ty.union_members().iter().all(|member| {
+        let named = match member.kind() {
+            TypeKind::ClassString(Some(inner)) => inner.class_name().map(str::to_string),
+            _ => member
+                .as_literal()
+                .and_then(LiteralValue::string_content)
+                .map(|name| name.into_owned()),
+        };
+        named.is_some_and(|name| {
+            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.class_loader)
+        })
+    })
 }

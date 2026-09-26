@@ -360,6 +360,7 @@ async fn test_user_function_takes_precedence_over_stub() {
         is_polyfill: false,
         overloads: vec![],
         is_pure: false,
+        is_impure: false,
     };
 
     {

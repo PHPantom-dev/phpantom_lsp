@@ -2296,6 +2296,7 @@ fn replace_deprecated_function_call_action_offered() {
                     is_polyfill: false,
                     overloads: vec![],
                     is_pure: false,
+                    is_impure: false,
                 },
             ),
         );

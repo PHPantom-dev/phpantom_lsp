@@ -13,8 +13,8 @@ use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, PropertyInfo};
 use crate::util::short_name;
 
-/// Apply generic type substitution to a method's return type and parameter
-/// type hints.
+/// Apply generic type substitution to a method's return type, type
+/// assertions and parameter type hints.
 pub(crate) fn apply_substitution_to_method(
     method: &mut MethodInfo,
     subs: &HashMap<String, PhpType>,
@@ -24,6 +24,11 @@ pub(crate) fn apply_substitution_to_method(
     }
     if let Some(ref mut cond) = method.conditional_return {
         apply_substitution_to_conditional(cond, subs);
+    }
+    // `@phpstan-assert-if-true T $id` on a generic interface promises the
+    // implementation's `T`, not the bound.
+    for assertion in &mut method.type_assertions {
+        assertion.asserted_type = assertion.asserted_type.substitute(subs);
     }
     // Only copy-on-write the shared parameter list when a parameter
     // actually references a substituted name — substitution usually
@@ -176,7 +181,7 @@ pub(crate) fn apply_substitution_to_property(
 /// hundreds of parent methods, but only the handful that actually mention
 /// a template parameter need a distinct, substituted copy. The checked
 /// fields mirror [`apply_substitution_to_method`] exactly (return type,
-/// conditional return, parameter hints).
+/// conditional return, type assertions, parameter hints).
 pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[String]) -> bool {
     if template_params.is_empty() {
         return false;
@@ -189,6 +194,10 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
             .conditional_return
             .as_ref()
             .is_some_and(|c| c.references_any_template_param(template_params))
+        || method.type_assertions.iter().any(|a| {
+            a.asserted_type
+                .references_any_template_param(template_params)
+        })
         || method.parameters.iter().any(|p| {
             p.type_hint
                 .as_ref()

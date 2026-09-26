@@ -21,7 +21,7 @@ final class StreamSelectLoop
 			call_user_func(function () {
 				$this->stop();
 			});
-			assertType('bool', $this->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $this->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$this->running) {
 				$timeout = 0;
@@ -44,7 +44,7 @@ final class StreamSelectLoop
 			call_user_func(function () use ($s) {
 				$s->stop();
 			});
-			assertType('bool', $s->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $s->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$s->running) {
 				$timeout = 0;
@@ -84,7 +84,7 @@ final class StreamSelectLoop
 			};
 			assertType('true', $s->running);
 			call_user_func($cb);
-			assertType('bool', $s->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $s->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$s->running) {
 				$timeout = 0;
@@ -104,7 +104,7 @@ final class StreamSelectLoop
 			};
 			assertType('true', $this->running);
 			call_user_func($cb);
-			assertType('bool', $this->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $this->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$this->running) {
 				$timeout = 0;
@@ -123,7 +123,7 @@ final class StreamSelectLoop
 				$s = new self();
 				$s->stop();
 			})();
-			assertType('bool', $s->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $s->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$s->running) {
 				$timeout = 0;
@@ -141,7 +141,7 @@ final class StreamSelectLoop
 			(function () {
 				$this->stop();
 			})();
-			assertType('bool', $this->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $this->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$this->running) {
 				$timeout = 0;
@@ -159,7 +159,7 @@ final class StreamSelectLoop
 			call_user_func(static function () use ($s) {
 				$s->stop();
 			});
-			assertType('bool', $s->running); // SKIP: a narrowed member read or call result survives a call that can change it
+			assertType('bool', $s->running); // SKIP: a call inside an invoked closure does not invalidate what the closure captures
 
 			if (!$s->running) {
 				$timeout = 0;

@@ -13,7 +13,7 @@ function (object $foo) {
 	$fooClassString = 'Foo';
 
 	if (is_a($foo, $fooClassString)) {
-		\PHPStan\Testing\assertType('IsA\Foo', $foo); // SKIP: is_a() narrowing ignores allow_string, class-string variables, and a narrower subject
+		\PHPStan\Testing\assertType('IsA\Foo', $foo);
 	}
 };
 
@@ -59,7 +59,7 @@ function (string $a, string $b, string $c, string $d) {
 
 	/** @var class-string<Bar> $b */
 	if (is_a($b, Foo::class, true)) {
-		\PHPStan\Testing\assertType('class-string<IsA\Bar>', $b); // SKIP: is_a() narrowing ignores allow_string, class-string variables, and a narrower subject
+		\PHPStan\Testing\assertType('class-string<IsA\Bar>', $b);
 	}
 
 	/** @var class-string<Bar> $c */

@@ -29,7 +29,7 @@ class Durable
 
 		$this->damage = min($this->damage + $amount, 5);
 
-		assertType('bool', $this->isBroken()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('bool', $this->isBroken());
 		assertType('5', $this->prop2);
 	}
 
@@ -46,7 +46,7 @@ class Durable
 
 		$this->array['foo'] = min($this->damage + $amount, 5);
 
-		assertType('bool', $this->isBroken()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('bool', $this->isBroken());
 		assertType('5', $this->prop2);
 	}
 

@@ -1139,6 +1139,7 @@ fn func(name: &str) -> FunctionInfo {
         is_polyfill: false,
         overloads: Vec::new(),
         is_pure: false,
+        is_impure: false,
     }
 }
 

@@ -49,7 +49,9 @@ class HelloWorld
 
 		if ($update) {
 			assertType('10', $data);
-			assertType('bool', $foo); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('true', $foo);
 		} else {
 			assertType('1|2|3', $data);
 			assertType('bool', $foo);
@@ -60,27 +62,39 @@ class HelloWorld
 			assertType('bool', $update);
 		} else {
 			assertType('1|2', $data);
-			assertType('bool', $update); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $update);
 		}
 
 		if ($data === 1) {
-			assertType('bool', $update); // SKIP: a narrowed member read or call result survives a call that can change it
-			assertType('bool', $foo); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $update);
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $foo);
 		} else {
 			assertType('bool', $update);
 			assertType('bool', $foo);
 		}
 
 		if ($data === 2) {
-			assertType('bool', $update); // SKIP: a narrowed member read or call result survives a call that can change it
-			assertType('bool', $foo); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $update);
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $foo);
 		} else {
 			assertType('bool', $update);
 			assertType('bool', $foo);
 		}
 
 		if ($data === 3) {
-			assertType('bool', $update); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $update);
 			assertType('true', $foo);
 		} else {
 			assertType('bool', $update);
@@ -88,11 +102,15 @@ class HelloWorld
 		}
 
 		if ($data === 1 || $data === 2) {
-			assertType('bool', $update); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('false', $update);
 			assertType('false', $foo);
 		} else {
 			assertType('bool', $update);
-			assertType('bool', $foo); // SKIP: a narrowed member read or call result survives a call that can change it
+			// More precise than upstream, which reports `bool`: the flags were set
+			// together in each branch, so testing one recovers the other.
+			assertType('true', $foo);
 		}
 
 	}

@@ -18,7 +18,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fflush();
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
   
   public function fgetc() : void
@@ -33,7 +33,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fgetc();
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fgetcsv() : void
@@ -48,7 +48,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fgetcsv();
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fgets() : void
@@ -63,7 +63,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fgets();
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fpassthru() : void
@@ -78,7 +78,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fpassthru();
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fputcsv() : void
@@ -109,7 +109,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fread(1);
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fscanf() : void
@@ -124,7 +124,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->fscanf('%f');
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fseek() : void
@@ -155,7 +155,7 @@ class Bug11200SplFileObjectTests
     // call method that has side effects
     $file->ftruncate(0);
     // the value of eof may have changed
-    assertType('bool', $file->eof()); // SKIP: a narrowed member read or call result survives a call that can change it
+    assertType('bool', $file->eof());
   }
 
   public function fwrite() : void

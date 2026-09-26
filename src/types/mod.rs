@@ -1292,6 +1292,10 @@ pub struct FunctionInfo {
     /// Whether the function is declared side-effect free via `@pure`,
     /// `@phpstan-pure` or `@psalm-pure`.  See [`MethodInfo::is_pure`].
     pub is_pure: bool,
+    /// Whether the function is declared to have side effects via
+    /// `@impure`, `@phpstan-impure` or `@psalm-impure`.  See
+    /// [`MethodInfo::is_impure`].
+    pub is_impure: bool,
 }
 
 impl FunctionInfo {

@@ -100,7 +100,7 @@ class Test
 		assertType('false', $foo->getActive());
 
 		new ClassWithImpureConstructorMarked($foo);
-		assertType('bool', $foo->getActive()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('bool', $foo->getActive());
 	}
 
 	public function testClassWithPureConstructorMarked()

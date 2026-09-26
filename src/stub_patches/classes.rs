@@ -31,6 +31,82 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         _ => {}
     }
     mark_benevolent_methods(class);
+    mark_impure_methods(class);
+}
+
+/// Built-in methods that change their object's state while returning a
+/// value, so nothing but a tag can say so.  The list is PHPStan's
+/// (`functionMetadata.php`, every class method with `hasSideEffects`).
+///
+/// `SplFileObject::fgets()` returns the line it read, and moves the cursor
+/// that `eof()` reports on; without the tag, a checked `eof()` would stay
+/// proven across the read.
+const IMPURE_BUILTIN_METHODS: &[(&str, &[&str])] = &[
+    (
+        "DateTime",
+        &[
+            "add",
+            "modify",
+            "setDate",
+            "setISODate",
+            "setTime",
+            "setTimestamp",
+            "setTimezone",
+            "sub",
+        ],
+    ),
+    ("SplDoublyLinkedList", &["pop", "shift"]),
+    (
+        "SplFileObject",
+        &[
+            "fflush",
+            "fgetc",
+            "fgetcsv",
+            "fgets",
+            "fgetss",
+            "fpassthru",
+            "fputcsv",
+            "fread",
+            "fscanf",
+            "fseek",
+            "ftruncate",
+            "fwrite",
+        ],
+    ),
+    ("SplFixedArray", &["extract"]),
+    ("SplHeap", &["extract", "insert", "recoverFromCorruption"]),
+    (
+        "SplObjectStorage",
+        &["addAll", "attach", "detach", "removeAll", "removeAllExcept"],
+    ),
+    (
+        "SplPriorityQueue",
+        &["extract", "insert", "recoverFromCorruption"],
+    ),
+    ("SplQueue", &["dequeue"]),
+    ("XMLReader", &["next", "read"]),
+];
+
+/// Tag the class's [`IMPURE_BUILTIN_METHODS`] `@impure`.
+fn mark_impure_methods(class: &mut ClassInfo) {
+    let Some((_, methods)) = IMPURE_BUILTIN_METHODS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&class.name))
+    else {
+        return;
+    };
+    for idx in 0..class.methods.len() {
+        let method = &class.methods[idx];
+        if method.is_impure
+            || method.is_pure
+            || !methods.iter().any(|m| m.eq_ignore_ascii_case(&method.name))
+        {
+            continue;
+        }
+        let mut method = (**method).clone();
+        method.is_impure = true;
+        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    }
 }
 
 /// A `@phpstan-assert-if-true` promise a third-party class makes in its
@@ -401,6 +477,47 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
     }
 }
 
+/// Let `ReflectionClass::isSubclassOf()` narrow the class it reflects.
+///
+/// `$r->isSubclassOf(Picture::class)` holding means `$r` reflects a
+/// `Picture`, so `$r` is a `ReflectionClass<Picture>` in that branch.
+/// PHPStan says so with a type-specifying extension; spelling the same
+/// promise as a method template and an `-if-true` tag lets the ordinary
+/// assertion narrowing carry it.
+fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.eq_ignore_ascii_case("isSubclassOf"))
+    else {
+        return;
+    };
+    let Some(param) = class.methods[idx].parameters.first().map(|p| p.name) else {
+        return;
+    };
+    if !class.methods[idx].type_assertions.is_empty() {
+        return;
+    }
+    let template = atom("TIsSubclassOf");
+    let mut method = (*class.methods[idx]).clone();
+    method.template_params.push(template);
+    method
+        .template_param_bounds
+        .insert(template, PhpType::object());
+    method.template_bindings.push((template, param));
+    method.type_assertions.push(crate::types::TypeAssertion {
+        kind: crate::types::AssertionKind::IfTrue,
+        param_name: "$this".to_string(),
+        asserted_type: PhpType::generic_atom(
+            atom("ReflectionClass"),
+            vec![PhpType::named(template)],
+        ),
+        negated: false,
+        is_equality: false,
+    });
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
 /// Fix two `ReflectionClass` return types phpstorm-stubs understate.
 ///
 /// `newInstanceArgs()` is declared `@return T|null` (mirroring php-src's
@@ -416,6 +533,8 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
 /// anything that asks for a `class-string`. PHPStan's stub says
 /// `list<class-string>`.
 fn patch_reflection_class(class: &mut ClassInfo) {
+    patch_reflection_is_subclass_of(class);
+
     if let Some(idx) = class
         .methods
         .iter()

@@ -40,14 +40,14 @@ class Bar
 		assertType('\'foo\'', $foo->getName());
 
 		$this->doLorem($foo);
-		assertType('string', $foo->getName()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('string', $foo->getName());
 		assertType(Foo::class, $foo);
 
 		assert($foo->getName() === 'foo');
 		assertType('\'foo\'', $foo->getName());
 
 		$this->doIpsum($foo);
-		assertType('string', $foo->getName()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('string', $foo->getName());
 		assertType(Foo::class, $foo);
 	}
 

@@ -69,7 +69,7 @@ class Foo
 		assertType('1', $this->fooProp);
 
 		$this->voidMethod();
-		assertType('int', $this->fooProp); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', $this->fooProp);
 	}
 
 	public function doFluent(): void
@@ -78,7 +78,7 @@ class Foo
 		assertType('1', $this->fooProp);
 
 		$this->returnsThis(new stdClass());
-		assertType('int', $this->fooProp); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', $this->fooProp);
 	}
 
 	public function doFluent2(): void
@@ -87,7 +87,7 @@ class Foo
 		assertType('1', $this->fooProp);
 
 		$this->phpDocReturnThis();
-		assertType('int', $this->fooProp); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', $this->fooProp);
 	}
 
 	public function doBar(): void
@@ -105,7 +105,7 @@ class Foo
 		assertType('1', $this->fooProp);
 
 		$this->impureMethod();
-		assertType('int', $this->fooProp); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', $this->fooProp);
 	}
 
 	public function doLorem(): void
@@ -114,7 +114,7 @@ class Foo
 		assertType('1', $this->fooProp);
 
 		$this->impureMethod2();
-		assertType('int', $this->fooProp); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('int', $this->fooProp);
 	}
 
 }
@@ -150,7 +150,7 @@ class Bar
 		assert($p->getName() !== null);
 		assertType('string', $p->getName());
 		$f->returnsThisImpure($p);
-		assertType('string|null', $p->getName()); // SKIP: a narrowed member read or call result survives a call that can change it
+		assertType('string|null', $p->getName());
 	}
 
 }
@@ -199,5 +199,5 @@ function (ExtendingClass $e): void {
 	assert($e->pure() === 1);
 	assertType('1', $e->pure());
 	$e->impure();
-	assertType('int', $e->pure()); // SKIP: a narrowed member read or call result survives a call that can change it
+	assertType('int', $e->pure());
 };

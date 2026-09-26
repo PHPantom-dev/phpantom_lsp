@@ -148,6 +148,12 @@ fn merge_nested_array_write_inner(
                 updated[index].optional = false;
                 return PhpType::array_shape(updated);
             }
+            if keys.len() == 1
+                && let Some(entries) = base.shape_entries()
+                && let Some(updated) = write_literal_keys_into_shape(entries, key_type, value_type)
+            {
+                return updated;
+            }
             let inner_merged = if keys.len() == 1 {
                 value_type.clone()
             } else {
@@ -375,6 +381,62 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
     });
 
     PhpType::array_shape(entries)
+}
+
+/// Write `value_type` through a key known to be one of a few literals into
+/// a shape that already holds every one of them, or `None` when that is not
+/// the case.
+///
+/// The write lands on exactly one of the keys without saying which, so each
+/// entry it may have hit holds either its old value or the new one; a
+/// single literal is a write to that one entry.  Widening to `array<K, V>`
+/// instead would lose every key, which is what a `$seen[$k] = true` after
+/// an `isset($seen[$k])` check did.
+fn write_literal_keys_into_shape(
+    entries: &[ShapeEntry],
+    key_type: &PhpType,
+    value_type: &PhpType,
+) -> Option<PhpType> {
+    let written: Vec<String> = key_type
+        .union_members()
+        .iter()
+        .map(|member| match member.as_literal()? {
+            LiteralValue::Int(raw) => is_decimal_int_array_key(raw).then(|| raw.to_string()),
+            // A decimal-integer string names the same entry as the integer,
+            // and shapes record both under the same spelling.
+            literal @ LiteralValue::String(_) => {
+                literal.string_content().map(std::borrow::Cow::into_owned)
+            }
+            LiteralValue::Float(_) => None,
+        })
+        .collect::<Option<_>>()?;
+    let runtime_keys = runtime_shape_keys(entries)?;
+    if !written.iter().all(|key| runtime_keys.contains(key)) {
+        return None;
+    }
+    let value_type = value_type.widen_scalar_literals();
+    let single = written.len() == 1;
+
+    let updated: Vec<ShapeEntry> = entries
+        .iter()
+        .zip(&runtime_keys)
+        .map(|(entry, key)| {
+            let mut entry = entry.clone();
+            if written.contains(key) {
+                if single {
+                    entry.value_type = value_type.clone();
+                    entry.optional = false;
+                } else {
+                    entry.value_type = PhpType::join_runtime_value_types(vec![
+                        entry.value_type.clone(),
+                        value_type.clone(),
+                    ]);
+                }
+            }
+            entry
+        })
+        .collect();
+    Some(PhpType::array_shape(updated))
 }
 
 /// The position in `entries` of the entry whose explicit key is the
