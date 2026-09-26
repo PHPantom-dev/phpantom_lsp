@@ -847,23 +847,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b425-a-declared-generic-type-that-omits-a-defaulted-argument-does-not-spell-it-out" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B425. A declared generic type that omits a defaulted argument does not spell it out
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1608,23 +1591,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Type comparison">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b425-a-declared-generic-type-that-omits-a-defaulted-argument-does-not-spell-it-out" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B425. A declared generic type that omits a defaulted argument does not spell it out
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1922,32 +1888,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="crashes">Crashes<a class="headerlink" href="#crashes" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
-<h3 id="b425-a-declared-generic-type-that-omits-a-defaulted-argument-does-not-spell-it-out">B425. A declared generic type that omits a defaulted argument does not spell it out<a class="headerlink" href="#b425-a-declared-generic-type-that-omits-a-defaulted-argument-does-not-spell-it-out" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @template T1 = true  @template T2 = true */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">class Test {}</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">/** @param Test&lt;false&gt; $one */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function f(Test $one) {} // $one should be Test&lt;false, true&gt;, is Test&lt;false&gt;</span>
-</code></pre></div>
-<p>Members already see the default (<code>build_generic_subs</code> fills it in), but
-the type itself keeps only the arguments written, so hover shows
-<code>Test&lt;false&gt;</code> and a comparison against <code>Test&lt;false, true&gt;</code> sees two
-different arities. PHPStan fills omitted arguments with their defaults
-when it resolves the type. The fill needs the class loader, so it belongs
-where every declared type (parameter, <code>@var</code>, return, property) is
-resolved, not in one consumer.</p>
-<p>Found porting PHPStan's <code>nsrt/template-default.php</code>; the assertion is
-<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <h3 id="b417-an-argument-in-a-branch-a-null-test-rules-out-is-still-checked">B417. An argument in a branch a <code>!== null</code> test rules out is still checked<a class="headerlink" href="#b417-an-argument-in-a-branch-a-null-test-rules-out-is-still-checked" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function takesNode(Node $n): void {}</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f(?Node $x): void {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if ($x instanceof Node) { return; }</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    if ($x !== null) { takesNode($x); } // reported: expects Node, got null</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">function takesNode(Node $n): void {}</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(?Node $x): void {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if ($x instanceof Node) { return; }</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    if ($x !== null) { takesNode($x); } // reported: expects Node, got null</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>With <code>$x</code> down to <code>null</code>, <code>strip_null_from_scope</code> marks the branch
 unreachable, but the argument check inside it still resolves <code>$x</code> as
@@ -1960,14 +1911,14 @@ is how it turned up in phpstan-src (<code>src/PhpDoc/TypeNodeResolver.php</code>
 the argument diagnostics treat an unreachable scope.</p>
 <h3 id="b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after">B379. The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after<a class="headerlink" href="#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$ex = null;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">try {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $x = 1;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    maybeThrows();</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">} catch (\RuntimeException $ex) {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    $x; // should be 1 (maybe defined), has no type</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">$ex; // should be RuntimeException|null, is null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$ex = null;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">try {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $x = 1;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    maybeThrows();</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">} catch (\RuntimeException $ex) {</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    $x; // should be 1 (maybe defined), has no type</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">$ex; // should be RuntimeException|null, is null</span>
 </code></pre></div>
 <p>A <code>catch</code> block starts from the scope before the <code>try</code>, so assignments the
 body made before throwing are invisible there, and the exception variable a
@@ -1977,16 +1928,16 @@ it is too slow under the runner (see
 <a href="../performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65</a>).</p>
 <h3 id="b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it">B380. A loop that must run, or a <code>switch</code> that cannot fall out, still joins the path that skips it<a class="headerlink" href="#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$v = null;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">for ($i = 0; $i &lt; 1; $i++) { $v = 1; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">$v; // should be 1, is 1|null</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$w = null;</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">switch (doFoo()) {</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    case 1: $w = 1; break;</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">    default: throw new \Exception();</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">}</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">$w; // should be 1, is 1|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$v = null;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">for ($i = 0; $i &lt; 1; $i++) { $v = 1; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$v; // should be 1, is 1|null</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">$w = null;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">switch (doFoo()) {</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    case 1: $w = 1; break;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    default: throw new \Exception();</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">$w; // should be 1, is 1|null</span>
 </code></pre></div>
 <p>A <code>for</code> whose condition is provably true on entry always runs its body, and a
 <code>switch</code> whose <code>default</code> throws cannot be skipped, but the walker still joins
@@ -1997,11 +1948,11 @@ it is too slow under the runner (see
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable">B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable<a class="headerlink" href="#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">while ($this-&gt;running) {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    $cb = function () { $this-&gt;stop(); };</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    call_user_func($cb);</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">while ($this-&gt;running) {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $cb = function () { $this-&gt;stop(); };</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    call_user_func($cb);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The walker invalidates <code>$this</code> and <code>use (…)</code> captures for a closure
 written inline as the call's own argument, or invoked immediately where
@@ -2023,16 +1974,16 @@ different purpose (its return type).</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b418-fooclass-of-a-class-in-the-files-own-namespace-can-stay-unqualified">B418. <code>Foo::class</code> of a class in the file's own namespace can stay unqualified<a class="headerlink" href="#b418-fooclass-of-a-class-in-the-files-own-namespace-can-stay-unqualified" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">namespace Acme\Model\Events;</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">use Illuminate\Database\Eloquent\Model;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">final class EventSubcategory extends Model {</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    public function event(): BelongsTo {</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">        // reported: expects class-string&lt;Model&gt;, got class-string&lt;Event&gt;</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">        return $this-&gt;belongsTo(Event::class, &#39;event_id&#39;);</span>
-<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">    }</span>
-<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">namespace Acme\Model\Events;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">use Illuminate\Database\Eloquent\Model;</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">final class EventSubcategory extends Model {</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    public function event(): BelongsTo {</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">        // reported: expects class-string&lt;Model&gt;, got class-string&lt;Event&gt;</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">        return $this-&gt;belongsTo(Event::class, &#39;event_id&#39;);</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">    }</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Event</code> is <code>Acme\Model\Events\Event</code>, a model in the same directory and
 namespace, and no <code>use</code> names it. In a full-project <code>analyze</code> of a
@@ -2048,9 +1999,9 @@ namespace-relative lookup <code>type_hint_to_classes_typed</code> does against t
 facade alias fallback in <code>resolution.rs</code>.</p>
 <h3 id="b403-new-of-a-class-that-cannot-be-loaded-has-no-type">B403. <code>new</code> of a class that cannot be loaded has no type<a class="headerlink" href="#b403-new-of-a-class-that-cannot-be-loaded-has-no-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$x = new UndeclaredFoo(); // should be UndeclaredFoo, has no type</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$arr = [];</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$arr[] = new UndeclaredFoo(); // should gain an UndeclaredFoo entry, stays array{}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$x = new UndeclaredFoo(); // should be UndeclaredFoo, has no type</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$arr = [];</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$arr[] = new UndeclaredFoo(); // should gain an UndeclaredFoo entry, stays array{}</span>
 </code></pre></div>
 <p><code>new</code> resolves to the classes the name loads, and an unloadable name gives an
 empty list, so hover is empty and appends of the value are skipped. The
@@ -2061,13 +2012,13 @@ it is too slow under the runner (see
 <p><strong>Where to look:</strong> <code>type_engine/variable/rhs_resolution/instantiation.rs</code>.</p>
 <h3 id="b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members">B404. <code>$this</code> in a <code>@phpstan-require-extends</code> trait does not see the required class's members<a class="headerlink" href="#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @phpstan-require-extends SomeClass */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">trait T {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    function f(): void {</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">        $this-&gt;x; // should be int, has no type</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    }</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">}</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">class SomeClass { public int $x = 1; }</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @phpstan-require-extends SomeClass */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">trait T {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    function f(): void {</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">        $this-&gt;x; // should be int, has no type</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    }</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">class SomeClass { public int $x = 1; }</span>
 </code></pre></div>
 <p>The static-access half of this is
 <a href="../completion/#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13</a>.
@@ -2076,16 +2027,16 @@ In PHPStan's fixture the required class is declared after the trait.</p>
 assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b405-a-closure-called-through-call-or-a-callable-held-in-a-variable-is-not-resolved">B405. A closure called through <code>-&gt;call()</code>, or a callable held in a variable, is not resolved<a class="headerlink" href="#b405-a-closure-called-through-call-or-a-callable-held-in-a-variable-is-not-resolved" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    public function doFoo(): float { return 1.0; }</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    public function f(\stdClass $o): void {</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">        (fn () =&gt; $this)-&gt;call($o); // should be stdClass, is Foo</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">        $c = function (): string {};</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">        $c();                        // should be string, is mixed</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">        $cb = [$this, &#39;doFoo&#39;];</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">        $cb();                       // should be float, has no type</span>
-<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="x">    }</span>
-<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    public function doFoo(): float { return 1.0; }</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    public function f(\stdClass $o): void {</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">        (fn () =&gt; $this)-&gt;call($o); // should be stdClass, is Foo</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">        $c = function (): string {};</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">        $c();                        // should be string, is mixed</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">        $cb = [$this, &#39;doFoo&#39;];</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">        $cb();                       // should be float, has no type</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="x">    }</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Closure::call()</code> rebinds <code>$this</code> to its argument, and invoking a variable
 that holds a closure or an array callable resolves to its target's return.</p>
@@ -2094,10 +2045,10 @@ the assertions are <code>// SKIP</code> in the ported copies under
 <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable">B406. Closure variadics are lists or untyped, and a <code>null</code> default does not always make a parameter nullable<a class="headerlink" href="#b406-closure-variadics-are-lists-or-untyped-and-a-null-default-does-not-always-make-a-parameter-nullable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$c = function (string $s, string ...$y) {}; // $y should be array&lt;int|string, string&gt;, is list&lt;string&gt;</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">$d = function (...$arr) {};                 // $arr should be array&lt;int|string, mixed&gt;, has no type</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">$e = function (bool $a = null) {};          // $a should be bool|null, is bool</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">function g(bool $a = Null) {}               // $a should be bool|null, is bool</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$c = function (string $s, string ...$y) {}; // $y should be array&lt;int|string, string&gt;, is list&lt;string&gt;</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">$d = function (...$arr) {};                 // $arr should be array&lt;int|string, mixed&gt;, has no type</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">$e = function (bool $a = null) {};          // $a should be bool|null, is bool</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">function g(bool $a = Null) {}               // $a should be bool|null, is bool</span>
 </code></pre></div>
 <p>Named arguments put string keys in a variadic, which a named function's
 variadic already reflects. A <code>null</code> default makes a typed parameter nullable;
@@ -2109,15 +2060,15 @@ assertions are <code>// SKIP</code> in the ported copies under
 <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b407-a-property-inferred-from-the-constructor-drops-and-does-not-narrow-a-readonly-union">B407. A property inferred from the constructor drops <code>[]</code> and does not narrow a readonly union<a class="headerlink" href="#b407-a-property-inferred-from-the-constructor-drops-and-does-not-narrow-a-readonly-union" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    private $items;</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    private readonly int|float $i;</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public function __construct() { $this-&gt;items = []; $this-&gt;i = getInt(); }</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">    public function f() {</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">        $this-&gt;items; // should be array, has no type</span>
-<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">        $this-&gt;i;     // should be int, is int|float</span>
-<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    }</span>
-<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    private $items;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    private readonly int|float $i;</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    public function __construct() { $this-&gt;items = []; $this-&gt;i = getInt(); }</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    public function f() {</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">        $this-&gt;items; // should be array, has no type</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">        $this-&gt;i;     // should be int, is int|float</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">    }</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>The empty-array literal is dropped when inferring an untyped property, and a
 readonly property assigned once in the constructor could take the assigned
@@ -2128,9 +2079,9 @@ type.</p>
 <code>// SKIP</code> in the ported copies under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b408-an-assignment-inside-an-argument-to-new-is-not-seen">B408. An assignment inside an argument to <code>new</code> is not seen<a class="headerlink" href="#b408-an-assignment-inside-an-argument-to-new-is-not-seen" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">new Foo([$inArray = 1]);</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$inArray; // should be 1, has no type</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">foo($direct = 3); // this one works</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">new Foo([$inArray = 1]);</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">$inArray; // should be 1, has no type</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">foo($direct = 3); // this one works</span>
 </code></pre></div>
 <p>Nested assignments are collected from call arguments but not from an array
 literal inside a <code>new</code> argument list.</p>
