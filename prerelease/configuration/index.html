@@ -1788,11 +1788,19 @@
 generate a starter config file:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>init
 </code></pre></div>
-<p>This creates a minimal <code>.phpantom.toml</code> with a JSON schema directive.
-Editors with TOML schema support (Zed, VS Code + Even Better TOML,
+<p>On an interactive terminal, this walks through the settings projects
+customize most often (PHP version, indexing strategy, a few diagnostic
+toggles, semantic token mode) and writes only the answers that differ
+from PHPantom's defaults. Press Enter to accept a default and skip a
+question. Run <code>phpantom_lsp init --yes</code> (or pipe stdin, e.g. in a
+script) to skip the prompts and write a minimal <code>.phpantom.toml</code> with
+just a JSON schema directive instead.</p>
+<p>Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for every option
 via the schema. Only add settings you want to override -- when absent,
-all settings use their defaults.</p>
+all settings use their defaults. Settings that need a list or a table
+(<code>indexing.exclude</code>, <code>[[diagnostics.ignore]]</code>, per-tool command
+overrides) aren't part of the wizard; add those by hand.</p>
 <h3 id="global-config">Global config<a class="headerlink" href="#global-config" title="Permanent link">&para;</a></h3>
 <p>Settings you want in every project belong in the global config rather
 than in a <code>.phpantom.toml</code> per repository:</p>
