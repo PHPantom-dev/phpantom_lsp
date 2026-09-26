@@ -973,10 +973,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" class="md-nav__link">
+  <a href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were
+        B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk
       </span>
     </span>
   </a>
@@ -1634,10 +1634,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" class="md-nav__link">
+  <a href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were
+        B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk
       </span>
     </span>
   </a>
@@ -1820,29 +1820,33 @@ needs the same, from the call-argument arms of both walker entry points.</p>
 <code>type_engine/variable/forward_walk/closures.rs</code> and
 <code>walk_closures_in_call</code> in <code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were">B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were<a class="headerlink" href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" title="Permanent link">&para;</a></h3>
+<h3 id="b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk">B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk<a class="headerlink" href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array&lt;string, array{string, bool, string}&gt; $pairs */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach (array_keys($pairs) as $cn) {  // or `foreach ($pairs as $cn =&gt; $_)`</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $pairs[$cn][3] = [&#39;I&#39;];</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">}</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">// should be array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">// is array&lt;string, array{string, bool, string}&gt;|non-empty-array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function add_flag(array $pairs): array {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    foreach (array_keys($pairs) as $cn) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        $pairs[$cn][3] = [&#39;I&#39;];</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    }</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    return $pairs;</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">}</span>
 </code></pre></div>
-<p>A loop over an array's own keys that writes the element at each key
-rewrites every element, so after the loop the element type is the one the
-body wrote, whether the loop ran or not (an empty array has no elements to
-leave behind). The walker joins the scope from before the loop instead,
-as it would for a loop that might skip some keys, so a declared return
-that spells out the added entry rejects the array. Seen in phpstan-src
-(<code>build/PHPStan/Build/TurboAttributeCollector.php</code>, the
-<code>$pairs[$className][3] = $reflection-&gt;getInterfaceNames()</code> loop), whose
-return type is reported against its own <code>@return</code> array shape.</p>
-<p><strong>Where to look:</strong> the <code>foreach</code> handling in
-<code>type_engine/variable/forward_walk/</code>, where the post-loop scope joins the
-pre-loop one. The body's write to <code>$arr[$key]</code> (with <code>$key</code> the loop's
-key, or a value iterated from <code>array_keys($arr)</code>) would have to replace
-the array's element type rather than join it.</p>
+<p>Hovering <code>$pairs</code> right after the loop reports the precise
+<code>non-empty-array&lt;string, array{string, bool, string, array{'I'}}&gt;</code>, but
+the return-type diagnostic for the same function sees
+<code>non-empty-array&lt;string|int, array{string, bool, string, array{'I'}}&gt;</code>
+for the identical write and flags it as incompatible with the declared
+<code>@return array&lt;string, array{string, bool, string, array{'I'}}&gt;</code>. The
+only difference between the two runs is <code>is_diagnostic_scope_active()</code>,
+so <code>$cn</code>'s key type — correctly narrowed to <code>string</code> outside
+diagnostics — falls back to the benevolent <code>int|string</code> array-key
+default during a diagnostic-scope walk.</p>
+<p><strong>Where to look:</strong> <code>resolve_foreach_iterable_type_raw</code> and
+<code>bind_foreach_value</code> in <code>type_engine/variable/forward_walk/foreach.rs</code>,
+and whether the diagnostic-scope cache
+(<code>type_engine/variable/forward_walk/diagnostic_cache.rs</code>) or the chain
+resolution cache (<code>type_engine/resolver/context.rs</code>) returns a less
+precise resolution for <code>array_keys($pairs)</code> during a diagnostic-scope
+walk than the same expression gets outside one.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
