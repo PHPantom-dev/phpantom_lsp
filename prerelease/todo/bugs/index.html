@@ -1149,17 +1149,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B420. A conditional return whose winning branch is <code>never</code> reads as the declared type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1987,17 +1976,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B420. A conditional return whose winning branch is <code>never</code> reads as the declared type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2386,23 +2364,6 @@ the body sees <code>?T</code> and the call site binds <code>T</code> with <code>
 <p>The single-argument <code>array&lt;V&gt;</code> form has <code>array-key</code> keys.</p>
 <p>Found porting PHPStan's <code>nsrt/key-of-generic.php</code>; the assertions are
 <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type">B420. A conditional return whose winning branch is <code>never</code> reads as the declared type<a class="headerlink" href="#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @template S = false */</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">class Builder {</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">    /** @return ($this is self&lt;true&gt; ? void : never) */</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    public function execute(): void {}</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">}</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">(new Builder())-&gt;execute(); // should be never, is null (the declared void)</span>
-</code></pre></div>
-<p>The condition is decided, but <code>is_uninformative_return()</code> treats <code>void</code>
-and <code>never</code> alike, so a <code>never</code> branch is dropped and the call falls back
-to its declared return type. A <code>never</code> branch does carry information: the
-call does not return.</p>
-<p>Found porting PHPStan's <code>nsrt/template-default.php</code>; the assertion is
-<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>; the assertion is <code>// SKIP</code> in
-the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
