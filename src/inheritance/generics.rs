@@ -585,13 +585,28 @@ pub(crate) fn apply_generic_args(class: &ClassInfo, type_args: &[PhpType]) -> Cl
         .iter()
         .any(|m| method_references_params(m, &sub_keys))
     {
-        let fp = crate::virtual_members::TransformFingerprint::new(Some(&subs), None, 0);
         for method in result.methods.make_mut() {
-            if method_references_params(method, &sub_keys) {
+            // A method that redeclares one of these names as its own
+            // `@template` shadows the class's: its signature must keep
+            // the raw name for call-site binding, not the class-level
+            // erasure, or the argument never gets a chance to bind it
+            // (see `class_scoped_template_values`, which strips the same
+            // shadowed names from the *values* side of a call).
+            let method_subs = class_scoped_template_values(&subs, &method.template_params);
+            if method_subs.is_empty() {
+                continue;
+            }
+            let method_sub_keys: Vec<String> = method_subs.keys().cloned().collect();
+            if method_references_params(method, &method_sub_keys) {
+                let fp = crate::virtual_members::TransformFingerprint::new(
+                    Some(method_subs.as_ref()),
+                    None,
+                    0,
+                );
                 let transformed =
                     crate::virtual_members::intern_transformed_method(method, fp, || {
                         let mut m = (**method).clone();
-                        apply_substitution_to_method(&mut m, &subs);
+                        apply_substitution_to_method(&mut m, &method_subs);
                         m
                     });
                 *method = transformed;

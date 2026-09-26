@@ -113,7 +113,6 @@ unlikely to move the needle for most users.
 | B430 | [`isset()` on a constant shape read with a dynamic key loses the element type](todo/bugs.md#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type) | Low-Medium  | Low-Medium  |
 | B431 | [A class constant array keyed by `Foo::class` is a bare `array`](todo/bugs.md#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array) | Low-Medium  | Low-Medium  |
 | B432 | [A write through a dynamic key into a nested offset turns each shape entry into a generic array](todo/bugs.md#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array) | Low-Medium  | Medium      |
-| B433 | [A method `@template` that shadows its class's template of the same name is bound as the class's](todo/bugs.md#b433-a-method-template-that-shadows-its-classs-template-of-the-same-name-is-bound-as-the-classs) | Low         | Low-Medium  |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

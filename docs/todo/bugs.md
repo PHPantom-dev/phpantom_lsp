@@ -26,36 +26,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B433. A method `@template` that shadows its class's template of the same name is bound as the class's
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-foreach ($reflection->getAttributes(Ref::class) as $attr) { // $reflection: \ReflectionClass
-    $attr->newInstance();      // should be Ref, is object
-    $attr->newInstance()->key; // should be string, has no type
-}
-```
-
-`ReflectionClass` is `@template T of object`, and its `getAttributes()`
-declares a method-level `@template T` of its own, bound by
-`@param class-string<T>|null $name` and returned as
-`ReflectionAttribute<T>[]`. The method's `T` shadows the class's, so the
-call should give `ReflectionAttribute<Ref>`. Instead the class's `T`
-(erased to its `object` bound on an unparameterised `\ReflectionClass`)
-is substituted into the signature first, and the argument never gets to
-bind anything. Any class and method pair that reuses a template name is
-affected, not just reflection: `make(string $name): list<T>` declared
-`@template T` inside a `@template T of object` class gives `list<object>`
-for `$holder->make(Ref::class)`.
-
-Seen in phpstan-src (`build/PHPStan/Build/TurboAttributeCollector.php`),
-where it feeds the return-type mismatch described under
-[B432](#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array).
-
-**Where to look:** where a method's signature is substituted with the
-receiver's class-level template arguments (`inheritance/generics.rs`,
-`type_engine/call_resolution/template_subs.rs`): names the method
-declares as its own templates must be left for call-site binding.
+No outstanding items.
 
 ## Reachability
 
@@ -324,8 +295,7 @@ lost and any declared element shape rejects it. Seen in phpstan-src
 `$pairs[$className][3] = $reflection->getInterfaceNames()` loop), whose
 return type is reported against its own `@return` array shape. That
 report also carries
-[B431](#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array)
-and [B433](#b433-reflectionclassgetattributesfooclass-does-not-carry-foo-to-newinstance).
+[B431](#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array).
 
 **Where to look:** `merge_nested_array_write` in
 `type_engine/variable/array_shape_writes.rs`, for an `ArrayWriteKey::Keyed`

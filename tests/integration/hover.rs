@@ -13749,6 +13749,65 @@ function test(ReflectionMethod $ref): void {
     );
 }
 
+/// A method-level `@template T` that shadows its class's own `@template T`
+/// binds from the call's argument, not from the class's (erased) template.
+///
+/// `ReflectionClassStub<T of object>` declares a class-level `T`, and its
+/// `getAttributes()` declares a method-level `T` of its own, bound by
+/// `class-string<T>` and returned as `ReflectionAttribute<T>[]`. On an
+/// unparameterised receiver the class-level `T` erases to its `object`
+/// bound; the method's own `T` must still bind from the `Ref::class`
+/// argument instead of inheriting that erasure.
+#[test]
+fn hover_method_template_shadows_class_template() {
+    let backend = create_test_backend();
+    let uri = "file:///method_template_shadow.php";
+
+    let stub_uri = "file:///method_template_shadow_stub.php";
+    let stub = r#"<?php
+/**
+ * @template T of object
+ */
+class ReflectionClassStub {
+    /**
+     * @template T
+     * @param class-string<T>|null $name
+     * @return ReflectionAttribute<T>[]
+     */
+    public function getAttributes(?string $name = null): array {}
+}
+
+/**
+ * @template T
+ */
+class ReflectionAttribute {
+    /** @return T */
+    public function newInstance() {}
+}
+
+class Ref {}
+"#;
+    backend.update_ast(stub_uri, stub);
+
+    let content = r#"<?php
+function test(ReflectionClassStub $reflection): void {
+    foreach ($reflection->getAttributes(Ref::class) as $attr) {
+        $x = $attr->newInstance();
+        $x;
+    }
+}
+"#;
+
+    let result =
+        hover_text(&hover_at(&backend, uri, content, 4, 10).expect("hover $x")).to_string();
+    assert!(
+        result.contains("Ref") && !result.contains("object"),
+        "$x from newInstance() should bind the method's own T to Ref via \
+         the class-string<T> argument, not erase to the class's object \
+         bound, got: {result}"
+    );
+}
+
 /// Foreach key type should be extracted from a class's
 /// `implements_generics` when the iterable is a bare class name
 /// (e.g. Finder implementing `IteratorAggregate<non-empty-string, SplFileInfo>`).
