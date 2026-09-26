@@ -106,7 +106,6 @@ unlikely to move the needle for most users.
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
 | B422 | [A class constant array holding `Foo::class` is plain `array`](todo/bugs.md#b422-a-class-constant-array-holding-fooclass-is-plain-array) | Low-Medium  | Low-Medium  |
-| B420 | [A value typed as a model's base collection has the custom collection's class but not its type](todo/bugs.md#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type) | Low-Medium  | Medium      |
 | B390 | [A literal argument bound to a function template is widened](todo/bugs.md#b390-a-literal-argument-bound-to-a-function-template-is-widened) | Low-Medium  | Medium      |
 | B392 | [Template defaults are ignored](todo/bugs.md#b392-template-defaults-are-ignored) | Low-Medium  | Medium      |
 | B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |

@@ -339,12 +339,11 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 
 // ─── Type-resolution helpers ────────────────────────────────────────────────
 //
-// Called from `type_engine/types/resolution.rs`
-// (`type_hint_to_classes_typed_depth`) and the call/return-type resolvers
-// under `type_engine/` to apply Eloquent-specific post-processing after a
-// class has been resolved and generic substitution applied.  Keeping the
-// framework logic here rather than inline in the generic resolver avoids
-// coupling the type engine to Laravel conventions.
+// Called from the call/return-type resolvers under `type_engine/` to apply
+// Eloquent-specific post-processing after a class has been resolved and
+// generic substitution applied.  Keeping the framework logic here rather
+// than inline in the generic resolver avoids coupling the type engine to
+// Laravel conventions.
 
 /// Swap a resolved Eloquent Collection to a model's custom collection.
 ///
@@ -361,7 +360,14 @@ pub(super) fn self_ref_subs(ty: PhpType) -> HashMap<String, PhpType> {
 /// where `TModel` has been substituted to the concrete model and the
 /// model declares a custom collection like `ProductCollection`.
 ///
-/// Returns `None` when the class is not the Eloquent Collection, has no
+/// Only called for a *returned* type hint (a method's return type, never
+/// a parameter/property/`@var` hint): a value the caller merely declares
+/// as the base collection may be one it built itself, so treating it as
+/// the custom subclass there would be an over-claim.  A collection is
+/// only known to be the custom one when Eloquent actually produced it,
+/// which is what a return position proves.
+///
+/// Returns `cls` unchanged when it is not the Eloquent Collection, has no
 /// generic args, or the model does not declare a custom collection.
 pub(crate) fn try_swap_custom_collection(
     cls: ClassInfo,

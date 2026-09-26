@@ -67,7 +67,7 @@ pub(super) fn resolve_auth_user_at_call(
         &loader,
     )?;
 
-    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+    let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
         &model_type,
         "",
         ctx.all_classes,

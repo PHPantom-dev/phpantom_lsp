@@ -40,7 +40,7 @@ impl Backend {
                 ctx,
             )
         {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
                 ctx.all_classes,
@@ -86,7 +86,7 @@ impl Backend {
         if let Some(ty) =
             resolve_request_accessor_at_call(method_name, text_args, &lhs_resolved, ctx)
         {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
                 ctx.all_classes,
@@ -502,7 +502,7 @@ impl Backend {
             // …): the call's type *is* the element type.
             if let Some(element_type) = array_func_element_type(func_name, &fn_args) {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         &element_type,
                         owner_name,
                         ctx.all_classes,
@@ -531,7 +531,7 @@ impl Backend {
                 let classes: Vec<Arc<ClassInfo>> = raw_type
                     .extract_value_type(true)
                     .map(|element_type| {
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             element_type,
                             owner_name,
                             ctx.all_classes,
@@ -611,7 +611,7 @@ impl Backend {
                             ctx,
                         );
                     let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &parsed_ty,
                             "",
                             ctx.all_classes,
@@ -667,7 +667,7 @@ impl Backend {
                 {
                     let substituted = ret.substitute(&subs);
                     let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
                             "",
                             ctx.all_classes,
@@ -702,7 +702,7 @@ impl Backend {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(ret.clone());
                 }
-                return crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret,
                     "",
                     ctx.all_classes,
@@ -732,7 +732,7 @@ impl Backend {
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let classes: Vec<Arc<ClassInfo>> =
-                crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret_type,
                     "",
                     ctx.all_classes,
@@ -755,7 +755,7 @@ impl Backend {
         for rt in &resolved_var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret_type,
                         "",
                         ctx.all_classes,
@@ -776,7 +776,7 @@ impl Backend {
                 && let Some(ref ret) = invoke.return_type
             {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret,
                         "",
                         ctx.all_classes,
@@ -974,7 +974,7 @@ impl Backend {
         for ty in &callable_types {
             if let Some(ret_type) = ty.callable_return_type() {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret_type,
                         "",
                         ctx.all_classes,
@@ -999,7 +999,7 @@ impl Backend {
                 && let Some(ref ret) = invoke.return_type
             {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret,
                         "",
                         ctx.all_classes,

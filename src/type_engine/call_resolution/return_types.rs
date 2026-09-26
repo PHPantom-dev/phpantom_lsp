@@ -305,7 +305,7 @@ impl Backend {
         // The operator stood in for the classes the resolution below could
         // not name; now that it has evaluated, they can be named.
         let classes = if classes.is_empty() {
-            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &evaluated,
                 "",
                 ctx.all_classes,
@@ -393,7 +393,7 @@ impl Backend {
                 mr_ctx.class_loader,
             ) {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         &effective,
                         &class_info.fqn(),
                         all_classes,
@@ -414,7 +414,7 @@ impl Backend {
                 let substituted = ret.substitute(template_subs);
                 if &substituted != ret {
                     let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
                             &class_info.fqn(),
                             all_classes,
@@ -438,7 +438,7 @@ impl Backend {
                 if ret.is_parent_ref() {
                     if let Some(ref parent_name) = class_info.parent_class {
                         let classes =
-                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                                 &PhpType::named(atom(parent_name.as_ref())),
                                 &class_info.fqn(),
                                 all_classes,
@@ -463,7 +463,7 @@ impl Backend {
                 if ret.is_self_like() {
                     return vec![Arc::new(class_info.clone())];
                 }
-                return crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret,
                     &class_info.fqn(),
                     all_classes,
@@ -494,7 +494,7 @@ impl Backend {
                 if inferred.is_self_like() {
                     return vec![Arc::new(class_info.clone())];
                 }
-                return crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     &inferred,
                     &class_info.fqn(),
                     all_classes,

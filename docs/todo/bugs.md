@@ -462,33 +462,7 @@ the ported copy under `tests/phpstan_nsrt/`.
 
 ## Laravel
 
-### B420. A value typed as a model's base collection has the custom collection's class but not its type
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param Collection<int, Product> $c */   // Product collects into ProductCollection
-function f(Collection $c): void {
-    if ($c instanceof ProductCollection) {
-        takesProducts($c); // reported: expects ProductCollection, got Collection<int, Product>
-    }
-}
-```
-
-Resolving `Eloquent\Collection<int, Product>` to classes swaps in the
-model's custom collection (`try_swap_custom_collection`) while the type
-string keeps naming the base collection. `instanceof ProductCollection`
-then finds the class already narrow enough and keeps the stale type string,
-which the argument check compares against. The swap is also too eager for a
-declared parameter: the caller may hand over a plain collection it built
-itself, so completion offering `ProductCollection` methods there is an
-over-claim. Only a collection Eloquent produces (a `get()` return, a
-`chunk()` callback argument) is known to be the custom one; that direction
-is already handled by `replace_eloquent_collections_in_type`.
-
-**Where to look:** `try_swap_custom_collection` in
-`src/virtual_members/laravel/mod.rs`, called from `type_hint_to_classes_typed`,
-and the "already subtypes" shortcut in `apply_instanceof_inclusion`
-(`src/type_engine/types/narrowing/instanceof.rs`).
+No outstanding items.
 
 ## Blade
 

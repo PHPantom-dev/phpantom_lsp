@@ -12715,3 +12715,52 @@ namespace App {
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("ProductCollection"), "{messages:?}");
 }
+
+/// A parameter merely *declared* as the base `Collection<int, Product>`
+/// might be a plain collection the caller built itself, so it does not
+/// get the custom-collection treatment the way a `get()`/`chunk()` value
+/// Eloquent actually produced does (see
+/// `eloquent_chunk_callback_receives_the_models_collection` above). Once
+/// an `instanceof ProductCollection` check proves it really is the custom
+/// collection, though, narrowing must update the tracked type string
+/// along with the class, or a later argument check still compares
+/// against the pre-narrowing `Collection<int, Product>` and reports a
+/// spurious mismatch.
+#[test]
+fn instanceof_on_a_declared_base_collection_narrows_to_the_custom_collection() {
+    let php = r#"<?php
+namespace Illuminate\Database\Eloquent {
+    /** @template TKey of array-key @template TModel */
+    class Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+
+    class Product {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    function takesProducts(ProductCollection $p): void {}
+
+    /** @param Collection<int, Product> $c */
+    function f(Collection $c): void {
+        if ($c instanceof ProductCollection) {
+            takesProducts($c);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}

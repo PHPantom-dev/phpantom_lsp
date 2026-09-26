@@ -141,7 +141,27 @@ pub(crate) fn type_hint_to_classes_typed(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Vec<Arc<ClassInfo>> {
-    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0)
+    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, false)
+}
+
+/// [`type_hint_to_classes_typed`] for a method's *return* type hint.
+///
+/// A returned collection is one Eloquent actually produced, so — unlike a
+/// parameter, property, or `@var` hint resolved through the plain
+/// entry point above — it is safe to swap the declared
+/// `Illuminate\Database\Eloquent\Collection<…, TModel>` for the model's
+/// custom collection class (see
+/// [`laravel::try_swap_custom_collection`]). Resolving a value the
+/// caller merely declared as the base collection to the narrower
+/// subclass would be an over-claim: the caller may have built a plain
+/// collection itself.
+pub(crate) fn type_hint_to_classes_typed_returned(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Vec<Arc<ClassInfo>> {
+    type_hint_to_classes_typed_depth(ty, owning_class_name, all_classes, class_loader, 0, true)
 }
 
 /// Type `hint` as the classes it names, or as a bare type string when it
@@ -175,12 +195,18 @@ pub(crate) fn resolved_types_for_hint(
 
 /// Inner implementation with a recursion depth guard to prevent
 /// infinite loops from circular type aliases.
+///
+/// `produced` is true only when `ty` is a method's return type hint (see
+/// [`type_hint_to_classes_typed_returned`]); it is threaded unchanged
+/// through every recursive call so a union/generic-arg member nested
+/// inside a return type is still treated as returned.
 fn type_hint_to_classes_typed_depth(
     ty: &PhpType,
     owning_class_name: &str,
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u8,
+    produced: bool,
 ) -> Vec<Arc<ClassInfo>> {
     if depth > MAX_ALIAS_DEPTH {
         return vec![];
@@ -197,6 +223,7 @@ fn type_hint_to_classes_typed_depth(
                 all_classes,
                 class_loader,
                 depth,
+                produced,
             )
         }
         // ── Nullable → unwrap inner ────────────────────────────────
@@ -206,6 +233,7 @@ fn type_hint_to_classes_typed_depth(
             all_classes,
             class_loader,
             depth,
+            produced,
         ),
 
         // ── Union type ─────────────────────────────────────────────
@@ -218,6 +246,7 @@ fn type_hint_to_classes_typed_depth(
                     all_classes,
                     class_loader,
                     depth,
+                    produced,
                 );
                 ClassInfo::extend_unique_arc(&mut results, resolved);
             }
@@ -234,6 +263,7 @@ fn type_hint_to_classes_typed_depth(
                     all_classes,
                     class_loader,
                     depth,
+                    produced,
                 );
                 ClassInfo::extend_unique_arc(&mut results, resolved);
             }
@@ -289,9 +319,15 @@ fn type_hint_to_classes_typed_depth(
             })]
         }
 
-        TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-            resolve_named_type(s, &[], owning_class_name, all_classes, class_loader, depth)
-        }
+        TypeKind::StaticType(s) | TypeKind::ThisType(s) => resolve_named_type(
+            s,
+            &[],
+            owning_class_name,
+            all_classes,
+            class_loader,
+            depth,
+            produced,
+        ),
 
         // ── Named type (class name, keyword, or alias) ─────────────
         TypeKind::Named(name) => resolve_named_type(
@@ -301,6 +337,7 @@ fn type_hint_to_classes_typed_depth(
             all_classes,
             class_loader,
             depth,
+            produced,
         ),
 
         // ── Generic type ───────────────────────────────────────────
@@ -322,6 +359,7 @@ fn type_hint_to_classes_typed_depth(
                         all_classes,
                         class_loader,
                         depth + 1,
+                        produced,
                     );
                 }
             }
@@ -332,6 +370,7 @@ fn type_hint_to_classes_typed_depth(
                 all_classes,
                 class_loader,
                 depth,
+                produced,
             )
         }
 
@@ -364,6 +403,7 @@ fn resolve_named_type(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     depth: u8,
+    produced: bool,
 ) -> Vec<Arc<ClassInfo>> {
     // ── Fast reject: built-in scalar/pseudo types can never resolve
     //    to a class and are never type aliases. ──────────────────────
@@ -384,6 +424,7 @@ fn resolve_named_type(
             all_classes,
             class_loader,
             depth + 1,
+            produced,
         );
     }
 
@@ -403,6 +444,7 @@ fn resolve_named_type(
                 all_classes,
                 class_loader,
                 depth,
+                produced,
             );
         }
         return find_class_by_name(all_classes, owning_class_name)
@@ -448,14 +490,22 @@ fn resolve_named_type(
 
     match lookup_class_declaration(name, owning_class_name, all_classes, class_loader) {
         Some(cls) => {
+            let cls = Arc::unwrap_or_clone(cls);
+
             // ── Eloquent custom collection swapping ────────────────
-            let cls = laravel::try_swap_custom_collection(
-                Arc::unwrap_or_clone(cls),
-                name,
-                generic_args,
-                all_classes,
-                class_loader,
-            );
+            // Only for a returned type hint — see
+            // `type_hint_to_classes_typed_returned`.
+            let cls = if produced {
+                laravel::try_swap_custom_collection(
+                    cls,
+                    name,
+                    generic_args,
+                    all_classes,
+                    class_loader,
+                )
+            } else {
+                cls
+            };
 
             // A type hint that names a generic class without arguments
             // (`@var ItemCollection $items`, a bare parameter or return
@@ -588,6 +638,7 @@ fn resolve_named_type(
                     all_classes,
                     class_loader,
                     depth + 1,
+                    produced,
                 );
             }
 
