@@ -902,45 +902,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B407. A readonly property is not narrowed to what the constructor assigns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b434-an-assignment-inside-an-arrow-function-body-is-not-seen" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B434. An assignment inside an arrow function body is not seen
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b427-the-forward-walker-ignores-param-closure-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B427. The forward walker ignores <code>@param-closure-this</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -951,23 +912,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1546,45 +1490,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B407. A readonly property is not narrowed to what the constructor assigns
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b434-an-assignment-inside-an-arrow-function-body-is-not-seen" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B434. An assignment inside an arrow function body is not seen
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b427-the-forward-walker-ignores-param-closure-this" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B427. The forward walker ignores <code>@param-closure-this</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1595,23 +1500,6 @@
       </span>
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1698,99 +1586,9 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns">B407. A readonly property is not narrowed to what the constructor assigns<a class="headerlink" href="#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    private readonly int|float $i;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    public function __construct() { $this-&gt;i = getInt(); }</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    public function f() {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        $this-&gt;i; // should be int, is int|float</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>A readonly property can only be written once, so what the constructor
-leaves in it is what every other method reads. PHPStan remembers the
-constructor's final scope and applies its readonly properties to the other
-methods of the class, keeping the declared type where the constructor's is
-not narrower (<code>?int</code> assigned to an <code>int</code> property stays <code>int</code>).</p>
-<p>Doing the same here means walking the constructor when another method's
-scope is seeded, which neither walker entry point
-(<code>resolve_in_method_body</code> for hover and completion,
-<code>seed_and_walk_function_body</code> for diagnostics) can do today: both are
-handed one method's parameters and statements, not its siblings. It also
-needs a keyed guard, since walking the constructor can resolve a
-<code>$this-&gt;method()</code> whose body seeds <code>$this</code> again.</p>
-<p>Found porting PHPStan's
-<code>nsrt/remember-non-nullable-property-non-strict.php</code>; the assertion is
-<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<p><strong>Where to look:</strong> <code>seed_this</code> in
-<code>type_engine/variable/forward_walk/callable_inference.rs</code>, and the two
-entry points above.</p>
-<h3 id="b434-an-assignment-inside-an-arrow-function-body-is-not-seen">B434. An assignment inside an arrow function body is not seen<a class="headerlink" href="#b434-an-assignment-inside-an-arrow-function-body-is-not-seen" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$f = fn () =&gt; $x = $this-&gt;make();</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">// hovering `$x` inside the arrow body finds no assignment</span>
-</code></pre></div>
-<p>The forward walker enters an arrow function by seeding its parameters and
-never applies the assignments its body expression makes, so a variable
-assigned there has no type at the cursor. A statement body is walked
-statement by statement up to the cursor; an arrow body needs the same for
-the sub-expressions that run before it.</p>
-<p>Found porting PHPStan's <code>nsrt/closure-types.php</code>, whose <code>assertType()</code>
-inside an arrow function passed to <code>-&gt;call()</code> becomes such an assignment
-under the runner; that line is <code>// SKIP</code> in the ported copy under
-<code>tests/phpstan_nsrt/</code>.</p>
-<p><strong>Where to look:</strong> the <code>Expression::ArrowFunction</code> arm of
-<code>try_enter_closure_expr</code> in <code>type_engine/variable/forward_walk/closures.rs</code>.</p>
-<h3 id="b427-the-forward-walker-ignores-param-closure-this">B427. The forward walker ignores <code>@param-closure-this</code><a class="headerlink" href="#b427-the-forward-walker-ignores-param-closure-this" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Reg {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    /** @param-closure-this Target $cb */</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    public static function on(\Closure $cb): void {}</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">Reg::on(function () {</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    $t = $this; // should be Target, is the enclosing class</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">});</span>
-</code></pre></div>
-<p>Completion and hover on <code>$this-&gt;</code> itself honour the tag, through
-<code>find_closure_this_types</code> in <code>type_engine/variable/closure_resolution.rs</code>,
-but the walker seeds every closure scope with the enclosing <code>$this</code>
-(<code>seed_closure_captures</code>), so anything that reads <code>$this</code> through the
-scope, a variable assigned from it or a diagnostic on it, sees the
-lexical class. <code>Closure::call()</code> already rebinds the walker's scope
-(<code>closure_call_scope</code>); a closure passed to a parameter carrying the tag
-needs the same, from the call-argument arms of both walker entry points.</p>
-<p><strong>Where to look:</strong> <code>try_enter_closure_expr</code> in
-<code>type_engine/variable/forward_walk/closures.rs</code> and
-<code>walk_closures_in_call</code> in <code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk">B436. <code>array_keys()</code>'s key type widens to <code>int|string</code> only inside a diagnostic-scope walk<a class="headerlink" href="#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param array&lt;string, array{string, bool, string}&gt; $pairs */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function add_flag(array $pairs): array {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    foreach (array_keys($pairs) as $cn) {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        $pairs[$cn][3] = [&#39;I&#39;];</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    }</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    return $pairs;</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>Hovering <code>$pairs</code> right after the loop reports the precise
-<code>non-empty-array&lt;string, array{string, bool, string, array{'I'}}&gt;</code>, but
-the return-type diagnostic for the same function sees
-<code>non-empty-array&lt;string|int, array{string, bool, string, array{'I'}}&gt;</code>
-for the identical write and flags it as incompatible with the declared
-<code>@return array&lt;string, array{string, bool, string, array{'I'}}&gt;</code>. The
-only difference between the two runs is <code>is_diagnostic_scope_active()</code>,
-so <code>$cn</code>'s key type — correctly narrowed to <code>string</code> outside
-diagnostics — falls back to the benevolent <code>int|string</code> array-key
-default during a diagnostic-scope walk.</p>
-<p><strong>Where to look:</strong> <code>resolve_foreach_iterable_type_raw</code> and
-<code>bind_foreach_value</code> in <code>type_engine/variable/forward_walk/foreach.rs</code>,
-and whether the diagnostic-scope cache
-(<code>type_engine/variable/forward_walk/diagnostic_cache.rs</code>) or the chain
-resolution cache (<code>type_engine/resolver/context.rs</code>) returns a less
-precise resolution for <code>array_keys($pairs)</code> during a diagnostic-scope
-walk than the same expression gets outside one.</p>
+<p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
