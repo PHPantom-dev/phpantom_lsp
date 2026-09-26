@@ -471,6 +471,7 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,

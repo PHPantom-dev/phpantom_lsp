@@ -2291,6 +2291,7 @@ fn replace_deprecated_function_call_action_offered() {
                     deprecated_replacement: Some("exif_read_data(%parametersList%)".to_string()),
                     template_params: vec![],
                     template_bindings: vec![],
+                    template_param_defaults: Default::default(),
                     template_param_bounds: Default::default(),
                     throws: vec![],
                     is_polyfill: false,

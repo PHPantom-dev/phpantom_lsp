@@ -15,7 +15,7 @@ use crate::types::*;
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 
 use super::return_types::{
-    resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
+    literal_arg_type, resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
     resolve_expression_to_type, resolve_literal_type, resolve_operator_type,
     resolve_static_access_type,
 };
@@ -62,6 +62,7 @@ impl Backend {
             &mut subs,
             &method.template_params,
             &method.template_param_bounds,
+            &method.template_param_defaults,
             method.return_type.as_ref(),
             ctx,
         );
@@ -141,10 +142,19 @@ impl Backend {
                                 None => continue,
                                 _ => continue,
                             },
+                            // A `null` default binds `T` only when nothing
+                            // else in the hint takes the null: for
+                            // `@param T|null $t = null` it is the `null`
+                            // alternative's, and `T` is left unbound.
                             TemplateBindingMode::Direct => match default_value {
                                 Some(d)
                                     if !subs.contains_key(tpl_name.as_str())
-                                        && (d == "null" || d.ends_with("::class")) =>
+                                        && ((d == "null"
+                                            && !param_hint.is_some_and(|h| {
+                                                matches!(h.kind(), TypeKind::Nullable(_))
+                                                    || h.union_members().iter().any(|m| m.is_null())
+                                            }))
+                                            || d.ends_with("::class")) =>
                                 {
                                     d
                                 }
@@ -167,7 +177,14 @@ impl Backend {
 
             match binding_mode {
                 TemplateBindingMode::Direct => {
-                    if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
+                    let bare_template = param_hint.is_some_and(
+                        |h| matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name.as_str()),
+                    );
+                    if bare_template && let Some(literal) = literal_arg_type(arg_text.trim()) {
+                        subs.insert(tpl_name.to_string(), literal);
+                    } else if let Some(resolved_type) =
+                        Self::resolve_arg_text_to_type(arg_text, ctx)
+                    {
                         // `resolve_arg_text_to_type` collapses any `[...]`
                         // literal to the bare `array` keyword, which loses
                         // the argument's own keys. When the template binds
@@ -1633,7 +1650,8 @@ fn ancestor_bound_binding(
 /// bound names, then fill in the template params no argument bound.
 ///
 /// The halves exist so a raw name never leaks downstream. An unbound
-/// template resolves to its declared upper bound (`@template T of Foo` →
+/// template resolves to its declared default (`@template T of object =
+/// \stdClass` → `stdClass`), else its upper bound (`@template T of Foo` →
 /// `Foo`) or `mixed`, following PHPStan's `resolveToBounds()`. A constant
 /// operand resolves to the array shape it names, which is what lets the
 /// substitution every call site already runs finish the operator:
@@ -1647,6 +1665,7 @@ pub(crate) fn finish_template_subs(
     subs: &mut HashMap<String, PhpType>,
     template_params: &[Atom],
     template_param_bounds: &crate::atom::AtomMap<PhpType>,
+    template_param_defaults: &[(Atom, PhpType)],
     return_type: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) {
@@ -1661,12 +1680,20 @@ pub(crate) fn finish_template_subs(
     );
 
     for tpl_name in template_params {
-        subs.entry(tpl_name.to_string()).or_insert_with(|| {
-            template_param_bounds
-                .get(tpl_name)
-                .map(|bound| bound.substitute(&constant_subs))
-                .unwrap_or_else(PhpType::mixed)
-        });
+        if subs.contains_key(tpl_name.as_str()) {
+            continue;
+        }
+        let fallback = template_param_defaults
+            .iter()
+            .find(|(name, _)| name == tpl_name)
+            .map(|(_, default)| default.substitute(subs))
+            .or_else(|| {
+                template_param_bounds
+                    .get(tpl_name)
+                    .map(|bound| bound.substitute(&constant_subs))
+            })
+            .unwrap_or_else(PhpType::mixed);
+        subs.insert(tpl_name.to_string(), fallback);
     }
 
     for (name, shape) in constant_subs {
@@ -1897,6 +1924,35 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
 fn names_template_directly(hint: &PhpType, tpl_name: &str) -> bool {
     matches!(hint.kind(), TypeKind::Generic(g)
         if g.args.iter().any(|a| matches!(a.kind(), TypeKind::Named(n) if &**n == tpl_name)))
+}
+
+/// Generalize a literal bound to a template of an object type.
+///
+/// An object outlives the call that shaped it, so `new Box(42)` is a
+/// `Box<int>` that can hold any int later rather than a `Box<42>`, the way
+/// PHPStan generalizes it; a `@phpstan-self-out self<T>` result is the same
+/// kind of type. A bound that is itself a scalar (`@template T of 'a'|'b'`,
+/// `of int`) says the literal is the point, except `array-key`, which only
+/// says the value can index an array.
+pub(crate) fn generalize_object_template_arg(ty: &PhpType, bound: Option<&PhpType>) -> PhpType {
+    let keeps_literals = bound.is_some_and(|bound| {
+        !bound.is_array_key()
+            && bound.union_members().iter().all(|member| {
+                member.is_string_subtype()
+                    || member.is_int_subtype()
+                    || member.is_float_subtype()
+                    || member.is_bool()
+                    || member.is_true()
+                    || member.is_false()
+                    || matches!(member.kind(), TypeKind::Named(n)
+                        if n.eq_ignore_ascii_case("scalar") || n.eq_ignore_ascii_case("numeric"))
+            })
+    });
+    if keeps_literals {
+        ty.clone()
+    } else {
+        ty.widen_scalar_literals()
+    }
 }
 
 #[cfg(test)]

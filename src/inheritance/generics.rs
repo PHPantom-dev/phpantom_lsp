@@ -221,8 +221,10 @@ pub(crate) fn property_references_params(
 }
 
 /// Fill in every template parameter of `source` that `subs` leaves
-/// unbound, using the parameter's declared bound (`@template T of object`
-/// → `object`) or `mixed` where it declares none.
+/// unbound, using the parameter's declared default (`@template T = Foo`),
+/// else its bound (`@template T of object` → `object`), else `mixed`. A
+/// default or bound naming another parameter reads what that one is bound
+/// to.
 ///
 /// A class that extends, uses, or implements a generic without saying what
 /// it binds the parameters to would otherwise leak the raw template names
@@ -233,12 +235,8 @@ pub(crate) fn fill_template_bounds(source: &ClassInfo, subs: &mut HashMap<String
         if subs.contains_key(key.as_str()) {
             continue;
         }
-        let bound = source
-            .template_param_bounds
-            .get(param_name)
-            .cloned()
-            .unwrap_or_else(PhpType::mixed);
-        subs.insert(key, bound);
+        let fallback = default_type_arg(source, param_name).substitute(subs);
+        subs.insert(key, fallback);
     }
 }
 
@@ -308,29 +306,41 @@ pub(crate) fn build_substitution_map(
         type_args.len(),
     );
 
+    let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in parent.template_params.iter().enumerate() {
-        if i < offset {
-            // Skipped leading (key-like) param: fall back to its declared
-            // bound or `mixed` so the raw template name never leaks.
-            let fallback = parent
-                .template_param_bounds
-                .get(param_name)
-                .cloned()
-                .unwrap_or_else(PhpType::mixed);
-            map.insert(param_name.to_string(), fallback);
-            continue;
+        match i.checked_sub(offset).and_then(|index| type_args.get(index)) {
+            Some(arg) => {
+                // Apply any active substitutions to the type argument.
+                // This handles chaining: if arg is "T" and active_subs has
+                // {T => Foo}, the result is {param_name => Foo}.
+                let resolved = if active_subs.is_empty() {
+                    arg.clone()
+                } else {
+                    arg.substitute(active_subs)
+                };
+                map.insert(param_name.to_string(), resolved);
+            }
+            // A skipped leading (key-like) param falls back to its declared
+            // default, bound, or `mixed` so the raw template name never
+            // leaks.
+            None if i < offset => omitted.push(param_name),
+            // A trailing param the arguments stop short of takes its
+            // declared default, which can name another parameter
+            // (`@template EO of DI = DI`) and so stands for what that one
+            // received. Without a default it is left for
+            // `fill_template_bounds`.
+            None if parent.template_param_defaults.contains_key(param_name) => {
+                omitted.push(param_name);
+            }
+            None => {}
         }
-        if let Some(arg) = type_args.get(i - offset) {
-            // Apply any active substitutions to the type argument.
-            // This handles chaining: if arg is "T" and active_subs has
-            // {T => Foo}, the result is {param_name => Foo}.
-            let resolved = if active_subs.is_empty() {
-                arg.clone()
-            } else {
-                arg.substitute(active_subs)
-            };
-            map.insert(param_name.to_string(), resolved);
-        }
+    }
+    let fallbacks: Vec<PhpType> = omitted
+        .iter()
+        .map(|param_name| default_type_arg(parent, param_name).substitute(&map))
+        .collect();
+    for (param_name, fallback) in omitted.into_iter().zip(fallbacks) {
+        map.insert(param_name.to_string(), fallback);
     }
 
     map
@@ -417,24 +427,27 @@ pub(crate) fn build_generic_subs(
     );
 
     let mut subs = HashMap::new();
+    let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in class.template_params.iter().enumerate() {
-        if i < offset {
-            // Skipped (right-aligned) params: fall back to their
-            // declared default, upper bound, or `mixed` so the raw
-            // template name never leaks into downstream consumers.
-            let fallback = default_type_arg(class, param_name);
-            subs.insert(param_name.to_string(), fallback);
-            continue;
+        // Skipped (right-aligned) params, and params left over once the
+        // arguments run out, fall back to their declared default, upper
+        // bound, or `mixed` so the raw template name never leaks into
+        // downstream consumers.
+        match i.checked_sub(offset).and_then(|index| type_args.get(index)) {
+            Some(arg) => {
+                subs.insert(param_name.to_string(), arg.clone());
+            }
+            None => omitted.push(param_name),
         }
-        if let Some(arg) = type_args.get(i - offset) {
-            subs.insert(param_name.to_string(), arg.clone());
-        } else {
-            // Unbound param (more template params than type args and
-            // right-alignment didn't apply): use its default before
-            // falling back to the upper bound or `mixed`.
-            let fallback = default_type_arg(class, param_name);
-            subs.insert(param_name.to_string(), fallback);
-        }
+    }
+    // A default can name another parameter (`@template EO of DI = DI`), which
+    // stands for whatever that parameter received here.
+    let fallbacks: Vec<PhpType> = omitted
+        .iter()
+        .map(|param_name| default_type_arg(class, param_name).substitute(&subs))
+        .collect();
+    for (param_name, fallback) in omitted.into_iter().zip(fallbacks) {
+        subs.insert(param_name.to_string(), fallback);
     }
 
     subs

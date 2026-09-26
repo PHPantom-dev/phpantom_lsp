@@ -62,9 +62,9 @@ class Foo
 	public function doFoo()
 	{
 		$c = new TypeCollection(new ClassStringType(\stdClass::class));
-		assertType('array<class-string<stdClass>>', $c->validate([\stdClass::class])); // SKIP: a template bound through an argument's ancestors, or by several arguments, is lost
+		assertType('array<class-string<stdClass>>', $c->validate([\stdClass::class]));
 		$c2 = new TypeCollection(new StdClassType());
-		assertType('array<class-string<stdClass>>', $c2->validate([\stdClass::class])); // SKIP: a template bound through an argument's ancestors, or by several arguments, is lost
+		assertType('array<class-string<stdClass>>', $c2->validate([\stdClass::class]));
 	}
 
 	/**

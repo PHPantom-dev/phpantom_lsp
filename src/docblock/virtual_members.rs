@@ -207,6 +207,7 @@ pub fn extract_method_tags_from_info(info: &DocblockInfo) -> Vec<MethodInfo> {
             deprecated_replacement: None,
             template_params,
             template_param_bounds,
+            template_param_defaults: Default::default(),
             template_bindings,
             has_scope_attribute: false,
             is_abstract: false,

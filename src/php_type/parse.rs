@@ -630,6 +630,7 @@ fn flatten_binary<'ast>(
 /// - `key-of<array{a: int, b: string}>` → `'a'|'b'`
 /// - `key-of<array{'x', 5: 'y'}>` → `0|5`
 /// - `key-of<array<string, mixed>>` → `string`
+/// - `key-of<array<mixed>>` → `array-key`
 /// - `key-of<list<T>>` → `int`
 /// - `key-of<list<int>|array{a: int}>` → `int|'a'`
 /// - Otherwise returns `key-of<T>` unchanged.
@@ -674,12 +675,15 @@ pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
             let n = g.name.to_ascii_lowercase();
             match n.as_str() {
                 "array" | "non-empty-array" if g.args.len() == 2 => g.args[0].clone(),
-                "array" | "non-empty-array" if g.args.len() == 1 => PhpType::named(atom("int")),
+                // The single-argument form leaves the keys unconstrained.
+                "array" | "non-empty-array" if g.args.len() == 1 => {
+                    PhpType::named(atom("array-key"))
+                }
                 "list" | "non-empty-list" => PhpType::named(atom("int")),
                 _ => PhpType::key_of(resolved.clone()),
             }
         }
-        TypeKind::Array(_) => PhpType::named(atom("int")),
+        TypeKind::Array(_) => PhpType::named(atom("array-key")),
         _ => PhpType::key_of(resolved.clone()),
     }
 }

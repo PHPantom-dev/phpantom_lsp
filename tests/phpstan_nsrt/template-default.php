@@ -19,7 +19,7 @@ class Test
  */
 function foo(Test $one, Test $two, Test $three)
 {
-	assertType('TemplateDefault\\Test<false, true>', $one); // SKIP: template defaults are ignored
+	assertType('TemplateDefault\\Test<false, true>', $one); // SKIP: a declared generic type that omits a defaulted argument does not spell it out
 	assertType('TemplateDefault\\Test<false, false>', $two);
 	assertType('TemplateDefault\\Test<false, false, false>', $three);
 }
@@ -101,7 +101,7 @@ function () {
 	$form = new Form();
 
 	assertType('TemplateDefault\\FormData', $form->mapValues(new FormData));
-	assertType('stdClass', $form->mapValues()); // SKIP: template defaults are ignored
+	assertType('stdClass', $form->mapValues());
 };
 
 /**
@@ -131,6 +131,6 @@ interface Baz extends Foo
 }
 
 function (Bar $bar, Baz $baz) {
-	assertType('string', $bar->get()); // SKIP: template defaults are ignored
+	assertType('string', $bar->get());
 	assertType('bool', $baz->get());
 };

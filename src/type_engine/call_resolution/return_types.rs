@@ -1174,6 +1174,29 @@ pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Opti
     None
 }
 
+/// The literal type of a string or integer literal argument, or `None` for
+/// anything else.
+///
+/// [`resolve_literal_type`] widens both to their base type, which is what
+/// most argument checks want. A template bound straight from the argument
+/// (`@param T $a` with `id('hello')`) keeps the value instead, the way the
+/// forward walker types `$a = 'hello'`. A double-quoted string that
+/// interpolates is only known to be a string.
+pub(crate) fn literal_arg_type(text: &str) -> Option<PhpType> {
+    let quoted = |q: char| text.len() >= 2 && text.starts_with(q) && text.ends_with(q);
+    if quoted('\'') || (quoted('"') && !text.contains('$')) {
+        return Some(PhpType::literal_string_raw(text));
+    }
+    let numeric = text.strip_prefix('-').unwrap_or(text);
+    let is_octal = numeric.len() > 1 && numeric.starts_with('0');
+    if is_octal || numeric.is_empty() || !numeric.bytes().all(|b| b.is_ascii_digit() || b == b'_') {
+        return None;
+    }
+    let digits: String = text.chars().filter(|&c| c != '_').collect();
+    let value = digits.parse::<i64>().ok()?;
+    Some(PhpType::literal_int(value.to_string()))
+}
+
 /// Resolve a literal expression to its PHP type.
 ///
 /// Returns `Some(PhpType)` for string literals (`"…"`, `'…'`), integer

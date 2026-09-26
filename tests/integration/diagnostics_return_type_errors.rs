@@ -4671,3 +4671,45 @@ trait HasFactory
         "the guard rules the template out, so the return satisfies the declared type: {messages:?}"
     );
 }
+
+/// A key whose type nobody measured is PHP's whole key domain, so an array
+/// written through it is not held to both `int` and `string`.
+#[test]
+fn a_write_through_an_unknown_key_keeps_the_keys_benevolent() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function typed(mixed $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+/** @return array<int, string> */
+function untyped($k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_write_through_a_declared_array_key_is_still_enforced() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function f(int|string $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}

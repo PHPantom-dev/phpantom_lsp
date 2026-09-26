@@ -346,12 +346,25 @@ impl ParameterInfo {
     /// null. Call this after a docblock `@param` merge has (re)computed
     /// `type_hint`, since the merge would otherwise drop the implied null.
     /// The operation is idempotent.
-    pub fn apply_null_default(&mut self) {
-        if self.defaults_to_null()
-            && let Some(t) = self.type_hint.take()
-        {
-            self.type_hint = Some(t.or_null());
+    ///
+    /// A type the default can bind a template in is left alone:
+    /// `@param T $t` with `$t = null` is still `T`, and the `null` is one
+    /// of the values `T` stands for rather than something added to it.
+    /// `is_template` names the templates in scope.
+    pub fn apply_null_default(&mut self, is_template: impl Fn(&str) -> bool) {
+        if !self.defaults_to_null() {
+            return;
         }
+        let Some(t) = self.type_hint.take() else {
+            return;
+        };
+        let names_template =
+            |ty: &PhpType| matches!(ty.kind(), TypeKind::Named(n) if is_template(n));
+        let binds_template = match t.kind() {
+            TypeKind::Union(members) => members.iter().any(names_template),
+            _ => names_template(&t),
+        };
+        self.type_hint = Some(if binds_template { t } else { t.or_null() });
     }
 
     /// Whether the declared default value is the literal `null`.
@@ -510,6 +523,13 @@ pub struct MethodInfo {
     /// Used by hover to display the constraint when the return type or a
     /// parameter type is a method-level template parameter.
     pub template_param_bounds: AtomMap<PhpType>,
+    /// Defaults for method-level template parameters
+    /// (`@template T of object = \stdClass`), which a call that leaves the
+    /// parameter unbound resolves it to instead of the bound.
+    ///
+    /// A slice rather than a map: most methods declare none, and an empty
+    /// boxed slice costs half an empty map on every `MethodInfo`.
+    pub template_param_defaults: Box<[(Atom, PhpType)]>,
     /// Mappings from method-level template parameter names to the method
     /// parameter names (with `$` prefix) that directly bind them via
     /// `@param` annotations.
@@ -635,6 +655,7 @@ impl MethodInfo {
             && self.deprecated_replacement == other.deprecated_replacement
             && self.template_params == other.template_params
             && self.template_param_bounds == other.template_param_bounds
+            && self.template_param_defaults == other.template_param_defaults
             && self.template_bindings == other.template_bindings
             && self.has_scope_attribute == other.has_scope_attribute
             && self.is_abstract == other.is_abstract
@@ -704,6 +725,7 @@ impl MethodInfo {
             template_params: Vec::new(),
             template_param_bounds: AtomMap::default(),
             template_bindings: Vec::new(),
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -1262,6 +1284,10 @@ pub struct FunctionInfo {
     /// when no bound exists) so that raw template names never leak
     /// into downstream consumers.
     pub template_param_bounds: AtomMap<PhpType>,
+    /// Defaults for function-level template parameters
+    /// (`@template T = string`), which a call that leaves the parameter
+    /// unbound resolves it to instead of the bound.
+    pub template_param_defaults: Box<[(Atom, PhpType)]>,
     /// Exception types from `@throws` docblock tags.
     ///
     /// Populated during parsing from the function's docblock.  Used by
@@ -1337,6 +1363,7 @@ impl FunctionInfo {
             || self.template_params != other.template_params
             || self.template_bindings != other.template_bindings
             || self.template_param_bounds != other.template_param_bounds
+            || self.template_param_defaults != other.template_param_defaults
             || self.type_assertions != other.type_assertions
             || self.throws != other.throws
             || self.namespace != other.namespace

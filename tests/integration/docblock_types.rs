@@ -2485,3 +2485,64 @@ function f(Bar $b) {
         &[("$copy", "Bar"), ("$other", "Foo"), ("$maybe", "Bar|null")],
     );
 }
+
+/// A template several constructor arguments bind is what all of them hold,
+/// and an object built from literals holds their base types, since it can
+/// hold other values of that type later.
+#[test]
+fn constructor_templates_union_their_arguments_and_widen_literals() {
+    crate::common::assert_assigned_types(
+        "<?php
+class Cat {}
+class Dog {}
+/** @template T */
+class Pair {
+    /**
+     * @param T $a
+     * @param T $b
+     */
+    public function __construct($a, $b) {}
+}
+/** @template T */
+class Box {
+    /** @param T $v */
+    public function __construct($v) {}
+}
+/** @template T of 'a'|'b' */
+class Tagged {
+    /** @param T $v */
+    public function __construct($v) {}
+}
+function f() {
+    $pair = new Pair(new Cat(), new Dog());
+    $box = new Box(42);
+    $tagged = new Tagged('a');
+}
+",
+        &[
+            ("$pair", "Pair<Cat|Dog>"),
+            ("$box", "Box<int>"),
+            ("$tagged", "Tagged<'a'>"),
+        ],
+    );
+}
+
+/// A function template no argument binds resolves to its declared
+/// default, ahead of its bound.
+#[test]
+fn an_unbound_function_template_takes_its_default() {
+    crate::common::assert_assigned_types(
+        "<?php
+/**
+ * @template T of object = \\stdClass
+ * @param T|null $v
+ * @return T
+ */
+function make(?object $v = null): object { return $v ?? new \\stdClass(); }
+function f() {
+    $made = make();
+}
+",
+        &[("$made", "stdClass")],
+    );
+}

@@ -162,6 +162,7 @@ impl Backend {
                         see_refs,
                         func_template_params,
                         func_template_param_bounds,
+                        func_template_param_defaults,
                         func_template_bindings,
                         throws,
                     ) = if let Some(ctx) = doc_ctx {
@@ -206,6 +207,14 @@ impl Backend {
                                     bound.as_ref().map(|b| (atom(name), b.clone()))
                                 })
                                 .collect();
+                        let tpl_param_defaults: Box<
+                            [(crate::atom::Atom, crate::php_type::PhpType)],
+                        > = params_full
+                            .iter()
+                            .filter_map(|(name, _, _, default)| {
+                                default.as_ref().map(|d| (atom(name), d.clone()))
+                            })
+                            .collect();
                         let tpl_bindings: Vec<(crate::atom::Atom, crate::atom::Atom)> =
                             if !tpl_params.is_empty() {
                                 info.as_ref()
@@ -289,6 +298,7 @@ impl Backend {
                             see_refs,
                             tpl_params,
                             tpl_param_bounds,
+                            tpl_param_defaults,
                             tpl_bindings,
                             throws,
                         )
@@ -309,6 +319,7 @@ impl Backend {
                             Vec::new(),
                             Vec::new(),
                             crate::atom::AtomMap::<crate::php_type::PhpType>::default(),
+                            Box::default(),
                             Vec::new(),
                             Vec::new(),
                         )
@@ -324,7 +335,9 @@ impl Backend {
                     // `type_hint` with a non-nullable docblock type. Re-fold
                     // null for parameters whose default value is `null`.
                     for param in &mut parameters {
-                        param.apply_null_default();
+                        param.apply_null_default(|name| {
+                            func_template_params.iter().any(|t| t == name)
+                        });
                     }
 
                     // `@pure` promises the call changes nothing, which is what
@@ -371,6 +384,7 @@ impl Backend {
                             template_params: func_tpl_atoms,
                             template_param_bounds: func_template_param_bounds,
                             template_bindings: func_template_bindings,
+                            template_param_defaults: func_template_param_defaults,
                             throws,
                             is_polyfill: false,
                             overloads: Vec::new(),

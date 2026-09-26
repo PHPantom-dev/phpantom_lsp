@@ -63,7 +63,14 @@ fn apply_template_binding_mode(
     let from_walker = || walker_types.and_then(|lookup| lookup(arg_text));
     match *binding_mode {
         TemplateBindingMode::Direct => {
-            if let Some(resolved_type) =
+            let bare_template = param_hint
+                .is_some_and(|h| matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name));
+            if bare_template
+                && let Some(literal) =
+                    crate::type_engine::call_resolution::literal_arg_type(arg_text.trim())
+            {
+                insert_or_union(subs, tpl_name.to_string(), literal);
+            } else if let Some(resolved_type) =
                 Backend::resolve_arg_text_to_type(arg_text, rctx).or_else(from_walker)
             {
                 // An array-literal argument resolves only to the bare
@@ -371,6 +378,7 @@ pub(crate) fn build_function_template_subs(
         &mut subs,
         &func_info.template_params,
         &func_info.template_param_bounds,
+        &func_info.template_param_defaults,
         func_info.return_type.as_ref(),
         rctx,
     );

@@ -13,7 +13,7 @@ class Foo
 		assertType('int', $this->sameWithDefault($int));
 
 		assertType('int|null', $this->same($intOrNull));
-		assertType('int|null', $this->sameWithDefault($intOrNull)); // SKIP: a null default on an untyped @param T parameter makes it ?T
+		assertType('int|null', $this->sameWithDefault($intOrNull));
 
 		assertType('null', $this->same(null));
 		assertType('null', $this->sameWithDefault(null));
@@ -37,7 +37,7 @@ class Foo
 	 * @return T
 	 */
 	function sameWithDefault($t = null) {
-		assertType('T (method Bug6584\Foo::sameWithDefault(), argument)', $t); // SKIP: a null default on an untyped @param T parameter makes it ?T
+		assertType('T (method Bug6584\Foo::sameWithDefault(), argument)', $t);
 		return $t;
 	}
 

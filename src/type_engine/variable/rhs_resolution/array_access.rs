@@ -382,11 +382,10 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
                     }
                 }
             }
-            e.insert(if parts.len() == 1 {
-                parts.into_iter().next().unwrap()
-            } else {
-                PhpType::union(parts)
-            });
+            // A literal from one site and its base type from another bind
+            // the base type: `array_reduce(..., 0)` with an `int` callback
+            // carries an `int`, not a `0|int`.
+            e.insert(PhpType::join_runtime_value_types(parts));
         }
     }
 }

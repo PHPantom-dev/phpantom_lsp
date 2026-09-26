@@ -713,7 +713,10 @@ pub(super) fn infer_array_key_type(index: &Expression<'_>, resolved: &[ResolvedT
         }
     }
 
-    PhpType::union(vec![PhpType::int(), PhpType::string()])
+    // Benevolent for the same reason an unknown foreach key is: this
+    // `int|string` is PHP's whole key domain standing in for a type nobody
+    // measured, so the array it keys must not be held to both branches.
+    PhpType::benevolent(PhpType::union(vec![PhpType::int(), PhpType::string()]))
 }
 
 /// Normalize every possible runtime array-key branch to `int` or `string`.

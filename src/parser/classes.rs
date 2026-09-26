@@ -913,6 +913,7 @@ impl Backend {
                         method_deprecated_replacement,
                         method_template_params,
                         method_template_param_bounds,
+                        method_template_param_defaults,
                         method_template_bindings,
                     ) = if let Some(ref info) = method_docblock_info {
                         let parsed_doc_type = docblock::extract_return_type_from_info(info);
@@ -938,15 +939,17 @@ impl Backend {
 
                         // Extract method-level @template params, their bounds,
                         // and @param bindings for generic type substitution.
-                        let tpl_params_with_bounds =
-                            docblock::extract_template_params_with_bounds_from_info(info);
-                        let tpl_params: Vec<Atom> = tpl_params_with_bounds
+                        let tpl_params_full =
+                            docblock::extract_template_params_full_from_info(info);
+                        let tpl_params: Vec<Atom> =
+                            tpl_params_full.iter().map(|(n, ..)| atom(n)).collect();
+                        let tpl_param_defaults: Box<[(Atom, PhpType)]> = tpl_params_full
                             .iter()
-                            .map(|(n, _)| atom(n))
+                            .filter_map(|(n, _, _, d)| d.clone().map(|d| (atom(n), d)))
                             .collect();
-                        let tpl_param_bounds: AtomMap<PhpType> = tpl_params_with_bounds
+                        let tpl_param_bounds: AtomMap<PhpType> = tpl_params_full
                             .into_iter()
-                            .filter_map(|(n, b)| b.map(|b| (atom(&n), b)))
+                            .filter_map(|(n, b, ..)| b.map(|b| (atom(&n), b)))
                             .collect();
                         let tpl_bindings: Vec<(Atom, Atom)> = if !tpl_params.is_empty() {
                             let tpl_strs: Vec<String> =
@@ -1032,6 +1035,7 @@ impl Backend {
                             depr_info.replacement,
                             tpl_params,
                             tpl_param_bounds,
+                            tpl_param_defaults,
                             tpl_bindings,
                         )
                     } else {
@@ -1056,6 +1060,7 @@ impl Backend {
                             depr_info.replacement,
                             Vec::<Atom>::new(),
                             AtomMap::<PhpType>::default(),
+                            Box::<[(Atom, PhpType)]>::default(),
                             Vec::<(Atom, Atom)>::new(),
                         )
                     };
@@ -1164,7 +1169,12 @@ impl Backend {
                     // `type_hint` with a non-nullable docblock type. Re-fold
                     // null for parameters whose default value is `null`.
                     for param in &mut parameters {
-                        param.apply_null_default();
+                        param.apply_null_default(|name| {
+                            method_template_params
+                                .iter()
+                                .chain(class_template_params)
+                                .any(|t| t == name)
+                        });
                     }
 
                     let has_scope_attr = has_scope_attribute(method);
@@ -1251,6 +1261,7 @@ impl Backend {
                         template_params: method_template_params,
                         template_param_bounds: method_template_param_bounds,
                         template_bindings: method_template_bindings,
+                        template_param_defaults: method_template_param_defaults,
                         has_scope_attribute: has_scope_attr,
                         is_abstract: method.is_abstract(),
                         is_final,

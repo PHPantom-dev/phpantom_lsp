@@ -1574,14 +1574,20 @@ pub(crate) fn process_self_out_narrowing<'b>(
     let mut results: Vec<ResolvedType> = Vec::with_capacity(before.len());
     for rt in &before {
         let mutated = rt.class_info.as_ref().and_then(|owner| {
-            let self_out = owner.get_method_ci(&method_name)?.self_out.clone()?;
-            let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+            let method = owner.get_method_ci(&method_name)?;
+            let self_out = method.self_out.clone()?;
+            let mut template_subs = crate::type_engine::call_resolution::build_call_template_subs(
                 owner,
                 &method_name,
                 &arg_refs,
                 Some(&rt.type_string),
                 &rctx,
             );
+            for (name, ty) in template_subs.iter_mut() {
+                let bound = method.template_param_bounds.get(&crate::atom::atom(name));
+                *ty =
+                    crate::type_engine::call_resolution::generalize_object_template_arg(ty, bound);
+            }
             let substituted = self_out.substitute(&template_subs).simplified();
             let final_ty = if substituted.contains_self_ref() {
                 substituted.replace_self_with_type(&rt.type_string)

@@ -32,8 +32,8 @@ function testUnbounded(
 	string $numericString,
 	string $nonEmptyString
 ): void {
-	assertType('\'hello\'', unbounded('hello')); // SKIP: a literal argument bound to a function template is widened
-	assertType('\'stdClass\'', unbounded('stdClass')); // SKIP: a literal argument bound to a function template is widened
+	assertType('\'hello\'', unbounded('hello'));
+	assertType('\'stdClass\'', unbounded('stdClass'));
 	assertType('class-string', unbounded($classString));
 	assertType('class-string<stdClass>', unbounded($genericClassString));
 
@@ -66,8 +66,8 @@ function testBoundToString(
 	string $nonEmptyString,
 	string $string
 ): void {
-	assertType('\'hello\'', boundToString('hello')); // SKIP: a literal argument bound to a function template is widened
-	assertType('\'stdClass\'', boundToString('stdClass')); // SKIP: a literal argument bound to a function template is widened
+	assertType('\'hello\'', boundToString('hello'));
+	assertType('\'stdClass\'', boundToString('stdClass'));
 	assertType('class-string', boundToString($classString));
 	assertType('class-string<stdClass>', boundToString($genericClassString));
 

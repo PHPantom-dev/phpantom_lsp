@@ -30,6 +30,7 @@ fn empty_function(name: &str) -> FunctionInfo {
         template_params: Vec::new(),
         template_param_bounds: Default::default(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         is_polyfill: false,
         overloads: Vec::new(),
         is_pure: false,

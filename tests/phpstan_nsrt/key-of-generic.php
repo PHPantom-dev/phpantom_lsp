@@ -33,7 +33,7 @@ function test(
 ): void {
 	assertType("'j'|'k'|null", $result->getKey());
 	assertType('0|1|null', $listResult->getKey());
-	assertType('int|string|null', $mixedResult->getKey()); // SKIP: key-of<array<V>> is int instead of int|string
+	assertType('int|string|null', $mixedResult->getKey());
 	assertType('string|null', $stringKeyResult->getKey());
 	assertType('int|null', $intKeyResult->getKey());
 	assertType('null', $emptyResult->getKey());

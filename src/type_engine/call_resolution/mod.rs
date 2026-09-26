@@ -75,7 +75,7 @@ pub(crate) use reflection::{
     resolve_reflected_property_at_new,
 };
 pub(crate) use return_types::{
-    MethodReturnCtx, folded_class_constant_type, folded_global_constant_type,
+    MethodReturnCtx, folded_class_constant_type, folded_global_constant_type, literal_arg_type,
     qualify_class_keyword, resolve_static_access_type,
 };
 pub(crate) use target_cache::{
@@ -85,5 +85,5 @@ pub(crate) use target_cache::{
 pub(crate) use template_subs::{
     array_literal_shape_type, bind_callable_param_template, bind_callable_return_template,
     build_call_template_subs, callable_bindings_last, evaluate_constant_operands,
-    finish_template_subs, type_operator_bound_literal,
+    finish_template_subs, generalize_object_template_arg, type_operator_bound_literal,
 };

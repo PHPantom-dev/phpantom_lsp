@@ -4809,6 +4809,11 @@ fn key_of_concrete_shape_is_evaluated_at_parse_time() {
         "int|string"
     );
     assert_eq!(PhpType::parse("key-of<list<string>>").to_string(), "int");
+    assert_eq!(
+        PhpType::parse("key-of<array<string>>").to_string(),
+        "array-key"
+    );
+    assert_eq!(PhpType::parse("key-of<string[]>").to_string(), "array-key");
 }
 
 #[test]

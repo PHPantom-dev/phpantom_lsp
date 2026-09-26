@@ -22,7 +22,51 @@ No outstanding items.
 
 ## Type comparison
 
-No outstanding items.
+### B424. An array's type arguments are checked with scalar coercion in a file without `strict_types`
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r; // should be reported, is not; is with declare(strict_types=1)
+}
+```
+
+PHP converts a scalar handed to a parameter in a coercive-mode file, but
+never the keys or values inside an array passed whole, so `array<int, V>`
+is no more an `array<string, V>` in a lenient file than in a strict one.
+The same-base generic rule in `is_type_compatible` already compares class
+type arguments strictly for this reason; array-likes still pass the file's
+`strict_types` through, so `int` satisfies a `string` key (and value) in
+a lenient file. A `list<string>` for a `list<int>` is caught either way,
+since `string` does not coerce to `int`.
+
+**Where to look:** `args_strict` in the same-base generic rule in
+`src/diagnostics/type_errors/compatibility.rs`. Expect new diagnostics on
+lenient projects, so check them against the `projects/` corpus.
+
+### B425. A declared generic type that omits a defaulted argument does not spell it out
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @template T1 = true  @template T2 = true */
+class Test {}
+/** @param Test<false> $one */
+function f(Test $one) {} // $one should be Test<false, true>, is Test<false>
+```
+
+Members already see the default (`build_generic_subs` fills it in), but
+the type itself keeps only the arguments written, so hover shows
+`Test<false>` and a comparison against `Test<false, true>` sees two
+different arities. PHPStan fills omitted arguments with their defaults
+when it resolves the type. The fill needs the class loader, so it belongs
+where every declared type (parameter, `@var`, return, property) is
+resolved, not in one consumer.
+
+Found porting PHPStan's `nsrt/template-default.php`; the assertion is
+`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 ## Standard-library return types
 
@@ -289,118 +333,7 @@ it is too slow under the runner (see
 
 ## Array types
 
-### B419. Writing through a key of unknown type makes the keys `int|string`
-**Impact: Low · Complexity: Low**
-
-```php
-/** @return array<string, string> */
-function f(mixed $k): array {
-    $r = [];
-    $r[$k] = 'a';
-    return $r; // reported: non-empty-array<int|string, string> is incompatible
-}
-```
-
-A key whose type is unknown is `array-key`, which the type comparison
-treats as benevolent because nobody measured it. Written through an
-array, it comes out as a plain `int|string` union instead, which both
-halves have to satisfy, so a `string`-keyed return or parameter rejects
-it. Showed up in phpstan-src
-(`build/PHPStan/Build/TurboAttributeCollector.php`, a key read off
-`ReflectionAttribute::newInstance()`).
-
-**Where to look:** the key type recorded by the keyed-write arm in
-`type_engine/variable/array_shape_writes.rs`.
-
-### B390. A literal argument bound to a function template is widened
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T  @param T $a  @return T */
-function id($a) { return $a; }
-id('hello'); // should be 'hello', is string
-```
-
-Binding `T` from a literal argument generalises it to its base type.
-
-Found porting PHPStan's `nsrt/generic-generalization.php`; the
-assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B392. Template defaults are ignored
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T1 = true  @template T2 = string */
-interface Foo { /** @return T2 */ public function get(): mixed; }
-/** @extends Foo<int> */
-interface Bar extends Foo {}
-function f(Bar $b) { $b->get(); } // should be string, is mixed
-```
-
-`@template T = Default` supplies the argument when a type or an `@extends`
-omits it, or when a call leaves it unbound. A default that names another
-template (`@template EO of DI = DI`) should resolve to that template's
-argument.
-
-Found porting PHPStan's `nsrt/template-default-referring-other.php`,
-`nsrt/template-default.php`; the assertions are `// SKIP` in the ported
-copies under `tests/phpstan_nsrt/`.
-
-### B393. A template bound through an argument's ancestors, or by several arguments, is lost
-**Impact: Low · Complexity: Medium-High**
-
-```php
-/** @template T @implements Type<T[]> */
-final class Coll implements Type {
-    /** @param Type<T> $t */ public function __construct(public Type $t) {}
-}
-$c = new Coll(new IntType()); // IntType implements Type<int>
-$c->get(); // should be array<int>, is array
-
-/** @template T @extends P<T, T> */
-class C extends P {}
-new C(new Cat(), new Dog()); // should be C<Cat|Dog>, is C<Dog>
-```
-
-Inference does not walk an argument's own `@implements`/`@extends` to match
-a generic parameter type, and a template bound by several arguments keeps
-only the last binding instead of their union.
-
-Found porting PHPStan's `nsrt/bug-2735.php`, `nsrt/bug-6505.php`; the
-assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
-
-### B394. A `null` default on an untyped `@param T` parameter makes it `?T`
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-class C {
-    /** @template T  @param T $t  @return T */
-    public function same($t = null) { return $t; } // $t should be T, is ?T
-    public function g(?int $x) { $this->same($x); } // should be int|null, is int
-}
-```
-
-The implicit `null` of the default is folded into the declared template, so
-the body sees `?T` and the call site binds `T` with `null` stripped.
-
-Found porting PHPStan's `nsrt/bug-6584.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B395. `key-of<array<V>>` is `int` instead of `int|string`
-**Impact: Low · Complexity: Low**
-
-```php
-/** @template T of array<mixed> */
-interface R { /** @return key-of<T>|null */ public function key(); }
-/** @param R<array<mixed>> $r */
-function f(R $r) { $r->key(); } // should be int|string|null, is int|null
-```
-
-The single-argument `array<V>` form has `array-key` keys.
-
-Found porting PHPStan's `nsrt/key-of-generic.php`; the assertions are
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Laravel
 

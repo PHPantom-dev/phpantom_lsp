@@ -560,7 +560,8 @@ fn split_top_level_union(ty: &str) -> Vec<&str> {
 }
 
 /// Canonicalize spellings of the same type that PHPStan and PHPantom
-/// print differently: `callable(): mixed` is `callable`, `mixed[]` and
+/// print differently: `callable(): mixed` is `callable`, `array-key` is
+/// `int|string`, `mixed[]` and
 /// `array<int|string, V>` are `array` and `array<V>`, `(A|B)` is `A|B`,
 /// a union with `mixed` in it is `mixed`, and `array{}` beside a wider
 /// `array` member adds nothing.
@@ -579,6 +580,7 @@ fn canonicalize_union_spelling(ty: &str) -> String {
         match member {
             "callable():mixed" => "callable".to_string(),
             "Closure():mixed" => "Closure".to_string(),
+            "array-key" => "int|string".to_string(),
             "mixed[]" | "array<mixed>" | "array<mixed, mixed>" => "array".to_string(),
             _ => {
                 for prefix in ["array<int|string, ", "array<array-key, "] {

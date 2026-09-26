@@ -437,8 +437,8 @@ function testBoundedClassExtends(): void
 function testMethodLevelTemplate(): void
 {
 	$w = new Wrapper();
-	assertType('int', $w->identity(42));
-	assertType('string', $w->identity('hello'));
+	assertType('42', $w->identity(42));
+	assertType('\'hello\'', $w->identity('hello'));
 	assertType('DateTime', $w->identity(new \DateTime()));
 	assertType('User', $w->identity(new User()));
 }
@@ -486,14 +486,14 @@ function testGenericParamResolution(): void
 }
 
 // ============================================================
-// 12. Literal types (PHPantom normalizes to base types)
+// 12. Literal types (kept through a function template)
 // ============================================================
 
 function testLiterals(): void
 {
-	assertType('int', identity(1)); // literal '1' → 'int'
-	assertType('string', identity('foo')); // literal '\'foo\'' → 'string'
-	assertType('true', identity(true)); // literal 'true' preserved through template inference
+	assertType('1', identity(1));
+	assertType('\'foo\'', identity('foo'));
+	assertType('true', identity(true));
 }
 
 // ============================================================
@@ -526,8 +526,8 @@ function makePair($key, $value)
 
 function testTwoTemplateFn(): void
 {
-	assertType('array<string, int>', makePair('a', 1));
-	assertType('array<int, User>', makePair(0, new User()));
+	assertType('array<\'a\', 1>', makePair('a', 1));
+	assertType('array<0, User>', makePair(0, new User()));
 }
 
 // ============================================================

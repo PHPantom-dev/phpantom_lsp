@@ -1134,6 +1134,7 @@ fn func(name: &str) -> FunctionInfo {
         deprecated_replacement: None,
         template_params: Vec::new(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         template_param_bounds: Default::default(),
         throws: Vec::new(),
         is_polyfill: false,

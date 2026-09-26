@@ -100,7 +100,7 @@ class ChildThree extends ParentWithConstructor
 
 function (): void {
 	$a = new ChildThree(new Cat(), new Dog());
-	assertType('Bug2735\\ChildThree<Bug2735\\Cat|Bug2735\\Dog>', $a); // SKIP: a template bound through an argument's ancestors, or by several arguments, is lost
+	assertType('Bug2735\\ChildThree<Bug2735\\Cat|Bug2735\\Dog>', $a);
 };
 
 /**

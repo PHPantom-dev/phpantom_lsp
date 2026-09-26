@@ -107,7 +107,7 @@ function test(
 function testMoneyCodecDirect(MoneyCodec $codec): void
 {
     assertType('TemplateDefaultReferringOther\MoneyValue', $codec->decode(['currency' => 'CZK', 'cents' => 123]));
-    assertType('array{currency: string, cents: int}', $codec->encode(new MoneyValue('CZK', 100))); // SKIP: template defaults are ignored
+    assertType('array{currency: string, cents: int}', $codec->encode(new MoneyValue('CZK', 100)));
 }
 
 function testDateTimeCodecDirect(DateTimeInterfaceCodec $codec): void

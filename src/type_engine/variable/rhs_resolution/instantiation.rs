@@ -380,13 +380,21 @@ pub(crate) fn extract_generic_arg_from_ancestor(
     let class_loader = rctx.class_loader;
     let cls = class_loader(class_name)?;
 
+    // The argument's own type arguments are what its `@extends`/
+    // `@implements` names stand for: `ClassStringType<class-string<Foo>>`
+    // with `@implements Type<class-string<T>>` hands `Type` a
+    // `class-string<Foo>`, not a `class-string<T>`.
+    let subs = match arg_type.kind() {
+        TypeKind::Generic(g) => crate::inheritance::build_generic_subs(&cls, &g.args),
+        _ => HashMap::new(),
+    };
     let wrapper_short = crate::util::short_name(wrapper_name);
     let mut visited = Vec::new();
     ancestor_generic_arg(
         &cls,
         wrapper_short,
         tpl_position,
-        &HashMap::new(),
+        &subs,
         &mut visited,
         class_loader,
     )
@@ -504,6 +512,7 @@ pub(crate) fn remap_inherited_ctor_subs(
     // need a reference across loop iterations.
     let mut cur_parent_class = child.parent_class;
     let mut cur_extends_generics = child.extends_generics.clone();
+    let mut owner_params: Vec<crate::atom::Atom> = Vec::new();
 
     for _ in 0..15 {
         let parent_name = match cur_parent_class {
@@ -532,6 +541,7 @@ pub(crate) fn remap_inherited_ctor_subs(
                 }
             }
             ancestor_to_child = new_mapping;
+            owner_params.clone_from(&parent.template_params);
         } else {
             // No @extends generics — can't map further.
             break;
@@ -547,14 +557,25 @@ pub(crate) fn remap_inherited_ctor_subs(
     }
 
     // Now remap: for each entry in raw_subs (keyed by ancestor param name),
-    // find which child param it maps to via ancestor_to_child.
+    // find which child param it maps to via ancestor_to_child. Several
+    // ancestor params can land on one child param (`@extends P<T, T>`), and
+    // then the child's is what all of them were bound to, joined in the
+    // ancestor's declaration order so the union reads the way the arguments
+    // were written.
+    let mut ordered: Vec<(&String, &PhpType)> = raw_subs.iter().collect();
+    ordered.sort_by_key(|(name, _)| {
+        owner_params
+            .iter()
+            .position(|param| param.as_str() == name.as_str())
+            .unwrap_or(usize::MAX)
+    });
     let mut result = HashMap::new();
-    for (ancestor_param, inferred_type) in raw_subs {
+    for (ancestor_param, inferred_type) in ordered {
         if let Some(child_type) = ancestor_to_child.get(ancestor_param) {
             // child_type is typically PhpType::named("V") — extract the name.
             match child_type.kind() {
                 TypeKind::Named(child_param) => {
-                    result.insert(child_param.to_string(), inferred_type.clone());
+                    insert_or_union(&mut result, child_param.to_string(), inferred_type.clone());
                 }
                 _ => {
                     // Complex mapping (e.g. mapped to a concrete type, not a
@@ -580,7 +601,7 @@ pub(crate) fn remap_inherited_ctor_subs(
 ///   - Generic wrapper: `@param Wrapper<T> $w` + `new Foo(new Wrapper(new X()))` → `T = X`
 ///     (by resolving the wrapper's constructor template params recursively)
 pub(super) fn build_constructor_template_subs(
-    _class: &ClassInfo,
+    class: &ClassInfo,
     ctor: &crate::types::MethodInfo,
     arg_texts: &[String],
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
@@ -639,8 +660,17 @@ pub(super) fn build_constructor_template_subs(
 
         match binding_mode {
             TemplateBindingMode::Direct => {
-                if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx) {
-                    subs.insert(tpl_name.to_string(), resolved_type);
+                // A literal is kept here and generalized below, which is
+                // where a scalar bound gets to hold on to it.
+                let bare_template = param_hint
+                    .is_some_and(|h| matches!(h.kind(), TypeKind::Named(n) if n == tpl_name));
+                let literal = bare_template
+                    .then(|| crate::type_engine::call_resolution::literal_arg_type(arg_text.trim()))
+                    .flatten();
+                if let Some(resolved_type) =
+                    literal.or_else(|| Backend::resolve_arg_text_to_type(arg_text, rctx))
+                {
+                    insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                 }
             }
             TemplateBindingMode::CallableReturnType => {
@@ -750,6 +780,15 @@ pub(super) fn build_constructor_template_subs(
                 }
             }
         }
+    }
+
+    for (name, ty) in subs.iter_mut() {
+        let name = atom(name);
+        let bound = class
+            .template_param_bounds
+            .get(&name)
+            .or_else(|| ctor.template_param_bounds.get(&name));
+        *ty = crate::type_engine::call_resolution::generalize_object_template_arg(ty, bound);
     }
 
     subs
@@ -1083,6 +1122,31 @@ pub(crate) fn type_contains_name(ty: &PhpType, name: &str) -> bool {
 /// recursively resolve the wrapper's constructor template params to
 /// find the concrete type for the template param at `tpl_position`.
 pub(super) fn resolve_generic_wrapper_template(
+    wrapper_name: &str,
+    tpl_position: usize,
+    arg_text: &str,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
+    wrapper_constructor_template(wrapper_name, tpl_position, arg_text, rctx, ctx).or_else(|| {
+        // The argument need not be the wrapper itself: an `IntType` that
+        // `@implements Type<int>` hands a `Type<T>` parameter an `int`.
+        if matches!(
+            wrapper_name,
+            "array" | "list" | "non-empty-array" | "non-empty-list"
+        ) {
+            return None;
+        }
+        let resolved = Backend::resolve_arg_text_to_type(arg_text, rctx)?;
+        extract_generic_arg_from_ancestor(&resolved, wrapper_name, tpl_position, rctx)
+    })
+}
+
+/// [`resolve_generic_wrapper_template`] for an argument that is the
+/// wrapper itself: an array literal for an array-like wrapper, or a
+/// `new Wrapper(…)` whose constructor arguments bind the wrapper's
+/// templates.
+fn wrapper_constructor_template(
     wrapper_name: &str,
     tpl_position: usize,
     arg_text: &str,
