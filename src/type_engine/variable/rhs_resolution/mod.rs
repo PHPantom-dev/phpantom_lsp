@@ -54,6 +54,7 @@ mod arithmetic;
 mod array_access;
 mod calls;
 mod instantiation;
+mod magic_constants;
 mod property_access;
 mod scalar_fold;
 
@@ -61,6 +62,7 @@ use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
+use magic_constants::{EnclosingFunction, enclosing_function_at};
 use property_access::resolve_rhs_property_access;
 
 pub(crate) use arithmetic::{
@@ -1409,16 +1411,27 @@ fn resolve_rhs_expression_inner<'b>(
 
 /// The type a magic constant holds.
 ///
-/// `__LINE__` is the only one PHP gives a number; every other magic
-/// constant is a string. `__CLASS__` narrows further to
-/// `class-string<Foo>`, the way `Foo::class` does, so the class identity
-/// survives into `new $class` and `class-string` parameters. A trait body
-/// only knows it will be *some* class name at runtime (the using class,
-/// not the trait), so it gets a bare `class-string`, and code outside any
-/// class-like gets the plain `string` the empty value is.
+/// Every magic constant's value is known at the point it is written, so
+/// each resolves to the exact literal rather than its base type:
+/// `__LINE__` to the literal line number, `__NAMESPACE__`/`__FUNCTION__`/
+/// `__METHOD__`/`__TRAIT__` to the literal string PHP would substitute
+/// there. `__CLASS__` narrows further to `class-string<Foo>`, the way
+/// `Foo::class` does, so the class identity survives into `new $class`
+/// and `class-string` parameters — the named inner type already pins it
+/// exactly. A trait body only knows it will be *some* class name at
+/// runtime (the using class, not the trait), so `__CLASS__` gets a bare
+/// `class-string` there, and code outside any class-like gets the plain
+/// `string` the empty value is.
 fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
     match magic {
-        MagicConstant::Line(_) => PhpType::int(),
+        MagicConstant::Line(_) => {
+            let offset = magic.span().start.offset as usize;
+            let line = crate::text_position::offset_to_position(ctx.content, offset).line + 1;
+            PhpType::literal_int(line.to_string())
+        }
+        MagicConstant::Namespace(_) => {
+            PhpType::literal_string_value(ctx.current_class.file_namespace.as_deref().unwrap_or(""))
+        }
         MagicConstant::Class(_) if ctx.current_class.name.is_empty() => PhpType::string(),
         MagicConstant::Class(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
             PhpType::class_string(None)
@@ -1426,7 +1439,38 @@ fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) ->
         MagicConstant::Class(_) => {
             PhpType::class_string(Some(PhpType::named(ctx.current_class.fqn())))
         }
+        MagicConstant::Trait(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
+            PhpType::literal_string_value(ctx.current_class.fqn())
+        }
+        MagicConstant::Trait(_) => PhpType::literal_string_value(""),
+        MagicConstant::Function(_) => {
+            PhpType::literal_string_value(enclosing_function_display_name(magic, ctx))
+        }
+        MagicConstant::Method(_) => {
+            let name = enclosing_function_display_name(magic, ctx);
+            if name.is_empty() || ctx.current_class.name.is_empty() {
+                PhpType::literal_string_value(name)
+            } else {
+                PhpType::literal_string_value(format!("{}::{}", ctx.current_class.fqn(), name))
+            }
+        }
         _ => PhpType::string(),
+    }
+}
+
+/// The bare name `__FUNCTION__`/`__METHOD__` substitute for the function,
+/// method, closure, or arrow function directly enclosing `magic` — its
+/// declared name, `{closure}` for an anonymous one, or the empty string
+/// for top-level code outside any function-like construct.
+fn enclosing_function_display_name(
+    magic: &MagicConstant<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> String {
+    let offset = magic.span().start.offset;
+    match enclosing_function_at(ctx.content, offset) {
+        Some(EnclosingFunction::Named(name)) => name,
+        Some(EnclosingFunction::Closure) => "{closure}".to_string(),
+        None => String::new(),
     }
 }
 

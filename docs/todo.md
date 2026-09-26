@@ -116,8 +116,8 @@ unlikely to move the needle for most users.
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
 | B458 | [An `(array)` cast of a union with a non-array member is plain `array`](todo/bugs.md#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array) | Low | Low |
 | B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
-| B474 | [A magic constant resolves to its base type rather than its value](todo/bugs.md#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value) | Low | Low-Medium |
-| B479 | [`??=` on an offset whose key is not a variable leaves the offset `null`](todo/bugs.md#b479--on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null) | Low | Low-Medium |
+| B481 | [`??=` on an offset whose key is not a variable leaves the offset `null`](todo/bugs.md#b481--on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null) | Low | Low-Medium |
+| B482 | [`__PROPERTY__` inside a property hook resolves to its base type rather than its value](todo/bugs.md#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value) | Low | Low |
 | B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
 | B441 | [A class constant whose initializer names an enum case is not resolved](todo/bugs.md#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved) | Low | Medium |
 | B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |

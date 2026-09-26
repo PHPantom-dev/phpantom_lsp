@@ -15435,9 +15435,12 @@ fn hover_namespaced_constant_through_every_spelling() {
     }
 }
 
-/// `__LINE__` is the only magic constant PHP gives a number; the rest are
-/// strings, and `__CLASS__` keeps the class identity the way `Foo::class`
-/// does so `new $class` and `class-string` parameters still work.
+/// Every magic constant's value is known at the point it is written, so
+/// each carries its exact literal rather than its base type: `__LINE__`
+/// the literal line number, `__NAMESPACE__`/`__FUNCTION__`/`__METHOD__`
+/// the literal string PHP would substitute there. `__CLASS__` keeps the
+/// class identity the way `Foo::class` does so `new $class` and
+/// `class-string` parameters still work.
 #[test]
 fn hover_magic_constants_carry_their_own_types() {
     let backend = create_test_backend();
@@ -15448,6 +15451,7 @@ namespace App;
 trait Probe {
     public function inTrait(): void {
         $traitClass = __CLASS__;
+        $traitTrait = __TRAIT__;
     }
 }
 
@@ -15469,15 +15473,16 @@ $outsideAnyClass = __CLASS__;
 "#;
     for (var, want) in [
         ("$traitClass", "class-string"),
-        ("$line", "int"),
+        ("$traitTrait", "'App\\\\Probe'"),
+        ("$line", "13"),
         ("$file", "string"),
         ("$dir", "string"),
         ("$class", "class-string<Widget>"),
-        ("$trait", "string"),
-        ("$namespace", "string"),
-        ("$method", "string"),
-        ("$function", "string"),
-        ("$sum", "int"),
+        ("$trait", "''"),
+        ("$namespace", "'App'"),
+        ("$method", "'App\\\\Widget::probe'"),
+        ("$function", "'probe'"),
+        ("$sum", "24"),
         ("$outsideAnyClass", "string"),
     ] {
         let needle = format!("{var} = ");
@@ -15487,6 +15492,67 @@ $outsideAnyClass = __CLASS__;
             .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
             as u32;
         let hover = hover_at(&backend, uri, content, line, 9)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
+/// `__FUNCTION__` inside a closure or arrow function names it `{closure}`,
+/// matching PHP, not the enclosing named function it sits in.
+#[test]
+fn hover_magic_constants_inside_closures_report_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+function outer(): void {
+    $fn = function () {
+        $inner = __FUNCTION__;
+    };
+    $arrow = fn() => __FUNCTION__;
+    $arrowResult = $arrow();
+}
+"#;
+    // `$inner` inside the closure body.
+    let hover = hover_at(&backend, uri, content, 3, 9).expect("no hover for $inner");
+    assert!(
+        hover_text(&hover).contains("$inner = '{closure}'"),
+        "__FUNCTION__ inside a closure should be '{{closure}}', got: {}",
+        hover_text(&hover)
+    );
+
+    // The value the arrow function returns.
+    let hover = hover_at(&backend, uri, content, 6, 6).expect("no hover for $arrowResult");
+    assert!(
+        hover_text(&hover).contains("$arrowResult = '{closure}'"),
+        "__FUNCTION__ inside an arrow function should be '{{closure}}', got: {}",
+        hover_text(&hover)
+    );
+}
+
+/// Outside any namespace or function-like construct, `__NAMESPACE__`,
+/// `__FUNCTION__`, and `__METHOD__` are all the empty string, matching
+/// PHP's top-level-code behaviour.
+#[test]
+fn hover_magic_constants_at_top_level_are_empty_strings() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+$namespace = __NAMESPACE__;
+$function = __FUNCTION__;
+$method = __METHOD__;
+"#;
+    for (var, want) in [("$namespace", "''"), ("$function", "''"), ("$method", "''")] {
+        let needle = format!("{var} = ");
+        let line = content
+            .lines()
+            .position(|l| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"))
+            as u32;
+        let hover = hover_at(&backend, uri, content, line, 3)
             .unwrap_or_else(|| panic!("no hover for {var}"));
         assert!(
             hover_text(&hover).contains(&format!("{var} = {want}")),

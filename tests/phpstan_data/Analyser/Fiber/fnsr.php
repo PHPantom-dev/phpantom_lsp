@@ -459,12 +459,13 @@ function (): void {
 
 class MagicConstUser {
 	function doFoo(): void {
-		assertType('471', __LINE__); // SKIP: a magic constant resolves to its base type rather than its value
-		assertType("'FiberNodeScopeResolverTest'", __NAMESPACE__); // SKIP: a magic constant resolves to its base type rather than its value
-		assertType("'FiberNodeScopeResolverTest\\\\MagicConstUser'", __CLASS__); // SKIP: a magic constant resolves to its base type rather than its value
-		assertType("''", __TRAIT__); // SKIP: a magic constant resolves to its base type rather than its value
-		assertType("'doFoo'", __FUNCTION__); // SKIP: a magic constant resolves to its base type rather than its value
-		assertType("'FiberNodeScopeResolverTest\\\\MagicConstUser::doFoo'", __METHOD__); // SKIP: a magic constant resolves to its base type rather than its value
+		assertType('462', __LINE__);
+		assertType("'FiberNodeScopeResolverTest'", __NAMESPACE__);
+		// PHPantom is more precise than PHPStan here: __CLASS__ keeps the class identity as a class-string, not just a literal string.
+		assertType('class-string<FiberNodeScopeResolverTest\\MagicConstUser>', __CLASS__);
+		assertType("''", __TRAIT__);
+		assertType("'doFoo'", __FUNCTION__);
+		assertType("'FiberNodeScopeResolverTest\\\\MagicConstUser::doFoo'", __METHOD__);
 		assertType("''", __PROPERTY__); // SKIP: a magic constant resolves to its base type rather than its value
 	}
 }

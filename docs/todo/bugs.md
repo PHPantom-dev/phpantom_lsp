@@ -280,7 +280,7 @@ Joining branches that wrote different shapes leaves a redundant `array|array{…
 
 Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php` and `Rules/Methods/data/bug-5749.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B479. `??=` on an offset whose key is not a variable leaves the offset `null`
+### B481. `??=` on an offset whose key is not a variable leaves the offset `null`
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
@@ -454,26 +454,22 @@ Found porting PHPStan's `Rules/Functions/data/varying-acceptor.php`; the asserti
 
 ## Miscellaneous
 
-### B474. A magic constant resolves to its base type rather than its value
-**Impact: Low · Complexity: Low-Medium**
+### B482. `__PROPERTY__` inside a property hook resolves to its base type rather than its value
+**Impact: Low · Complexity: Low**
 
 ```php
-namespace App;
 class User {
-    public function doFoo() {
-        __LINE__;      // should be the line number, is int
-        __NAMESPACE__; // should be 'App', is string
-        __FUNCTION__;  // should be 'doFoo', is string
-        __METHOD__;    // should be 'App\User::doFoo', is string
-        __CLASS__;     // should be 'App\User', is class-string<User>
+    public string $name {
+        get {
+            __PROPERTY__; // should be 'name', is string
+        }
     }
 }
-fn() => __FUNCTION__; // returns '{closure}'
 ```
 
-Each of these is known at the point it is written. `__CLASS__` as `class-string<User>` is already useful, but the literal is exact.
+`__PROPERTY__` (PHP 8.4) is known at the point it is written, the way `__FUNCTION__`/`__METHOD__` are for a method.
 
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php` and `Rules/Functions/data/bug-anonymous-function-method-constant.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
 ### B475. A variable a closure captures by reference does not take on the closure's assignments
 **Impact: Low · Complexity: Medium**
