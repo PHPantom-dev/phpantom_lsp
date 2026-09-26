@@ -7,14 +7,17 @@
 namespace PsalmTest_binary_operation_1 {
     $a = 5 + 4;
 
-    assertType('int', $a);
+    // Psalm widens two literal operands to `int`; PHPantom folds them to
+    // the value PHP computes, as PHPStan does.
+    assertType('9', $a);
 }
 
 // Test: differingNumericTypesAdditionInWeakMode
 namespace PsalmTest_binary_operation_2 {
     $a = 5 + 4.1;
 
-    assertType('float', $a);
+    // Folded, as in regularAddition above.
+    assertType('9.1', $a);
 }
 
 // Test: modulo
@@ -81,14 +84,16 @@ namespace PsalmTest_binary_operation_7 {
     $b += 1;
 
     assertType('float', $a);
-    assertType('float', $b);
+    // Folded, as in regularAddition above.
+    assertType('2.1', $b);
 }
 
 // Test: exponent
 namespace PsalmTest_binary_operation_8 {
     $b = 4 ** 5;
 
-    assertType('int|float', $b);
+    // Folded, as in regularAddition above.
+    assertType('1024', $b);
 }
 
 // Test: bitwiseNot

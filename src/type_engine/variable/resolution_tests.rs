@@ -816,9 +816,9 @@ function test(bool $flag) {
         resolve_literal_test_var(content, "$union_object"),
         "object{scalar: int|string}&stdClass"
     );
-    assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "int");
-    assert_eq!(resolve_literal_test_var(content, "$float_sum"), "float");
-    assert_eq!(resolve_literal_test_var(content, "$division"), "int|float");
+    assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "3");
+    assert_eq!(resolve_literal_test_var(content, "$float_sum"), "3.5");
+    assert_eq!(resolve_literal_test_var(content, "$division"), "0.5");
 }
 
 #[test]

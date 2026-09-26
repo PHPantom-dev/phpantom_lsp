@@ -71,38 +71,38 @@ class Foo
 
 		// ── Arithmetic: literal int op int ──────────────────────────────
 
-		assertType('int', 1 + 1);
-		assertType('int', 1 - 1);
-		assertType('int|float', 1 / 2);
-		assertType('int', 1 * 1);
-		assertType('int|float', 1 ** 1);
+		assertType('2', 1 + 1);
+		assertType('0', 1 - 1);
+		assertType('0.5', 1 / 2);
+		assertType('1', 1 * 1);
+		assertType('1', 1 ** 1);
 		assertType('int', 1 % 1);
 
 		// ── Arithmetic: literal float op float ──────────────────────────
 
-		assertType('float', 1.2 + 1.4);
-		assertType('float', 1.2 - 1.4);
-		assertType('float', 1.2 / 2.4);
-		assertType('float', 1.2 * 1.4);
-		assertType('float', 1.2 ** 1.4);
+		assertType('2.5999999999999996', 1.2 + 1.4);
+		assertType('-0.19999999999999996', 1.2 - 1.4);
+		assertType('0.5', 1.2 / 2.4);
+		assertType('1.68', 1.2 * 1.4);
+		assertType('1.290784508319084', 1.2 ** 1.4);
 		assertType('int', 3.2 % 2.4);
 
 		// ── Arithmetic: literal int op float ────────────────────────────
 
-		assertType('float', 1 + 1.4);
-		assertType('float', 1 - 1.4);
-		assertType('float', 1 / 2.4);
-		assertType('float', 1 * 1.4);
-		assertType('float', 1 ** 1.4);
+		assertType('2.4', 1 + 1.4);
+		assertType('-0.3999999999999999', 1 - 1.4);
+		assertType('0.4166666666666667', 1 / 2.4);
+		assertType('1.4', 1 * 1.4);
+		assertType('1.0', 1 ** 1.4);
 		assertType('int', 3 % 2.4);
 
 		// ── Arithmetic: literal float op int ────────────────────────────
 
-		assertType('float', 1.2 + 1);
-		assertType('float', 1.2 - 1);
-		assertType('float', 1.2 / 2);
-		assertType('float', 1.2 * 1);
-		assertType('float', 1.2 ** 1);
+		assertType('2.2', 1.2 + 1);
+		assertType('0.19999999999999996', 1.2 - 1);
+		assertType('0.6', 1.2 / 2);
+		assertType('1.2', 1.2 * 1);
+		assertType('1.2', 1.2 ** 1);
 		assertType('int', 3.2 % 2);
 
 		// ── Arithmetic: variable int operations ─────────────────────────

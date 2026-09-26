@@ -128,21 +128,7 @@ the walker already runs for invoked closures.
 
 ## Arithmetic
 
-### B411. Arithmetic on float literals is not folded
-**Impact: Low · Complexity: Low**
-
-```php
-$w = 1;
-$scale = 2.0;
-$w *= $scale; // should be 2.0, is float
-```
-
-Integer literal arithmetic folds; a float operand widens the result to
-`float`.
-
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
+No outstanding items.
 
 ## Symbol resolution
 

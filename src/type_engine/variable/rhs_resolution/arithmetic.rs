@@ -189,26 +189,39 @@ fn classify_php_type(ty: &PhpType, saw_float: &mut bool, saw_int: &mut bool) -> 
     }
 }
 
-/// Which arithmetic operator is being inferred, distinguishing the two
-/// operators whose `int op int` case can still produce a `float` at
-/// runtime from the ones that cannot.
+/// Which arithmetic operator is being inferred. Distinguishes every operator
+/// [`infer_arithmetic_result_type`] handles, both for the widening fallback
+/// (which two of them can still turn `int op int` into a `float` at runtime)
+/// and for folding two literal operands to the exact value PHP would
+/// compute.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ArithmeticOpKind {
+    /// `+` / `+=`, once [`infer_addition_result_type`] has ruled out its
+    /// array-union overload.
+    Addition,
+    /// `-` / `-=`.
+    Subtraction,
+    /// `*` / `*=`.
+    Multiplication,
     /// `/` / `/=`: an uneven division produces a float (e.g. `7 / 2`).
     Division,
     /// `**` / `**=`: overflow or a negative exponent produces a float
     /// (e.g. `2 ** 64`, `2 ** -1`).
     Exponentiation,
-    /// `-`, `*` and their compound forms: `int op int` always stays `int`.
-    Other,
 }
 
 impl ArithmeticOpKind {
     pub(crate) fn from_binary_operator(operator: &BinaryOperator<'_>) -> Self {
         match operator {
+            BinaryOperator::Addition(_) => Self::Addition,
+            BinaryOperator::Subtraction(_) => Self::Subtraction,
+            BinaryOperator::Multiplication(_) => Self::Multiplication,
             BinaryOperator::Division(_) => Self::Division,
             BinaryOperator::Exponentiation(_) => Self::Exponentiation,
-            _ => Self::Other,
+            // Every caller only reaches here for one of the five arithmetic
+            // operators above; anything else has no arithmetic meaning to
+            // pick between, so `*` is as reasonable a default as any.
+            _ => Self::Multiplication,
         }
     }
 }
@@ -227,12 +240,28 @@ pub(crate) fn infer_arithmetic_result_type(
     rhs_types: &[ResolvedType],
     op_kind: ArithmeticOpKind,
 ) -> PhpType {
+    // Two operands that are each pinned to one literal value fold to the
+    // exact value PHP would compute, the same way a mask built from two
+    // literal ints already folds through `apply_bitwise` above. Division by
+    // zero and the handful of other cases PHP itself has no single value
+    // for fall through to the classification below instead.
+    if let (Some(lhs_lit), Some(rhs_lit)) = (
+        single_literal_number(lhs_types),
+        single_literal_number(rhs_types),
+    ) && let Some(folded) = fold_literal_arithmetic(op_kind, lhs_lit, rhs_lit)
+    {
+        return folded;
+    }
+
     let lhs = classify_numeric_operand(lhs_types);
     let rhs = classify_numeric_operand(rhs_types);
     match (lhs, rhs) {
         // Both are known int (not float): int op int.
         (Some(false), Some(false)) => {
-            if op_kind != ArithmeticOpKind::Other {
+            if matches!(
+                op_kind,
+                ArithmeticOpKind::Division | ArithmeticOpKind::Exponentiation
+            ) {
                 // int / int can return float (e.g. 7/2 = 3.5), and
                 // int ** int can too (overflow, or a negative exponent, e.g.
                 // 2 ** 64 or 2 ** -1) — but in both cases the float half only
@@ -310,7 +339,7 @@ pub(crate) fn infer_addition_result_type(
     if lhs_is_array || rhs_is_array {
         return PhpType::array();
     }
-    infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Other)
+    infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Addition)
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary
@@ -352,4 +381,92 @@ fn single_literal_int(types: &[ResolvedType]) -> Option<i64> {
         return None;
     };
     const_fold::literal_int_value(&only.type_string)
+}
+
+/// A single literal numeric operand, keeping whether it was spelled as an
+/// int or a float so folding can tell whether an all-int operation stays an
+/// int or must produce a float, the same way PHP itself decides.
+#[derive(Clone, Copy)]
+enum LiteralNumber {
+    Int(i64),
+    Float(f64),
+}
+
+impl LiteralNumber {
+    fn as_f64(self) -> f64 {
+        match self {
+            Self::Int(value) => value as f64,
+            Self::Float(value) => value,
+        }
+    }
+}
+
+/// The literal number an operand holds, when it resolved to exactly one
+/// literal int or float. An operand that could be several types, or a
+/// non-literal `int`/`float`, is not a known value.
+fn single_literal_number(types: &[ResolvedType]) -> Option<LiteralNumber> {
+    let [only] = types else {
+        return None;
+    };
+    let literal = only.type_string.as_literal()?;
+    if let Some(value) = literal.parse_i64() {
+        return Some(LiteralNumber::Int(value));
+    }
+    literal.parse_f64().map(LiteralNumber::Float)
+}
+
+/// The literal PHP value `lhs op rhs` folds to, or `None` when there is no
+/// single value to fold to (division by zero) or the value would silently
+/// widen further than a `checked_*` operation can vouch for (`int` overflow
+/// into `float`). Either case leaves the operation to the classification
+/// [`infer_arithmetic_result_type`] falls back to, which already answers
+/// those cases with a plain `int`/`float` rather than a wrong literal.
+fn fold_literal_arithmetic(
+    op_kind: ArithmeticOpKind,
+    lhs: LiteralNumber,
+    rhs: LiteralNumber,
+) -> Option<PhpType> {
+    use LiteralNumber::Int;
+    match (op_kind, lhs, rhs) {
+        (ArithmeticOpKind::Addition, Int(a), Int(b)) => a.checked_add(b).map(literal_int),
+        (ArithmeticOpKind::Addition, _, _) => literal_float(lhs.as_f64() + rhs.as_f64()),
+        (ArithmeticOpKind::Subtraction, Int(a), Int(b)) => a.checked_sub(b).map(literal_int),
+        (ArithmeticOpKind::Subtraction, _, _) => literal_float(lhs.as_f64() - rhs.as_f64()),
+        (ArithmeticOpKind::Multiplication, Int(a), Int(b)) => a.checked_mul(b).map(literal_int),
+        (ArithmeticOpKind::Multiplication, _, _) => literal_float(lhs.as_f64() * rhs.as_f64()),
+        (ArithmeticOpKind::Division, Int(a), Int(b)) => {
+            if b == 0 {
+                return None;
+            }
+            match (a.checked_div(b), a.checked_rem(b)) {
+                (Some(quotient), Some(0)) => Some(literal_int(quotient)),
+                _ => literal_float(a as f64 / b as f64),
+            }
+        }
+        (ArithmeticOpKind::Division, _, _) => {
+            let divisor = rhs.as_f64();
+            if divisor == 0.0 {
+                return None;
+            }
+            literal_float(lhs.as_f64() / divisor)
+        }
+        (ArithmeticOpKind::Exponentiation, Int(a), Int(b)) if b >= 0 => {
+            let exponent = u32::try_from(b).ok()?;
+            let result = (a as i128).checked_pow(exponent)?;
+            i64::try_from(result).ok().map(literal_int)
+        }
+        (ArithmeticOpKind::Exponentiation, _, _) => literal_float(lhs.as_f64().powf(rhs.as_f64())),
+    }
+}
+
+fn literal_int(value: i64) -> PhpType {
+    PhpType::literal_int(value.to_string())
+}
+
+/// A finite `f64` as a literal float type, or `None` for the non-finite
+/// results PHP itself cannot represent as a `float` literal (`NAN`, `INF`).
+fn literal_float(value: f64) -> Option<PhpType> {
+    value
+        .is_finite()
+        .then(|| PhpType::literal_float(format!("{value:?}")))
 }

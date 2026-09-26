@@ -13674,7 +13674,9 @@ function test(): void {
     );
 }
 
-/// Numeric `+=` should still infer `int|float` (regression guard).
+/// Numeric `+=` should still infer a number, not the array overload
+/// (regression guard). Two literal operands fold to the exact value PHP
+/// computes, so the number here is the literal `3`, not the bare `int`.
 #[test]
 fn hover_numeric_plus_assign_still_infers_numeric() {
     let backend = create_test_backend();
@@ -13689,8 +13691,8 @@ function test(): void {
 
     let result = hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $n")).to_string();
     assert!(
-        result.contains("int"),
-        "$n after numeric += should contain int, got: {result}"
+        result.contains('3'),
+        "$n after numeric += should fold to the literal 3, got: {result}"
     );
     assert!(
         !result.contains("array"),

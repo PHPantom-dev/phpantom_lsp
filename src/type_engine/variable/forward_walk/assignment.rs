@@ -947,9 +947,11 @@ fn compound_assignment_result(
         | AssignmentOperator::Division(_)
         | AssignmentOperator::Exponentiation(_) => {
             let op_kind = match operator {
+                AssignmentOperator::Subtraction(_) => ArithmeticOpKind::Subtraction,
+                AssignmentOperator::Multiplication(_) => ArithmeticOpKind::Multiplication,
                 AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
                 AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                _ => ArithmeticOpKind::Other,
+                _ => unreachable!("outer match already narrowed to arithmetic operators"),
             };
             Some(infer_arithmetic_result_type(
                 &lhs_types(),

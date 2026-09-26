@@ -586,9 +586,11 @@ fn resolve_assignment_as_value<'b>(
         | AssignmentOperator::Division(_)
         | AssignmentOperator::Exponentiation(_) => {
             let op_kind = match assignment.operator {
+                AssignmentOperator::Subtraction(_) => ArithmeticOpKind::Subtraction,
+                AssignmentOperator::Multiplication(_) => ArithmeticOpKind::Multiplication,
                 AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
                 AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                _ => ArithmeticOpKind::Other,
+                _ => unreachable!("outer match already narrowed to arithmetic operators"),
             };
             let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
             let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
