@@ -973,43 +973,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it" class="md-nav__link">
+  <a href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B429. A <code>class-string</code> key is widened to <code>string</code> when an array is written through it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B430. <code>isset()</code> on a constant shape read with a dynamic key loses the element type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B431. A class constant array keyed by <code>Foo::class</code> is a bare <code>array</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array
+        B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were
       </span>
     </span>
   </a>
@@ -1667,43 +1634,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it" class="md-nav__link">
+  <a href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B429. A <code>class-string</code> key is widened to <code>string</code> when an array is written through it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B430. <code>isset()</code> on a constant shape read with a dynamic key loses the element type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B431. A class constant array keyed by <code>Foo::class</code> is a bare <code>array</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array
+        B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were
       </span>
     </span>
   </a>
@@ -1886,88 +1820,29 @@ needs the same, from the call-argument arms of both walker entry points.</p>
 <code>type_engine/variable/forward_walk/closures.rs</code> and
 <code>walk_closures_in_call</code> in <code>type_engine/variable/forward_walk/diagnostic_walk.rs</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it">B429. A <code>class-string</code> key is widened to <code>string</code> when an array is written through it<a class="headerlink" href="#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param class-string $n */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(string $n): array {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $mapping = [];</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $mapping[$n] = &#39;y&#39;; // should be non-empty-array&lt;class-string, &#39;y&#39;&gt;, is non-empty-array&lt;string, string&gt;</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    return $mapping;    // so a declared array&lt;class-string, string&gt; is reported</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>normalize_array_key_type</code> maps every non-numeric string domain
-(<code>class-string</code>, <code>interface-string</code>, and the rest) to plain <code>string</code>.
-PHP never coerces those keys, so the refined type is a valid key as it
-stands, and PHPStan keeps it. Erasing it makes every
-<code>array&lt;class-string, …&gt;</code> return that is built by writing keys reject its
-own value. The unit test
-<code>collection_key_normalization_preserves_non_numeric_string_domains</code> in
-<code>array_shape_writes_tests.rs</code> pins the current <code>string</code> answer, so
-changing this means deciding against that test.</p>
-<p>Seen in phpstan-src (<code>src/DependencyInjection/ValidateServiceTagsExtension.php</code>,
-the <code>$mapping[$class-&gt;name] = …</code> loop in <code>getInterfaceTagMapping()</code>).</p>
-<p><strong>Where to look:</strong> <code>normalize_array_key_type</code> in
-<code>type_engine/variable/array_shape_writes.rs</code>.</p>
-<h3 id="b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type">B430. <code>isset()</code> on a constant shape read with a dynamic key loses the element type<a class="headerlink" href="#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$g = [$a];</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$g[] = $b;                         // array{P, P}</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">if (!isset($g[$k])) { return; }    // $k is int</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$g[$k]-&gt;id;                        // $g[$k] should be P, is mixed</span>
-</code></pre></div>
-<p>Without the <code>isset()</code> guard, <code>$g[$k]</code> is <code>P</code>, and the same guard over a
-<code>list&lt;P&gt;</code> keeps <code>P</code> too. Only a constant shape guarded through a
-non-literal key comes out <code>mixed</code>, which then reports
-<code>Cannot verify property 'id'</code> on the read. Seen in a Laravel feature
-test that indexes a two-element list of models with the entries of a
-data-provider array.</p>
-<p><strong>Where to look:</strong> the <code>isset</code>/<code>!isset</code> arm of the null narrowing that
-records the synthetic <code>$g[$k]</code> key
-(<code>type_engine/variable/forward_walk/cond_narrowing/null_narrowing.rs</code>),
-and how the shape's element type is looked up for a key that is not a
-literal.</p>
-<h3 id="b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array">B431. A class constant array keyed by <code>Foo::class</code> is a bare <code>array</code><a class="headerlink" href="#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class C {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    private const B = [\stdClass::class =&gt; &#39;X&#39;];</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    private const A = [&#39;k&#39; =&gt; &#39;X&#39;];</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    public function f(): void {</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">        self::B; // should be array{stdClass: &#39;X&#39;}, is array</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">        self::A; // array{k: &#39;X&#39;}, as expected</span>
-<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    }</span>
-<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">}</span>
-</code></pre></div>
-<p>An initialiser whose keys are <code>::class</code> constants is not inferred at
-all, so the constant loses both its keys and its values. A literal
-string key works. Seen in phpstan-src
-(<code>build/PHPStan/Build/TurboAttributeCollector.php</code>, <code>VENDORED_PAIRS</code>),
-where the bare <code>array</code> survives as the <code>array|</code> at the front of the
-inferred return type.</p>
-<p><strong>Where to look:</strong> the constant-initialiser inference behind
-<code>infer_type_from_constant_value_resolved</code> and
-<code>folded_class_constant_type</code> (<code>rhs_resolution/property_access.rs</code>
-calls both), for array keys that are class-constant accesses.</p>
-<h3 id="b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array">B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array<a class="headerlink" href="#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array" title="Permanent link">&para;</a></h3>
+<h3 id="b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were">B435. A <code>foreach</code> that writes every element of an array still joins the elements as they were<a class="headerlink" href="#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @var array&lt;string, array{string, bool, string}&gt; $pairs */</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">foreach (array_keys($pairs) as $cn) {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $pairs[$cn][3] = [&#39;I&#39;];</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">// should be array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">// is non-empty-array&lt;string, array{…}|non-empty-array&lt;int, string|bool|array{&#39;I&#39;}&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array&lt;string, array{string, bool, string}&gt; $pairs */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach (array_keys($pairs) as $cn) {  // or `foreach ($pairs as $cn =&gt; $_)`</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $pairs[$cn][3] = [&#39;I&#39;];</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">// should be array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">// is array&lt;string, array{string, bool, string}&gt;|non-empty-array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
 </code></pre></div>
-<p>A write to a literal offset below a dynamic key should add that offset to
-the element shape it reaches. Instead the element is joined with a
-generic <code>non-empty-array&lt;int, …&gt;</code> holding every value, so the shape is
-lost and any declared element shape rejects it. Seen in phpstan-src
+<p>A loop over an array's own keys that writes the element at each key
+rewrites every element, so after the loop the element type is the one the
+body wrote, whether the loop ran or not (an empty array has no elements to
+leave behind). The walker joins the scope from before the loop instead,
+as it would for a loop that might skip some keys, so a declared return
+that spells out the added entry rejects the array. Seen in phpstan-src
 (<code>build/PHPStan/Build/TurboAttributeCollector.php</code>, the
 <code>$pairs[$className][3] = $reflection-&gt;getInterfaceNames()</code> loop), whose
-return type is reported against its own <code>@return</code> array shape. That
-report also carries
-<a href="#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array">B431</a>.</p>
-<p><strong>Where to look:</strong> <code>merge_nested_array_write</code> in
-<code>type_engine/variable/array_shape_writes.rs</code>, for an <code>ArrayWriteKey::Keyed</code>
-level followed by an <code>ArrayWriteKey::Shape</code> one.</p>
+return type is reported against its own <code>@return</code> array shape.</p>
+<p><strong>Where to look:</strong> the <code>foreach</code> handling in
+<code>type_engine/variable/forward_walk/</code>, where the post-loop scope joins the
+pre-loop one. The body's write to <code>$arr[$key]</code> (with <code>$key</code> the loop's
+key, or a value iterated from <code>array_keys($arr)</code>) would have to replace
+the array's element type rather than join it.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
