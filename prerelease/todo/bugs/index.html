@@ -880,6 +880,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b488-isset-on-a-non-numeric-offset-does-not-rule-out-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B488. <code>isset()</code> on a non-numeric offset does not rule out <code>string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -904,17 +921,6 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B486. A type alias on a member declared in another file is left unexpanded
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched" class="md-nav__link">
@@ -1657,6 +1663,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Narrowing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b488-isset-on-a-non-numeric-offset-does-not-rule-out-string" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B488. <code>isset()</code> on a non-numeric offset does not rule out <code>string</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1681,17 +1704,6 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B486. A type alias on a member declared in another file is left unexpanded
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched" class="md-nav__link">
@@ -1960,42 +1972,22 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b488-isset-on-a-non-numeric-offset-does-not-rule-out-string">B488. <code>isset()</code> on a non-numeric offset does not rule out <code>string</code><a class="headerlink" href="#b488-isset-on-a-non-numeric-offset-does-not-rule-out-string" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param list&lt;string|array{message?: string, count?: int}&gt; $list */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(array $list) {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    foreach ($list as $e) {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        if (!isset($e[&#39;message&#39;])) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">            continue;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">        $e; // should be array{message: string, count?: int}, is string|array{message: string, count?: int}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    }</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>isset()</code> narrows each array shape in the union but leaves <code>string</code> in place, although a string offset that is not an integer is never set. Reading another offset off the narrowed value then yields <code>string</code> as well, and arithmetic on it widens to <code>int|float</code>. PHPStan's own <code>IgnoredErrorHelper::initialize()</code> hits this on the entries it rebuilds from <code>$ignoreError['count'] ?? 1</code> and <code>$ignoreError['reportUnmatched'] ?? …</code>, so <code>IgnoredErrorHelper.php:173</code> is reported three times (the <code>index</code> key of the same entries is B485).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded">B486. A type alias on a member declared in another file is left unexpanded<a class="headerlink" href="#b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// src/Repo.php</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">/**</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> * @phpstan-type Row array{id: int, name: string}</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x"> * @phpstan-type Rows list&lt;Row&gt;</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x"> */</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">class Repo {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    /** @return Rows */</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    public function all(): array { return []; }</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    /** @var Row */</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    public array $current;</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="x">// src/Consumer.php</span>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="x">function f(Repo $r) {</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="x">    $r-&gt;all();              // should be list&lt;array{id: int, name: string}&gt;, is Rows</span>
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="x">    $r-&gt;current[&#39;name&#39;];    // should be string, resolves to nothing</span>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="x">    foreach ($r-&gt;all() as $row) {</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="x">        $row;               // should be array{id: int, name: string}, is mixed</span>
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="x">    }</span>
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="x">}</span>
-</code></pre></div>
-<p>Aliases are kept as bare names in member signatures and expanded only when a consumer asks, by searching the classes of the file being analysed (<code>resolve_type_alias_once</code> in <code>type_engine/types/resolution.rs</code>). Once a member's type leaves its declaring file, nothing records which class the name belongs to, so every consumer (call and property results, <code>foreach</code>, offset access, argument checks) sees an unknown name. The same code in one file works. <code>@phpstan-import-type</code> has the same problem one step further out: the importer's own file resolves it, a third file does not.</p>
-<p>A proper fix expands aliases at the point where their scope is still known, for local and imported aliases alike:</p>
-<ul>
-<li><strong>Local aliases</strong> can be expanded at parse time, in the pass that qualifies member types (<code>resolve_parent_class_names</code> in <code>parser/ast_update.rs</code>), where every class of the declaring file is in scope. Substitute after names are qualified, give a class's own alias precedence over another class's in the file, let a <code>@template</code> or import of the same name hide it, and expand alias bodies in dependency order with a cycle left unexpanded rather than unrolled. This was prototyped and fixes every consumer at once.</li>
-<li><strong>Imported aliases</strong> need the source class, which is not loadable while the importing file is parsed, and would go stale when it is edited. Link them during class resolution instead (<code>resolve_class_fully</code>), where a class loader and the dependency-evicted resolved-class cache exist, and add each import's source class to the eviction dependencies so editing it refreshes its importers. Members inherited from a parent or trait carry the parent's or trait's imports, not the child's.</li>
-</ul>
-<p>Both halves have to land together. With only local aliases expanded, a parameter typed by a local alias is checked against an argument that still carries the bare imported name, which is a false positive: PHPStan's own <code>FileAnalyser.php:259-260</code> is reported, passing a <code>LinesToIgnore</code> imported by <code>LocalIgnoresProcessorResult</code> to <code>FileAnalyserResult</code>'s constructor, which declares it locally.</p>
-<p>Expanding also makes argument checks run where an unexpanded name used to skip them, so it surfaces inference gaps that were hidden. On phpstan-src, <code>IgnoredErrorHelper.php:173</code> is reported three times, partly because of B485 and partly because of shape mismatches in the inferred arguments (<code>count: int|float</code> against <code>count?: int</code>, <code>reportUnmatched: string|bool</code> against <code>bool</code>) that still need to be traced. Re-run <code>analyze</code> on phpstan-src and agcms, which use aliases heavily, and triage every new diagnostic before landing.</p>
-<p>Hover on a method typed with an alias will show the expanded type rather than the alias name.</p>
 <h3 id="b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched">B484. <code>extract()</code> with flags or a non-shape array leaves the locals untouched<a class="headerlink" href="#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function f(array $data) {</span>
