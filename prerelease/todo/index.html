@@ -1652,6 +1652,12 @@ unlikely to move the needle for most users.</p>
 <td>Medium-High</td>
 </tr>
 <tr>
+<td>T44</td>
+<td><a href="../todo/type-inference/#t44-a-single-enum-case-has-no-type">A single enum case has no type</a></td>
+<td>Low-Medium</td>
+<td>High</td>
+</tr>
+<tr>
 <td>T4</td>
 <td><a href="../todo/type-inference/#t4-non-empty--type-narrowing-and-propagation">Non-empty-* type narrowing and propagation</a></td>
 <td>Low-Medium</td>
@@ -1680,6 +1686,258 @@ unlikely to move the needle for most users.</p>
 <td><strong><a href="../todo/bugs/">Bugs</a></strong></td>
 <td></td>
 <td></td>
+</tr>
+<tr>
+<td>B457</td>
+<td><a href="../todo/bugs/#b457-array_push-does-not-change-the-arrays-type"><code>array_push()</code> does not change the array's type</a></td>
+<td>Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B437</td>
+<td><a href="../todo/bugs/#b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through"><code>self</code> in an inherited property's docblock names the class it is read through</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B438</td>
+<td><a href="../todo/bugs/#b438-an-inline-phpstan-var-above-an-assignment-is-ignored">An inline <code>@phpstan-var</code> above an assignment is ignored</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B471</td>
+<td><a href="../todo/bugs/#b471-an-override-with-no-docblock-does-not-inherit-the-parents-method-templates">An override with no docblock does not inherit the parent's method templates</a></td>
+<td>Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B444</td>
+<td><a href="../todo/bugs/#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key">A union of array shapes is not narrowed by comparing its tag key</a></td>
+<td>Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B442</td>
+<td><a href="../todo/bugs/#b442-valueclass-resolves-to-nothing"><code>$value::class</code> resolves to nothing</a></td>
+<td>Low-Medium</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B450</td>
+<td><a href="../todo/bugs/#b450-phpstan-assert-if-true-does-not-narrow-an-untyped-parameter"><code>@phpstan-assert-if-true</code> does not narrow an untyped parameter</a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B439</td>
+<td><a href="../todo/bugs/#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it"><code>@mixin</code> on a trait is not applied to the class that uses it</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B445</td>
+<td><a href="../todo/bugs/#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting"><code>instanceof</code> on a template-typed value unions the class in rather than intersecting</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B446</td>
+<td><a href="../todo/bugs/#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property">Writing into a property's array offset does not narrow the property</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B456</td>
+<td><a href="../todo/bugs/#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it">Writes through a list's own keys drop <code>list</code>, while <code>unset()</code> of an element keeps it</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B459</td>
+<td><a href="../todo/bugs/#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type">Writing a literal into an array offset widens it to its base type</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B465</td>
+<td><a href="../todo/bugs/#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds">A new object with unbound templates assigned to a generic property keeps the bounds</a></td>
+<td>Low-Medium</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B454</td>
+<td><a href="../todo/bugs/#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with">Comparing a foreach key does not narrow the value it was read with</a></td>
+<td>Low-Medium</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td>B455</td>
+<td><a href="../todo/bugs/#b455-the-else-branch-of-is_resource-drops-the-possibly-closed-resource">The else branch of <code>is_resource()</code> drops the possibly closed resource</a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B458</td>
+<td><a href="../todo/bugs/#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array">An <code>(array)</code> cast of a union with a non-array member is plain <code>array</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B462</td>
+<td><a href="../todo/bugs/#b462-arithmetic-with-a-mixed-operand-stays-mixed">Arithmetic with a <code>mixed</code> operand stays <code>mixed</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B476</td>
+<td><a href="../todo/bugs/#b476-calling-a-closure-declared--static-gives-a-bare-static">Calling a closure declared <code>: static</code> gives a bare <code>static</code></a></td>
+<td>Low</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>B448</td>
+<td><a href="../todo/bugs/#b448-falsiness-narrowing-does-not-narrow-to-the-falsy-values">Falsiness narrowing does not narrow to the falsy values</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B451</td>
+<td><a href="../todo/bugs/#b451-an-equality-assertion-phpstan-assert-if-true-int-is-not-read">An equality assertion (<code>@phpstan-assert-if-true =int</code>) is not read</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B453</td>
+<td><a href="../todo/bugs/#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member"><code>is_callable()</code> on <code>Foo|callable(): Foo</code> drops the <code>Foo&amp;callable</code> member</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B467</td>
+<td><a href="../todo/bugs/#b467-a-template-default-is-not-used-when-nothing-binds-the-template">A template default is not used when nothing binds the template</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B473</td>
+<td><a href="../todo/bugs/#b473-iterating-a-class-whose-getiterator-declares-iteratorv-gives-intstring-keys">Iterating a class whose <code>getIterator()</code> declares <code>Iterator&lt;V&gt;</code> gives <code>int|string</code> keys</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B474</td>
+<td><a href="../todo/bugs/#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value">A magic constant resolves to its base type rather than its value</a></td>
+<td>Low</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
+<td>B440</td>
+<td><a href="../todo/bugs/#b440-extract-defines-no-variables"><code>extract()</code> defines no variables</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B441</td>
+<td><a href="../todo/bugs/#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved">A class constant whose initializer names an enum case is not resolved</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B443</td>
+<td><a href="../todo/bugs/#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait">A closure parameter is not inferred from a <code>callable(static)</code> type alias declared on a trait</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B447</td>
+<td><a href="../todo/bugs/#b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read"><code>array_key_exists()</code> with a variable key does not narrow the offset read</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B449</td>
+<td><a href="../todo/bugs/#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never">Exhausted narrowing leaves the last type standing instead of <code>never</code></a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B452</td>
+<td><a href="../todo/bugs/#b452-phpstan-assert-if-false-on-a-variadic-parameter-does-not-narrow-the-arguments"><code>@phpstan-assert-if-false</code> on a variadic parameter does not narrow the arguments</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B460</td>
+<td><a href="../todo/bugs/#b460-array-shape-unions-are-merged-differently-from-phpstan">Array shape unions are merged differently from PHPStan</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B461</td>
+<td><a href="../todo/bugs/#b461-literal-operands-are-not-folded-through-several-operators">Literal operands are not folded through several operators</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B463</td>
+<td><a href="../todo/bugs/#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method">A method template with a bound is shown as its bound inside the method</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B464</td>
+<td><a href="../todo/bugs/#b464-template-inference-from-a-literal-argument-widens-it">Template inference from a literal argument widens it</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B466</td>
+<td><a href="../todo/bugs/#b466-a-template-nested-in-class-stringfoot-is-not-inferred">A template nested in <code>class-string&lt;Foo&lt;T&gt;&gt;</code> is not inferred</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B469</td>
+<td><a href="../todo/bugs/#b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated">A conditional return type whose subject is an offset of a template is not evaluated</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B470</td>
+<td><a href="../todo/bugs/#b470-an-offset-access-on-a-type-alias-is-not-evaluated">An offset access on a type alias is not evaluated</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B472</td>
+<td><a href="../todo/bugs/#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred">A template bound through a nested callable parameter is not inferred</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B475</td>
+<td><a href="../todo/bugs/#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments">A variable a closure captures by reference does not take on the closure's assignments</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B477</td>
+<td><a href="../todo/bugs/#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower">An arrow function's return type comes from its declared hint even when the body returns something narrower</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B478</td>
+<td><a href="../todo/bugs/#b478-an-assignment-inside-a-match-arm-is-not-recorded">An assignment inside a <code>match</code> arm is not recorded</a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B468</td>
+<td><a href="../todo/bugs/#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument">A conditional return type on <code>$param is not null</code> does not pick up a template bound by a callable argument</a></td>
+<td>Low</td>
+<td>Medium-High</td>
 </tr>
 <tr>
 <td></td>

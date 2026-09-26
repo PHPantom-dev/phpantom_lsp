@@ -1404,6 +1404,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T44. A single enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1746,6 +1757,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T44. A single enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1905,7 +1927,9 @@ and resolving <code>Closure::fromCallable('functionName')</code> to the actual
 function's signature as a typed <code>Closure</code>.  This is relevant for DI
 containers and middleware patterns but is a niche use case.</p>
 <p>See <code>ClosureBindDynamicReturnTypeExtension</code> and
-<code>ClosureFromCallableDynamicReturnTypeExtension</code> in PHPStan.</p>
+<code>ClosureFromCallableDynamicReturnTypeExtension</code> in PHPStan. A
+<code>Closure::fromCallable($cb)</code> assertion in
+<code>tests/phpstan_data/Analyser/Fiber/fnsr.php</code> is <code>// SKIP</code> on this.</p>
 <hr />
 <h2 id="t10-ternary-expression-as-rhs-of-list-destructuring">T10. Ternary expression as RHS of list destructuring<a class="headerlink" href="#t10-ternary-expression-as-rhs-of-list-destructuring" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
@@ -1988,7 +2012,12 @@ produce a full callable type string for variable-type contexts.</p>
 </li>
 </ol>
 <p><strong>After fixing:</strong> verify that extract function docblock generation
-emits the concrete callable signature in the <code>@param</code> tag.</p>
+emits the concrete callable signature in the <code>@param</code> tag, and un-SKIP
+the <code>Closure(): 1</code>-style assertions in
+<code>tests/phpstan_data/Analyser/Fiber/fnsr.php</code> and the closure calls in
+<code>tests/phpstan_data/Rules/Functions/bug-anonymous-function-method-constant.php</code>
+(a closure without a declared return type, whose call reads back as
+<code>mixed</code>).</p>
 <hr />
 <h2 id="t20-type-narrowing-reconciliation-engine">T20. Type narrowing reconciliation engine<a class="headerlink" href="#t20-type-narrowing-reconciliation-engine" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
@@ -2228,7 +2257,11 @@ in the same function) would cover <code>$obj::CONST</code>, and the constant loo
 below it needs no change.</p>
 <p><strong>Tests to update once fixed:</strong> upstream's <code>nsrt/deducted-types.php</code> has
 a <code>$foo::INTEGER_CONSTANT</code> block that was dropped when
-<code>tests/phpstan_nsrt/deducted-types.php</code> was ported; port it back.</p>
+<code>tests/phpstan_nsrt/deducted-types.php</code> was ported; port it back. The
+<code>$hw::B</code>/<code>$self::FOO</code> assertions in
+<code>tests/phpstan_data/Rules/Constants/bug-10212.php</code> and
+<code>tests/phpstan_data/Rules/Methods/return-type-class-constant.php</code> are
+<code>// SKIP</code> on this.</p>
 <hr />
 <h2 id="t34-staticconst-over-narrows-to-the-declaring-classs-value">T34. <code>static::CONST</code> over-narrows to the declaring class's value<a class="headerlink" href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
@@ -2418,6 +2451,30 @@ it against the <em>declaring</em> class's own <code>type_aliases</code> map (via
 <code>resolve_type_alias_typed</code> with that class as <code>owning_class_name</code>)
 before substituting it into the parent's template.</p>
 <p><strong>Blocks:</strong> Test Porting Phase 4A pattern 870.</p>
+<hr />
+<h2 id="t44-a-single-enum-case-has-no-type">T44. A single enum case has no type<a class="headerlink" href="#t44-a-single-enum-case-has-no-type" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">enum Suit { case Hearts; case Spades; case Clubs; }</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">function f(Suit $s) {</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    if ($s === Suit::Hearts) {</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">    } elseif ($s === Suit::Spades) {</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    } else {</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">        $s; // PHPStan: Suit::Clubs; PHPantom: Suit</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">    }</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>Suit::Hearts</code> resolves to the enum class, so narrowing by comparing
+against cases can only ever say "some <code>Suit</code>". PHPStan and Psalm give each
+case its own type, a subtype of the enum: comparing narrows to the cases
+left, a <code>match</code> over the rest is known exhaustive, a <code>readonly</code> property
+assigned one case keeps it, and <code>-&gt;value</code>/<code>-&gt;name</code> on it are the case's
+literal values.</p>
+<p>The type model needs an enum-case variant (or a literal kind for it) that
+is a subtype of its enum in <code>is_subtype_of</code>, prints as <code>Enum::CASE</code>, and
+joins back into the enum when every case is present. Narrowing by <code>===</code>
+and <code>instanceof</code> then subtracts cases the way it subtracts union members.</p>
+<p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code>; the
+assertion is <code>// SKIP</code> in <code>tests/phpstan_data/</code>.</p>
 
 
 
