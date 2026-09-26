@@ -975,6 +975,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1536,6 +1547,17 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -2083,6 +2105,22 @@ class for a trait method body (as opposed to <code>$this-&gt;</code>'s path) and
 it through the same <code>@require-extends</code>/<code>@require-implements</code> bound the
 <code>$this-&gt;</code> path already consults, rather than adding a second lookup of
 the tag.</p>
+<h2 id="c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch">C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch<a class="headerlink" href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The forward walker now applies an assignment nested in a <code>match</code> arm or
+a ternary branch (each arm/branch walked against its own scope copy,
+then joined), covered by <code>hover_variable_assigned_in_match_arm</code> and
+<code>hover_variable_assigned_in_ternary_branch</code> in <code>tests/integration/hover.rs</code>
+and by the un-skipped half of the ported
+<code>tests/phpstan_data/Analyser/scope-in-enum-match-arm-body.php</code>
+assertion, but <code>examples/php/completion.php</code> — the file where "type
+inference of every kind" is demonstrated — has no example a user can
+open and try this on directly.</p>
+<p>Add a small demo (a function with <code>$r = match ($k) { 1 =&gt; $x = $n,
+default =&gt; null }; $x;</code> and the ternary equivalent, with a "Try:"
+comment showing what <code>$x</code> resolves to) to <code>completion.php</code>, plus a
+matching <code>assert()</code> in <code>scaffolding/assertions.php</code> verifying the
+runtime type the comment claims.</p>
 
 
 

@@ -1380,17 +1380,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b478-an-assignment-inside-a-match-arm-is-not-recorded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B478. An assignment inside a <code>match</code> arm is not recorded
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2416,17 +2405,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b478-an-assignment-inside-a-match-arm-is-not-recorded" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B478. An assignment inside a <code>match</code> arm is not recorded
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2896,16 +2874,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p>A template bound from a closure's return type takes the declared hint. PHPStan takes the body's type when it is narrower than the hint.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-5372.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b478-an-assignment-inside-a-match-arm-is-not-recorded">B478. An assignment inside a <code>match</code> arm is not recorded<a class="headerlink" href="#b478-an-assignment-inside-a-match-arm-is-not-recorded" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-36-1" name="__codelineno-36-1" href="#__codelineno-36-1"></a><span class="x">$r = match ($k) {</span>
-<a id="__codelineno-36-2" name="__codelineno-36-2" href="#__codelineno-36-2"></a><span class="x">    1 =&gt; $x = $n,</span>
-<a id="__codelineno-36-3" name="__codelineno-36-3" href="#__codelineno-36-3"></a><span class="x">    default =&gt; null,</span>
-<a id="__codelineno-36-4" name="__codelineno-36-4" href="#__codelineno-36-4"></a><span class="x">};</span>
-<a id="__codelineno-36-5" name="__codelineno-36-5" href="#__codelineno-36-5"></a><span class="x">$x; // resolves to nothing</span>
-</code></pre></div>
-<p>The walker applies assignments nested in conditions, call arguments and array literals, but does not descend into <code>match</code> arms (or ternary branches). Each arm has to be applied to its own copy of the scope and the copies joined, so an arm that does not run cannot leak a definite assignment. The runner turns an <code>assertType()</code> inside an arm into exactly such an assignment.</p>
-<p>Found porting PHPStan's <code>Analyser/data/scope-in-enum-match-arm-body.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 
 
 
