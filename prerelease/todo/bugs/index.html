@@ -1292,17 +1292,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B477. An arrow function's return type comes from its declared hint even when the body returns something narrower
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2240,17 +2229,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B477. An arrow function's return type comes from its declared hint even when the body returns something narrower
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2622,16 +2600,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p><code>static</code> in a closure's return type is bound to the enclosing class like it is in a method's, but calling the closure through its variable skips that binding.</p>
 <p>Found porting PHPStan's <code>Reflection/data/staticReturnType.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower">B477. An arrow function's return type comes from its declared hint even when the body returns something narrower<a class="headerlink" href="#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="x">/** @param class-string $classString */</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="x">function f(Collection $col, string $classString) {</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="x">    $col-&gt;map(static fn (string $v): string =&gt; $classString);</span>
-<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="x">    // should be Collection&lt;int, class-string&gt;, is Collection&lt;int, string&gt;</span>
-<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>A template bound from a closure's return type takes the declared hint. PHPStan takes the body's type when it is narrower than the hint.</p>
-<p>Found porting PHPStan's <code>Rules/Methods/data/bug-5372.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 
 
 
