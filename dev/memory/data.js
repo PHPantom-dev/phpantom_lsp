@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790426024893,
+  "lastUpdate": 1790429015502,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -32061,6 +32061,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "931fba21677dd52fc9534e25ea2c5fbf99857a09",
+          "message": "Variable types follow `try`/`catch`, `switch`, and `for` the way the\ncode actually runs",
+          "timestamp": "2026-09-26T15:05:57+02:00",
+          "tree_id": "ea751bb5745e793500ec32afcb48e44cdbb24450",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/931fba21677dd52fc9534e25ea2c5fbf99857a09"
+        },
+        "date": 1790429005581,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81,
             "unit": "MiB"
           }
         ]
