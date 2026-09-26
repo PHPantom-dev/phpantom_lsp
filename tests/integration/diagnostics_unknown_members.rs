@@ -14279,3 +14279,50 @@ class Registry {
         "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
     );
 }
+
+#[test]
+fn native_parameter_hint_names_its_own_namespace_class_before_a_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global_event.php", "<?php\nclass Event {}\n");
+    backend.update_ast(
+        "file:///scheduling/Event.php",
+        r#"<?php
+namespace App\Scheduling;
+
+class Event {
+    public string $command = '';
+
+    public function mutexName(): string { return ''; }
+}
+"#,
+    );
+    let php = r#"<?php
+namespace App\Scheduling;
+
+class CommandBuilder {
+    public function build(Event $event): string {
+        $closure = fn (Event $inner): string => $inner->mutexName();
+
+        return $event->command . $event->mutexName() . $closure($event);
+    }
+}
+"#;
+    backend.update_ast("file:///scheduling/CommandBuilder.php", php);
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics(
+        "file:///scheduling/CommandBuilder.php",
+        php,
+        &mut diags,
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.code == Some(NumberOrString::String("unknown_member".to_string())))
+        .map(|d| d.message.clone())
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "`Event` inside `namespace App\\Scheduling` is `App\\Scheduling\\Event`, \
+         not the global `Event`: {unknown:?}"
+    );
+}

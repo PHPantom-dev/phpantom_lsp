@@ -326,6 +326,8 @@ impl Backend {
         }
 
         let class_loader = self.class_loader(&file_ctx);
+        // FQN-only lookup, so this file's imports can't rename the callee's types.
+        let fqn_class_loader = |name: &str| self.find_or_load_class(name);
         let function_loader_cl = self.function_loader(&file_ctx);
         let constant_loader_cl = self.constant_loader(&file_ctx);
         // Read once for the whole file: `config()` clones the config
@@ -416,7 +418,9 @@ impl Backend {
                             if name.contains("__anonymous@") {
                                 return name.to_string();
                             }
-                            if let Some(cls) = class_loader(name) {
+                            // Already an FQN: this file's imports must not rename it.
+                            if let Some(cls) = fqn_class_loader(name).or_else(|| class_loader(name))
+                            {
                                 cls.fqn().to_string()
                             } else {
                                 name.to_string()
@@ -563,7 +567,8 @@ impl Backend {
             let call_context_class: Option<String> =
                 resolved.owner_class.map(|fqn| fqn.to_string());
             let ctx_parent_fqn: Option<String> = call_context_class.as_ref().and_then(|fqn| {
-                class_loader(fqn).and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
+                fqn_class_loader(fqn)
+                    .and_then(|cls| cls.parent_class.as_ref().map(|p| p.to_string()))
             });
 
             for (arg_idx, resolved_arg) in resolved_args.args.iter().enumerate() {
@@ -718,7 +723,7 @@ impl Backend {
                     && is_type_compatible(
                         arg_type,
                         effective_param_type,
-                        &class_loader,
+                        &fqn_class_loader,
                         strict_types,
                     )
                 {
@@ -728,7 +733,7 @@ impl Backend {
                     // a generic position.
                     if !resolved_arg.array_string_literals.is_empty()
                         && let Some(model_fqn) = extract_model_property_from_array_type(param_type)
-                        && let Some(cls) = class_loader(&model_fqn)
+                        && let Some(cls) = fqn_class_loader(&model_fqn)
                     {
                         let resolved = crate::virtual_members::resolve_class_fully_cached(
                             &cls,
@@ -790,7 +795,7 @@ impl Backend {
                                 return is_type_compatible(
                                     arg_type,
                                     effective_alt,
-                                    &class_loader,
+                                    &fqn_class_loader,
                                     strict_types,
                                 );
                             }
@@ -899,7 +904,7 @@ impl Backend {
                                 !is_type_compatible(
                                     m,
                                     effective_param_type,
-                                    &class_loader,
+                                    &fqn_class_loader,
                                     strict_types,
                                 )
                             })
@@ -925,7 +930,7 @@ impl Backend {
                         only_null_unsatisfied = is_type_compatible(
                             inner,
                             effective_param_type,
-                            &class_loader,
+                            &fqn_class_loader,
                             strict_types,
                         );
                     }
