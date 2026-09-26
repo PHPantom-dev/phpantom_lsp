@@ -2474,7 +2474,7 @@ is a subtype of its enum in <code>is_subtype_of</code>, prints as <code>Enum::CA
 joins back into the enum when every case is present. Narrowing by <code>===</code>
 and <code>instanceof</code> then subtracts cases the way it subtracts union members,
 and a branch that has compared away every case holds <code>never</code>.</p>
-<p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code>; both its
+<p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code> and <code>Rules/Methods/data/return-type-class-constant.php</code>; both its
 case and its <code>never</code> assertion are <code>// SKIP</code> in the ported copy under
 <code>tests/phpstan_data/</code>.</p>
 <p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code>; the
