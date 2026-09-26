@@ -1097,23 +1097,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B426. <code>analyze</code> occasionally reports a member of a vendor interface as unknown
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1853,23 +1836,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B426. <code>analyze</code> occasionally reports a member of a vendor interface as unknown
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2157,19 +2123,7 @@ level followed by an <code>ArrayWriteKey::Shape</code> one.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown">B426. <code>analyze</code> occasionally reports a member of a vendor interface as unknown<a class="headerlink" href="#b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>One <code>analyze</code> run over <code>projects/bladestan</code> reported
-<code>Method 'isInClass' not found on class 'PHPStan\Analyser\Scope'</code> and the
-same for <code>getClassReflection</code> (<code>src/NodeAnalyzer/LaravelViewFunctionMatcher.php</code>,
-lines 81-82). Four further runs of the same binary on the same tree did not
-report them, so the result depends on something other than the input:
-most likely the order the parallel workers load classes in, leaving the
-<code>Scope</code> interface resolved from a partial or not-yet-merged class once.</p>
-<p><strong>Where to look:</strong> how the analyze workers share the resolved-class
-cache, and whether a class read while another worker is still indexing
-its file can be cached incomplete. Reproduce by looping <code>analyze</code> on
-<code>projects/bladestan</code> and grepping for <code>isInClass</code>.</p>
+<p>No outstanding items.</p>
 
 
 
