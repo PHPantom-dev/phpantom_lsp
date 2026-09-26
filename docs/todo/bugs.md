@@ -34,56 +34,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B446. Writing into a property's array offset does not narrow the property
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @var array{foo?: bool} */
-private array $arr = [];
-public function f(): bool {
-    if (!isset($this->arr['foo'])) {
-        $this->arr['foo'] = true;
-    }
-    $this->arr; // should be array{foo: bool}, is array{foo?: bool}
-}
-```
-
-An offset write on a local variable updates its shape, but the same write through `$this->prop[...]` leaves the property on its declared type, and a nested write (`$this->arr[$i]['foo'] = true`) makes the offset read back `null`.
-
-Found porting PHPStan's `Rules/Arrays/data/bug-11679.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B447. `array_key_exists()` with a variable key does not narrow the offset read
-**Impact: Low · Complexity: Medium**
-
-```php
-$results = [];
-foreach ($items as $item) {
-    $key = $item->key();
-    if (array_key_exists($key, $results)) {
-        $results[$key]; // should be array{...}, includes null
-    }
-    $results[$key] = ['count' => 1];
-}
-```
-
-Inside a guard that proved the key exists, reading that key should not include the `null` that comes from the array possibly being empty (here, the `[]` it was initialised with). The same missing proof makes a compound write inside the guard (`$results[$key]['count'] += $n`) create a new element on the loop's first pass, when the array is still `[]`, so the array's type after the loop carries a variant with only the written key.
-
-Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B449. Exhausted narrowing leaves the last type standing instead of `never`
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(true|null $v) {
-    if (is_null($v)) { return; }
-    if (is_bool($v)) { return; }
-    $v; // should be never, is true
-}
-```
-
-When every member of a type has been ruled out (by type checks, by comparing each enum case, by an `@phpstan-assert` the value cannot satisfy, or by an impossible `count()`), the value should be `never`. Today the narrowing that would remove the last member is skipped, so the branch keeps it.
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`, `Rules/Comparison/data/bug-8169.php`, `Rules/Comparison/data/bug-8485.php`, `Rules/Comparison/data/docblock-assert-equality.php` and `Rules/Methods/data/true-typehint.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+No outstanding items.
 
 ## Arithmetic
 
@@ -278,7 +229,9 @@ $review; // should be array<array<mixed>>, is array<int|string, array|array{id: 
 
 Joining branches that wrote different shapes leaves a redundant `array|array{…}` union where the shape is already covered by `array`, and joining shapes with differing optional keys (`Rules/Comparison/data/bug-7898.php`) marks keys required that only one branch set.
 
-Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php` and `Rules/Methods/data/bug-5749.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+A shape a sibling variant already covers is kept beside it as well: the passes of a loop that writes `['count' => $n, 'item' => $item]` into an array leave `array{count: int|float, item: mixed}` beside `array{count: mixed, item: mixed}`, and an `array{}` that `array<K, V>` covers makes an offset read on the joined array include `null`.
+
+Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php`, `Rules/Methods/data/bug-5749.php` and `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
 ### B481. `??=` on an offset whose key is not a variable leaves the offset `null`
 **Impact: Low · Complexity: Low-Medium**

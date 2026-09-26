@@ -66,7 +66,7 @@ function dooFoo(FooEnum $s):void {
 	} elseif ($s === FooEnum::B) {
 	} elseif ($s === FooEnum::C) {
 	} else {
-		assertType('*NEVER*', $s); // SKIP: exhausted narrowing leaves the last type standing instead of never
+		assertType('*NEVER*', $s); // SKIP: there is no type for a single enum case
 	}
 
 	if ($s === FooEnum::A) {

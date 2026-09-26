@@ -152,7 +152,8 @@ fn count_bound(expr: &Expression<'_>) -> Option<i64> {
 /// function's business to decide. The unequal branch drops every
 /// alternative the literal covers, which is what lets a discriminant
 /// (`if ($this->state === 'notLoaded') { … }`) leave its sentinel behind
-/// in the branch that ruled it out.
+/// in the branch that ruled it out, and exhausts a subject that held
+/// nothing else.
 pub(super) fn apply_literal_identity_narrowing(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
@@ -190,10 +191,9 @@ pub(super) fn apply_literal_identity_narrowing(
             Some(rt)
         })
         .collect();
-    // Nothing is recorded when the subtraction empties the type: the
-    // remaining alternatives are what the branch runs on, and "no type at
-    // all" is not one of them.
-    if !kept.is_empty() {
+    if kept.is_empty() {
+        mark_exhausted(&var_name, scope);
+    } else {
         scope.set(&var_name, kept);
         write_offset_key_into_shapes(&var_name, scope);
     }
@@ -307,9 +307,13 @@ pub(crate) fn apply_switch_arm_narrowing(
             None => changed = true,
         }
     }
-    // Nothing left means the arm cannot run with what the subject holds,
-    // which is the reachability question rather than this one.
-    if changed && !narrowed.is_empty() {
+    if !changed {
+        return;
+    }
+    // Nothing left means the arm cannot run with what the subject holds.
+    if narrowed.is_empty() {
+        mark_exhausted(&var_name, scope);
+    } else {
         scope.set(&var_name, narrowed);
         write_offset_key_into_shapes(&var_name, scope);
     }

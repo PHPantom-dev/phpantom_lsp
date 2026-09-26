@@ -690,6 +690,79 @@ function f(array $shape): void {
     );
 }
 
+/// Whatever key `array_key_exists()` found, the array holding it is not
+/// the `[]` a loop's first pass starts from, so reading the key back does
+/// not give the `null` an empty array would.
+#[test]
+fn array_key_exists_with_an_unknown_key_rules_out_the_empty_array() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_unknown_key.php";
+    let content = r#"<?php
+function f(array $items, array $counts): void {
+    $results = [];
+    foreach ($items as $item) {
+        foreach ($counts as $n) {
+            $key = $item->key();
+            if (array_key_exists($key, $results)) {
+                $row = $results[$key];
+                $row; // <-- here
+                $results[$key]['count'] += $n;
+            } else {
+                $results[$key] = ['count' => $n, 'item' => $item];
+            }
+        }
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("count"),
+        "expected the row shape, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "the key is known to be present: {text}"
+    );
+}
+
+/// A write through the found key updates the element that is there
+/// rather than creating one, so the array after the loop has no variant
+/// holding only the written key.
+#[test]
+fn array_key_exists_with_an_unknown_key_writes_into_the_existing_element() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_unknown_key_write.php";
+    let content = r#"<?php
+function f(array $items, array $counts): void {
+    $results = [];
+    foreach ($items as $item) {
+        foreach ($counts as $n) {
+            if ($item->matches($n)) {
+                $key = $item->key();
+                if (array_key_exists($key, $results)) {
+                    $results[$key]['count'] += $n;
+                } else {
+                    $results[$key] = ['count' => $n, 'item' => $item];
+                }
+            }
+        }
+    }
+    $results; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("item: mixed"),
+        "expected the row shape, got: {text}"
+    );
+    assert!(
+        !text.contains("array{count: int|float}"),
+        "no element holds only the written key: {text}"
+    );
+}
+
 /// A successful `isset()` on an offset proves the key is one of the keys
 /// the array holds.
 #[test]

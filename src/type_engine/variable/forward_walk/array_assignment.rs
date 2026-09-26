@@ -236,6 +236,16 @@ fn apply_array_write<'b>(
     } else {
         ResolvedType::types_joined(&rhs_types)
     };
+    // A property is written through with its declared type as the
+    // starting point.  One with no type to start from (undeclared, or
+    // reached through `__get`) is left to its declaration rather than
+    // pinned to what one write put into it.
+    if narrowing::is_member_path_key(base_name) {
+        seed_synthetic_key_if_needed(base_name, scope, ctx);
+        if scope.get(base_name).is_empty() {
+            return;
+        }
+    }
     let base_type = scope
         .get(base_name)
         .last()

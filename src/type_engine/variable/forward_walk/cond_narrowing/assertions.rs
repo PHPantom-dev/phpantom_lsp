@@ -387,7 +387,14 @@ pub(super) fn apply_assertion_to_key(
         return;
     }
 
+    // Only a check that names no class proves nothing survived it.  A
+    // class exclusion ignores type arguments, so ruling out
+    // `ReflectionClass<Picture>` empties a `ReflectionClass<object>` the
+    // check never contradicted, and a class inclusion comes back empty
+    // when the loader cannot find the class.
+    let mut exhaustible = false;
     if let Some(kind) = narrowing::scalar_assert_guard_kind(asserted_type) {
+        exhaustible = true;
         if should_exclude {
             narrowing::apply_type_guard_exclusion(kind, &mut results, Some(ctx.class_loader));
         } else {
@@ -428,6 +435,8 @@ pub(super) fn apply_assertion_to_key(
 
     if !results.is_empty() {
         scope.set(target, results);
+    } else if exhaustible {
+        mark_exhausted(target, scope);
     }
 }
 

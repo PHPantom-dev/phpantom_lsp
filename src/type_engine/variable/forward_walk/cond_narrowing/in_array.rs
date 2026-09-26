@@ -30,14 +30,21 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
         let Some((base_key, key_expr, negated)) = array_key_exists_target(operand) else {
             continue;
         };
+        let present = negated == inverted;
+        // A property or static-property subject (`$this->excludePaths`)
+        // is not a tracked local, so its type has to be brought into the
+        // scope before it can be refined.
+        seed_synthetic_key_if_needed(&base_key, scope, ctx);
         let Some(key_name) = constant_array_key(key_expr, scope) else {
+            // Whatever the key is, an array holding it is not empty: the
+            // `[]` a loop's first pass carries cannot reach this branch,
+            // so a read of the key does not see the `null` it would give.
+            if present {
+                refine_non_empty_in_scope(&base_key, EmptyValue::Array, scope);
+            }
             continue;
         };
-        // A property or static-property subject (`$this->excludePaths`)
-        // is not a tracked local, so its shape has to be brought into
-        // the scope before it can be refined.
-        seed_synthetic_key_if_needed(&base_key, scope, ctx);
-        if negated != inverted {
+        if !present {
             mark_array_shape_key_absent(&base_key, &key_name, scope);
             continue;
         }

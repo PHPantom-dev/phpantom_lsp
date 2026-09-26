@@ -25,7 +25,7 @@ class Truthy {
 			return;
 		}
 
-		assertType('*NEVER*', $trueUnion); // SKIP: exhausted narrowing leaves the last type standing instead of never
+		assertType('*NEVER*', $trueUnion);
 	}
 
 	function trueUnionReturn(): true|null

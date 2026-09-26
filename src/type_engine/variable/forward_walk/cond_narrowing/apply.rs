@@ -319,9 +319,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             .find(|a| a.subject == *var_name && !a.alternatives.is_empty());
         if let Some(alias) = alias_or.filter(|a| !a.extraction.negated) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            if exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope) {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope);
             continue;
         }
         // The inverse of `!$isNode`: the chain did hold, so the subject
@@ -346,9 +344,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            if exclude_classes_in_scope(var_name, &classes, &var_ctx, scope) {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
             continue;
         }
 
@@ -381,9 +377,9 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                             &scope_resolver,
                         );
                     }
-                } else if exclude_classes_in_scope(var_name, &targets, &var_ctx, scope) {
-                    scope.unreachable = true;
                 }
+                // The value may name a subclass of the class its type
+                // spells, so the check failing rules nothing out.
                 continue;
             }
         }
@@ -436,18 +432,12 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
-                if exclude_classes_in_scope(
+                exclude_classes_in_scope(
                     var_name,
                     std::slice::from_ref(&extraction.class_type),
                     &var_ctx,
                     scope,
-                ) {
-                    // Every alternative the variable had was excluded, so
-                    // nothing can reach this path: `$v` was already an
-                    // `AbstractNode` and this is the else of
-                    // `if ($v instanceof AbstractNode)`.
-                    scope.unreachable = true;
-                }
+                );
             }
         }
     }

@@ -309,9 +309,17 @@ impl PhpType {
             let base_sub = sub.name.to_ascii_lowercase();
             let base_sup = sup.name.to_ascii_lowercase();
 
+            // A `list` or `non-empty-*` supertype promises something about
+            // the array that a plain one does not: sequential keys, or at
+            // least one entry.
+            let keeps_promises = (!is_list_name(&sup.name) || is_list_name(&sub.name))
+                && (!is_non_empty_array_name(&sup.name) || is_non_empty_array_name(&sub.name));
+
             // Same base or compatible bases (list <: array, etc.)
             let bases_compatible = base_sub == base_sup
-                || (is_array_like_name(&sub.name) && is_array_like_name(&sup.name));
+                || (is_array_like_name(&sub.name)
+                    && is_array_like_name(&sup.name)
+                    && keeps_promises);
 
             if bases_compatible && sub.args.len() == sup.args.len() {
                 return sub
@@ -330,9 +338,7 @@ impl PhpType {
                 && let Some((sub_key, sub_val)) = array_like_key_value(sub)
                 && let Some((sup_key, sup_val)) = array_like_key_value(sup)
             {
-                // A `list` supertype demands sequential integer keys,
-                // which a plain `array` cannot promise.
-                if is_list_name(&sup.name) && !is_list_name(&sub.name) {
+                if !keeps_promises {
                     return false;
                 }
                 return sub_key.is_subtype_of(&sup_key) && sub_val.is_subtype_of(sup_val);

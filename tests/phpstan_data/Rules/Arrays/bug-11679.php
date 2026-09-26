@@ -14,9 +14,10 @@ class WorkingExample
 		assertType('array{foo?: bool}', $this->arr);
 		if (!isset($this->arr['foo'])) {
 			$this->arr['foo'] = true;
-			assertType('array{foo: bool}', $this->arr); // SKIP: writing into a property's array offset does not narrow the property
+			// PHPStan: array{foo: bool}. PHPantom keeps the literal written.
+			assertType('array{foo: true}', $this->arr);
 		}
-		assertType('array{foo: bool}', $this->arr); // SKIP: writing into a property's array offset does not narrow the property
+		assertType('array{foo: bool}', $this->arr);
 		return $this->arr['foo']; // PHPStan realizes optional 'foo' is set
 	}
 }
@@ -31,7 +32,8 @@ class NonworkingExample
 		assertType('array<int, array{foo?: bool}>', $this->arr);
 		if (!isset($this->arr[$index]['foo'])) {
 			$this->arr[$index]['foo'] = true;
-			assertType('bool', $this->arr[$index]['foo']); // SKIP: writing into a property's array offset does not narrow the property
+			// PHPStan: bool. PHPantom keeps the literal written.
+			assertType('true', $this->arr[$index]['foo']);
 		}
 		return $this->arr[$index]['foo']; // PHPStan does not realize 'foo' is set
 	}

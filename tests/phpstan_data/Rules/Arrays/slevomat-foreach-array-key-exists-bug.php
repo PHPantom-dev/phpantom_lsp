@@ -15,24 +15,24 @@ class Foo
 				if ($percentageInterval->isInInterval((float) $changeInPercents)) {
 					$key = $percentageInterval->getFormatted();
 					if (array_key_exists($key, $intervalResults)) {
-						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
+						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 						$intervalResults[$key]['itemsCount'] += $itemsCount;
-						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
+						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 					} else {
-						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
-						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
+						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 						$intervalResults[$key] = [
 							'itemsCount' => $itemsCount,
 							'interval' => $percentageInterval,
 						];
-						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
+						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]);
 					}
 				}
 			}
 		}
 
-		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
+		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 		foreach ($intervalResults as $data) {
 			echo $data['interval'];
 		}

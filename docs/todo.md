@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | B438 | [An inline `@phpstan-var` above an assignment is ignored](todo/bugs.md#b438-an-inline-phpstan-var-above-an-assignment-is-ignored) | Medium | Medium |
 | B442 | [`$value::class` resolves to nothing](todo/bugs.md#b442-valueclass-resolves-to-nothing) | Low-Medium | Low |
 | B439 | [`@mixin` on a trait is not applied to the class that uses it](todo/bugs.md#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it) | Low-Medium | Medium |
-| B446 | [Writing into a property's array offset does not narrow the property](todo/bugs.md#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property) | Low-Medium | Medium |
 | B456 | [Writes through a list's own keys drop `list`, while `unset()` of an element keeps it](todo/bugs.md#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it) | Low-Medium | Medium |
 | B459 | [Writing a literal into an array offset widens it to its base type](todo/bugs.md#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
@@ -120,8 +119,6 @@ unlikely to move the needle for most users.
 | B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
 | B441 | [A class constant whose initializer names an enum case is not resolved](todo/bugs.md#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved) | Low | Medium |
 | B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |
-| B447 | [`array_key_exists()` with a variable key does not narrow the offset read](todo/bugs.md#b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read) | Low | Medium |
-| B449 | [Exhausted narrowing leaves the last type standing instead of `never`](todo/bugs.md#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never) | Low | Medium |
 | B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
 | B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |

@@ -5838,6 +5838,29 @@ class AbstractNode {
     );
 }
 
+/// A ternary's branch narrowing ends with the ternary: the next argument
+/// of the same call sees the subject as it was before the condition, not
+/// as the else branch left it.
+#[test]
+fn ternary_branch_narrowing_does_not_reach_the_next_argument() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class A { public function a(): int { return 1; } }
+class B { public function b(): int { return 1; } }
+function take(int $x, int $y): void {}
+function run(A|B $x): void {
+    take($x instanceof A ? 1 : 2, $x->a());
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'a'")),
+        "`$x` is still `A|B` after the ternary, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Same-namespace class wins over a global stub of the same short name
 // ═══════════════════════════════════════════════════════════════════════════

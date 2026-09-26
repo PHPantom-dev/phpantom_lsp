@@ -10,11 +10,13 @@ use crate::php_type::{
 use crate::types::ResolvedType;
 
 /// Walk a (possibly nested) `ArrayAccess` chain and return the base
-/// variable name and the ordered list of index expressions from
+/// subject's scope key and the ordered list of index expressions from
 /// outermost to innermost.
 ///
 /// For `$var['a']['b']['c']` returns `Some(("$var", [expr_a, expr_b, expr_c]))`.
-/// Returns `None` when the base expression is not a simple direct variable.
+/// A property path is as much a base as a variable is: `$this->arr['a']`
+/// returns `Some(("$this->arr", [expr_a]))`.  Returns `None` for any other
+/// base.
 pub(super) fn extract_nested_array_access_chain<'a, 'b>(
     outermost: &'a ArrayAccess<'b>,
 ) -> Option<(String, Vec<&'a Expression<'b>>)> {
@@ -33,6 +35,11 @@ pub(super) fn extract_nested_array_access_chain<'a, 'b>(
                 // outermost key (closest to the variable) comes first.
                 keys.reverse();
                 return Some((bytes_to_str(dv.name).to_string(), keys));
+            }
+            Expression::Access(Access::Property(_) | Access::StaticProperty(_)) => {
+                let base = crate::type_engine::types::narrowing::expr_to_subject_key(current)?;
+                keys.reverse();
+                return Some((base, keys));
             }
             _ => return None,
         }
@@ -419,24 +426,24 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         return merge_keyed_type(base, &key_type, value_type);
     }
 
-    let mut entries: Vec<ShapeEntry> = Vec::new();
-
-    // Copy existing shape entries from the base type, skipping the
-    // key we are about to upsert.
-    if let Some(shape_entries) = base.shape_entries() {
-        for entry in shape_entries {
-            if entry.key.as_deref() != Some(key) {
-                entries.push(entry.clone());
-            }
-        }
-    }
-
-    // Add/upsert the new key.
-    entries.push(ShapeEntry {
+    let mut entries: Vec<ShapeEntry> = base
+        .shape_entries()
+        .map(<[ShapeEntry]>::to_vec)
+        .unwrap_or_default();
+    let written = ShapeEntry {
         key: Some(key.to_string()),
         value_type: value_type.widen_scalar_literals(),
         optional: false,
-    });
+    };
+    // PHP keeps an overwritten key where it was; only a new key goes on
+    // the end.
+    match entries
+        .iter_mut()
+        .find(|entry| entry.key.as_deref() == Some(key))
+    {
+        Some(existing) => *existing = written,
+        None => entries.push(written),
+    }
 
     PhpType::array_shape(entries)
 }

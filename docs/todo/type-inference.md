@@ -823,7 +823,12 @@ literal values.
 The type model needs an enum-case variant (or a literal kind for it) that
 is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
 joins back into the enum when every case is present. Narrowing by `===`
-and `instanceof` then subtracts cases the way it subtracts union members.
+and `instanceof` then subtracts cases the way it subtracts union members,
+and a branch that has compared away every case holds `never`.
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; both its
+case and its `never` assertion are `// SKIP` in the ported copy under
+`tests/phpstan_data/`.
 
 Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; the
 assertion is `// SKIP` in `tests/phpstan_data/`.

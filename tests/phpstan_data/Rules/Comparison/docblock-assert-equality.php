@@ -41,6 +41,6 @@ function bar(int $x): void
 	if (isAnInteger($x)) {
 		assertType('int', $x);
 	} else {
-		assertType('*NEVER*', $x); // SKIP: exhausted narrowing leaves the last type standing instead of never
+		assertType('*NEVER*', $x);
 	}
 }

@@ -33,6 +33,6 @@ class HelloWorld
 	{
 		assertType('int', $foo);
 		$this->assertString($foo); // should report as always evaluating to false?
-		assertType('*NEVER*', $foo); // SKIP: exhausted narrowing leaves the last type standing instead of never
+		assertType('*NEVER*', $foo); // SKIP: an assertion the inferred type contradicts is trusted over the inferred type
 	}
 }

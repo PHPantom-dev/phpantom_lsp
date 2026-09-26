@@ -19,7 +19,8 @@ const SHAPE_SIZE_LIMIT: i64 = 256;
 /// `array{int, int, int}` `$a`.  A list-shaped shape with optional entries
 /// keeps as many of them as the size needs.  Only the branch where the
 /// sizes are equal learns anything; an inequality rules out one size of
-/// many.
+/// many.  A size the subject cannot have (a negative one, or one its
+/// shape has no room for) exhausts it.
 pub(super) fn apply_count_size_narrowing(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
@@ -45,6 +46,14 @@ pub(super) fn apply_count_size_narrowing(
         let Some(size) = known_size(other, scope) else {
             continue;
         };
+        // `count()` never returns a negative number.
+        if size < 0 {
+            seed_synthetic_key_if_needed(&subject, scope, ctx);
+            if !scope.get(&subject).is_empty() {
+                mark_exhausted(&subject, scope);
+            }
+            continue;
+        }
         if !(1..SHAPE_SIZE_LIMIT).contains(&size) {
             continue;
         }
@@ -72,7 +81,12 @@ pub(super) fn apply_count_size_narrowing(
                 }
             })
             .collect();
-        if changed && !narrowed.is_empty() {
+        if !changed {
+            continue;
+        }
+        if narrowed.is_empty() {
+            mark_exhausted(&subject, scope);
+        } else {
             scope.set(&subject, narrowed);
         }
     }

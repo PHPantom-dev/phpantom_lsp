@@ -627,7 +627,7 @@ function (mixed $m): void {
 
 function (array $a): void {
 	if (count($a) === -10) {
-		assertType('*NEVER*', $a); // SKIP: exhausted narrowing leaves the last type standing instead of never
+		assertType('*NEVER*', $a);
 	} else {
 		assertType('array', $a);
 	}

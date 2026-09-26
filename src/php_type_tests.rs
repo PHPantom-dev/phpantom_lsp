@@ -2785,6 +2785,22 @@ mod subtype_tests {
         assert!(!is_subtype("array{0?: string, 1: int}", "list<string|int>"));
     }
 
+    /// A generic array keeps the `list` and `non-empty-…` promises of its
+    /// family: a plain `array<int>` may be empty and may have any keys.
+    #[test]
+    fn generic_array_satisfies_only_the_promises_its_family_makes() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype("non-empty-array<int>", "array<int>"));
+        assert!(is_subtype("non-empty-list<int>", "non-empty-array<int>"));
+        assert!(is_subtype("list<int>", "array<int, int>"));
+        assert!(!is_subtype("array<int>", "non-empty-array<int>"));
+        assert!(!is_subtype("list<int>", "non-empty-list<int>"));
+        assert!(!is_subtype("array<int>", "list<int>"));
+        assert!(!is_subtype("array<int, int>", "list<int>"));
+    }
+
     #[test]
     fn array_is_subtype_of_iterable() {
         assert!(PhpType::array().is_subtype_of(&PhpType::iterable()));

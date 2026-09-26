@@ -112,7 +112,9 @@ pub(crate) fn apply_type_guard_on_operands(
                         Some(ctx.class_loader),
                     );
                 }
-                if !results.is_empty() {
+                if results.is_empty() {
+                    mark_exhausted(var_name, scope);
+                } else {
                     scope.set(var_name, results);
                 }
             }

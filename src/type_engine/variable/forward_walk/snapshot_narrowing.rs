@@ -107,6 +107,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                     }
                 }
             }
+            restore_after_branches(expr, scope);
         }
         Expression::Conditional(conditional) => {
             // Each arm is evaluated under its own polarity of the condition,
@@ -124,6 +125,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             let mut else_scope = scope.clone();
             apply_condition_narrowing_inverse(conditional.condition, &mut else_scope, ctx);
             record_branch_snapshots(conditional.r#else, &else_scope, ctx);
+            restore_after_branches(expr, scope);
         }
         Expression::Assignment(assignment) => {
             record_match_ternary_snapshots(assignment.rhs, scope, ctx);
@@ -212,9 +214,20 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                     _ => record_branch_snapshots(arm_expr, scope, ctx),
                 }
             }
+            restore_after_branches(expr, scope);
         }
         _ => {}
     }
+}
+
+/// Put the enclosing scope back where a ternary or `match` ends.
+///
+/// A lookup reads the nearest snapshot at or before its offset, so without
+/// this the code after the expression (the next argument of
+/// `f($x instanceof A ? 1 : 2, $x->a())`) would read the last branch's
+/// narrowing as its own.
+fn restore_after_branches(expr: &Expression<'_>, scope: &ScopeState) {
+    record_scope_snapshot(expr.span().end.offset, scope);
 }
 
 /// Record every snapshot a branch body needs, given the scope that body

@@ -1,0 +1,11 @@
+// test: overwriting a key an array shape already has keeps it where it was
+// feature: hover
+// expect: array{a: int, b: string}
+---
+<?php
+
+/** @param array{a: int, b: string} $row */
+function test(array $row): void {
+    $row['a'] += 1;
+    $<>row;
+}

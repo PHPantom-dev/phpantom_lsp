@@ -4,19 +4,18 @@ use super::*;
 /// record each exclusion so a later check knows the branch ruled it out.
 ///
 /// A negated `instanceof` does not eliminate `null`: `!$x instanceof Foo`
-/// is true when `$x` is null, so `null` stays in the union. A subject the
-/// exclusions empty keeps its entry as it was, since an operand that
-/// proves nothing must not erase what the scope already knew.
+/// is true when `$x` is null, so `null` stays in the union.
 ///
-/// Returns `true` when the exclusions emptied a variable that had types:
-/// every alternative it could hold was ruled out, so the path the caller
-/// is narrowing for cannot run and should be marked unreachable.
+/// A subject the exclusions empty is [exhausted](mark_exhausted): every
+/// alternative it could hold was ruled out, as in the else of
+/// `if ($v instanceof AbstractNode)` on a `$v` that was already an
+/// `AbstractNode`, so the path cannot run.
 pub(super) fn exclude_classes_in_scope(
     var_name: &str,
     classes: &[PhpType],
     var_ctx: &VarResolutionCtx<'_>,
     scope: &mut ScopeState,
-) -> bool {
+) {
     let had_types = !scope.get(var_name).is_empty();
     let resolve = |hint: PhpType| {
         crate::type_engine::type_resolution::resolved_types_for_hint(
@@ -35,11 +34,11 @@ pub(super) fn exclude_classes_in_scope(
         narrowing::exclude_instance_of(cls, var_ctx, &mut results);
         scope.record_exclusion(var_name, cls);
     }
-    if results.is_empty() {
-        return had_types;
+    if !results.is_empty() {
+        scope.set(var_name, results);
+    } else if had_types {
+        mark_exhausted(var_name, scope);
     }
-    scope.set(var_name, results);
-    false
 }
 
 /// `types` with every alternative that names a class only in its type
@@ -223,9 +222,7 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if alias.extraction.negated {
                     // `!$isNode` — no leg of the chain held, so every one
                     // of them is excluded.
-                    if exclude_classes_in_scope(var_name, &classes, &var_ctx, scope) {
-                        scope.unreachable = true;
-                    }
+                    exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
                 } else {
                     let union = narrowing::resolve_class_names_to_union(&classes, &var_ctx);
                     if !union.is_empty() {
@@ -248,11 +245,9 @@ pub(super) fn commit_chain_instanceof<'b>(
                 let targets = dynamic_instanceof_targets(rhs, scope, ctx);
                 if !targets.is_empty() {
                     let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-                    if negated {
-                        if exclude_classes_in_scope(var_name, &targets, &var_ctx, scope) {
-                            scope.unreachable = true;
-                        }
-                    } else {
+                    // The value may name a subclass of the class its type
+                    // spells, so failing the check rules nothing out.
+                    if !negated {
                         let mut resolved = Vec::new();
                         for target in &targets {
                             let mut single = Vec::new();
@@ -300,14 +295,12 @@ pub(super) fn commit_chain_instanceof<'b>(
                 if extraction.negated {
                     // Negated instanceof: apply exclusion to the current
                     // scope immediately (each negation removes one type).
-                    if exclude_classes_in_scope(
+                    exclude_classes_in_scope(
                         var_name,
                         std::slice::from_ref(&extraction.class_type),
                         &var_ctx,
                         scope,
-                    ) {
-                        scope.unreachable = true;
-                    }
+                    );
                 } else {
                     // Positive instanceof: resolve and accumulate into
                     // the per-variable union.  For a single operand this
