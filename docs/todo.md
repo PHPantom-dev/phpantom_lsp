@@ -103,10 +103,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B407 | [A readonly property is not narrowed to what the constructor assigns](todo/bugs.md#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns) | Low         | Medium      |
-| B434 | [An assignment inside an arrow function body is not seen](todo/bugs.md#b434-an-assignment-inside-an-arrow-function-body-is-not-seen) | Low         | Low-Medium  |
-| B427 | [The forward walker ignores `@param-closure-this`](todo/bugs.md#b427-the-forward-walker-ignores-param-closure-this) | Low-Medium  | Medium      |
-| B436 | [`array_keys()`'s key type widens to `int\|string` only inside a diagnostic-scope walk](todo/bugs.md#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk) | Low-Medium  | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

@@ -12340,6 +12340,39 @@ async fn self_and_static_in_macro_closure_resolve_to_macro_target() {
     );
 }
 
+/// A variable assigned from `$this` inside a `@param-closure-this`
+/// closure holds the bound object, so its members are the bound class's.
+#[tokio::test]
+async fn variable_read_from_param_closure_this_uses_bound_class() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "class Target { public function aim(): void {} }\n",
+        "class Reg {\n",
+        "    /** @param-closure-this Target $cb */\n",
+        "    public static function on(\\Closure $cb): void {}\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        Reg::on(function () {\n",
+        "            $t = $this;\n",
+        "            $t->aim();\n",
+        "        });\n",
+        "        $this->aim();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, "file:///test/closure_this_var.php", text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "only the `$this->aim()` outside the closure should be flagged, got: {:?}",
+        diags
+    );
+    assert_eq!(diags[0].range.start.line, 12, "got: {:?}", diags);
+}
+
 /// `self::` outside the macro closure still resolves to the lexically
 /// enclosing class, so a method that only exists on the macro target is
 /// flagged there.

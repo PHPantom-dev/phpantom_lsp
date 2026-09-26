@@ -233,6 +233,9 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // Record the scope at the body expression.
             let body_span = arrow.expression.span();
             record_scope_snapshot(body_span.start.offset, &arrow_scope);
+            // The body is `return <expr>;`, and writes what that statement
+            // would, recording a snapshot at the end of each assignment.
+            process_assignment_expr(arrow.expression, &mut arrow_scope, ctx);
             record_scope_snapshot(body_span.end.offset, &arrow_scope);
 
             // The arrow body is a single return-value expression, so
@@ -317,7 +320,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
         }
         Expression::Instantiation(inst) => {
             if let Some(ref args) = inst.argument_list {
-                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+                walk_closures_in_call_args(&args.arguments, None, outer_scope, ctx, |_| vec![]);
             }
         }
         Expression::AnonymousClass(anon) => {
@@ -384,19 +387,25 @@ pub(crate) fn walk_closures_in_call<'b>(
                 Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                 _ => None,
             };
-            walk_closures_in_call_args(&fc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = func_name {
-                    infer_callable_params_from_function_fw(
-                        name,
-                        arg_idx,
-                        &fc.argument_list,
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &fc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = func_name {
+                        infer_callable_params_from_function_fw(
+                            name,
+                            arg_idx,
+                            &fc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::Method(mc) => {
             match closure_call_scope(mc, outer_scope, ctx) {
@@ -411,21 +420,27 @@ pub(crate) fn walk_closures_in_call<'b>(
             };
             let obj_span = mc.object.span();
             let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::NullSafeMethod(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
@@ -437,21 +452,27 @@ pub(crate) fn walk_closures_in_call<'b>(
             };
             let obj_span = mc.object.span();
             let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::StaticMethod(sc) => {
             walk_closures_in_expr(sc.class, outer_scope, ctx, None);
@@ -462,21 +483,27 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let first_arg = extract_first_arg_string_fw(&sc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&sc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_static_receiver_fw(
-                        sc.class,
-                        name,
-                        arg_idx,
-                        &sc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &sc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_static_receiver_fw(
+                            sc.class,
+                            name,
+                            arg_idx,
+                            &sc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
     }
 }
@@ -484,9 +511,12 @@ pub(crate) fn walk_closures_in_call<'b>(
 /// Walk the arguments of a call expression, invoking `infer_fn` for
 /// each argument index to get inferred callable parameter types.
 /// When an argument is a closure/arrow function, the inferred types
-/// are passed through so untyped parameters get the correct types.
+/// are passed through so untyped parameters get the correct types,
+/// and a `@param-closure-this` on the parameter of `call` receiving it
+/// rebinds its `$this`.
 pub(crate) fn walk_closures_in_call_args<'b, F>(
     arguments: &'b TokenSeparatedSequence<'b, Argument<'b>>,
+    call: Option<&Call<'_>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     infer_fn: F,
@@ -501,9 +531,11 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
                 let inferred = infer_fn(arg_idx);
+                let rebound = call
+                    .and_then(|call| closure_this_argument_scope(call, arg_idx, outer_scope, ctx));
                 walk_closures_in_expr(
                     arg_expr,
-                    outer_scope,
+                    rebound.as_ref().unwrap_or(outer_scope),
                     ctx,
                     if inferred.is_empty() {
                         None
@@ -1417,6 +1449,11 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // scanner.
     if !is_static {
         seed_this(&mut scope, ctx);
+        super::readonly_properties::seed_constructor_readonly_properties(
+            &mut scope,
+            method_name,
+            ctx,
+        );
     }
 
     // Seed scope with parameter types.

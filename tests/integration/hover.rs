@@ -129,6 +129,126 @@ class Service {
     assert!(text.contains("Order"), "should resolve to Order: {}", text);
 }
 
+/// An arrow function's body writes what `return <expr>;` would, so a
+/// variable assigned there is in the arrow's scope, and reads the scope
+/// `Closure::call()` binds rather than the lexical `$this`.
+#[test]
+fn hover_variable_assigned_inside_arrow_function_body() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target { public function ok(): bool { return true; } }
+class Service {
+    public function run(Target $t): void {
+        (fn () => $bound = $this)->call($t);
+        $f = fn () => ($made = new Target()) && $made->ok();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 4, 20).expect("expected hover on $bound");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 5, 50).expect("expected hover on $made");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+}
+
+/// A readonly property holds what the constructor assigned it in every
+/// other method, when that is narrower than the declared type.  An
+/// assignment the constructor only makes on one path, or a property that
+/// is not readonly, keeps the declared type.
+#[test]
+fn hover_readonly_property_narrowed_by_constructor() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Cat {}
+class Dog {}
+class Pets {
+    private readonly Cat|Dog $always;
+    private readonly Cat|Dog $sometimes;
+    private Cat|Dog $mutable;
+    public function __construct(bool $flag) {
+        $this->always = new Cat();
+        if ($flag) { $this->sometimes = new Cat(); }
+        $this->mutable = new Cat();
+    }
+    public function read(): void {
+        $a = $this->always;
+        $s = $this->sometimes;
+        $m = $this->mutable;
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 13, 9).expect("expected hover on $a");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Cat") && !text.contains("Dog"),
+        "$a should be Cat: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 14, 9).expect("expected hover on $s");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Dog"),
+        "$s should keep the declared Cat|Dog: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 15, 9).expect("expected hover on $m");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Dog"),
+        "$m should keep the declared Cat|Dog: {text}"
+    );
+}
+
+/// A variable read from `$this` inside a closure handed to a
+/// `@param-closure-this` parameter gets the bound type, not the lexical
+/// class.
+#[test]
+fn hover_variable_assigned_from_param_closure_this() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target {}
+class Reg {
+    /** @param-closure-this Target $cb */
+    public static function on(\Closure $cb): void {}
+}
+class Service {
+    public function run(): void {
+        Reg::on(function () {
+            $t = $this;
+        });
+        Reg::on(fn () => $u = $this);
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 9, 13).expect("expected hover on $t");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
+
+    let hover = hover_at(&backend, uri, content, 11, 26).expect("expected hover on $u");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+    assert!(
+        !text.contains("Service"),
+        "should not see the lexical $this: {text}"
+    );
+}
+
 #[test]
 fn hover_conditional_return_with_interpolated_string_resolves_string_branch() {
     let backend = create_test_backend();

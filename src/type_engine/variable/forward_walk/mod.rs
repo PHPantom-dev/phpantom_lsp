@@ -64,6 +64,7 @@ mod loop_control;
 mod loops;
 mod param_seeding;
 mod reachability;
+mod readonly_properties;
 mod receiver_mutation;
 mod scope_state;
 mod snapshot_narrowing;
@@ -262,11 +263,12 @@ pub(crate) fn resolve_in_method_body<'b>(
 ) -> Option<Vec<ResolvedType>> {
     let mut scope = ScopeState::new();
 
+    let method_name = method_ctx.map(|(n, _)| n);
     if !is_static {
         seed_this(&mut scope, ctx);
+        readonly_properties::seed_constructor_readonly_properties(&mut scope, method_name, ctx);
     }
 
-    let method_name = method_ctx.map(|(n, _)| n);
     let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
     seed_params(
         &mut scope,

@@ -209,11 +209,50 @@ pub(crate) fn closure_call_scope(
     if bound.is_empty() {
         return None;
     }
+    Some(rebind_this(outer, bound))
+}
+
+/// The scope to enter a closure passed as argument `arg_idx` of `call`
+/// from, or `None` when the parameter receiving it does not carry
+/// `@param-closure-this`.
+///
+/// The tag declares what the callee binds the closure's `$this` to, the
+/// way `Closure::call()` does for [`closure_call_scope`].
+pub(crate) fn closure_this_argument_scope(
+    call: &Call<'_>,
+    arg_idx: usize,
+    outer: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<ScopeState> {
+    let scope_resolver = |var_name: &str| -> Vec<ResolvedType> {
+        outer
+            .locals
+            .get(&crate::atom::atom(var_name))
+            .cloned()
+            .unwrap_or_default()
+    };
+    let var_ctx = ctx.var_ctx_for_with_scope(
+        "$__infer",
+        ctx.cursor_offset,
+        &scope_resolver,
+        Some(outer.proofs()),
+    );
+    let bound = crate::type_engine::variable::closure_resolution::closure_this_for_argument(
+        call,
+        arg_idx,
+        &var_ctx.as_resolution_ctx(),
+    )?;
+    Some(rebind_this(outer, bound))
+}
+
+/// `outer` with `$this` bound to `bound`, keeping nothing recorded
+/// against the `$this` it replaces.
+fn rebind_this(outer: &ScopeState, bound: Vec<ResolvedType>) -> ScopeState {
     let mut scope = outer.clone();
     scope.remove("$this");
     scope.invalidate_dependent_keys("$this");
     scope.set("$this", bound);
-    Some(scope)
+    scope
 }
 
 /// Try to enter a closure or arrow function if the cursor is inside one.
@@ -344,6 +383,21 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     &filtered_inferred,
                     ctx,
                 );
+                // The body is `return <expr>;`, so it writes what that
+                // statement would: `fn () => $x = $this->make()` assigns
+                // `$x` and `fn () => ($x = f()) && $x->ok()` reads it back.
+                // A cursor in the right-hand side of a root assignment is
+                // left to the recursion below, which applies the write
+                // itself before searching the value for a nested closure.
+                let cursor_in_root_rhs = matches!(
+                    crate::parser::unwrap_parens(arrow.expression),
+                    Expression::Assignment(a)
+                        if ctx.cursor_offset >= a.rhs.span().start.offset
+                            && ctx.cursor_offset <= a.rhs.span().end.offset
+                );
+                if !cursor_in_root_rhs {
+                    process_assignment_expr(arrow.expression, scope, ctx);
+                }
                 // The arrow body is a single return-value expression, so
                 // apply the same cursor narrowing that `walk_body_forward`
                 // applies to a statement body.  This narrows a parameter
@@ -406,6 +460,21 @@ pub(crate) fn try_enter_closure_expr<'b>(
                 } else {
                     Some(inferred.as_slice())
                 };
+                let arg_span = arg_expr.span();
+                if matches!(
+                    arg_expr,
+                    Expression::Closure(_) | Expression::ArrowFunction(_)
+                ) && ctx.cursor_offset >= arg_span.start.offset
+                    && ctx.cursor_offset <= arg_span.end.offset
+                    && let Some(mut rebound) =
+                        closure_this_argument_scope(call, arg_idx, scope, ctx)
+                {
+                    if try_enter_closure_expr(arg_expr, &mut rebound, ctx, inferred_opt) {
+                        *scope = rebound;
+                        return true;
+                    }
+                    continue;
+                }
                 if try_enter_closure_expr(arg_expr, scope, ctx, inferred_opt) {
                     return true;
                 }

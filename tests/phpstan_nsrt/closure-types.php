@@ -64,7 +64,7 @@ class Foo
 			return;
 		}
 
-		(fn () => assertType('DateTimeInterface&stdClass', $this))->call($foo); // SKIP: an assignment inside an arrow function body is not seen
+		(fn () => assertType('DateTimeInterface&stdClass', $this))->call($foo);
 	}
 
 }

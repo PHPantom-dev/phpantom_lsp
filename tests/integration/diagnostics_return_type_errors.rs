@@ -1,4 +1,7 @@
-use crate::common::{collect_diagnostics_with, create_test_backend, messages_with_code};
+use crate::common::{
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
+    messages_with_code,
+};
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
@@ -2342,6 +2345,35 @@ function add_flag(array $pairs): array {
         messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "A foreach ($arr as $key => $_) that rewrites every element should not join \
          with the pre-loop shape, got: {diags:?}"
+    );
+}
+
+/// Same as above, iterating the array's keys through `array_keys()`: the
+/// key `array_keys()` hands the loop is the array's own `string` key, not
+/// the `int|string` default for an array key.
+#[test]
+fn no_diagnostic_for_foreach_over_array_keys_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach over array_keys($arr) that rewrites every element should keep \
+         the array's string key, got: {diags:?}"
     );
 }
 

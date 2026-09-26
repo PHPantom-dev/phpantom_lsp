@@ -46,6 +46,12 @@ struct AssertTypeCall {
     original_line: usize,
     /// Number of source lines the call spans (1 unless it is multi-line).
     line_count: usize,
+    /// Byte range of the call within its line, from the function name to
+    /// the closing `)`, for a call on a single line.  The call is replaced
+    /// in place so the code around it keeps running: an assertion inside
+    /// `(fn () => assertType(…, $this))->call($foo)` must still see the
+    /// `$this` that `call()` binds.
+    in_line: Option<(usize, usize)>,
 }
 
 /// Extract all `assertType()` calls from the PHP source.
@@ -95,6 +101,15 @@ fn extract_assert_type_calls(source: &str) -> Vec<AssertTypeCall> {
 
             if let Some(mut parsed) = parse_assert_type_call(&call_text, source, &lines, i) {
                 parsed.line_count = lines_consumed;
+                if lines_consumed == 1
+                    && let Some(close) = matching_close_paren(after_paren)
+                {
+                    let indent = line.len() - line.trim_start().len();
+                    let name_start = trimmed[..call_start]
+                        .rfind("assertType(")
+                        .expect("the call starts with its name");
+                    parsed.in_line = Some((indent + name_start, indent + call_start + close + 1));
+                }
                 results.push(parsed);
             }
 
@@ -198,7 +213,40 @@ fn parse_assert_type_call(
         expr,
         original_line: line_idx + 1,
         line_count: 1,
+        in_line: None,
     })
+}
+
+/// Byte offset of the `)` closing a call whose arguments start `text`,
+/// skipping parentheses inside string literals.
+fn matching_close_paren(text: &str) -> Option<usize> {
+    let mut depth = 1;
+    let mut string_char = None;
+    let mut escaped = false;
+    for (i, ch) in text.char_indices() {
+        if let Some(quote) = string_char {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote {
+                string_char = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => string_char = Some(ch),
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse the first argument of assertType, which is either:
@@ -329,11 +377,19 @@ fn transform_source(
             for &idx in indices {
                 let a = &assertions[idx];
                 let var_name = format!("$__phpantom_assert_{}", idx);
-                let replacement = format!("{} = {};", var_name, a.expr);
-
-                // Preserve indentation from the original line.
-                let indent = &line[..line.len() - line.trim_start().len()];
-                result.push_str(indent);
+                let replacement = match a.in_line {
+                    Some((start, end)) => {
+                        // The name may be qualified (`\PHPStan\Testing\assertType`).
+                        let before = line[..start]
+                            .trim_end_matches(|c: char| c.is_alphanumeric() || "_\\".contains(c));
+                        format!("{before}{var_name} = {}{}", a.expr, &line[end..])
+                    }
+                    None => {
+                        // Preserve indentation from the original line.
+                        let indent = &line[..line.len() - line.trim_start().len()];
+                        format!("{indent}{var_name} = {};", a.expr)
+                    }
+                };
                 result.push_str(&replacement);
                 result.push('\n');
 

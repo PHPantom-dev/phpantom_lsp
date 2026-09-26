@@ -375,17 +375,8 @@ fn walk_call_for_closure_this(
 ) -> Option<Vec<ResolvedType>> {
     match call {
         Call::Function(fc) => {
-            let func_name = match fc.function {
-                Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
-                _ => None,
-            };
-            let func_name_offset = fc.function.span().start.offset;
             let result = walk_args_for_closure_this(&fc.argument_list.arguments, ctx, &|arg_idx| {
-                let name = func_name.as_deref()?;
-                let fi = ctx
-                    .function_loader
-                    .and_then(|fl| fl(name, func_name_offset))?;
-                closure_this_from_function_params(&fi, arg_idx, ctx).map(bound_this)
+                closure_this_for_argument(call, arg_idx, ctx)
             });
             if result.is_some() {
                 return result;
@@ -408,23 +399,11 @@ fn walk_call_for_closure_this(
             if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let obj_span = mc.object.span();
-                let result =
-                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_receiver(
-                            obj_span.start.offset,
-                            obj_span.end.offset,
-                            &method_name,
-                            arg_idx,
-                            ctx,
-                        )
-                        .map(bound_this)
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in mc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -440,23 +419,11 @@ fn walk_call_for_closure_this(
             if let Some(r) = walk_expr_for_closure_this(mc.object, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let obj_span = mc.object.span();
-                let result =
-                    walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_receiver(
-                            obj_span.start.offset,
-                            obj_span.end.offset,
-                            &method_name,
-                            arg_idx,
-                            ctx,
-                        )
-                        .map(bound_this)
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&mc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in mc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -472,16 +439,11 @@ fn walk_call_for_closure_this(
             if let Some(r) = walk_expr_for_closure_this(sc.class, ctx) {
                 return Some(r);
             }
-            if let ClassLikeMemberSelector::Identifier(ident) = &sc.method {
-                let method_name = bytes_to_str(ident.value).to_string();
-                let result =
-                    walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
-                        closure_this_from_static_receiver(sc.class, &method_name, arg_idx, ctx)
-                            .map(bound_this)
-                    });
-                if result.is_some() {
-                    return result;
-                }
+            let result = walk_args_for_closure_this(&sc.argument_list.arguments, ctx, &|arg_idx| {
+                closure_this_for_argument(call, arg_idx, ctx)
+            });
+            if result.is_some() {
+                return result;
             }
             for arg in sc.argument_list.arguments.iter() {
                 let arg_expr = arg.value();
@@ -494,6 +456,48 @@ fn walk_call_for_closure_this(
             None
         }
     }
+}
+
+/// What `$this` is bound to inside a closure passed as argument `arg_idx`
+/// of `call`, when the parameter receiving it carries
+/// `@param-closure-this`.
+pub(crate) fn closure_this_for_argument(
+    call: &Call<'_>,
+    arg_idx: usize,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    fn method_name<'a>(selector: &ClassLikeMemberSelector<'a>) -> Option<&'a str> {
+        match selector {
+            ClassLikeMemberSelector::Identifier(ident) => Some(bytes_to_str(ident.value)),
+            _ => None,
+        }
+    }
+    let bound = match call {
+        Call::Function(fc) => {
+            let Expression::Identifier(ident) = fc.function else {
+                return None;
+            };
+            let fi = ctx
+                .function_loader
+                .and_then(|fl| fl(bytes_to_str(ident.value()), fc.function.span().start.offset))?;
+            closure_this_from_function_params(&fi, arg_idx, ctx)
+        }
+        Call::Method(MethodCall { object, method, .. })
+        | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
+            let obj_span = object.span();
+            closure_this_from_receiver(
+                obj_span.start.offset,
+                obj_span.end.offset,
+                method_name(method)?,
+                arg_idx,
+                ctx,
+            )
+        }
+        Call::StaticMethod(sc) => {
+            closure_this_from_static_receiver(sc.class, method_name(&sc.method)?, arg_idx, ctx)
+        }
+    }?;
+    Some(bound_this(bound))
 }
 
 /// `(function () { … })->call($obj)` runs the closure with `$this` bound
