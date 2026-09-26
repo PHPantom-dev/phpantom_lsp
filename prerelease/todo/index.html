@@ -1336,12 +1336,6 @@ contributor even though it's short.</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
-<td>B369</td>
-<td><a href="../todo/bugs/#b369-issetarrk-and-array_key_existsk-arr-do-not-narrow-k-to-the-arrays-keys"><code>isset($arr[$k])</code> and <code>array_key_exists($k, $arr)</code> do not narrow <code>$k</code> to the array's keys</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>P64</td>
 <td><a href="../todo/performance/#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch">A file with one very large scope copies it at every branch</a></td>
 <td>Medium</td>
@@ -1688,18 +1682,6 @@ unlikely to move the needle for most users.</p>
 <td></td>
 </tr>
 <tr>
-<td>B368</td>
-<td><a href="../todo/bugs/#b368-a-narrowed-member-read-or-call-result-survives-a-call-that-can-change-it">A narrowed member read or call result survives a call that can change it</a></td>
-<td>Medium</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td>B374</td>
-<td><a href="../todo/bugs/#b374-instanceof-against-a-class-that-cannot-be-loaded-clears-the-variables-type"><code>instanceof</code> against a class that cannot be loaded clears the variable's type</a></td>
-<td>Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
 <td>B379</td>
 <td><a href="../todo/bugs/#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after">The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after</a></td>
 <td>Medium</td>
@@ -1712,20 +1694,14 @@ unlikely to move the needle for most users.</p>
 <td>Low-Medium</td>
 </tr>
 <tr>
+<td>B422</td>
+<td><a href="../todo/bugs/#b422-a-class-constant-array-holding-fooclass-is-plain-array">A class constant array holding <code>Foo::class</code> is plain <code>array</code></a></td>
+<td>Low-Medium</td>
+<td>Low-Medium</td>
+</tr>
+<tr>
 <td>B420</td>
 <td><a href="../todo/bugs/#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type">A value typed as a model's base collection has the custom collection's class but not its type</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B370</td>
-<td><a href="../todo/bugs/#b370-a-loose-comparison-against-a-literal-does-not-narrow">A loose comparison against a literal does not narrow</a></td>
-<td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B372</td>
-<td><a href="../todo/bugs/#b372-a-condition-stored-in-a-variable-loses-its-narrowing">A condition stored in a variable loses its narrowing</a></td>
 <td>Low-Medium</td>
 <td>Medium</td>
 </tr>
@@ -1745,42 +1721,6 @@ unlikely to move the needle for most users.</p>
 <td>B404</td>
 <td><a href="../todo/bugs/#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members"><code>$this</code> in a <code>@phpstan-require-extends</code> trait does not see the required class's members</a></td>
 <td>Low-Medium</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B371</td>
-<td><a href="../todo/bugs/#b371-a-check-compared-to-true-or-array_key_exists-with-a-non-literal-key-does-not-narrow">A check compared to <code>true</code>, or <code>array_key_exists()</code> with a non-literal key, does not narrow</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>B373</td>
-<td><a href="../todo/bugs/#b373-is_a-narrowing-ignores-allow_string-class-string-variables-and-a-narrower-subject"><code>is_a()</code> narrowing ignores <code>allow_string</code>, class-string variables, and a narrower subject</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B375</td>
-<td><a href="../todo/bugs/#b375-phpstan-assert-if-true-misses-the-receivers-template-binding-and-untyped-subjects"><code>@phpstan-assert-if-true</code> misses the receiver's template binding and untyped subjects</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B376</td>
-<td><a href="../todo/bugs/#b376-reflectionclassissubclassof-does-not-narrow-the-reflected-class"><code>ReflectionClass::isSubclassOf()</code> does not narrow the reflected class</a></td>
-<td>Low</td>
-<td>Low-Medium</td>
-</tr>
-<tr>
-<td>B377</td>
-<td><a href="../todo/bugs/#b377-a-type-guard-on-an-array-offset-does-not-narrow-the-array">A type guard on an array offset does not narrow the array</a></td>
-<td>Low</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td>B378</td>
-<td><a href="../todo/bugs/#b378-counta--countb-does-not-give-b-as-length"><code>count($a) == count($b)</code> does not give <code>$b</code> <code>$a</code>'s length</a></td>
-<td>Low</td>
 <td>Medium</td>
 </tr>
 <tr>
@@ -1846,6 +1786,12 @@ unlikely to move the needle for most users.</p>
 <tr>
 <td>B421</td>
 <td><a href="../todo/bugs/#b421-aia-does-not-simplify-to-a"><code>(A&amp;I)\|A</code> does not simplify to <code>A</code></a></td>
+<td>Low</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td>B423</td>
+<td><a href="../todo/bugs/#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures">A call inside an invoked closure does not invalidate what the closure captures</a></td>
 <td>Low</td>
 <td>Medium</td>
 </tr>
