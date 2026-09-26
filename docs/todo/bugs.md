@@ -341,18 +341,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B426. `analyze` occasionally reports a member of a vendor interface as unknown
-**Impact: Low · Complexity: Medium**
-
-One `analyze` run over `projects/bladestan` reported
-`Method 'isInClass' not found on class 'PHPStan\Analyser\Scope'` and the
-same for `getClassReflection` (`src/NodeAnalyzer/LaravelViewFunctionMatcher.php`,
-lines 81-82). Four further runs of the same binary on the same tree did not
-report them, so the result depends on something other than the input:
-most likely the order the parallel workers load classes in, leaving the
-`Scope` interface resolved from a partial or not-yet-merged class once.
-
-**Where to look:** how the analyze workers share the resolved-class
-cache, and whether a class read while another worker is still indexing
-its file can be cached incomplete. Reproduce by looping `analyze` on
-`projects/bladestan` and grepping for `isInClass`.
+No outstanding items.

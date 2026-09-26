@@ -24,6 +24,7 @@ use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
+use super::cache::PendingClaim;
 use super::laravel;
 use super::{
     ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, apply_virtual_members,
@@ -55,6 +56,66 @@ struct InFlightGuard<'a> {
 impl Drop for InFlightGuard<'_> {
     fn drop(&mut self) {
         self.cache.write().unmark_in_flight(self.fqn);
+    }
+}
+
+/// RAII guard that releases a cross-thread single-flight claim (see
+/// [`super::cache::ResolvedCacheInner::claim_pending`]) when the
+/// resolution that took it finishes, normally or by panic.
+struct PendingGuard<'a> {
+    cache: &'a ResolvedClassCache,
+    key: ResolvedClassCacheKey,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.cache.write().release_pending(&self.key);
+    }
+}
+
+/// Bound on how long a thread waits for another thread's first-time
+/// resolution of the same not-yet-cached class before giving up and
+/// resolving it independently.
+///
+/// A single resolution takes a fraction of a millisecond in the common
+/// case (see [`MAX_POPULATE_WORKERS`]), so this is orders of magnitude
+/// above normal contention and only fires if the owning thread is
+/// abnormally stuck — mirroring `ParseInflight`'s escape hatch in
+/// `resolution.rs`.
+const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait for another thread's first-time resolution of `key` to land in
+/// the cache.
+///
+/// Returns `None` when the caller should give up waiting and resolve
+/// the class itself instead: either the owning thread released its
+/// claim without inserting a result (e.g. it hit its own cycle break
+/// at this very key from a different angle), or the wait exceeded
+/// [`PENDING_WAIT_ESCAPE_HATCH`].
+fn wait_for_pending(
+    cache: &ResolvedClassCache,
+    key: &ResolvedClassCacheKey,
+) -> Option<Arc<ClassInfo>> {
+    let deadline = std::time::Instant::now() + PENDING_WAIT_ESCAPE_HATCH;
+    loop {
+        std::thread::sleep(std::time::Duration::from_micros(50));
+        {
+            let guard = cache.read();
+            if let Some(cached) = guard.get(key) {
+                return Some(Arc::clone(cached));
+            }
+            if !guard.is_pending(key) {
+                return None;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                "PHPantom: gave up waiting for another thread to resolve {} \
+                 after {PENDING_WAIT_ESCAPE_HATCH:?}; resolving independently",
+                key.0
+            );
+            return None;
+        }
     }
 }
 
@@ -559,6 +620,38 @@ fn resolve_class_fully_inner(
         }
     }
 
+    // ── Cross-thread single-flight for the first resolution ─────────
+    // Two threads racing to resolve the same never-before-cached class
+    // (common for a vendor interface reached only via a parameter type
+    // hint, so it is never eagerly toposorted) would otherwise both
+    // run the full merge independently and race to insert, each seeing
+    // only its own `in_flight` set below — see
+    // `ResolvedCacheInner::pending` for why that can silently diverge
+    // rather than merely duplicate work.
+    // Bound the write guard to a `let` (not a `match` scrutinee) so it
+    // is dropped immediately: a `match`/`if let` scrutinee's temporary
+    // lives for the whole expression, and the `OwnedByOtherThread` arm
+    // below takes its own `cache.read()` inside `wait_for_pending` —
+    // holding the write guard that long would self-deadlock.
+    let claim = cache.write().claim_pending(&cache_key);
+    let pending_guard = match claim {
+        PendingClaim::Fresh => Some(PendingGuard {
+            cache,
+            key: cache_key.clone(),
+        }),
+        PendingClaim::AlreadyOwnedByThisThread => None,
+        PendingClaim::OwnedByOtherThread => {
+            if let Some(result) = wait_for_pending(cache, &cache_key) {
+                return result;
+            }
+            // Gave up waiting; resolve independently instead of
+            // blocking forever. `pending_guard` stays `None` so this
+            // thread's completion below does not release a claim it
+            // never took.
+            None
+        }
+    };
+
     // ── Cycle break ─────────────────────────────────────────────────
     // If this class is already being resolved by this thread (re-entrant
     // call from a virtual member provider or interface merge on a
@@ -581,6 +674,7 @@ fn resolve_class_fully_inner(
     merged.rebuild_method_index();
     let result = Arc::new(merged);
     cache.write().insert(cache_key, Arc::clone(&result));
+    drop(pending_guard);
 
     result
 }

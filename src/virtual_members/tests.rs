@@ -1854,3 +1854,94 @@ fn interface_merge_matches_with_and_without_a_warm_cache() {
         "the contract's bound concrete should come through either way"
     );
 }
+
+/// Two threads racing to resolve the same never-before-cached class must
+/// not both perform the full merge independently: the second thread
+/// should wait for the first and read the identical finished result
+/// (same `Arc` allocation), rather than compute — and possibly diverge
+/// on — its own copy. See B426 and `ResolvedCacheInner::pending`.
+#[test]
+fn concurrent_first_resolution_of_the_same_class_is_single_flighted() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::mpsc;
+
+    let mut iface = make_class("Vendor\\Scope");
+    iface.kind = ClassLikeKind::Interface;
+    iface
+        .methods
+        .push(Arc::new(make_method("isInClass", Some("bool"))));
+    let iface_arc = Arc::new(iface);
+
+    let mut target = make_class("Vendor\\Analyser\\ScopeImpl");
+    target.interfaces = vec![atom("Vendor\\Scope")];
+    let target_arc = Arc::new(target);
+
+    // Fires exactly once: the winning thread's interface-merge lookup of
+    // `Vendor\Scope` blocks until the test explicitly releases it, giving
+    // the losing thread a reliable window to observe the pending claim.
+    let gate_armed = Arc::new(AtomicBool::new(true));
+    let release = Arc::new(AtomicBool::new(false));
+    let (reached_tx, reached_rx) = mpsc::channel();
+
+    let class_loader = {
+        let iface_arc = Arc::clone(&iface_arc);
+        let target_arc = Arc::clone(&target_arc);
+        let gate_armed = Arc::clone(&gate_armed);
+        let release = Arc::clone(&release);
+        let reached_tx = reached_tx.clone();
+        move |name: &str| -> Option<Arc<ClassInfo>> {
+            match name {
+                "Vendor\\Analyser\\ScopeImpl" => Some(Arc::clone(&target_arc)),
+                "Vendor\\Scope" => {
+                    if gate_armed.swap(false, Ordering::SeqCst) {
+                        let _ = reached_tx.send(());
+                        while !release.load(Ordering::SeqCst) {
+                            std::thread::yield_now();
+                        }
+                    }
+                    Some(Arc::clone(&iface_arc))
+                }
+                _ => None,
+            }
+        }
+    };
+
+    let cache = new_resolved_class_cache();
+
+    let winner = {
+        let class_loader = class_loader.clone();
+        let target_arc = Arc::clone(&target_arc);
+        let cache = Arc::clone(&cache);
+        std::thread::spawn(move || resolve_class_fully_cached(&target_arc, &class_loader, &cache))
+    };
+
+    // Wait until the winning thread is blocked inside its interface
+    // merge, i.e. after it has claimed the pending slot.
+    reached_rx
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("winner thread must reach the interface-merge gate");
+
+    let loser = {
+        let target_arc = Arc::clone(&target_arc);
+        let cache = Arc::clone(&cache);
+        std::thread::spawn(move || resolve_class_fully_cached(&target_arc, &class_loader, &cache))
+    };
+
+    // Give the loser thread a moment to reach `claim_pending` and observe
+    // `OwnedByOtherThread` before releasing the winner.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    release.store(true, Ordering::SeqCst);
+
+    let winner_result = winner.join().expect("winner thread panicked");
+    let loser_result = loser.join().expect("loser thread panicked");
+
+    assert!(
+        Arc::ptr_eq(&winner_result, &loser_result),
+        "both threads must observe the exact same resolved-class allocation, \
+         not two independently computed copies"
+    );
+    assert!(
+        winner_result.methods.iter().any(|m| m.name == "isInClass"),
+        "the interface method must survive the merge"
+    );
+}

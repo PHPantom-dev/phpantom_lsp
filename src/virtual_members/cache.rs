@@ -97,6 +97,28 @@ pub struct ResolvedCacheInner {
     /// for the duration of one synchronous resolution call tree; they
     /// are removed by an RAII guard, so a panic cannot leak them.
     in_flight: HashSet<(std::thread::ThreadId, Atom)>,
+    /// Cross-thread claim on the first resolution of a not-yet-cached
+    /// `(FQN, generic args)`, keyed the same as [`map`](Self::map).
+    ///
+    /// Unlike `in_flight` (which is deliberately keyed per thread so a
+    /// genuine same-thread dependency cycle can break out with a
+    /// partial result), this tracks which single thread is allowed to
+    /// perform the *first* full resolution of a given key. Two threads
+    /// that both reach a never-before-cached class at the same time
+    /// (common for a class reached only via a parameter type hint,
+    /// never eagerly toposorted) would otherwise both run the full
+    /// merge independently and race to insert. Racing is not just
+    /// wasted work: each thread's `in_flight` set reflects only *its
+    /// own* concurrent call stack, so a thread that happens to already
+    /// have an unrelated class marked in-flight from other nested work
+    /// can take a different cycle-break path than a thread that
+    /// doesn't, silently dropping virtual/interface members the other
+    /// thread's result would have had. Making the first resolution
+    /// single-flighted removes that divergence: every other consumer
+    /// of the same not-yet-cached key waits for the one true
+    /// computation instead of racing it. See
+    /// [`claim_pending`](Self::claim_pending).
+    pending: HashMap<ResolvedClassCacheKey, std::thread::ThreadId>,
     /// Interned transformed methods, keyed by the identity of the
     /// original `Arc<MethodInfo>` plus a fingerprint of the transform
     /// (template substitution map, bare-`self` replacement target,
@@ -128,6 +150,21 @@ pub struct ResolvedCacheInner {
     /// produces value-identical transformed properties, which interning
     /// collapses to one allocation shared across all of them.
     substituted_properties: HashMap<(usize, u128), SubstitutedPropertyEntry>,
+}
+
+/// Outcome of [`ResolvedCacheInner::claim_pending`].
+pub(crate) enum PendingClaim {
+    /// No other thread was resolving this key; the caller must now
+    /// perform the full resolution and release the claim via
+    /// [`ResolvedCacheInner::release_pending`] when done.
+    Fresh,
+    /// The calling thread already holds the claim (a same-thread
+    /// re-entrant call). Proceed as if uncontended; do not release
+    /// this claim independently of the outer call that took it.
+    AlreadyOwnedByThisThread,
+    /// A different thread holds the claim. The caller should wait for
+    /// it to finish and read the cache instead of resolving again.
+    OwnedByOtherThread,
 }
 
 /// One interned transformed method: the origin witness plus the shared
@@ -163,6 +200,7 @@ impl Default for ResolvedCacheInner {
             schema_index: SchemaIndex::default(),
             laravel_aliases: crate::virtual_members::laravel::new_alias_slot(),
             in_flight: HashSet::new(),
+            pending: HashMap::new(),
             substituted_methods: HashMap::new(),
             substituted_properties: HashMap::new(),
         }
@@ -238,6 +276,32 @@ impl ResolvedCacheInner {
         self.in_flight.remove(&(std::thread::current().id(), fqn));
     }
 
+    /// Attempt to become the sole resolver of `key`'s first, not-yet-cached
+    /// resolution. See [`pending`](Self::pending) for why this exists
+    /// alongside `in_flight`.
+    pub(crate) fn claim_pending(&mut self, key: &ResolvedClassCacheKey) -> PendingClaim {
+        let current = std::thread::current().id();
+        match self.pending.get(key) {
+            Some(&owner) if owner == current => PendingClaim::AlreadyOwnedByThisThread,
+            Some(_) => PendingClaim::OwnedByOtherThread,
+            None => {
+                self.pending.insert(key.clone(), current);
+                PendingClaim::Fresh
+            }
+        }
+    }
+
+    /// Release a [`PendingClaim::Fresh`] claim on `key`, letting any
+    /// thread waiting in `claim_pending` proceed.
+    pub(crate) fn release_pending(&mut self, key: &ResolvedClassCacheKey) {
+        self.pending.remove(key);
+    }
+
+    /// Whether another thread currently holds a fresh claim on `key`.
+    pub(crate) fn is_pending(&self, key: &ResolvedClassCacheKey) -> bool {
+        self.pending.contains_key(key)
+    }
+
     pub fn schema_index(&self) -> &SchemaIndex {
         &self.schema_index
     }
@@ -303,9 +367,9 @@ impl ResolvedCacheInner {
 
     /// Remove all entries and indices.
     ///
-    /// `in_flight` is left untouched: its entries belong to resolution
-    /// call trees currently running on other threads, not to the cached
-    /// contents being invalidated.
+    /// `in_flight` and `pending` are left untouched: their entries
+    /// belong to resolution call trees currently running on other
+    /// threads, not to the cached contents being invalidated.
     pub fn clear(&mut self) {
         self.map.clear();
         self.fqn_keys.clear();

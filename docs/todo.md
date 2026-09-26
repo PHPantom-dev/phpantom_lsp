@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 | B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
 | B407 | [A readonly property is not narrowed to what the constructor assigns](todo/bugs.md#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns) | Low         | Medium      |
 | B424 | [A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable](todo/bugs.md#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable) | Low         | Medium      |
-| B426 | [`analyze` occasionally reports a member of a vendor interface as unknown](todo/bugs.md#b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown) | Low         | Medium      |
 | B434 | [An assignment inside an arrow function body is not seen](todo/bugs.md#b434-an-assignment-inside-an-arrow-function-body-is-not-seen) | Low         | Low-Medium  |
 | B427 | [The forward walker ignores `@param-closure-this`](todo/bugs.md#b427-the-forward-walker-ignores-param-closure-this) | Low-Medium  | Medium      |
 | B429 | [A `class-string` key is widened to `string` when an array is written through it](todo/bugs.md#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it) | Low-Medium  | Low         |
