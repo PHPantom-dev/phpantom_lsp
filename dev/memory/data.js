@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790459933200,
+  "lastUpdate": 1790461642167,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -32979,6 +32979,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.8,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5f6422d36d1ba477306f17d8a43a748d8a488c91",
+          "message": "A loop past a guard clause a repeated check rules out keeps what it\nassigned",
+          "timestamp": "2026-09-27T00:09:18+02:00",
+          "tree_id": "0d408446c9be08e850181511e4485b88632a6efe",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5f6422d36d1ba477306f17d8a43a748d8a488c91"
+        },
+        "date": 1790461631676,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.9,
             "unit": "MiB"
           }
         ]
