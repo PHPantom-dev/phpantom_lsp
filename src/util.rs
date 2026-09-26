@@ -204,10 +204,17 @@ pub(crate) fn resolve_php_type_names(
 /// true>` sees two different arities for what should be the same type.
 ///
 /// This walks the type and rebuilds every `Generic` node whose argument
-/// count falls short of its class's template parameters, appending each
-/// remaining parameter's resolved default (falling back further to its
-/// bound, or `mixed`, the same rules [`build_generic_subs`] applies to
-/// member substitution).
+/// count falls short of its class's template parameters, spelling out each
+/// omitted parameter the way [`build_generic_subs`] binds it for member
+/// substitution.
+///
+/// Only a parameter that is actually left to something is filled: one with
+/// a declared default, or a leading key parameter a short list skips
+/// (`Collection<User>` is `Collection<array-key, User>`, `Iterator<Foo>` is
+/// `Iterator<mixed, Foo>`). A trailing parameter with neither is left out,
+/// as PHPStan leaves it, rather than spelled `mixed`: writing
+/// `Iterator<Foo>` out as `Iterator<Foo, mixed>` would move `Foo` into the
+/// key slot for every consumer that reads the arguments positionally.
 ///
 /// [`build_generic_subs`]: crate::inheritance::build_generic_subs
 fn fill_generic_type_defaults(
@@ -224,17 +231,26 @@ fn fill_generic_type_defaults(
                 .map(|a| fill_generic_type_defaults(a, class_loader))
                 .collect();
             let filled_args = class_loader(g.name.as_str()).and_then(|cls| {
-                (cls.template_params.len() > args.len()).then(|| {
-                    let subs = crate::inheritance::build_generic_subs(&cls, &args);
-                    cls.template_params
-                        .iter()
-                        .map(|param| {
-                            subs.get(param.as_str())
-                                .cloned()
-                                .unwrap_or_else(PhpType::mixed)
-                        })
-                        .collect::<Vec<_>>()
-                })
+                let written = args.len();
+                let offset = crate::inheritance::generic_arg_offset(&cls, written);
+                let every_omitted_is_left_to_something = cls
+                    .template_params
+                    .iter()
+                    .skip(offset + written)
+                    .all(|param| cls.template_param_defaults.contains_key(param));
+                (cls.template_params.len() > written && every_omitted_is_left_to_something).then(
+                    || {
+                        let subs = crate::inheritance::build_generic_subs(&cls, &args);
+                        cls.template_params
+                            .iter()
+                            .map(|param| {
+                                subs.get(param.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(PhpType::mixed)
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                )
             });
             PhpType::generic_atom(g.name, filled_args.unwrap_or(args))
         }

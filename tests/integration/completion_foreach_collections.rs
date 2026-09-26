@@ -1,5 +1,6 @@
 use crate::common::{
-    complete_at, create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+    assert_assigned_types, complete_at, create_psr4_workspace, create_test_backend,
+    create_test_backend_with_full_stubs,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -986,5 +987,40 @@ async fn test_foreach_chain_iterable_inline_var_overrides_assignment_type() {
         !labels.iter().any(|l| l.starts_with("ban")),
         "Should NOT include 'ban' from Admin (the @var overrode the assignment type). Got: {:?}",
         labels
+    );
+}
+
+/// A lone argument to `Traversable`, `Iterator` or `IteratorAggregate` names
+/// the value, not the key, even though their `TKey` has no bound to right-align
+/// the argument by. Binding it to `TKey` left every element `mixed`.
+#[test]
+fn a_single_argument_iterable_interface_names_its_value() {
+    let content = r#"<?php
+class Node { public function getImage(): string { return ''; } }
+/**
+ * @param Iterator<Node> $iterator
+ * @param Traversable<Node> $traversable
+ * @param IteratorAggregate<Node> $aggregate
+ */
+function probe(Iterator $iterator, Traversable $traversable, IteratorAggregate $aggregate): void {
+    foreach ($iterator as $key => $fromIterator) {}
+    foreach ($traversable as $fromTraversable) {}
+    foreach ($aggregate as $fromAggregate) {}
+    $current = $iterator->current();
+    $copy = $fromIterator;
+    $copyTraversable = $fromTraversable;
+    $copyAggregate = $fromAggregate;
+    $copyKey = $key;
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$copy", "Node"),
+            ("$copyTraversable", "Node"),
+            ("$copyAggregate", "Node"),
+            ("$current", "Node"),
+            ("$copyKey", "mixed"),
+        ],
     );
 }

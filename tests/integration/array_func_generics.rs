@@ -943,3 +943,29 @@ function probe(array $map, bool $flag): void {
         ],
     );
 }
+
+/// A first-class callable hands `array_map` the method or function itself,
+/// so its declared return is what each element becomes. Without it the
+/// element passed straight through, and `array_map(Row::fromCache(...),
+/// $rows)` read back as the rows it was built from.
+#[test]
+fn array_map_with_a_first_class_callable_returns_what_the_callable_returns() {
+    let content = r#"<?php
+class Row {
+    /** @param array{id: int} $data */
+    public static function fromCache(array $data): self { return new self(); }
+}
+/**
+ * @param list<array{id: int}> $rows
+ * @param list<Stringable> $labels
+ */
+function probe(array $rows, array $labels): void {
+    $objects = array_map(Row::fromCache(...), $rows);
+    $texts = array_map(strval(...), $labels);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[("$objects", "list<Row>"), ("$texts", "list<string>")],
+    );
+}

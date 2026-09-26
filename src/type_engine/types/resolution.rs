@@ -813,6 +813,35 @@ pub(crate) fn resolve_imported_type_alias(
     all_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<PhpType> {
+    let visiting = std::cell::RefCell::new(Vec::new());
+    resolve_imported_alias_in_source(
+        source_class_name,
+        original_name,
+        all_classes,
+        class_loader,
+        &visiting,
+    )
+}
+
+/// [`resolve_imported_type_alias`], with the imports already being
+/// resolved on the way here.
+///
+/// An imported alias is written in its source class's scope, so any alias
+/// its body names (`array{r: RDto}` under `@import-type RDto from R`) is
+/// that class's, not the importer's, and is expanded there. An import of an
+/// import is followed the same way. `visiting` holds the `(class, alias)`
+/// pairs being resolved, so an alias that names itself through a cycle of
+/// imports resolves to `mixed` where it recurs, as PHPStan gives up on a
+/// circular alias. Leaving the name there instead would hand it back to the
+/// caller's own alias walk, which would expand the cycle once more per
+/// level it allows.
+fn resolve_imported_alias_in_source(
+    source_class_name: &str,
+    original_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> Option<PhpType> {
     let lookup = source_class_name
         .rsplit('\\')
         .next()
@@ -820,15 +849,74 @@ pub(crate) fn resolve_imported_type_alias(
     let source_class = all_classes
         .iter()
         .find(|c| c.name == lookup)
-        .map(|c| ClassInfo::clone(c))
-        .or_else(|| class_loader(source_class_name).map(Arc::unwrap_or_clone));
-
-    let source_class = source_class?;
+        .cloned()
+        .or_else(|| class_loader(source_class_name))?;
     let def = source_class.type_aliases.get(&atom(original_name))?;
 
-    // Don't follow nested imports — just return the local definition.
-    match def {
-        TypeAliasDef::Local(php_type) => Some(php_type.clone()),
-        TypeAliasDef::Import { .. } => None,
+    let key = (source_class_name.to_string(), original_name.to_string());
+    if visiting.borrow().contains(&key) {
+        return Some(PhpType::mixed());
     }
+    visiting.borrow_mut().push(key);
+    let resolved = match def {
+        TypeAliasDef::Local(php_type) => Some(expand_aliases_in_source(
+            php_type,
+            &source_class,
+            class_loader,
+            visiting,
+        )),
+        TypeAliasDef::Import {
+            source_class,
+            original_name,
+        } => resolve_imported_alias_in_source(
+            source_class,
+            original_name,
+            &[],
+            class_loader,
+            visiting,
+        ),
+    };
+    visiting.borrow_mut().pop();
+    resolved
+}
+
+/// Expand the aliases `source_class` declares or imports wherever they are
+/// named inside `ty`.
+fn expand_aliases_in_source(
+    ty: &PhpType,
+    source_class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    visiting: &std::cell::RefCell<Vec<(String, String)>>,
+) -> PhpType {
+    if source_class.type_aliases.is_empty() {
+        return ty.clone();
+    }
+    if let TypeKind::Named(name) = ty.kind()
+        && let Some(def) = source_class.type_aliases.get(name)
+    {
+        let expanded = match def {
+            TypeAliasDef::Local(body) => {
+                let key = (source_class.fqn().to_string(), name.to_string());
+                if visiting.borrow().contains(&key) {
+                    return PhpType::mixed();
+                }
+                visiting.borrow_mut().push(key);
+                let expanded = expand_aliases_in_source(body, source_class, class_loader, visiting);
+                visiting.borrow_mut().pop();
+                Some(expanded)
+            }
+            TypeAliasDef::Import {
+                source_class,
+                original_name,
+            } => resolve_imported_alias_in_source(
+                source_class,
+                original_name,
+                &[],
+                class_loader,
+                visiting,
+            ),
+        };
+        return expanded.unwrap_or_else(|| ty.clone());
+    }
+    ty.map_children(&|child| expand_aliases_in_source(child, source_class, class_loader, visiting))
 }

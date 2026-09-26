@@ -102,6 +102,16 @@ pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<S
     extract_sentinel_check(expr, Sentinel::Is, is_null_expr)
 }
 
+/// Whether `expr` (under any `!` and parentheses) is a loose `==` / `!=`
+/// comparison rather than a strict one.
+pub(crate) fn is_loose_comparison(expr: &Expression<'_>) -> bool {
+    matches!(
+        narrowing::unwrap_condition_negation(expr).0,
+        Expression::Binary(bin)
+            if matches!(bin.operator, BinaryOperator::Equal(_) | BinaryOperator::NotEqual(_))
+    )
+}
+
 /// Extract the subject of an identity comparison against a class
 /// constant, paired with the constant expression itself.
 ///

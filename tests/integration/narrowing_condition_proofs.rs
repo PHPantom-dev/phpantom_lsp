@@ -2903,11 +2903,10 @@ function f(bool $isI): void {
     assert_eq!(text, "```php\n<?php\n$isI = false\n```");
 }
 
-/// Only the boolean half is refined. A falsy `string` is falsy without
-/// being `false`, and PHP has no narrower spelling for it than `string`,
-/// so the rest of the union survives untouched.
+/// Each member keeps its own falsy values: the boolean half is `false`,
+/// and a falsy `string` is one of the two strings PHP treats as false.
 #[test]
-fn a_falsy_branch_keeps_the_members_it_cannot_refine() {
+fn a_falsy_branch_keeps_each_members_falsy_values() {
     let backend = create_test_backend();
     let uri = "file:///bool_union_else.php";
     let content = r#"<?php
@@ -2920,7 +2919,7 @@ function f($v): void {
 }
 "#;
     let text = hover_marked(&backend, uri, content);
-    assert_eq!(text, "```php\n<?php\n$v = false|string\n```");
+    assert_eq!(text, "```php\n<?php\n$v = false|''|'0'\n```");
 }
 
 /// A `while` runs until its subject is falsy, so a boolean loop condition
@@ -3026,7 +3025,7 @@ function f($v): void {
 }
 "#;
     let text = hover_marked(&backend, uri, content);
-    assert_eq!(text, "```php\n<?php\n$v = string\n```");
+    assert_eq!(text, "```php\n<?php\n$v = ''|'0'\n```");
 }
 
 // ─── Ruling one leg of a disjunction out leaves the other ──────────────────

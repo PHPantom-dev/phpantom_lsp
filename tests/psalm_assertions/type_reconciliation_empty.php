@@ -4,7 +4,7 @@ namespace PsalmTest_type_reconciliation_empty_1 {
     /** @param mixed $a */
     function foo($a): void {
         if (empty($a)) {
-            assertType('mixed', $a);
+            assertType("0|0.0|''|'0'|array{}|false|null", $a);
         }
     }
 }

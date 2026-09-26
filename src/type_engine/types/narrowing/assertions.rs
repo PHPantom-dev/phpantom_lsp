@@ -802,13 +802,6 @@ pub(in crate::type_engine) fn fold_negation_pairs<'b>(
     current
 }
 
-/// Given a function's argument list and a parameter name (with `$`
-/// prefix), find the subject key passed at that parameter's position.
-///
-/// Returns the subject key for a direct variable (`$var`), a property
-/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
-/// assertion narrowing applies to non-variable subjects, not just plain
-/// variables.
 /// The subject key an assertion tag names at the call site.
 ///
 /// Most tags name a parameter (`@phpstan-assert Foo $value`), so the
@@ -839,6 +832,13 @@ pub(in crate::type_engine) fn assertion_subject_key(
     Some(format!("{base}{rest}"))
 }
 
+/// Given a function's argument list and a parameter name (with `$`
+/// prefix), find the subject key passed at that parameter's position.
+///
+/// Returns the subject key for a direct variable (`$var`), a property
+/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
+/// assertion narrowing applies to non-variable subjects, not just plain
+/// variables.
 pub(in crate::type_engine) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,
@@ -855,6 +855,38 @@ pub(in crate::type_engine) fn find_assertion_arg_variable(
     };
 
     expr_to_subject_key(arg_expr)
+}
+
+/// Every subject key a tag on `param_name` names at the call site.
+///
+/// A variadic parameter collects every positional argument from its
+/// position on, so an assertion about it is an assertion about each of
+/// them. Anything else names at most the one argument
+/// [`find_assertion_arg_variable`] finds.
+pub(in crate::type_engine) fn find_assertion_arg_variables(
+    argument_list: &ArgumentList<'_>,
+    param_name: &str,
+    parameters: &[crate::types::ParameterInfo],
+) -> Vec<String> {
+    let Some(param_idx) = parameters.iter().position(|p| p.name == param_name) else {
+        return Vec::new();
+    };
+    if !parameters[param_idx].is_variadic {
+        return find_assertion_arg_variable(argument_list, param_name, parameters)
+            .into_iter()
+            .collect();
+    }
+    // An unpacked `...$rest` hands over a whole array, not one value the
+    // tag could speak for.
+    argument_list
+        .arguments
+        .iter()
+        .skip(param_idx)
+        .filter_map(|arg| match arg {
+            Argument::Positional(pos) if pos.ellipsis.is_none() => expr_to_subject_key(pos.value),
+            _ => None,
+        })
+        .collect()
 }
 
 // ── `never` branches of a conditional return type ────────────────────

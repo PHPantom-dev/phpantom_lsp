@@ -19,13 +19,13 @@ function isAnInteger($x)
 function foo($x): void
 {
 	if (equalsRandomInteger($x)) {
-		assertType('int', $x); // SKIP: an equality assertion (@phpstan-assert-if-true =int) is not read
+		assertType('int', $x);
 	} else {
 		assertType('mixed', $x);
 	}
 
 	if (isAnInteger($x)) {
-		assertType('int', $x); // SKIP: @phpstan-assert-if-true does not narrow an untyped parameter
+		assertType('int', $x);
 	} else {
 	}
 }

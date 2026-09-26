@@ -444,6 +444,19 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
                     super::array_func_rules::callable_string_function_name(bytes_to_str(s.raw))?;
                 (self.ctx.loaders.function_loader?)(name, 0)?.return_type
             }
+            // `array_map(Row::fromCache(...), $rows)` hands over the method
+            // itself, so its declared return is what each element becomes.
+            Expression::PartialApplication(pa) => {
+                let span = pa.span();
+                let text = self
+                    .ctx
+                    .content
+                    .get(span.start.offset as usize..span.end.offset as usize)?;
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text,
+                    &self.ctx.as_resolution_ctx(),
+                )
+            }
             _ => None,
         }
     }

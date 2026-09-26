@@ -41,10 +41,15 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_null_in_scope(&var_name, scope);
     }
-    // Check for `$x === null` or `$x == null` — narrow to null only.
+    // `$x === null` narrows to null only; `$x == null` to everything that
+    // compares equal to it.
     if let Some(var_name) = extract_null_equality_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        if is_loose_comparison(condition) {
+            narrow_to_loosely_null_in_scope(&var_name, scope);
+        } else {
+            narrow_to_null_in_scope(&var_name, scope);
+        }
     }
     // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart, and
     // `$x === ''` to the empty one.
@@ -139,10 +144,15 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         strip_null_from_subject(&var_name, scope, ctx);
     }
     // When the condition is `$x !== null`, the inverse (else/guard)
-    // means $x IS null — narrow to null only.
+    // means $x IS null — narrow to null only.  Failing `$x != null`
+    // leaves whatever compares equal to null.
     if let Some(var_name) = extract_non_null_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        if is_loose_comparison(condition) {
+            narrow_to_loosely_null_in_scope(&var_name, scope);
+        } else {
+            narrow_to_null_in_scope(&var_name, scope);
+        }
     }
     // When the condition is `!$x` or `empty($x)`, the inverse means
     // $x is truthy — remove every falsy member, not just `null`.  This

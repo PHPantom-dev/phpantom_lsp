@@ -1068,12 +1068,34 @@ fn type_matches_guard(
                 || ty.is_subtype_of(&PhpType::float())
                 || ty.is_subtype_of(&PhpType::bool())
         }
-        // `is_resource()` returns false for a closed resource, but a value
-        // declared `closed-resource` is still in the resource domain, so the
-        // subtype check covers both refinements.
         TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
         TypeGuardKind::Iterable => type_is_iterable(ty, class_loader),
     }
+}
+
+/// Whether a value of the non-union type `ty` can land in the branch of
+/// a type guard selected by `keep_matching`.
+///
+/// For most guards the answer follows from the type alone, but
+/// `is_resource()` returns false for a closed resource, so a plain
+/// `resource` reaches both branches: only `open-resource` is sure to pass
+/// and only `closed-resource` is sure to fail.
+fn guard_member_survives(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    keep_matching: bool,
+    class_loader: GuardClassLoader<'_>,
+) -> bool {
+    if kind == TypeGuardKind::Resource && type_matches_guard(ty, kind, class_loader) {
+        return if ty.is_named("open-resource") {
+            keep_matching
+        } else if ty.is_named("closed-resource") {
+            !keep_matching
+        } else {
+            true
+        };
+    }
+    type_matches_guard(ty, kind, class_loader) == keep_matching
 }
 
 /// Whether `foreach` can walk a value of `ty`: an array (in any of its
@@ -1227,7 +1249,7 @@ fn filter_type_by_guard(
         TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
                 .iter()
-                .filter(|m| type_matches_guard(m, kind, class_loader) == keep_matching)
+                .filter(|m| guard_member_survives(m, kind, keep_matching, class_loader))
                 .cloned()
                 .collect();
             if filtered.len() == members.len() {
@@ -1245,11 +1267,9 @@ fn filter_type_by_guard(
             // `?T` is `T|null`.  For `is_array`, null doesn't match,
             // so we keep only the inner type (if it matches) or only
             // null (if it doesn't).
-            let inner_matches = type_matches_guard(inner, kind, class_loader);
-            let null_matches = type_matches_guard(&PhpType::null(), kind, class_loader);
             match (
-                inner_matches == keep_matching,
-                null_matches == keep_matching,
+                guard_member_survives(inner, kind, keep_matching, class_loader),
+                guard_member_survives(&PhpType::null(), kind, keep_matching, class_loader),
             ) {
                 (true, true) => None, // keep both → no change
                 (true, false) => Some(inner.clone()),
@@ -1272,7 +1292,7 @@ fn filter_type_by_guard(
                 };
             }
             // Non-union type: if it matches the predicate, keep it.
-            if type_matches_guard(ty, kind, class_loader) == keep_matching {
+            if guard_member_survives(ty, kind, keep_matching, class_loader) {
                 None // no change needed
             } else {
                 Some(PhpType::empty_sentinel())

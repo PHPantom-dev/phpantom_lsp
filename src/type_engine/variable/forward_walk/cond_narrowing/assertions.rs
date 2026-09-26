@@ -299,11 +299,16 @@ pub(super) fn apply_assertion_to_key(
         // A subject with no type yet takes the one the tag promises, the
         // way an `instanceof` gives an untyped variable its class.  An
         // exclusion has nothing to rule out.
-        if !should_exclude && narrowing::scalar_assert_guard_kind(asserted_type).is_none() {
+        if should_exclude {
+            return;
+        }
+        if narrowing::scalar_assert_guard_kind(asserted_type).is_some() {
+            results.push(ResolvedType::from_type_string(asserted_type.clone()));
+        } else {
             let var_ctx = build_var_ctx(target, ctx, scope_resolver);
             narrowing::include_instance_of(asserted_type, false, &var_ctx, &mut results);
-            scope.set(target, results);
         }
+        scope.set(target, results);
         return;
     }
 

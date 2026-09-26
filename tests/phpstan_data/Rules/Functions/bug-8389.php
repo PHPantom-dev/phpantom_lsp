@@ -38,13 +38,13 @@ function doSomething($str1, $str2)
 function foo($input1, $input2) {
 	if (!check($input1, $input2)) {
 		assertType('null', $input1);
-		assertType('null', $input2); // SKIP: @phpstan-assert-if-false on a variadic parameter does not narrow the arguments
+		assertType('null', $input2);
 
 		throw new \Exception();
 	}
 
 	assertType('string', $input1);
-	assertType('string', $input2); // SKIP: @phpstan-assert-if-false on a variadic parameter does not narrow the arguments
+	assertType('string', $input2);
 
 	doSomething($input1, $input2);
 }

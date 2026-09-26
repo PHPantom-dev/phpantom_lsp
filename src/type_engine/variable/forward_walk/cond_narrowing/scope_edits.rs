@@ -129,8 +129,45 @@ pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
 /// emptied: the branch is dead, and saying so is the reachability
 /// question rather than this one.
 pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
+    narrow_to_falsy_part_in_scope(var_name, scope, PhpType::falsy_type);
+}
+
+/// Keep only what a variable could hold and still compare `== null`.
+///
+/// PHP compares `null` against a string as `''`, so `'0'` is the one falsy
+/// value that is not loosely equal to `null`; everything else falsy is.
+pub(crate) fn narrow_to_loosely_null_in_scope(var_name: &str, scope: &mut ScopeState) {
+    narrow_to_falsy_part_in_scope(var_name, scope, |ty| {
+        let falsy = ty.falsy_type()?;
+        let is_zero_string = |m: &PhpType| {
+            m.as_literal()
+                .and_then(LiteralValue::string_content)
+                .is_some_and(|text| text == "0")
+        };
+        if !falsy.union_members().into_iter().any(is_zero_string) {
+            return Some(falsy);
+        }
+        let mut kept: Vec<PhpType> = falsy
+            .union_members()
+            .into_iter()
+            .filter(|m| !is_zero_string(m))
+            .cloned()
+            .collect();
+        match kept.len() {
+            0 => None,
+            1 => kept.pop(),
+            _ => Some(PhpType::union(kept)),
+        }
+    });
+}
+
+fn narrow_to_falsy_part_in_scope(
+    var_name: &str,
+    scope: &mut ScopeState,
+    falsy_part: impl Fn(&PhpType) -> Option<PhpType>,
+) {
     refine_in_scope(var_name, scope, |mut rt| {
-        let falsy = rt.type_string.falsy_type()?;
+        let falsy = falsy_part(&rt.type_string)?;
         // An object is truthy, so a falsy `?Customer` is a `null` that
         // no longer names a class.  Leaving the resolved class beside
         // it makes the entry read as a `Customer` to everything that

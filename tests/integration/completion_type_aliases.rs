@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{assert_assigned_types_on, create_psr4_workspace, create_test_backend};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -962,6 +962,70 @@ async fn test_phpstan_import_type_cross_file() {
         }
         other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
     }
+}
+
+/// An imported alias is written in its source class's scope, so an alias it
+/// names that the source class itself imported is that class's to expand.
+/// Expanded in the importer's scope instead, the inner name leaked through as
+/// a class nobody declares. An import cycle stops at `mixed` rather than
+/// unrolling.
+#[test]
+fn an_imported_alias_expands_the_aliases_its_source_class_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Row.php",
+                "<?php\nnamespace App;\n/** @phpstan-type RowData array{v: int} */\nclass Row {}\n",
+            ),
+            (
+                "src/Page.php",
+                concat!(
+                    "<?php\nnamespace App;\n/**\n",
+                    " * @phpstan-import-type RowData from Row\n",
+                    " * @phpstan-import-type Back from Loop\n",
+                    " * @phpstan-type PageData array{id: int, row: RowData}\n",
+                    " * @phpstan-type Ahead array{back: Back}\n",
+                    " */\nclass Page {}\n",
+                ),
+            ),
+            (
+                "src/Loop.php",
+                concat!(
+                    "<?php\nnamespace App;\n/**\n",
+                    " * @phpstan-import-type Ahead from Page\n",
+                    " * @phpstan-type Back array{ahead: Ahead}\n",
+                    " */\nclass Loop {}\n",
+                ),
+            ),
+        ],
+    );
+    let content = r#"<?php
+namespace App;
+/**
+ * @phpstan-import-type PageData from Page
+ * @phpstan-import-type Ahead from Page
+ */
+class Consumer {
+    /**
+     * @param PageData $page
+     * @param Ahead $ahead
+     */
+    public function run(array $page, array $ahead): void {
+        $copy = $page;
+        $cycle = $ahead;
+    }
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[
+            ("$copy", "array{id: int, row: array{v: int}}"),
+            ("$cycle", "array{back: array{ahead: mixed}}"),
+        ],
+    );
 }
 
 // ─── @phpstan-type: object shape alias ──────────────────────────────────────

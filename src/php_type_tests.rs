@@ -5025,14 +5025,14 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
 
 #[test]
 fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
-    // The mirror of the truthy side: a `bool` keeps its `false` half and
-    // every nullable member keeps its `null`.
+    // Each member keeps only its falsy values, and every nullable member
+    // keeps its `null`.
     assert_eq!(
         PhpType::parse("?int|?bool|?string|?DateTime")
             .falsy_type()
             .unwrap()
             .to_string(),
-        "int|false|string|null"
+        "0|false|''|'0'|null"
     );
     // An object is truthy whatever it holds, so it is dropped outright.
     assert_eq!(
@@ -5040,16 +5040,17 @@ fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
             .falsy_type()
             .unwrap()
             .to_string(),
-        "string"
+        "''|'0'"
     );
     // A union that is entirely truthy has no falsy half at all.
     assert_eq!(PhpType::parse("true|DateTime").falsy_type(), None);
-    // Refinements PHP has no plain spelling for are left alone, exactly
-    // as the truthy side leaves `int` rather than excluding `0`.
-    assert_eq!(
-        PhpType::parse("int").falsy_type().unwrap().to_string(),
-        "int"
-    );
+    assert_eq!(PhpType::parse("int<1, 5>").falsy_type(), None);
+    assert_eq!(PhpType::parse("non-zero-int").falsy_type(), None);
+    let falsy = |ty: &str| PhpType::parse(ty).falsy_type().unwrap().to_string();
+    assert_eq!(falsy("int<0, max>"), "0");
+    assert_eq!(falsy("non-empty-string"), "'0'");
+    assert_eq!(falsy("list<int>|null"), "array{}|null");
+    assert_eq!(falsy("mixed"), "0|0.0|''|'0'|array{}|false|null");
 }
 
 #[test]

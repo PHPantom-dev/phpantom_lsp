@@ -181,6 +181,18 @@ fn loosely_equal_member(member: &PhpType, literal: &PhpType) -> Option<PhpType> 
         return (!member.is_provably_non_empty()).then(|| literal.clone());
     }
     let literal_value = literal.as_literal()?;
+    // `null` compares against a string as `''` and against a number as `0`,
+    // so it only equals the literals those are.
+    if member.is_null() {
+        let equals_null = match literal_value {
+            LiteralValue::String(_) => literal_value
+                .string_content()
+                .is_some_and(|text| text.is_empty()),
+            LiteralValue::Int(_) => literal_value.parse_i64() == Some(0),
+            LiteralValue::Float(_) => literal_value.parse_f64() == Some(0.0),
+        };
+        return equals_null.then(|| member.clone());
+    }
     if let Some(value) = member.as_literal() {
         return match value.loosely_equals(literal_value) {
             Some(false) => None,
@@ -188,6 +200,17 @@ fn loosely_equal_member(member: &PhpType, literal: &PhpType) -> Option<PhpType> 
         };
     }
     if !loose_means_identity(member, literal_value) {
+        // A string compares with a number, or with another string, as a
+        // number only when it is numeric itself (`'abc' == 1` is false), so a
+        // string equal to a numeric literal is a numeric string, though not
+        // necessarily that spelling of it (`' 1' == '1'`).
+        let numeric_literal = match literal_value {
+            LiteralValue::String(_) => literal_value.is_numeric_string(),
+            LiteralValue::Int(_) | LiteralValue::Float(_) => true,
+        };
+        if numeric_literal && member.is_string_subtype() && member.as_literal().is_none() {
+            return Some(PhpType::parse("numeric-string"));
+        }
         return Some(member.clone());
     }
     literal.is_subtype_of(member).then(|| literal.clone())

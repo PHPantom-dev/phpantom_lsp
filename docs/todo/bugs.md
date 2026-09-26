@@ -103,21 +103,6 @@ Inside a guard that proved the key exists, reading that key should not include t
 
 Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
-### B448. Falsiness narrowing does not narrow to the falsy values
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function f(int $i, mixed $m) {
-    if (!$i) { $i; } // should be 0, is int
-    if ($i == null) { $i; } // should be 0, is int
-    if (!$m) { $m; } // should be 0|0.0|''|'0'|array{}|false|null, is mixed
-}
-```
-
-The falsy branch of a truthiness check (and a loose comparison against `null`, `false` or `0`) should keep only the members of the type that can be falsy, which for `int` is the literal `0` and for `mixed` is the fixed set of falsy values.
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php` and `Rules/Methods/data/bug-5749.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
 ### B449. Exhausted narrowing leaves the last type standing instead of `never`
 **Impact: Low · Complexity: Medium**
 
@@ -132,55 +117,6 @@ function f(true|null $v) {
 When every member of a type has been ruled out (by type checks, by comparing each enum case, by an `@phpstan-assert` the value cannot satisfy, or by an impossible `count()`), the value should be `never`. Today the narrowing that would remove the last member is skipped, so the branch keeps it.
 
 Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`, `Rules/Comparison/data/bug-8169.php`, `Rules/Comparison/data/bug-8485.php`, `Rules/Comparison/data/docblock-assert-equality.php` and `Rules/Methods/data/true-typehint.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B450. `@phpstan-assert-if-true` does not narrow an untyped parameter
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/** @phpstan-assert-if-true int $x */
-function isAnInteger($x) { return is_int($x); }
-function foo($x) {
-    if (isAnInteger($x)) {
-        $x; // should be int, resolves to nothing
-    }
-}
-```
-
-The same assertion narrows a parameter declared `mixed`. An untyped parameter is seeded as an empty entry, and the assertion leaves it empty instead of replacing it.
-
-Found porting PHPStan's `Rules/Comparison/data/docblock-assert-equality.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B451. An equality assertion (`@phpstan-assert-if-true =int`) is not read
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @phpstan-assert-if-true =int $x */
-function equalsRandomInteger($x) { return is_int($x) && $x === random_int(0, 10); }
-if (equalsRandomInteger($x)) {
-    $x; // should be int
-}
-```
-
-The `=` prefix marks an assertion that only holds in the positive branch (the negative branch learns nothing). The tag parser does not accept the prefix, so the assertion is dropped altogether.
-
-Found porting PHPStan's `Rules/Comparison/data/docblock-assert-equality.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B452. `@phpstan-assert-if-false` on a variadic parameter does not narrow the arguments
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @phpstan-assert-if-false null $values */
-function check(...$values) {}
-/** @param string|null $a @param string|null $b */
-function f($a, $b) {
-    if (!check($a, $b)) { throw new Exception(); }
-    $a; // should be string, is string|null
-}
-```
-
-An assertion about a variadic parameter is an assertion about every argument passed to it.
-
-Found porting PHPStan's `Rules/Functions/data/bug-8389.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
 ### B453. `is_callable()` on `Foo|callable(): Foo` drops the `Foo&callable` member
 **Impact: Low · Complexity: Low-Medium**
@@ -215,20 +151,20 @@ Iterating a shape pairs each key with its value type. Narrowing the key to one l
 
 Found porting PHPStan's `Rules/Arrays/data/bug-6000.php` and `Rules/Arrays/data/bug-8467a.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B455. The else branch of `is_resource()` drops the possibly closed resource
-**Impact: Low · Complexity: Low**
+### B479. A loose comparison against a literal does not narrow `mixed`
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-$r = fopen('php://memory', 'r');
-if (is_resource($r)) {
-} else {
-    $r; // should be resource|false, is false
+function f(mixed $m) {
+    if ($m == 0) {
+        $m; // should be 0|0.0|string|false|null, is mixed
+    }
 }
 ```
 
-`is_resource()` is false for a closed resource, so the negative branch cannot remove `resource` from the type.
+A loose comparison narrows a typed subject to the values that compare equal, but a `mixed` subject stays `mixed`. It should narrow to the values of each type that can loosely equal the literal, which PHP 8's comparison rules decide per type (`null == ''` holds, `0 == ''` does not).
 
-Found porting PHPStan's `Analyser/data/is-resource-specified.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
+Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_data/`. PHPStan's expected type for `$m == ''` includes `0|0.0`, which follows PHP 7's rules; match PHP 8 there instead.
 
 ## Arithmetic
 
@@ -423,7 +359,7 @@ $review; // should be array<array<mixed>>, is array<int|string, array|array{id: 
 
 Joining branches that wrote different shapes leaves a redundant `array|array{…}` union where the shape is already covered by `array`, and joining shapes with differing optional keys (`Rules/Comparison/data/bug-7898.php`) marks keys required that only one branch set.
 
-Found porting PHPStan's `Rules/Variables/data/bug-8113.php` and `Rules/Comparison/data/bug-7898.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php` and `Rules/Methods/data/bug-5749.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
 ### B479. `??=` on an offset whose key is not a variable leaves the offset `null`
 **Impact: Low · Complexity: Low-Medium**

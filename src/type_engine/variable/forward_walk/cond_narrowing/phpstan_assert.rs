@@ -78,22 +78,26 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 if !applies_positively && assertion.is_equality {
                     continue;
                 }
-                if let Some(arg_var) = narrowing::find_assertion_arg_variable(
+                let arg_vars = narrowing::find_assertion_arg_variables(
                     &func_call.argument_list,
                     &assertion.param_name,
                     &func_info.parameters,
-                ) {
-                    let should_exclude = assertion.negated ^ !applies_positively;
-                    let asserted_type = narrowing::bind_call_templates(
-                        &assertion.asserted_type,
-                        &func_info.template_params,
-                        &func_info.template_bindings,
-                        &func_info.parameters,
-                        &func_call.argument_list,
-                        &build_var_ctx("", ctx, &scope_resolver),
-                    );
+                );
+                if arg_vars.is_empty() {
+                    continue;
+                }
+                let should_exclude = assertion.negated ^ !applies_positively;
+                let asserted_type = narrowing::bind_call_templates(
+                    &assertion.asserted_type,
+                    &func_info.template_params,
+                    &func_info.template_bindings,
+                    &func_info.parameters,
+                    &func_call.argument_list,
+                    &build_var_ctx("", ctx, &scope_resolver),
+                );
+                for arg_var in &arg_vars {
                     apply_assertion_to_key(
-                        &arg_var,
+                        arg_var,
                         &asserted_type,
                         should_exclude,
                         scope,
@@ -153,29 +157,33 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                 if !applies_positively && assertion.is_equality {
                     continue;
                 }
-                if let Some(arg_var) = narrowing::find_assertion_arg_variable(
+                let arg_vars = narrowing::find_assertion_arg_variables(
                     &static_call.argument_list,
                     &assertion.param_name,
                     &method.parameters,
-                ) {
-                    let should_exclude = assertion.negated ^ !applies_positively;
-                    let asserted_type = narrowing::bind_call_templates(
-                        &assertion.asserted_type,
-                        &method.template_params,
-                        &method.template_bindings,
-                        &method.parameters,
-                        &static_call.argument_list,
-                        &build_var_ctx("", ctx, &scope_resolver),
-                    );
-                    // Resolve `self`/`static`/`$this` in the asserted type
-                    // against the declaring class, not the enclosing class.
-                    let resolved_assert_type = if asserted_type.contains_self_ref() {
-                        asserted_type.replace_self(&class_info.fqn())
-                    } else {
-                        qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
-                    };
+                );
+                if arg_vars.is_empty() {
+                    continue;
+                }
+                let should_exclude = assertion.negated ^ !applies_positively;
+                let asserted_type = narrowing::bind_call_templates(
+                    &assertion.asserted_type,
+                    &method.template_params,
+                    &method.template_bindings,
+                    &method.parameters,
+                    &static_call.argument_list,
+                    &build_var_ctx("", ctx, &scope_resolver),
+                );
+                // Resolve `self`/`static`/`$this` in the asserted type
+                // against the declaring class, not the enclosing class.
+                let resolved_assert_type = if asserted_type.contains_self_ref() {
+                    asserted_type.replace_self(&class_info.fqn())
+                } else {
+                    qualify_assertion_type(&asserted_type, declaring_namespace.as_deref(), ctx)
+                };
+                for arg_var in &arg_vars {
                     apply_assertion_to_key(
-                        &arg_var,
+                        arg_var,
                         &resolved_assert_type,
                         should_exclude,
                         scope,
@@ -275,12 +283,14 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                             should_exclude,
                             format!("{receiver_var}->{member}"),
                         ));
-                    } else if let Some(arg_var) = narrowing::find_assertion_arg_variable(
-                        &method_call.argument_list,
-                        &assertion.param_name,
-                        &method.parameters,
-                    ) {
-                        to_apply.push((resolved_type, should_exclude, arg_var));
+                    } else {
+                        for arg_var in narrowing::find_assertion_arg_variables(
+                            &method_call.argument_list,
+                            &assertion.param_name,
+                            &method.parameters,
+                        ) {
+                            to_apply.push((resolved_type.clone(), should_exclude, arg_var));
+                        }
                     }
                 }
             }

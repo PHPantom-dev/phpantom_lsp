@@ -33,12 +33,12 @@ class FooFactory extends ActiveRowFactory {
 			$type = [$type];
 		}
 
-		assertType('0|array<int>|null', $type); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0|array<int>|null', $type); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
 
 		if ($type) {
 			$typeSql = ' AND type IN ' . self::dbarray_int($type) . ' ';
 		} else {
-			assertType('0|array{}|null', $type); // SKIP: falsiness narrowing does not narrow to the falsy values
+			assertType('0|array{}|null', $type);
 			$typeSql = '';
 		}
 

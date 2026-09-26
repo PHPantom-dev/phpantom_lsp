@@ -300,11 +300,7 @@ pub(crate) fn build_substitution_map(
     // Right-align a short argument list to the trailing template params,
     // matching `build_generic_subs` and PHPStan/Psalm convention so that
     // `@extends Collection<User>` binds `User` to the value parameter.
-    let offset = right_align_offset(
-        &parent.template_params,
-        &parent.template_param_bounds,
-        type_args.len(),
-    );
+    let offset = generic_arg_offset(parent, type_args.len());
 
     let mut omitted: Vec<&Atom> = Vec::new();
     for (i, param_name) in parent.template_params.iter().enumerate() {
@@ -420,11 +416,7 @@ pub(crate) fn build_generic_subs(
     // The heuristic only activates when every skipped leading param
     // has an `array-key` (or `int` / `string`) bound, which is the
     // universal convention for collection key parameters.
-    let offset = right_align_offset(
-        &class.template_params,
-        &class.template_param_bounds,
-        type_args.len(),
-    );
+    let offset = generic_arg_offset(class, type_args.len());
 
     let mut subs = HashMap::new();
     let mut omitted: Vec<&Atom> = Vec::new();
@@ -670,6 +662,31 @@ pub(crate) fn right_align_offset(
             .is_some_and(is_key_like_bound)
     });
     if all_skipped_are_key_like { skip } else { 0 }
+}
+
+/// Where the written arguments of a generic `class` start among its
+/// template parameters.
+///
+/// [`right_align_offset`] decides it from the parameters' bounds, which
+/// leaves the core iterable interfaces out: their `TKey` is unbounded, yet
+/// `Iterator<Foo>` names the value, not the key. PHPStan hard-codes the same
+/// reading for `Traversable`, `Iterator`, `IteratorAggregate` and
+/// `Generator`.
+pub(crate) fn generic_arg_offset(class: &ClassInfo, num_args: usize) -> usize {
+    if num_args == 1
+        && class.template_params.len() > 1
+        && matches!(
+            class.fqn().as_str(),
+            "Traversable" | "Iterator" | "IteratorAggregate" | "Generator"
+        )
+    {
+        return 1;
+    }
+    right_align_offset(
+        &class.template_params,
+        &class.template_param_bounds,
+        num_args,
+    )
 }
 
 /// Whether a template parameter bound represents a key-like type.

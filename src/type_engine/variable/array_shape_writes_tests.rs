@@ -169,6 +169,26 @@ fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
     );
 }
 
+/// A union of shapes is one of them at runtime, so a write lands in each
+/// alternative rather than folding them all into one generic pair.
+#[test]
+fn a_write_into_a_union_of_shapes_updates_each_shape() {
+    let slot = ArrayWriteKey::Keyed {
+        key_type: PhpType::literal_int("3"),
+        slot: Some(3),
+    };
+    assert_eq!(
+        merge_nested_array_write(
+            &PhpType::parse("list{'a', bool, 'c'}|array{string, bool, string}"),
+            &[slot],
+            &PhpType::parse("list<string>"),
+            false,
+        )
+        .to_string(),
+        "list{'a', bool, 'c', list<string>}|array{string, bool, string, list<string>}"
+    );
+}
+
 /// A straight-line `[]` append keeps the shape's arity and the exact value
 /// it wrote, the same as an array literal's own entries — only a write
 /// inside a loop body (`in_loop: true`) widens straight to the list it is

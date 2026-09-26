@@ -123,6 +123,14 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
                     )?;
                 (self.ctx.function_loader?)(name, 0)?.return_type
             })
+            .or_else(|| {
+                // A first-class callable (`Row::fromCache(...)`) returns
+                // what the method it names returns.
+                text.trim_end().ends_with("(...)").then_some(())?;
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text, self.ctx,
+                )
+            })
     }
 
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {

@@ -110,6 +110,23 @@ fn merge_nested_array_write_inner(
     in_loop: bool,
 ) -> PhpType {
     debug_assert!(!keys.is_empty());
+    // A union of shapes is one of them at runtime, and the write lands in
+    // whichever it is. Merging it into the union as a whole found no shape
+    // to update and fell back to the generic pair, which pooled every
+    // slot's type into one: `$pair[3] = $x` on `list{A, B}|array{C, D}` read
+    // back as `array<int, A|B|C|D|X>`.
+    if let TypeKind::Union(members) = base.kind()
+        && members
+            .iter()
+            .all(|member| member.shape_entries().is_some())
+    {
+        return PhpType::union(
+            members
+                .iter()
+                .map(|member| merge_nested_array_write_inner(member, keys, value_type, in_loop))
+                .collect(),
+        );
+    }
     match &keys[0] {
         ArrayWriteKey::Shape(key) => {
             if keys.len() == 1 {

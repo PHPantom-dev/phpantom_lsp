@@ -513,12 +513,13 @@ impl LiteralValue {
 /// The truthiness of a named type, bare or with type arguments.
 ///
 /// A class instance is always truthy, and so is a class name: no class is
-/// called `''` or `'0'`.
+/// called `''` or `'0'`.  A `non-empty-string` is not: `'0'` is non-empty
+/// and falsy.
 fn named_truthiness(name: &str) -> Option<bool> {
     match name.to_ascii_lowercase().as_str() {
-        "object" | "non-empty-string" | "non-empty-array" | "non-empty-list" | "positive-int"
-        | "negative-int" | "callable" | "closure" | "class-string" | "interface-string"
-        | "trait-string" | "enum-string" => Some(true),
+        "object" | "non-falsy-string" | "truthy-string" | "non-empty-array" | "non-empty-list"
+        | "positive-int" | "negative-int" | "non-zero-int" | "callable" | "closure"
+        | "class-string" | "interface-string" | "trait-string" | "enum-string" => Some(true),
         other if is_keyword_type(other) => None,
         _ => Some(true),
     }
@@ -2736,13 +2737,11 @@ impl PhpType {
     ///
     /// The mirror of [`Self::truthy_type`], for the branch an `if ($x)`
     /// skips rather than the one it enters. Members that are *always*
-    /// truthy are dropped and `bool` keeps only its `false` half; `None`
-    /// comes back when nothing the type describes could have been falsy.
-    ///
-    /// As on the truthy side, refinements the test justifies but PHP has
-    /// no plain spelling for are left alone: `string` stays `string`
-    /// rather than becoming the pair of empty spellings that are falsy,
-    /// and `int` stays `int` rather than becoming `0`.
+    /// truthy are dropped and the rest keep only their falsy values: `bool`
+    /// becomes `false`, `int` becomes `0`, `string` becomes `''|'0'`, an
+    /// array that may be empty becomes `array{}`, and `mixed` becomes the
+    /// fixed set of every falsy value.  `None` comes back when nothing the
+    /// type describes could have been falsy.
     pub fn falsy_type(&self) -> Option<PhpType> {
         let mut falsy = Vec::new();
         self.push_falsy_members(&mut falsy);
@@ -2774,6 +2773,60 @@ impl PhpType {
             }
             _ if self.truthiness() == Some(true) => {}
             _ if self.is_bool() => out.push(PhpType::false_()),
+            _ if self.is_mixed() => {
+                out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                    PhpType::array_shape(Vec::new()),
+                    PhpType::false_(),
+                    PhpType::null(),
+                ]);
+            }
+            TypeKind::IntRange(min, max) => {
+                let bound = |b: &Atom| b.parse::<i64>().ok();
+                let above_min = bound(min).is_none_or(|min| min <= 0);
+                let below_max = bound(max).is_none_or(|max| max >= 0);
+                if above_min && below_max {
+                    out.push(PhpType::literal_int("0"));
+                }
+            }
+            TypeKind::Named(name) => match keyword_lowercase(name).as_str() {
+                "int" | "integer" | "non-negative-int" | "non-positive-int" => {
+                    out.push(PhpType::literal_int("0"));
+                }
+                "float" | "double" => out.push(PhpType::literal_float("0.0")),
+                "string" => {
+                    out.push(PhpType::literal_string_value(""));
+                    out.push(PhpType::literal_string_value("0"));
+                }
+                "non-empty-string" | "numeric-string" => {
+                    out.push(PhpType::literal_string_value("0"));
+                }
+                "numeric" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value("0"),
+                ]),
+                "array-key" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                ]),
+                "scalar" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                    PhpType::false_(),
+                ]),
+                _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
+                _ => out.push(self.clone()),
+            },
+            // `[]` is the only falsy array, whatever the array was declared
+            // to hold.
+            _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
             _ => out.push(self.clone()),
         }
     }

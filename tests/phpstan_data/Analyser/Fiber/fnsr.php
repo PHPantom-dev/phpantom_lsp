@@ -403,7 +403,7 @@ class FooWithStaticMethods
 	public function doIf(int $i): void {
 		if ($i) {
 		} else {
-			assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+			assertType('0', $i);
 		}
 
 		assertType('int', $i);
@@ -474,7 +474,7 @@ function (): void {
 
 function (int $i) {
 	if ($i == null) {
-		assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0', $i);
 	} else {
 	}
 
@@ -483,7 +483,7 @@ function (int $i) {
 
 function (int $i) {
 	if ($i == false) {
-		assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0', $i);
 	} else {
 	}
 
@@ -492,7 +492,7 @@ function (int $i) {
 
 function (int $i) {
 	if (false == $i) {
-		assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0', $i);
 	} else {
 	}
 
@@ -502,7 +502,7 @@ function (int $i) {
 function (int $i) {
 	if ($i == true) {
 	} else {
-		assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0', $i);
 	}
 
 	assertType('int', $i);
@@ -511,7 +511,7 @@ function (int $i) {
 function (int $i) {
 	if (true == $i) {
 	} else {
-		assertType('0', $i); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0', $i);
 	}
 
 	assertType('int', $i);
@@ -519,7 +519,7 @@ function (int $i) {
 
 function (mixed $m) {
 	if ($m == 0) {
-		assertType('0|0.0|string|false|null', $m); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0|0.0|string|false|null', $m); // SKIP: a loose comparison against a literal does not narrow mixed
 	} else {
 	}
 
@@ -529,7 +529,7 @@ function (mixed $m) {
 function (mixed $m) {
 	if ($m != 0) {
 	} else {
-		assertType('0|0.0|string|false|null', $m); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType('0|0.0|string|false|null', $m); // SKIP: a loose comparison against a literal does not narrow mixed
 	}
 
 	assertType('mixed', $m);
@@ -537,7 +537,7 @@ function (mixed $m) {
 
 function (mixed $m) {
 	if ($m == '') {
-		assertType("0|0.0|''|false|null", $m); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType("0|0.0|''|false|null", $m); // SKIP: a loose comparison against a literal does not narrow mixed
 	} else {
 	}
 
@@ -581,7 +581,7 @@ function (bool $b): void {
 function (mixed $m): void {
 	if ((bool) $m) {
 	} else {
-		assertType("0|0.0|''|'0'|array{}|false|null", $m); // SKIP: falsiness narrowing does not narrow to the falsy values
+		assertType("0|0.0|''|'0'|array{}|false|null", $m);
 	}
 
 	assertType("mixed", $m);

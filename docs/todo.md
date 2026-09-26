@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | B471 | [An override with no docblock does not inherit the parent's method templates](todo/bugs.md#b471-an-override-with-no-docblock-does-not-inherit-the-parents-method-templates) | Medium | Medium |
 | B444 | [A union of array shapes is not narrowed by comparing its tag key](todo/bugs.md#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key) | Medium | Medium-High |
 | B442 | [`$value::class` resolves to nothing](todo/bugs.md#b442-valueclass-resolves-to-nothing) | Low-Medium | Low |
-| B450 | [`@phpstan-assert-if-true` does not narrow an untyped parameter](todo/bugs.md#b450-phpstan-assert-if-true-does-not-narrow-an-untyped-parameter) | Low-Medium | Low-Medium |
 | B439 | [`@mixin` on a trait is not applied to the class that uses it](todo/bugs.md#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it) | Low-Medium | Medium |
 | B445 | [`instanceof` on a template-typed value unions the class in rather than intersecting](todo/bugs.md#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting) | Low-Medium | Medium |
 | B446 | [Writing into a property's array offset does not narrow the property](todo/bugs.md#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property) | Low-Medium | Medium |
@@ -118,11 +117,9 @@ unlikely to move the needle for most users.
 | B459 | [Writing a literal into an array offset widens it to its base type](todo/bugs.md#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
 | B454 | [Comparing a foreach key does not narrow the value it was read with](todo/bugs.md#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with) | Low-Medium | Medium-High |
-| B455 | [The else branch of `is_resource()` drops the possibly closed resource](todo/bugs.md#b455-the-else-branch-of-is_resource-drops-the-possibly-closed-resource) | Low | Low |
 | B458 | [An `(array)` cast of a union with a non-array member is plain `array`](todo/bugs.md#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array) | Low | Low |
 | B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
-| B448 | [Falsiness narrowing does not narrow to the falsy values](todo/bugs.md#b448-falsiness-narrowing-does-not-narrow-to-the-falsy-values) | Low | Low-Medium |
-| B451 | [An equality assertion (`@phpstan-assert-if-true =int`) is not read](todo/bugs.md#b451-an-equality-assertion-phpstan-assert-if-true-int-is-not-read) | Low | Low-Medium |
+| B479 | [A loose comparison against a literal does not narrow `mixed`](todo/bugs.md#b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed) | Low | Low-Medium |
 | B453 | [`is_callable()` on `Foo|callable(): Foo` drops the `Foo&callable` member](todo/bugs.md#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member) | Low | Low-Medium |
 | B467 | [A template default is not used when nothing binds the template](todo/bugs.md#b467-a-template-default-is-not-used-when-nothing-binds-the-template) | Low | Low-Medium |
 | B473 | [Iterating a class whose `getIterator()` declares `Iterator<V>` gives `int|string` keys](todo/bugs.md#b473-iterating-a-class-whose-getiterator-declares-iteratorv-gives-intstring-keys) | Low | Low-Medium |
@@ -133,7 +130,6 @@ unlikely to move the needle for most users.
 | B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |
 | B447 | [`array_key_exists()` with a variable key does not narrow the offset read](todo/bugs.md#b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read) | Low | Medium |
 | B449 | [Exhausted narrowing leaves the last type standing instead of `never`](todo/bugs.md#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never) | Low | Medium |
-| B452 | [`@phpstan-assert-if-false` on a variadic parameter does not narrow the arguments](todo/bugs.md#b452-phpstan-assert-if-false-on-a-variadic-parameter-does-not-narrow-the-arguments) | Low | Medium |
 | B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
 | B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |

@@ -7,6 +7,8 @@
 
 use super::*;
 
+use mago_syntax::cst::unary::UnaryPrefixOperator;
+
 /// Narrow a `match ($x::class)` subject to the classes one arm names.
 ///
 /// `match ($node::class) { ASTClass::class, ASTEnum::class => … }` proves
@@ -80,6 +82,22 @@ impl Conjuncts {
     }
 }
 
+/// The operand of a `(bool)` cast, which a condition tests exactly as it
+/// would test the operand itself.
+fn bool_cast_operand<'b>(condition: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    match unwrap_parens(condition) {
+        Expression::UnaryPrefix(prefix)
+            if matches!(
+                prefix.operator,
+                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+            ) =>
+        {
+            Some(prefix.operand)
+        }
+        _ => None,
+    }
+}
+
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.
 pub(crate) fn apply_condition_narrowing<'b>(
@@ -91,6 +109,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // extractor looks at it.  The chain collectors fold each operand of an
     // `&&` / `||` the same way.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing(operand, scope, ctx);
+        return;
+    }
 
     // A `!` over a logical chain proves what the *inverse* pass proves
     // about the chain itself.
@@ -454,6 +476,10 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
 ) {
     // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing_inverse(operand, scope, ctx);
+        return;
+    }
 
     // The mirror of the truthy pass: the fall-through of
     // `if (!($t instanceof CallableType || $t instanceof ClosureType)) { return; }`
