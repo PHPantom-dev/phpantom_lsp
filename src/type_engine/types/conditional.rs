@@ -1093,7 +1093,7 @@ fn union_branch_types(a: Option<PhpType>, b: Option<PhpType>) -> Option<PhpType>
     match members.len() {
         0 => None,
         1 => members.into_iter().next(),
-        _ => Some(PhpType::union(members)),
+        _ => Some(PhpType::union(members).simplified()),
     }
 }
 

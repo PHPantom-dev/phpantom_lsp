@@ -38,6 +38,6 @@ class Testing
 		$d = $a->getFoo();
 		assertType('*ERROR*', $d);
 		Testing::testMethod($d);
-		assertType('Pr5108\A', $d); // SKIP: `(A&I)|A` does not simplify to `A`
+		assertType('Pr5108\A', $d);
 	}
 }

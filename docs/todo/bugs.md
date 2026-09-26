@@ -457,25 +457,6 @@ call does not return.
 Found porting PHPStan's `nsrt/template-default.php`; the assertion is
 `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-### B421. `(A&I)|A` does not simplify to `A`
-**Impact: Low · Complexity: Medium**
-
-```php
-class T {
-    /** @param A|null $arg  @param-out ($arg is null ? A&I : A) $arg */
-    public static function m(?A &$arg = null): void {}
-}
-$d = $a->unknownMethod();
-T::m($d);
-$d; // should be A, is A&I
-```
-
-An argument whose type cannot be resolved leaves the condition undecided,
-so the out type is the union of both branches. A union member that is a
-subtype of another member (`A&I` of `A`) is kept rather than absorbed, and
-the class-list conversion then lets the intersection's entry stand in for
-the plain `A`.
-
 Found porting PHPStan's `nsrt/pr-5108.php`; the assertion is `// SKIP` in
 the ported copy under `tests/phpstan_nsrt/`.
 

@@ -55,6 +55,7 @@ impl PhpType {
 
                 simplify_bool_union(&mut simplified);
                 absorb_scalar_refinements(&mut simplified);
+                absorb_subsumed_intersections(&mut simplified);
 
                 if simplified.len() == 1 {
                     return simplified.into_iter().next().unwrap();
@@ -965,6 +966,41 @@ fn unrefined_base(ty: &PhpType) -> Option<PhpType> {
             .map(|base| PhpType::generic_atom(atom(base), generic.args.clone())),
         _ => None,
     }
+}
+
+/// Drop a union member that is an intersection wholly subsumed by another
+/// member: `(A&I)|A` → `A`.
+///
+/// An intersection's runtime value is a subset of any single one of its
+/// conjuncts' (`A&I` is-a `A`), so once another member of the union already
+/// names that conjunct, the intersection is a strict narrowing of it and
+/// adds nothing. `PhpType::is_subtype_of` already resolves an intersection
+/// self-type this way (any member suffices), so this only has to route
+/// intersection members through it against their union siblings.
+pub(crate) fn absorb_subsumed_intersections(types: &mut Vec<PhpType>) {
+    if types.len() < 2
+        || !types
+            .iter()
+            .any(|t| matches!(t.kind(), TypeKind::Intersection(_)))
+    {
+        return;
+    }
+
+    let keep: Vec<bool> = types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            if !matches!(ty.kind(), TypeKind::Intersection(_)) {
+                return true;
+            }
+            !types
+                .iter()
+                .enumerate()
+                .any(|(other_index, other)| other_index != index && ty.is_subtype_of(other))
+        })
+        .collect();
+
+    crate::util::retain_by_mask(types, &keep);
 }
 
 /// Absorb scalar refinements into their parent types.
