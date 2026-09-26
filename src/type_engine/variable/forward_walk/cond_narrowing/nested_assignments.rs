@@ -114,6 +114,29 @@ pub(crate) fn process_nested_assignments<'b>(
         }
         return;
     }
+    // Assignment inside a match arm: `$r = match ($k) { 1 => $x = $n,
+    // default => null };`.  Only one arm runs, so each arm is walked
+    // against its own copy of the scope and the copies are joined — an
+    // arm that does not run cannot leak a definite assignment.  A match
+    // with no matching arm throws `UnhandledMatchError` rather than
+    // falling through, so unlike a `switch` without `default` there is
+    // no "no arm ran" scope to fold into the join.
+    //
+    // Split into its own function (rather than inlined here) so its
+    // per-arm scope clones don't inflate this function's own frame: a
+    // long `->method()` chain recurses through the `Call` case below
+    // thousands of levels deep, and every extra byte in *this* frame is
+    // paid at every one of those levels.
+    if let Expression::Match(match_expr) = expr {
+        process_match_nested_assignments(match_expr, scope, ctx);
+        return;
+    }
+    // Assignment inside a ternary branch: `$r = $cond ? $x = $a : $x =
+    // $b;`.  Same reasoning as `match` above — only one branch runs.
+    if let Expression::Conditional(conditional) = expr {
+        process_conditional_nested_assignments(conditional, scope, ctx);
+        return;
+    }
     // Assignment in a constructor argument, or in an array literal:
     //   `new Foo([$x = 1])`.
     match expr {
@@ -152,4 +175,42 @@ fn process_nested_assignments_in_element<'b>(
         ArrayElement::Variadic(v) => process_nested_assignments(v.value, scope, ctx),
         ArrayElement::Missing(_) => {}
     }
+}
+
+fn process_match_nested_assignments<'b>(
+    match_expr: &'b Match<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    process_nested_assignments(match_expr.expression, scope, ctx);
+
+    let mut arms = match_expr.arms.iter().map(|arm| {
+        let mut arm_scope = scope.clone();
+        process_nested_assignments(arm.expression(), &mut arm_scope, ctx);
+        arm_scope
+    });
+    if let Some(mut merged) = arms.next() {
+        for arm_scope in arms {
+            merged.merge_branch(&arm_scope);
+        }
+        *scope = merged;
+    }
+}
+
+fn process_conditional_nested_assignments<'b>(
+    conditional: &'b Conditional<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    process_nested_assignments(conditional.condition, scope, ctx);
+
+    let mut then_scope = scope.clone();
+    if let Some(then_expr) = conditional.then {
+        process_nested_assignments(then_expr, &mut then_scope, ctx);
+    }
+    let mut else_scope = scope.clone();
+    process_nested_assignments(conditional.r#else, &mut else_scope, ctx);
+
+    then_scope.merge_branch(&else_scope);
+    *scope = then_scope;
 }

@@ -16,8 +16,8 @@ enum Foo: int
 		}
 
 		match ($this) {
-			self::ALLOW_ONLY_INT => assertType('int', $nullable), // SKIP: an assignment inside a match arm is not recorded (the runner turns this assertion into one)
-			self::ALLOW_NULLABLE_INT => assertType('int|null', $nullable), // SKIP: an assignment inside a match arm is not recorded (the runner turns this assertion into one)
+			self::ALLOW_ONLY_INT => assertType('int', $nullable), // SKIP: narrowing $nullable here requires combining the negated compound guard condition above with the enum discriminant of this arm (AND/OR algebra gap, see docs/todo/type-inference.md)
+			self::ALLOW_NULLABLE_INT => assertType('int|null', $nullable),
 		};
 	}
 }

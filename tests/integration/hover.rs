@@ -9813,6 +9813,53 @@ function test(string $role): void {
     );
 }
 
+// ── Assignment inside match arm / ternary branch ───────────────────────
+
+#[test]
+fn hover_variable_assigned_in_match_arm() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+function test(int $k, ?string $n): void {
+    $r = match ($k) {
+        1 => $x = $n,
+        default => null,
+    };
+    $x;
+}
+"#;
+    // Hover on `$x` at line 6 (the bare `$x;` usage after the match).
+    let hover = hover_at(&backend, uri, php, 6, 4);
+    assert!(hover.is_some(), "should produce hover for $x");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("string"),
+        "hover should resolve $x from the assignment inside the match arm, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_variable_assigned_in_ternary_branch() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let php = r#"<?php
+function test(bool $flag, ?string $n): void {
+    $r = $flag ? $x = $n : null;
+    $x;
+}
+"#;
+    // Hover on `$x` at line 3 (the bare `$x;` usage after the ternary).
+    let hover = hover_at(&backend, uri, php, 3, 4);
+    assert!(hover.is_some(), "should produce hover for $x");
+    let text = hover_text(hover.as_ref().unwrap());
+    assert!(
+        text.contains("string"),
+        "hover should resolve $x from the assignment inside the ternary branch, got: {}",
+        text
+    );
+}
+
 // ── Alternate if:/endif; syntax: inverse narrowing in branch merge ──────
 
 /// After an `if (…): … endif;` written in the alternate colon syntax, the

@@ -397,3 +397,23 @@ class for a trait method body (as opposed to `$this->`'s path) and feed
 it through the same `@require-extends`/`@require-implements` bound the
 `$this->` path already consults, rather than adding a second lookup of
 the tag.
+
+## C14. `examples/php` has no demo for an assignment inside a `match` arm or ternary branch
+
+**Impact: Low · Complexity: Low**
+
+The forward walker now applies an assignment nested in a `match` arm or
+a ternary branch (each arm/branch walked against its own scope copy,
+then joined), covered by `hover_variable_assigned_in_match_arm` and
+`hover_variable_assigned_in_ternary_branch` in `tests/integration/hover.rs`
+and by the un-skipped half of the ported
+`tests/phpstan_data/Analyser/scope-in-enum-match-arm-body.php`
+assertion, but `examples/php/completion.php` — the file where "type
+inference of every kind" is demonstrated — has no example a user can
+open and try this on directly.
+
+Add a small demo (a function with `$r = match ($k) { 1 => $x = $n,
+default => null }; $x;` and the ternary equivalent, with a "Try:"
+comment showing what `$x` resolves to) to `completion.php`, plus a
+matching `assert()` in `scaffolding/assertions.php` verifying the
+runtime type the comment claims.

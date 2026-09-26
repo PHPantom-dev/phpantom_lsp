@@ -640,18 +640,3 @@ function f(Collection $col, string $classString) {
 A template bound from a closure's return type takes the declared hint. PHPStan takes the body's type when it is narrower than the hint.
 
 Found porting PHPStan's `Rules/Methods/data/bug-5372.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B478. An assignment inside a `match` arm is not recorded
-**Impact: Low · Complexity: Medium**
-
-```php
-$r = match ($k) {
-    1 => $x = $n,
-    default => null,
-};
-$x; // resolves to nothing
-```
-
-The walker applies assignments nested in conditions, call arguments and array literals, but does not descend into `match` arms (or ternary branches). Each arm has to be applied to its own copy of the scope and the copies joined, so an arm that does not run cannot leak a definite assignment. The runner turns an `assertType()` inside an arm into exactly such an assignment.
-
-Found porting PHPStan's `Analyser/data/scope-in-enum-match-arm-body.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.

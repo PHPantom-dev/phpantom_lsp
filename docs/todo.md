@@ -36,6 +36,7 @@ contributor even though it's short.
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
+| C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
@@ -139,7 +140,6 @@ unlikely to move the needle for most users.
 | B472 | [A template bound through a nested callable parameter is not inferred](todo/bugs.md#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred) | Low | Medium |
 | B475 | [A variable a closure captures by reference does not take on the closure's assignments](todo/bugs.md#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments) | Low | Medium |
 | B477 | [An arrow function's return type comes from its declared hint even when the body returns something narrower](todo/bugs.md#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower) | Low | Medium |
-| B478 | [An assignment inside a `match` arm is not recorded](todo/bugs.md#b478-an-assignment-inside-a-match-arm-is-not-recorded) | Low | Medium |
 | B468 | [A conditional return type on `$param is not null` does not pick up a template bound by a callable argument](todo/bugs.md#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
