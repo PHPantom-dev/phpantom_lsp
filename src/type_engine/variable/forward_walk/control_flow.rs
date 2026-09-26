@@ -179,9 +179,15 @@ pub(crate) fn process_switch<'b>(
         let mut case_scope = pre_switch_scope.clone();
         if !falls_into_next {
             if !is_default {
-                apply_switch_arm_narrowing(switch.expression, labels, &[], &mut case_scope);
+                apply_switch_arm_narrowing(switch.expression, labels, &[], &mut case_scope, ctx);
             } else if labels.is_empty() {
-                apply_switch_arm_narrowing(switch.expression, &[], &all_labels, &mut case_scope);
+                apply_switch_arm_narrowing(
+                    switch.expression,
+                    &[],
+                    &all_labels,
+                    &mut case_scope,
+                    ctx,
+                );
             }
         }
         let arm_jumps_out = branch_exits_stmts(stmts.iter().copied(), &case_scope, ctx);

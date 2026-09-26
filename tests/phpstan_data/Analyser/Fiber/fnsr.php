@@ -519,7 +519,9 @@ function (int $i) {
 
 function (mixed $m) {
 	if ($m == 0) {
-		assertType('0|0.0|string|false|null', $m); // SKIP: a loose comparison against a literal does not narrow mixed
+		// PHPStan expects `0|0.0|string|false|null`. Under PHP 8 only a numeric
+		// string equals 0, and a number-like object (`GMP`) can too.
+		assertType('0|0.0|numeric-string|false|null|object', $m);
 	} else {
 	}
 
@@ -529,7 +531,9 @@ function (mixed $m) {
 function (mixed $m) {
 	if ($m != 0) {
 	} else {
-		assertType('0|0.0|string|false|null', $m); // SKIP: a loose comparison against a literal does not narrow mixed
+		// PHPStan expects `0|0.0|string|false|null`. Under PHP 8 only a numeric
+		// string equals 0, and a number-like object (`GMP`) can too.
+		assertType('0|0.0|numeric-string|false|null|object', $m);
 	}
 
 	assertType('mixed', $m);
@@ -537,7 +541,10 @@ function (mixed $m) {
 
 function (mixed $m) {
 	if ($m == '') {
-		assertType("0|0.0|''|false|null", $m); // SKIP: a loose comparison against a literal does not narrow mixed
+		// PHPStan expects `0|0.0|''|false|null`, following PHP 7: since PHP 8
+		// `0 == ''` is false, while a `Stringable` object whose string is `''`
+		// compares equal.
+		assertType("''|false|null|Stringable", $m);
 	} else {
 	}
 

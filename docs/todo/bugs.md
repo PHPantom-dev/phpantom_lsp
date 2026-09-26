@@ -34,39 +34,6 @@ No outstanding items.
 
 ## Narrowing
 
-### B444. A union of array shapes is not narrowed by comparing its tag key
-**Impact: Medium · Complexity: Medium-High**
-
-```php
-/** @param array{type: 'a', a: string}|array{type: 'b', b: string} $in */
-function f(array $in) {
-    if ($in['type'] === 'a') {
-        $in; // should be array{type: 'a', a: string}, is the whole union
-    }
-}
-```
-
-Comparing a shape key against a literal should keep only the union members whose key can hold that literal, in both branches. This is the standard tagged-union idiom, and until it works array key completion offers the keys of every member.
-
-Found porting PHPStan's `Rules/Arrays/data/bug-5758.php` and `Rules/Arrays/data/bug-6364.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B445. `instanceof` on a template-typed value unions the class in rather than intersecting
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T @param T $block @return T */
-function f(mixed $block): mixed {
-    if ($block instanceof A) {
-        $block; // should be A&T, is T|A
-    }
-    $block; // should be T again, is T|A
-}
-```
-
-Narrowing a template-typed value by `instanceof` adds the class as a union member instead of intersecting it with the template, and the widened type survives the `if`, so the value leaves the function as `T|A` where it was declared `T`.
-
-Found porting PHPStan's `Rules/Methods/data/bug-6635.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
 ### B446. Writing into a property's array offset does not narrow the property
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -118,23 +85,6 @@ When every member of a type has been ruled out (by type checks, by comparing eac
 
 Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`, `Rules/Comparison/data/bug-8169.php`, `Rules/Comparison/data/bug-8485.php`, `Rules/Comparison/data/docblock-assert-equality.php` and `Rules/Methods/data/true-typehint.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B453. `is_callable()` on `Foo|callable(): Foo` drops the `Foo&callable` member
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-class Route {}
-/** @var Route|callable():Route */
-private $foo;
-if (is_callable($this->foo)) {
-    $this->foo;   // should be (Route&callable)|(callable(): Route), is callable(): Route
-    ($this->foo)(); // should be mixed, is Route
-}
-```
-
-A non-final `Route` can have a callable subclass, so narrowing by `is_callable()` has to keep a `Route&callable` member, and calling the result can return anything. The final-class variant in the same file (where the member drops out) is correct.
-
-Found porting PHPStan's `Rules/Classes/data/bug-5333.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
 ### B454. Comparing a foreach key does not narrow the value it was read with
 **Impact: Low-Medium · Complexity: Medium-High**
 
@@ -149,22 +99,9 @@ foreach ($data as $key => $value) {
 
 Iterating a shape pairs each key with its value type. Narrowing the key to one literal should narrow the value (and `$data[$key]`) to that key's type.
 
+Two smaller gaps sit underneath it. The foreach key of a shape is `string` rather than the union of the shape's keys (`'psr-4'|'classmap'`), and an offset read whose key variable is already a single literal (`$key` narrowed to `'classmap'`) still reads as a dynamic key, yielding every entry's type instead of that key's. Fixing the pairing properly means the scope remembers which key a foreach value was read with, and forgets it when either variable is reassigned.
+
 Found porting PHPStan's `Rules/Arrays/data/bug-6000.php` and `Rules/Arrays/data/bug-8467a.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B479. A loose comparison against a literal does not narrow `mixed`
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function f(mixed $m) {
-    if ($m == 0) {
-        $m; // should be 0|0.0|string|false|null, is mixed
-    }
-}
-```
-
-A loose comparison narrows a typed subject to the values that compare equal, but a `mixed` subject stays `mixed`. It should narrow to the values of each type that can loosely equal the literal, which PHP 8's comparison rules decide per type (`null == ''` holds, `0 == ''` does not).
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_data/`. PHPStan's expected type for `$m == ''` includes `0|0.0`, which follows PHP 7's rules; match PHP 8 there instead.
 
 ## Arithmetic
 

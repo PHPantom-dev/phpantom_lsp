@@ -138,6 +138,7 @@ fn refine_subject(
     // which is the reachability question rather than this one.
     if changed && !narrowed.is_empty() {
         scope.set(var_name, narrowed);
+        write_offset_key_into_shapes(var_name, scope);
     }
 }
 
@@ -181,6 +182,9 @@ fn loosely_equal_member(member: &PhpType, literal: &PhpType) -> Option<PhpType> 
         return (!member.is_provably_non_empty()).then(|| literal.clone());
     }
     let literal_value = literal.as_literal()?;
+    if member.is_mixed() {
+        return mixed_loosely_equal_part(literal, literal_value);
+    }
     // `null` compares against a string as `''` and against a number as `0`,
     // so it only equals the literals those are.
     if member.is_null() {
@@ -214,6 +218,58 @@ fn loosely_equal_member(member: &PhpType, literal: &PhpType) -> Option<PhpType> 
         return Some(member.clone());
     }
     literal.is_subtype_of(member).then(|| literal.clone())
+}
+
+/// The values of every type that PHP 8's `==` holds equal to `literal`, for
+/// a subject that could be anything.
+///
+/// A number equals the ints and floats of its value and every numeric
+/// string; a non-numeric string equals only itself among strings and no
+/// number at all (`0 == ''` is false since PHP 8).  A bool equals the
+/// literal when their truthiness agrees, and `null` equals `''` and `0`.
+/// Arrays equal no scalar.  An object can: a `Stringable` one compares by
+/// its string, and a number-like one (`GMP`, `BcMath\Number`) by its value.
+fn mixed_loosely_equal_part(literal: &PhpType, value: &LiteralValue) -> Option<PhpType> {
+    let number = match value {
+        LiteralValue::Int(_) => value.parse_i64().map(|v| v as f64),
+        LiteralValue::Float(_) => value.parse_f64(),
+        LiteralValue::String(_) => value
+            .numeric_string_value()
+            .and_then(|n| n.parse_i64().map(|v| v as f64).or_else(|| n.parse_f64())),
+    };
+    let mut parts: Vec<PhpType> = Vec::new();
+    match number {
+        Some(number) => {
+            if number.fract() == 0.0 && number.abs() < i64::MAX as f64 {
+                parts.push(PhpType::literal_int((number as i64).to_string()));
+            }
+            parts.push(PhpType::literal_float(format!("{number:?}")));
+            parts.push(PhpType::parse("numeric-string"));
+        }
+        None => {
+            // A float's string form is numeric except for `INF`, `-INF` and
+            // `NAN`, which a non-numeric string can spell.
+            let content = value.string_content().unwrap_or_default();
+            if matches!(content.as_ref(), "INF" | "-INF" | "NAN") {
+                parts.push(PhpType::float());
+            }
+            parts.push(literal.clone());
+        }
+    }
+    parts.push(if literal.truthiness() == Some(true) {
+        PhpType::true_()
+    } else {
+        PhpType::false_()
+    });
+    if let Some(null) = loosely_equal_member(&PhpType::null(), literal) {
+        parts.push(null);
+    }
+    parts.push(if number.is_some() {
+        PhpType::object()
+    } else {
+        PhpType::named(atom("Stringable"))
+    });
+    Some(PhpType::join_runtime_value_types(parts))
 }
 
 /// The part of `ty` that cannot loosely equal any of `literals`, or `None`

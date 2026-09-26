@@ -33,12 +33,12 @@ class Foo
 		foreach ($array as $key => $data) {
 			switch ($data['type']) {
 				case 'Type1':
-					assertType("array{type: 'Type1', id: string, jobs: array<string, string>}", $data); // SKIP: a union of array shapes is not narrowed by comparing its tag key
+					assertType("array{type: 'Type1', id: string, jobs: array<string, string>}", $data);
 					echo $data['id'];
 					print_r($data['jobs']);
 					break;
 				case 'Type3':
-					assertType("array{type: 'Type3', id: string, jobs: array<string, int>}", $data); // SKIP: a union of array shapes is not narrowed by comparing its tag key
+					assertType("array{type: 'Type3', id: string, jobs: array<string, int>}", $data);
 					$jobs = [];
 					foreach ($data['jobs'] as $job => $extractor) {
 						echo $job;
@@ -46,13 +46,13 @@ class Foo
 					}
 					break;
 				case 'Type2':
-					assertType("array{type: 'Type2', id: string, job?: string, extractor?: int}", $data); // SKIP: a union of array shapes is not narrowed by comparing its tag key
+					assertType("array{type: 'Type2', id: string, job?: string, extractor?: int}", $data);
 					echo $data['id'];
 					echo $data['job'] ?? 'default';
 					echo $data['extractor'] ?? 0;
 					break;
 				case 'Type4':
-					assertType("array{type: 'Type4', id: string, job?: string}", $data); // SKIP: a union of array shapes is not narrowed by comparing its tag key
+					assertType("array{type: 'Type4', id: string, job?: string}", $data);
 					echo $data['id'];
 					echo $data['job'] ?? 'default';
 					break;

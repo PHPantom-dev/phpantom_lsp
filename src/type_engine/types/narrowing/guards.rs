@@ -6,9 +6,9 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{AssertionKind, ClassInfo, ResolvedType};
+use crate::types::{AssertionKind, ClassInfo, ClassLikeKind, ResolvedType};
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
@@ -1245,6 +1245,14 @@ fn filter_type_by_guard(
         return (narrowed != ty.clone()).then_some(narrowed);
     }
 
+    if kind == TypeGuardKind::Callable
+        && keep_matching
+        && let Some(loader) = class_loader
+        && let Some(narrowed) = narrow_classes_to_callable(ty, loader)
+    {
+        return Some(narrowed);
+    }
+
     match ty.kind() {
         TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
@@ -1299,6 +1307,90 @@ fn filter_type_by_guard(
             }
         }
     }
+}
+
+/// What `is_callable()` passing leaves of `ty` when some alternative names
+/// a class, or `None` when none does and the type alone decides.
+///
+/// An instance is callable when its class declares `__invoke`, so such a
+/// class stays as it is.  A class that cannot be extended (final, or an
+/// enum) and declares none drops out.  Any other class or interface may
+/// have a callable subclass, so it survives as that subclass would:
+/// `Route&callable`.
+fn narrow_classes_to_callable(
+    ty: &PhpType,
+    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let members: Vec<PhpType> = match ty.kind() {
+        TypeKind::Nullable(inner) => inner.union_members().into_iter().cloned().collect(),
+        _ => ty.union_members().into_iter().cloned().collect(),
+    };
+    let mut names_class = false;
+    let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
+    for member in members {
+        let class = match member.kind() {
+            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => loader(name),
+            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => loader(&g.name),
+            _ => None,
+        };
+        let Some(class) = class else {
+            if member.is_callable() || member.is_mixed() {
+                kept.push(if member.is_mixed() {
+                    PhpType::callable()
+                } else {
+                    member
+                });
+            }
+            continue;
+        };
+        names_class = true;
+        if declares_invoke(&class, loader) {
+            kept.push(member);
+        } else if !class.is_final && class.kind != ClassLikeKind::Enum {
+            kept.push(PhpType::intersection(vec![member, PhpType::callable()]));
+        }
+    }
+    if !names_class {
+        return None;
+    }
+    Some(match kept.len() {
+        0 => PhpType::empty_sentinel(),
+        1 => kept.swap_remove(0),
+        _ => PhpType::union(kept),
+    })
+}
+
+/// Whether `class`, a trait it uses, or an ancestor declares `__invoke`.
+fn declares_invoke(class: &ClassInfo, loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+    if class.get_method_ci("__invoke").is_some() {
+        return true;
+    }
+    let mut seen: Vec<Atom> = Vec::new();
+    let mut pending: Vec<Atom> = class
+        .parent_class
+        .iter()
+        .chain(class.used_traits.iter())
+        .copied()
+        .collect();
+    while let Some(name) = pending.pop() {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        let Some(cls) = loader(&name) else {
+            continue;
+        };
+        if cls.get_method_ci("__invoke").is_some() {
+            return true;
+        }
+        pending.extend(
+            cls.parent_class
+                .iter()
+                .chain(cls.used_traits.iter())
+                .copied(),
+        );
+    }
+    false
 }
 
 /// Expand compound pseudo-types into unions of their constituent scalar

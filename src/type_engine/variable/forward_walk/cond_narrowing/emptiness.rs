@@ -178,6 +178,7 @@ pub(super) fn apply_literal_identity_narrowing(
         });
         if admits {
             scope.set(&var_name, vec![ResolvedType::from_type_string(literal)]);
+            write_offset_key_into_shapes(&var_name, scope);
         }
         return;
     }
@@ -194,6 +195,7 @@ pub(super) fn apply_literal_identity_narrowing(
     // all" is not one of them.
     if !kept.is_empty() {
         scope.set(&var_name, kept);
+        write_offset_key_into_shapes(&var_name, scope);
     }
 }
 
@@ -252,6 +254,7 @@ pub(crate) fn apply_switch_arm_narrowing(
     matched: &[&Expression<'_>],
     excluded: &[&Expression<'_>],
     scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
 ) {
     let Some(var_name) = expr_to_subject(subject) else {
         return;
@@ -283,6 +286,11 @@ pub(crate) fn apply_switch_arm_narrowing(
         equal == keep_equal
     };
 
+    // `switch ($x['type'])` discriminates the shapes `$x` can be, which is
+    // only visible once the offset has a type of its own to narrow.
+    if narrowing::split_trailing_bracket(&var_name).is_some() {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+    }
     let types = scope.get(&var_name);
     let mut changed = false;
     let mut narrowed = Vec::with_capacity(types.len());
@@ -303,6 +311,7 @@ pub(crate) fn apply_switch_arm_narrowing(
     // which is the reachability question rather than this one.
     if changed && !narrowed.is_empty() {
         scope.set(&var_name, narrowed);
+        write_offset_key_into_shapes(&var_name, scope);
     }
 }
 

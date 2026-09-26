@@ -106,40 +106,115 @@ pub(super) fn write_offset_narrowing_into_shapes(
     scope: &mut ScopeState,
 ) {
     for key in collect_condition_property_keys(condition) {
-        let Some((base, segment)) = narrowing::split_trailing_bracket(&key) else {
-            continue;
+        write_offset_key_into_shapes(&key, scope);
+    }
+}
+
+/// [`write_offset_narrowing_into_shapes`] for one offset key
+/// (`$x["k"]`), whatever narrowed it.
+///
+/// A union of shapes that the entry tells apart (the tagged-union idiom
+/// `array{type: 'a', …}|array{type: 'b', …}`) also loses every member whose
+/// entry cannot hold the narrowed value, so the branch sees only the
+/// shapes the check left possible.
+pub(crate) fn write_offset_key_into_shapes(key: &str, scope: &mut ScopeState) {
+    let Some((base, segment)) = narrowing::split_trailing_bracket(key) else {
+        return;
+    };
+    let Some(literal) = segment
+        .strip_prefix('"')
+        .and_then(|rest| rest.strip_suffix('"'))
+    else {
+        return;
+    };
+    let types = scope.get(key);
+    if types.is_empty() || !scope.contains(base) {
+        return;
+    }
+    let narrowed = ResolvedType::types_joined(types);
+    discard_shapes_excluding(base, literal, &narrowed, scope);
+
+    let is_refinement = |entry: &ShapeEntry| {
+        entry.value_type != narrowed && narrowed.is_subtype_of(&entry.value_type)
+    };
+    let refines_an_entry = scope.get(base).iter().any(|rt| {
+        rt.type_string
+            .union_members()
+            .into_iter()
+            .any(|shape| shape_entry_at(shape, literal).is_some_and(&is_refinement))
+    });
+    if !refines_an_entry {
+        return;
+    }
+    rewrite_shape_key(base, literal, scope, |entry| {
+        Some(if is_refinement(entry) {
+            ShapeEntry {
+                value_type: narrowed.clone(),
+                ..entry.clone()
+            }
+        } else {
+            entry.clone()
+        })
+    });
+}
+
+/// Drop the shapes in `base_var`'s union whose entry under `key` cannot
+/// hold any value of `narrowed`.
+///
+/// Only a `narrowed` made of literals is decided, against an entry made of
+/// scalars: whether a literal fits a scalar type is exact, while two class
+/// or template types can share values neither names.  A proof every member
+/// contradicts leaves the union alone, since the branch that sees it cannot
+/// run.
+fn discard_shapes_excluding(base_var: &str, key: &str, narrowed: &PhpType, scope: &mut ScopeState) {
+    let literals: Vec<&PhpType> = narrowed.union_members();
+    if !literals.iter().all(|m| m.as_literal().is_some()) {
+        return;
+    }
+    let excludes = |shape: &PhpType| {
+        let Some(entry) = shape_entry_at(shape, key) else {
+            return false;
         };
-        let Some(literal) = segment
-            .strip_prefix('"')
-            .and_then(|rest| rest.strip_suffix('"'))
-        else {
-            continue;
-        };
-        let types = scope.get(&key);
-        if types.is_empty() || !scope.contains(base) {
-            continue;
-        }
-        let narrowed = ResolvedType::types_joined(types);
-        let is_refinement = |entry: &ShapeEntry| {
-            entry.value_type != narrowed && narrowed.is_subtype_of(&entry.value_type)
-        };
-        let refines_an_entry = scope
-            .get(base)
-            .iter()
-            .any(|rt| shape_entry_at(&rt.type_string, literal).is_some_and(&is_refinement));
-        if !refines_an_entry {
-            continue;
-        }
-        rewrite_shape_key(base, literal, scope, |entry| {
-            Some(if is_refinement(entry) {
-                ShapeEntry {
-                    value_type: narrowed.clone(),
-                    ..entry.clone()
-                }
-            } else {
-                entry.clone()
-            })
+        let decidable = entry.value_type.union_members().iter().all(|m| {
+            matches!(m.kind(), TypeKind::Literal(_) | TypeKind::IntRange(..))
+                || (matches!(m.kind(), TypeKind::Named(_)) && m.is_scalar())
         });
+        decidable
+            && !literals
+                .iter()
+                .any(|literal| literal.is_subtype_of(&entry.value_type))
+    };
+
+    let types = scope.get(base_var);
+    let mut changed = false;
+    let mut kept: Vec<ResolvedType> = Vec::with_capacity(types.len());
+    for rt in types {
+        let members = rt.type_string.union_members();
+        let mut surviving: Vec<PhpType> = members
+            .iter()
+            .filter(|m| !excludes(m))
+            .map(|m| (*m).clone())
+            .collect();
+        if surviving.len() == members.len() {
+            kept.push(rt.clone());
+            continue;
+        }
+        changed = true;
+        if surviving.is_empty() {
+            continue;
+        }
+        let type_string = if surviving.len() == 1 {
+            surviving.swap_remove(0)
+        } else {
+            PhpType::union(surviving)
+        };
+        kept.push(ResolvedType {
+            type_string,
+            ..rt.clone()
+        });
+    }
+    if changed && !kept.is_empty() {
+        scope.set(base_var, kept);
     }
 }
 

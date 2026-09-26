@@ -1360,6 +1360,12 @@ pub(super) fn resolve_rhs_function_call<'b>(
         //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
         //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
         let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        if let Some(ret_type) = joined_callable_return(&var_types) {
+            let resolved = callable_return_resolution(&ret_type, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         for rt in &var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
                 let resolved = callable_return_resolution(ret_type, ctx);
@@ -1443,6 +1449,12 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // how a property or a method result annotated that way arrives
         // here.  Read it the same way the `$fn()` path does before falling
         // back to `__invoke()`.
+        if let Some(ret_type) = joined_callable_return(&callee_results) {
+            let resolved = callable_return_resolution(&ret_type, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         for rt in &callee_results {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
                 let resolved = callable_return_resolution(ret_type, ctx);
@@ -1478,6 +1490,41 @@ pub(super) fn resolve_rhs_function_call<'b>(
     }
 
     vec![]
+}
+
+/// What calling a value of one of `types` returns, when every alternative
+/// is callable by its type alone, or `None` when some alternative is not.
+///
+/// Each alternative contributes its own return type, so the answer is
+/// their join: `(Route&callable)|(callable(): Route)` can return anything,
+/// because the callable `Route` subclass declares no return type.  A
+/// callable spelled without a signature returns `mixed`.  An alternative
+/// that is callable only through a class's `__invoke()` is left to the
+/// callers' own lookup.
+fn joined_callable_return(types: &[ResolvedType]) -> Option<PhpType> {
+    fn member_return(member: &PhpType) -> Option<PhpType> {
+        match member.kind() {
+            TypeKind::Callable(c) => Some(c.return_type.clone().unwrap_or_else(PhpType::mixed)),
+            TypeKind::Named(_) if member.is_callable() => Some(PhpType::mixed()),
+            TypeKind::Intersection(parts) => parts.iter().find_map(member_return),
+            _ => None,
+        }
+    }
+    let mut returns: Vec<PhpType> = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            if member.is_null() {
+                continue;
+            }
+            returns.push(member_return(member)?);
+        }
+    }
+    // A single alternative already has its answer in the per-entry paths,
+    // which also know how to resolve the `Closure` stub's `__invoke()`.
+    if returns.len() < 2 {
+        return None;
+    }
+    Some(PhpType::join_runtime_value_types(returns))
 }
 
 /// What calling a value whose callable type returns `ret_type` produces.

@@ -1,6 +1,7 @@
 //! What a branch knows about a value from the test that led into it: the
-//! `case` labels of a `switch`, the falsy side of a truthiness check, and
-//! an `instanceof` check a union can pass through a subclass.
+//! `case` labels of a `switch`, the falsy side of a truthiness check, an
+//! `instanceof` check a union can pass through a subclass, the tag of a
+//! union of array shapes, and `is_callable()` on a class alternative.
 //!
 //! Each case hovers the variable at the `$x; // here` line and compares
 //! the type the hover reports.
@@ -185,4 +186,84 @@ function f($x): void {
 }
 "#;
     assert_eq!(type_at_marker(php), "Dog");
+}
+
+// ─── tagged unions of shapes ────────────────────────────────────────────────
+
+#[test]
+fn a_loose_tag_comparison_keeps_the_matching_shape() {
+    let php = r#"<?php
+/** @param array{type: 'a', a: string}|array{type: 'b', b: string} $in */
+function f(array $in): void {
+    if ($in['type'] == 'a') {
+        $in; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "array{type: 'a', a: string}");
+}
+
+#[test]
+fn the_default_arm_of_a_tag_switch_drops_every_named_shape() {
+    let php = r#"<?php
+/** @param array{type: 'a', a: string}|array{type: 'b', b: int}|array{type: 'c', c: bool} $in */
+function f(array $in): void {
+    switch ($in['type']) {
+        case 'a':
+        case 'b':
+            break;
+        default:
+            $in; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "array{type: 'c', c: bool}");
+}
+
+#[test]
+fn a_tag_whose_entry_is_not_a_literal_keeps_the_shape() {
+    let php = r#"<?php
+/** @param array{type: 'a', a: string}|array{type: string, other: int} $in */
+function f(array $in): void {
+    if ($in['type'] === 'a') {
+        $in; // here
+    }
+}
+"#;
+    assert_eq!(
+        type_at_marker(php),
+        "array{type: 'a', a: string}|array{type: 'a', other: int}"
+    );
+}
+
+// ─── is_callable() ──────────────────────────────────────────────────────────
+
+#[test]
+fn is_callable_keeps_a_class_that_declares_invoke() {
+    let php = r#"<?php
+class Handler { public function __invoke(): int { return 1; } }
+final class Plain {}
+/** @param Handler|Plain|string $h */
+function f($h): void {
+    if (is_callable($h)) {
+        $h; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "Handler");
+}
+
+#[test]
+fn is_callable_finds_invoke_on_a_parent() {
+    let php = r#"<?php
+abstract class Base { public function __invoke(): int { return 1; } }
+final class Child extends Base {}
+/** @param Child|int $h */
+function f($h): void {
+    if (is_callable($h)) {
+        $h; // here
+    }
+}
+"#;
+    assert_eq!(type_at_marker(php), "Child");
 }

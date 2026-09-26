@@ -91,6 +91,37 @@ fn resolve_class_naming_alternatives(
     Some(out)
 }
 
+/// The named alternatives of `types` when every non-null one names a type
+/// no class can be loaded for (an unbound template parameter, or a class
+/// the project does not ship), or `None` when any alternative is anything
+/// else.
+fn opaque_named_alternatives(
+    types: &[ResolvedType],
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<PhpType>> {
+    let mut names: Vec<PhpType> = Vec::new();
+    for rt in types {
+        if rt.class_info.is_some() {
+            return None;
+        }
+        for member in rt.type_string.union_members() {
+            if member.is_null() {
+                continue;
+            }
+            let TypeKind::Named(name) = member.kind() else {
+                return None;
+            };
+            if crate::php_type::is_keyword_type(name) || (ctx.class_loader)(name).is_some() {
+                return None;
+            }
+            if !names.contains(member) {
+                names.push(member.clone());
+            }
+        }
+    }
+    (!names.is_empty()).then_some(names)
+}
+
 /// `types` with each `iterable` alternative spelled out as the
 /// `array|Traversable` it stands for, or `None` when it holds none.
 ///
@@ -670,6 +701,31 @@ pub(super) fn commit_instanceof_narrowing(
         } else {
             scope.set(var_name, with_string_alt(filtered));
         }
+        return;
+    }
+
+    // A template parameter nothing binds (`@template T`) names no class
+    // the check could filter by, and neither does a class the project does
+    // not ship.  A value that passes the check is both at once, `A&T`,
+    // which is also what lets the join after the `if` fold it back into
+    // the bare `T` rather than leave `T|A` behind.
+    if let Some(opaque) = opaque_named_alternatives(existing, ctx) {
+        let mut intersected: Vec<ResolvedType> = Vec::with_capacity(narrowed.len());
+        for checked in &narrowed {
+            for name in &opaque {
+                ResolvedType::extend_unique(
+                    &mut intersected,
+                    vec![ResolvedType {
+                        type_string: PhpType::intersection(vec![
+                            checked.type_string.clone(),
+                            name.clone(),
+                        ]),
+                        ..checked.clone()
+                    }],
+                );
+            }
+        }
+        scope.set(var_name, with_string_alt(intersected));
         return;
     }
 

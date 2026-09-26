@@ -63,11 +63,13 @@ class HelloWorld2
 		assertNativeType('mixed', $this->foo);
 
 		if (\is_callable($this->foo)) {
-			assertType('(Bug5333\Route&callable(): mixed)|(callable(): Bug5333\Route)', $this->foo); // SKIP: is_callable() on Foo|callable(): Foo drops the Foo&callable member for a non-final class
+			// PHPStan spells this `(Bug5333\Route&callable(): mixed)|(callable(): Bug5333\Route)`:
+			// the same type, with the bare callable written out and the intersection parenthesised.
+			assertType('Bug5333\Route&callable|(callable(): Bug5333\Route)', $this->foo);
 			assertNativeType('callable(): mixed', $this->foo);
 
 			$res = ($this->foo)();
-			assertType('mixed', $res); // SKIP: is_callable() on Foo|callable(): Foo drops the Foo&callable member for a non-final class
+			assertType('mixed', $res);
 			assertNativeType('mixed', $res);
 			if (!$res instanceof Route) {
 				throw new \Exception();
