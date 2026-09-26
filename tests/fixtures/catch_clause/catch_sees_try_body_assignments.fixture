@@ -1,0 +1,16 @@
+// test: a catch block sees what the try body assigned before throwing
+// feature: hover
+// expect: 1
+---
+<?php
+
+function maybeThrows(): void {}
+
+function test(): void {
+    try {
+        $x = 1;
+        maybeThrows();
+    } catch (\RuntimeException $ex) {
+        echo $<>x;
+    }
+}

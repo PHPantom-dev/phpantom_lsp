@@ -1,26 +1,30 @@
-// test: comparison operators resolve to bool
+// test: comparison operators resolve to bool, or to the answer when both operands are known numbers
 // feature: hover
 // Adapted from phpactor binary-expression/compare.scalar.test
-// expect_hover: $eq => bool
-// expect_hover: $ident => bool
-// expect_hover: $neq => bool
-// expect_hover: $nident => bool
-// expect_hover: $gt => bool
-// expect_hover: $lt => bool
-// expect_hover: $gte => bool
-// expect_hover: $lte => bool
+// expect_hover: $eq => true
+// expect_hover: $ident => true
+// expect_hover: $neq => true
+// expect_hover: $nident => true
+// expect_hover: $gt => true
+// expect_hover: $lt => false
+// expect_hover: $gte => true
+// expect_hover: $lte => true
+// expect_hover: $mixedKinds => false
+// expect_hover: $unknown => bool
 ---
 <?php
 
-function test(): void {
+function test(int $n): void {
     $eq = 1 == 1;
     $ident = 1 === 1;
     $neq = 1 != 2;
     $nident = 1 !== 2;
     $gt = 2 > 1;
-    $lt = 1 < 2;
+    $lt = 2 < 1;
     $gte = 2 >= 1;
     $lte = 1 <= 2;
+    $mixedKinds = 1 === 1.0;
+    $unknown = $n < 2;
     $<>eq;
     $ident;
     $neq;
@@ -29,4 +33,6 @@ function test(): void {
     $lt;
     $gte;
     $lte;
+    $mixedKinds;
+    $unknown;
 }

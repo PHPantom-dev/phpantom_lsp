@@ -30,51 +30,7 @@ No outstanding items.
 
 ## Reachability
 
-### B379. The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after
-**Impact: Medium · Complexity: Medium**
-
-```php
-$ex = null;
-try {
-    $x = 1;
-    maybeThrows();
-} catch (\RuntimeException $ex) {
-    $x; // should be 1 (maybe defined), has no type
-}
-$ex; // should be RuntimeException|null, is null
-```
-
-A `catch` block starts from the scope before the `try`, so assignments the
-body made before throwing are invisible there, and the exception variable a
-non-exiting `catch` binds is not joined into the scope after the statement.
-
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
-
-### B380. A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it
-**Impact: Low · Complexity: Medium**
-
-```php
-$v = null;
-for ($i = 0; $i < 1; $i++) { $v = 1; }
-$v; // should be 1, is 1|null
-
-$w = null;
-switch (doFoo()) {
-    case 1: $w = 1; break;
-    default: throw new \Exception();
-}
-$w; // should be 1, is 1|null
-```
-
-A `for` whose condition is provably true on entry always runs its body, and a
-`switch` whose `default` throws cannot be skipped, but the walker still joins
-the pre-statement scope into the one after.
-
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
+No outstanding items.
 
 ## Narrowing
 

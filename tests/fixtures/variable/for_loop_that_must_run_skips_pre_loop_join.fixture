@@ -1,0 +1,14 @@
+// test: a for loop whose condition holds on entry does not join the pre-loop scope
+// feature: hover
+// expect: 1
+// expect_absent: null
+---
+<?php
+
+function test(): void {
+    $v = null;
+    for ($i = 0; $i < 1; $i++) {
+        $v = 1;
+    }
+    echo $<>v;
+}

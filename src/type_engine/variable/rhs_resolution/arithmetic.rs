@@ -5,6 +5,8 @@
 /// fix here reaches every consumer that asks "what type does this operator
 /// produce?" rather than being answered twice.
 use mago_syntax::cst::binary::{Binary, BinaryOperator};
+use mago_syntax::cst::unary::UnaryPrefixOperator;
+use mago_syntax::cst::{Expression, Literal, Variable};
 
 use crate::php_type::{PhpType, TypeKind, keyword_lowercase};
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -23,6 +25,27 @@ pub(super) fn resolve_binary_result_type<'b>(
     // Spaceship (<=>): always int (-1, 0, or 1).
     if matches!(binary.operator, BinaryOperator::Spaceship(_)) {
         return Some(vec![ResolvedType::from_type_string(PhpType::int())]);
+    }
+
+    // A comparison between two known numbers has one answer, which is what
+    // lets `for ($i = 0; $i < 1; $i++)` be seen to run its body.  Only
+    // operands that are cheap to look up are tried, so a comparison of two
+    // call results does not resolve both calls just to learn it is a `bool`.
+    if binary.operator.is_comparison()
+        && may_be_literal_number(binary.lhs)
+        && may_be_literal_number(binary.rhs)
+        && let Some(result) = fold_literal_comparison(
+            &binary.operator,
+            &resolve_rhs_expression(binary.lhs, ctx),
+            &resolve_rhs_expression(binary.rhs, ctx),
+        )
+    {
+        let folded = if result {
+            PhpType::true_()
+        } else {
+            PhpType::false_()
+        };
+        return Some(vec![ResolvedType::from_type_string(folded)]);
     }
 
     // instanceof, comparison, logical: always bool.
@@ -457,6 +480,59 @@ fn fold_literal_arithmetic(
         }
         (ArithmeticOpKind::Exponentiation, _, _) => literal_float(lhs.as_f64().powf(rhs.as_f64())),
     }
+}
+
+/// Whether an operand is a number literal or a variable, the operands a
+/// comparison can be folded over without resolving anything costly.
+fn may_be_literal_number(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::Parenthesized(inner) => may_be_literal_number(inner.expression),
+        Expression::Literal(Literal::Integer(_) | Literal::Float(_)) => true,
+        Expression::Variable(Variable::Direct(_)) => true,
+        Expression::UnaryPrefix(unary) => {
+            matches!(
+                unary.operator,
+                UnaryPrefixOperator::Negation(_) | UnaryPrefixOperator::Plus(_)
+            ) && may_be_literal_number(unary.operand)
+        }
+        _ => false,
+    }
+}
+
+/// The result of comparing two operands that each resolved to one literal
+/// number, or `None` when either is not a known number (or the operator is
+/// `<=>`, whose result is an int).
+fn fold_literal_comparison(
+    operator: &BinaryOperator<'_>,
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> Option<bool> {
+    use std::cmp::Ordering;
+    let lhs = single_literal_number(lhs_types)?;
+    let rhs = single_literal_number(rhs_types)?;
+    let ordering = match (lhs, rhs) {
+        (LiteralNumber::Int(a), LiteralNumber::Int(b)) => a.cmp(&b),
+        _ => lhs.as_f64().partial_cmp(&rhs.as_f64())?,
+    };
+    // `===` also compares the type: `1 === 1.0` is false.
+    let same_kind = matches!(
+        (lhs, rhs),
+        (LiteralNumber::Int(_), LiteralNumber::Int(_))
+            | (LiteralNumber::Float(_), LiteralNumber::Float(_))
+    );
+    Some(match operator {
+        BinaryOperator::LessThan(_) => ordering == Ordering::Less,
+        BinaryOperator::LessThanOrEqual(_) => ordering != Ordering::Greater,
+        BinaryOperator::GreaterThan(_) => ordering == Ordering::Greater,
+        BinaryOperator::GreaterThanOrEqual(_) => ordering != Ordering::Less,
+        BinaryOperator::Equal(_) => ordering == Ordering::Equal,
+        BinaryOperator::NotEqual(_) | BinaryOperator::AngledNotEqual(_) => {
+            ordering != Ordering::Equal
+        }
+        BinaryOperator::Identical(_) => same_kind && ordering == Ordering::Equal,
+        BinaryOperator::NotIdentical(_) => !same_kind || ordering != Ordering::Equal,
+        _ => return None,
+    })
 }
 
 fn literal_int(value: i64) -> PhpType {

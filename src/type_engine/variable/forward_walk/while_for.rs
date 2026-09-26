@@ -180,6 +180,7 @@ pub(crate) fn process_for<'b>(
     }
 
     let pre_loop_scope = scope.clone();
+    let always_enters = for_condition_holds_on_entry(for_stmt, scope, ctx);
 
     // The body executes when the conditions are truthy, so apply condition
     // narrowing (instanceof, isset, phpstan-assert-if-true, etc.) the same
@@ -280,11 +281,13 @@ pub(crate) fn process_for<'b>(
     // clause makes are part of the post-loop state.
     process_for_updates(for_stmt, scope, ctx);
 
-    // The loop body might not execute at all (condition false on
-    // first check), so merge with the pre-loop scope.
-    let post_loop = scope.clone();
-    *scope = pre_loop_scope;
-    scope.merge_branch(&post_loop);
+    // Unless the conditions hold on entry, the loop body might not execute
+    // at all, so merge with the pre-loop scope.
+    if !always_enters {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+    }
 
     // After the loop, only the last condition clause decided the exit (the
     // earlier clauses were evaluated for their side effects but don't gate
@@ -303,6 +306,28 @@ pub(crate) fn process_for<'b>(
     // narrowing; they only hold inside the loop body where the conditions
     // were true.
     strip_synthetic_property_keys(scope);
+}
+
+/// Whether a `for` loop's body is certain to run at least once: its last
+/// condition clause (the one that decides entry) resolves to `true` in the
+/// scope the initialisers leave behind, or there is no condition at all.
+fn for_condition_holds_on_entry<'b>(
+    for_stmt: &'b For<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some(last_cond) = for_stmt.conditions.iter().last() else {
+        return true;
+    };
+    // Only a comparison or a literal can come out as `true`; anything else
+    // is not worth resolving here.
+    match crate::parser::unwrap_parens(last_cond) {
+        Expression::Binary(binary) if binary.operator.is_comparison() => {}
+        Expression::Literal(Literal::True(_)) => return true,
+        _ => return false,
+    }
+    let resolved = resolve_rhs_with_scope(last_cond, scope, ctx);
+    !resolved.is_empty() && resolved.iter().all(|rt| rt.type_string.is_true())
 }
 
 /// Apply a `for` loop's update clause to `scope`.  The clause is usually

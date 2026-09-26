@@ -1,0 +1,20 @@
+// test: a switch arm that throws contributes nothing to the scope after the switch
+// feature: hover
+// expect: 1
+// expect_absent: null
+---
+<?php
+
+function doFoo(): int { return 1; }
+
+function test(): void {
+    $w = null;
+    switch (doFoo()) {
+        case 1:
+            $w = 1;
+            break;
+        default:
+            throw new \Exception();
+    }
+    echo $<>w;
+}

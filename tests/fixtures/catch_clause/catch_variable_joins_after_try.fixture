@@ -1,0 +1,17 @@
+// test: the exception variable a non-exiting catch binds is joined after the try
+// feature: hover
+// expect: RuntimeException
+// expect: null
+---
+<?php
+
+function maybeThrows(): void {}
+
+function test(): void {
+    $ex = null;
+    try {
+        maybeThrows();
+    } catch (\RuntimeException $ex) {
+    }
+    echo $<>ex;
+}

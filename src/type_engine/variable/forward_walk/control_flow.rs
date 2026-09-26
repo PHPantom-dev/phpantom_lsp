@@ -8,10 +8,10 @@ use crate::types::ResolvedType;
 
 /// Bind the exception variable a `catch` clause names into `scope`.
 ///
-/// A clause that names none (`catch (LogicException)`) binds nothing, and
-/// so does one whose hint resolves to no class: leaving the variable
-/// unset beats recording it as untyped, which would mask whatever the
-/// scope already knew about that name.
+/// A clause that names none (`catch (LogicException)`) binds nothing.  A
+/// hint naming a class that cannot be loaded still binds the named type,
+/// the way `new UndeclaredFoo()` does, so the variable joins the scope
+/// after the `try` rather than keeping whatever it held before.
 fn bind_catch_variable(
     catch: &TryCatchClause<'_>,
     scope: &mut ScopeState,
@@ -27,10 +27,34 @@ fn bind_catch_variable(
         ctx.all_classes,
         ctx.class_loader,
     );
-    let exception_types = ResolvedType::from_classes_with_hint(resolved, parsed_hint);
-    if !exception_types.is_empty() {
-        scope.set(bytes_to_str(var.name), exception_types);
+    let exception_types = if resolved.is_empty() {
+        vec![ResolvedType::from_type_string(parsed_hint)]
+    } else {
+        ResolvedType::from_classes_with_hint(resolved, parsed_hint)
+    };
+    scope.set(bytes_to_str(var.name), exception_types);
+}
+
+/// Walk a `try` body into `scope` and return the scope a `catch` clause
+/// starts from.
+///
+/// Any statement in the body can throw, so a `catch` sees the join of the
+/// state before each of them: the assignments the body made before the
+/// throw, but not the one the throwing statement was about to make
+/// (`$x = mayThrow();` leaves `$x` as it was).
+fn walk_try_body<'b>(
+    try_stmt: &'b Try<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> ScopeState {
+    let mut catch_entry = scope.clone();
+    for (i, stmt) in try_stmt.block.statements.iter().enumerate() {
+        if i > 0 {
+            catch_entry.merge_branch(scope);
+        }
+        walk_body_forward(std::iter::once(stmt), scope, ctx);
     }
+    catch_entry
 }
 
 /// Process a `try-catch-finally` statement.
@@ -39,8 +63,6 @@ pub(crate) fn process_try<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let pre_try_scope = scope.clone();
-
     let try_body_span = try_stmt.block.span();
     let cursor_in_try = ctx.cursor_offset >= try_body_span.start.offset
         && ctx.cursor_offset <= try_body_span.end.offset;
@@ -50,19 +72,15 @@ pub(crate) fn process_try<'b>(
         return;
     }
 
-    for catch in try_stmt.catch_clauses.iter() {
+    let cursor_in_catch = try_stmt.catch_clauses.iter().find(|catch| {
         let catch_span = catch.block.span();
-        if ctx.cursor_offset >= catch_span.start.offset
-            && ctx.cursor_offset <= catch_span.end.offset
-        {
-            // Start from the pre-try scope, since the exception could
-            // have been thrown at any point in the try body, and bind the
-            // caught exception variable on top of it.
-            *scope = pre_try_scope.clone();
-            bind_catch_variable(catch, scope, ctx);
-            walk_body_forward(catch.block.statements.iter(), scope, ctx);
-            return;
-        }
+        ctx.cursor_offset >= catch_span.start.offset && ctx.cursor_offset <= catch_span.end.offset
+    });
+    if let Some(catch) = cursor_in_catch {
+        *scope = walk_try_body(try_stmt, scope, ctx);
+        bind_catch_variable(catch, scope, ctx);
+        walk_body_forward(catch.block.statements.iter(), scope, ctx);
+        return;
     }
 
     if let Some(ref finally) = try_stmt.finally_clause {
@@ -79,12 +97,12 @@ pub(crate) fn process_try<'b>(
 
     // Cursor is after the try/catch/finally.  Walk the try body and
     // merge all catch scopes.
-    walk_body_forward(try_stmt.block.statements.iter(), scope, ctx);
+    let catch_entry = walk_try_body(try_stmt, scope, ctx);
     let try_scope = scope.clone();
 
     let mut all_scopes = vec![try_scope];
     for catch in try_stmt.catch_clauses.iter() {
-        let mut catch_scope = pre_try_scope.clone();
+        let mut catch_scope = catch_entry.clone();
         bind_catch_variable(catch, &mut catch_scope, ctx);
         walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
         // A catch that rethrows or returns never reaches the statement
@@ -166,7 +184,8 @@ pub(crate) fn process_switch<'b>(
                 apply_switch_arm_narrowing(switch.expression, &[], &all_labels, &mut case_scope);
             }
         }
-        falls_into_next = !branch_exits_stmts(stmts.iter().copied(), &case_scope, ctx);
+        let arm_jumps_out = branch_exits_stmts(stmts.iter().copied(), &case_scope, ctx);
+        falls_into_next = !arm_jumps_out;
         let exit_frame = ExitFrameGuard::push();
         walk_body_forward(stmts.iter().copied(), &mut case_scope, ctx);
         let arm_exits = exit_frame.pop();
@@ -182,7 +201,15 @@ pub(crate) fn process_switch<'b>(
         if holds_cursor {
             return Some(case_scope);
         }
+        // An arm that jumps out never runs off its end: what it hands the
+        // code after the `switch` is only what its `break`s carried, and
+        // an arm that throws or returns hands it nothing.  PHP treats a
+        // `continue` that targets the `switch` as a `break`.
+        if arm_jumps_out {
+            case_scope.unreachable = true;
+        }
         merge_exit_edges(&mut case_scope, &arm_exits.breaks);
+        merge_exit_edges(&mut case_scope, &arm_exits.continues);
         branch_scopes.push(case_scope);
         None
     };
@@ -229,6 +256,16 @@ pub(crate) fn process_switch<'b>(
     // arm at all, so merge with the pre-switch scope.
     if !has_default {
         merged.merge_branch(&pre_switch_scope);
+    }
+
+    // Every arm returns or throws and a `default` catches every value:
+    // nothing reaches the code after the `switch`.  As with an `if` whose
+    // branches all exit, the pre-switch types are the least surprising
+    // answer for a cursor in that dead code.
+    if merged.unreachable && !pre_switch_scope.unreachable {
+        *scope = pre_switch_scope;
+        scope.unreachable = true;
+        return;
     }
 
     *scope = merged;

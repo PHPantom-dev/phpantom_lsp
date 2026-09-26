@@ -1,0 +1,20 @@
+// test: a catch naming a class that cannot be loaded still binds the named type
+// feature: hover
+// expect: UndeclaredException
+// expect: null
+// expect_absent: SkippedException
+---
+<?php
+
+function maybeThrows(): void {}
+
+function test(): void {
+    $ex = null;
+    try {
+        maybeThrows();
+    } catch (SkippedException $ex) {
+        return;
+    } catch (UndeclaredException $ex) {
+    }
+    echo $<>ex;
+}
