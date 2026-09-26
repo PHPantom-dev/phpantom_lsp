@@ -26,7 +26,7 @@ class Foo
 			return new static();
 		};
 
-		assertType('static(NativeStaticReturnType\Foo)', $f()); // SKIP: calling a closure declared `: static` gives a bare static
+		assertType('static(NativeStaticReturnType\Foo)', $f());
 
 		return $f;
 	}

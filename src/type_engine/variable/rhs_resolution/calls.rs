@@ -811,6 +811,22 @@ pub(crate) fn infer_closure_literal_type(
         _ => None,
     });
 
+    // `static` in a closure's declared return type binds to the class the
+    // closure is lexically declared in, the same way it does for a method.
+    // A closure has no receiver at the call site to bind it against later,
+    // so it must be bound once here, at the point the closure value is
+    // created.
+    let inferred_return = inferred_return.map(|t| {
+        if ctx.current_class.name.is_empty() {
+            t
+        } else {
+            t.resolve_self_refs_bounded(
+                &ctx.current_class.fqn(),
+                ctx.current_class.parent_class.as_deref(),
+            )
+        }
+    });
+
     let params = declared_closure_params(expr, ctx);
     if inferred_return.is_some() || !params.is_empty() {
         PhpType::callable_spec("Closure", params, inferred_return)

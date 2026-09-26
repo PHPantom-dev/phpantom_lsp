@@ -486,19 +486,3 @@ $a; // should be 0|'s', is 0
 A by-reference capture shares the variable with the closure, and the closure may run any number of times before or after either read. Both sides should see the union of every value the closure assigns.
 
 Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B476. Calling a closure declared `: static` gives a bare `static`
-**Impact: Low · Complexity: Low**
-
-```php
-class Foo {
-    public function doBaz() {
-        $f = function (): static { return new static(); };
-        $f(); // should be static(Foo), is static
-    }
-}
-```
-
-`static` in a closure's return type is bound to the enclosing class like it is in a method's, but calling the closure through its variable skips that binding.
-
-Found porting PHPStan's `Reflection/data/staticReturnType.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
