@@ -63,11 +63,11 @@ class Foo
 		$this->takesStrings($newCol);
 
 		$newCol = $col->map(static fn(string $var): string => $classString);
-		assertType('Bug5372\Collection<int, class-string>', $newCol); // SKIP: an arrow function's return type comes from its declared hint even when the body returns something narrower
+		assertType('Bug5372\Collection<int, class-string>', $newCol);
 		$this->takesStrings($newCol);
 
 		$newCol = $col->map2(static fn(string $var): string => $classString);
-		assertType('Bug5372\Collection<int, class-string>', $newCol); // SKIP: an arrow function's return type comes from its declared hint even when the body returns something narrower
+		assertType('Bug5372\Collection<int, class-string>', $newCol);
 		$this->takesStrings($newCol);
 	}
 

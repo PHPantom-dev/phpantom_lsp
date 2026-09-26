@@ -502,18 +502,3 @@ class Foo {
 `static` in a closure's return type is bound to the enclosing class like it is in a method's, but calling the closure through its variable skips that binding.
 
 Found porting PHPStan's `Reflection/data/staticReturnType.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B477. An arrow function's return type comes from its declared hint even when the body returns something narrower
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param class-string $classString */
-function f(Collection $col, string $classString) {
-    $col->map(static fn (string $v): string => $classString);
-    // should be Collection<int, class-string>, is Collection<int, string>
-}
-```
-
-A template bound from a closure's return type takes the declared hint. PHPStan takes the body's type when it is narrower than the hint.
-
-Found porting PHPStan's `Rules/Methods/data/bug-5372.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.

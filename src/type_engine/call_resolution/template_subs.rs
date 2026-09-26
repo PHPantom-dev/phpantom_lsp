@@ -919,11 +919,11 @@ impl Backend {
     /// resolver.  A closure really returns what its body produces narrowed
     /// by what it declares, so an explicit `: ReturnType` annotation only
     /// wins when the body resolves to something that is not a subtype of
-    /// it.  A scalar annotation cannot be narrowed by anything the body
-    /// resolves to, so it skips the body walk.  An unannotated closure
-    /// tries generator `yield` inference before its body.  The body
-    /// fallback lets template params bind from unannotated closures like
-    /// `Cache::remember($k, $ttl, fn() => new Order())`.
+    /// it (this includes scalar refinements like `class-string` under a
+    /// declared `string`).  An unannotated closure tries generator `yield`
+    /// inference before its body.  The body fallback lets template params
+    /// bind from unannotated closures like `Cache::remember($k, $ttl,
+    /// fn() => new Order())`.
     pub(crate) fn infer_closure_return_type_seeded(
         arg_text: &str,
         param_seeds: &[Option<PhpType>],
@@ -953,9 +953,6 @@ impl Backend {
         // compared against types that arrived fully qualified, so the
         // spelling has to be canonicalised before it is bound.
         let declared = crate::util::resolve_php_type_names(&declared, ctx.class_loader);
-        if declared.is_scalar_leaf() && !declared.is_bare_array() {
-            return Some(declared);
-        }
         let narrowed = body_type().filter(|body| {
             crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
         });
