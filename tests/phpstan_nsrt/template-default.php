@@ -19,7 +19,7 @@ class Test
  */
 function foo(Test $one, Test $two, Test $three)
 {
-	assertType('TemplateDefault\\Test<false, true>', $one); // SKIP: a declared generic type that omits a defaulted argument does not spell it out
+	assertType('TemplateDefault\\Test<false, true>', $one);
 	assertType('TemplateDefault\\Test<false, false>', $two);
 	assertType('TemplateDefault\\Test<false, false, false>', $three);
 }

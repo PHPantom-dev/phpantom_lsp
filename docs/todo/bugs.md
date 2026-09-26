@@ -22,26 +22,7 @@ No outstanding items.
 
 ## Type comparison
 
-### B425. A declared generic type that omits a defaulted argument does not spell it out
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @template T1 = true  @template T2 = true */
-class Test {}
-/** @param Test<false> $one */
-function f(Test $one) {} // $one should be Test<false, true>, is Test<false>
-```
-
-Members already see the default (`build_generic_subs` fills it in), but
-the type itself keeps only the arguments written, so hover shows
-`Test<false>` and a comparison against `Test<false, true>` sees two
-different arities. PHPStan fills omitted arguments with their defaults
-when it resolves the type. The fill needs the class loader, so it belongs
-where every declared type (parameter, `@var`, return, property) is
-resolved, not in one consumer.
-
-Found porting PHPStan's `nsrt/template-default.php`; the assertion is
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Standard-library return types
 

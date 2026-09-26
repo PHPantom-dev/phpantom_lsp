@@ -188,7 +188,58 @@ pub(crate) fn resolve_php_type_names(
     ty: &crate::php_type::PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
+    let resolved = ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader));
+    fill_generic_type_defaults(&resolved, class_loader)
+}
+
+/// Spell out generic type arguments a declared type left to their
+/// `@template` default.
+///
+/// `@param Test<false> $one` on a class declaring
+/// `@template T1 = true  @template T2 = true` binds only `T1`; member
+/// lookups already see `T2`'s default because [`build_generic_subs`] fills
+/// omitted trailing parameters in, but the annotation's own `PhpType` still
+/// carries just the one argument written. Left alone, hover shows
+/// `Test<false>` and a comparison against the fully spelled `Test<false,
+/// true>` sees two different arities for what should be the same type.
+///
+/// This walks the type and rebuilds every `Generic` node whose argument
+/// count falls short of its class's template parameters, appending each
+/// remaining parameter's resolved default (falling back further to its
+/// bound, or `mixed`, the same rules [`build_generic_subs`] applies to
+/// member substitution).
+///
+/// [`build_generic_subs`]: crate::inheritance::build_generic_subs
+fn fill_generic_type_defaults(
+    ty: &crate::php_type::PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    use crate::php_type::{PhpType, TypeKind};
+
+    match ty.raw_kind() {
+        TypeKind::Generic(g) => {
+            let args: Vec<PhpType> = g
+                .args
+                .iter()
+                .map(|a| fill_generic_type_defaults(a, class_loader))
+                .collect();
+            let filled_args = class_loader(g.name.as_str()).and_then(|cls| {
+                (cls.template_params.len() > args.len()).then(|| {
+                    let subs = crate::inheritance::build_generic_subs(&cls, &args);
+                    cls.template_params
+                        .iter()
+                        .map(|param| {
+                            subs.get(param.as_str())
+                                .cloned()
+                                .unwrap_or_else(PhpType::mixed)
+                        })
+                        .collect::<Vec<_>>()
+                })
+            });
+            PhpType::generic_atom(g.name, filled_args.unwrap_or(args))
+        }
+        _ => ty.map_children(&|t| fill_generic_type_defaults(t, class_loader)),
+    }
 }
 
 /// [`resolve_php_type_names`] for a type written as source the reader
@@ -214,13 +265,14 @@ pub(crate) fn resolve_source_php_type_names(
     namespace: Option<&str>,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| {
+    let resolved = ty.resolve_names(&|name| {
         let resolved = resolve_source_class_name(name, namespace, class_loader);
         if resolved == name.trim_start_matches('\\') {
             return name.to_string();
         }
         resolved
-    })
+    });
+    fill_generic_type_defaults(&resolved, class_loader)
 }
 
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any
