@@ -464,6 +464,9 @@ pub(crate) fn process_foreach<'b>(
     {
         scope.set(kn, resolved.clone());
     }
+    if value_docblock_override.is_none() {
+        record_key_value_pairing(foreach, iter_type.as_ref(), scope, ctx);
+    }
     // When the iterable is a bare `array` (no generic parameters)
     // and no @var docblock provided a concrete type, the element
     // type is `mixed`.  Seed it so that assignments from the loop
@@ -567,6 +570,9 @@ pub(crate) fn process_foreach<'b>(
             {
                 next_scope.set(kn, resolved.clone());
             }
+            if value_docblock_override.is_none() {
+                record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
+            }
         },
     );
 
@@ -636,6 +642,85 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// Record what each key of an iterated shape pairs with, so narrowing the
+/// key variable narrows the value it was read with.
+///
+/// ```php
+/// /** @var array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+/// foreach ($data as $key => $value) {
+///     if ($key === 'classmap') {
+///         $value;        // list<string>
+///         $data[$key];   // list<string>
+///     }
+/// }
+/// ```
+///
+/// Each shape entry becomes a proof held by the key variable: once the key
+/// is shown to be that entry's key, the value variable and the offset read
+/// `$data[$key]` hold that entry's value type.  The entry cannot be missing
+/// there, since the loop is visiting it.  Reassigning the key drops every
+/// proof, and reassigning the value or the array drops the one about it
+/// (see [`ScopeState::invalidate_proofs`]), so the pairing only lasts as
+/// long as they still describe the same iteration.
+fn record_key_value_pairing(
+    foreach: &Foreach<'_>,
+    iter_type: Option<&PhpType>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let ForeachTarget::KeyValue(kv) = &foreach.target else {
+        return;
+    };
+    let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
+        return;
+    };
+    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+        return;
+    };
+    if entries.len() < 2 {
+        return;
+    }
+    let key_var = bytes_to_str(key_dv.name);
+    let value_var = extract_foreach_var_name(kv.value);
+    let element_key =
+        narrowing::expr_to_subject_key(foreach.expression).map(|base| format!("{base}[{key_var}]"));
+    let targets: Vec<crate::atom::Atom> = value_var
+        .iter()
+        .map(|v| atom(v))
+        .chain(element_key.iter().map(|k| atom(k)))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+
+    let mut proofs = Vec::with_capacity(entries.len() * targets.len());
+    let mut position = 0usize;
+    for entry in entries.iter() {
+        let key = match entry.key.as_deref() {
+            None => {
+                position += 1;
+                PhpType::literal_int((position - 1).to_string())
+            }
+            // Only known by its spelling, so no key comparison can match it.
+            Some(key) if key.contains("::") => continue,
+            Some(key) if crate::php_type::is_canonical_int_key(key) => PhpType::literal_int(key),
+            Some(key) => PhpType::literal_string_value(key),
+        };
+        let trigger = vec![ResolvedType::from_type_string(key)];
+        let types = ctx.resolved_types_for(entry.value_type.clone());
+        for target in &targets {
+            proofs.push(super::scope_state::ImpliedNarrowing {
+                trigger: super::scope_state::ProofTrigger::Within(trigger.clone()),
+                key: *target,
+                types: types.clone(),
+            });
+        }
+    }
+    // The key variable was just rebound, so whatever it stood for on the
+    // previous iteration is gone.
+    scope.implied_narrowings.insert(atom(key_var), proofs);
 }
 
 /// The (array variable, key variable) a `foreach` binds when it walks an

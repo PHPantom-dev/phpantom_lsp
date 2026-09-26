@@ -9,7 +9,7 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
 use crate::type_engine::resolver::VarResolutionCtx;
@@ -27,15 +27,15 @@ pub(super) fn resolve_rhs_array_access<'b>(
     // walking through nested ArrayAccess nodes.  This handles both
     // single access (`$result['data']`) and chained access
     // (`$result['items'][0]`).
-    let mut segments: Vec<ArrayBracketSegment> = Vec::new();
+    let mut segments: Vec<(ArrayBracketSegment, &Expression<'_>)> = Vec::new();
     let mut current_expr: &Expression<'_> = array_access.array;
 
     // Classify the outermost (current) index first.
-    segments.push(classify_array_index(array_access.index));
+    segments.push((classify_array_index(array_access.index), array_access.index));
 
     // Walk inward through nested ArrayAccess nodes.
     while let Expression::ArrayAccess(inner) = current_expr {
-        segments.push(classify_array_index(inner.index));
+        segments.push((classify_array_index(inner.index), inner.index));
         current_expr = inner.array;
     }
 
@@ -124,7 +124,14 @@ pub(super) fn resolve_rhs_array_access<'b>(
     }
 
     // Walk each bracket segment, narrowing the type at each step.
-    for seg in &segments {
+    for (seg, index) in &segments {
+        let literal_seg =
+            if matches!(seg, ArrayBracketSegment::ElementAccess) && has_shape_member(&current) {
+                literal_variable_index(index, ctx)
+            } else {
+                None
+            };
+        let seg = literal_seg.as_ref().unwrap_or(seg);
         let Some(element) = index_segment(&current, seg, ctx) else {
             return vec![];
         };
@@ -156,6 +163,46 @@ pub(super) fn resolve_rhs_array_access<'b>(
         vec![ResolvedType::from_type_string(current)]
     } else {
         ResolvedType::from_classes_with_hint(classes, current)
+    }
+}
+
+/// Whether `ty` is, or has a union member that is, an array shape: the
+/// only kind of array whose offset reads depend on which key is read.
+fn has_shape_member(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::ArrayShape(_) => true,
+        TypeKind::Nullable(inner) => has_shape_member(inner),
+        TypeKind::Union(members) => members.iter().any(has_shape_member),
+        _ => false,
+    }
+}
+
+/// The literal key a variable index holds, as the segment a literal
+/// written in its place would classify to.
+///
+/// `$k = 'classmap'; $data[$k]` reads the same entry `$data['classmap']`
+/// does, so a variable whose type is a single string or int literal
+/// addresses that one shape entry rather than any of them.
+fn literal_variable_index(
+    index: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<ArrayBracketSegment> {
+    let Expression::Variable(Variable::Direct(_)) = index else {
+        return None;
+    };
+    let resolved = resolve_rhs_expression(index, ctx);
+    let [only] = resolved.as_slice() else {
+        return None;
+    };
+    let literal = only.type_string.as_literal()?;
+    match literal {
+        LiteralValue::String(_) => Some(ArrayBracketSegment::StringKey(
+            literal.string_content()?.into_owned(),
+        )),
+        LiteralValue::Int(_) => Some(ArrayBracketSegment::IntKey(
+            literal.parse_i64()?.to_string(),
+        )),
+        LiteralValue::Float(_) => None,
     }
 }
 

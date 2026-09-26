@@ -85,24 +85,6 @@ When every member of a type has been ruled out (by type checks, by comparing eac
 
 Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`, `Rules/Comparison/data/bug-8169.php`, `Rules/Comparison/data/bug-8485.php`, `Rules/Comparison/data/docblock-assert-equality.php` and `Rules/Methods/data/true-typehint.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B454. Comparing a foreach key does not narrow the value it was read with
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-/** @var array{psr-4?: array<string, string>, classmap?: list<string>} $data */
-foreach ($data as $key => $value) {
-    if ($key === 'classmap') {
-        $value; // should be list<string>, is the union of every value type
-    }
-}
-```
-
-Iterating a shape pairs each key with its value type. Narrowing the key to one literal should narrow the value (and `$data[$key]`) to that key's type.
-
-Two smaller gaps sit underneath it. The foreach key of a shape is `string` rather than the union of the shape's keys (`'psr-4'|'classmap'`), and an offset read whose key variable is already a single literal (`$key` narrowed to `'classmap'`) still reads as a dynamic key, yielding every entry's type instead of that key's. Fixing the pairing properly means the scope remembers which key a foreach value was read with, and forgets it when either variable is reassigned.
-
-Found porting PHPStan's `Rules/Arrays/data/bug-6000.php` and `Rules/Arrays/data/bug-8467a.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
 ## Arithmetic
 
 No outstanding items.

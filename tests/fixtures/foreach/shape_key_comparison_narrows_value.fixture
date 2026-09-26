@@ -1,0 +1,15 @@
+// test: comparing a foreach key over a shape narrows the value read with it, in the else branch too
+// feature: hover
+// expect: $value = array<string, string>
+---
+<?php
+
+/** @param array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+function f(array $data): void {
+    foreach ($data as $key => $value) {
+        if ($key === 'classmap') {
+            continue;
+        }
+        $<>value;
+    }
+}

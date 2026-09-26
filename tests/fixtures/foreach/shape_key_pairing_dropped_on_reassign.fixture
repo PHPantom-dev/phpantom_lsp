@@ -1,0 +1,15 @@
+// test: a reassigned foreach key no longer narrows the value it was read with
+// feature: hover
+// expect: $value = array<string, string>|list<string>
+---
+<?php
+
+/** @param array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+function f(array $data, bool $b): void {
+    foreach ($data as $key => $value) {
+        $key = $b ? 'classmap' : 'psr-4';
+        if ($key === 'classmap') {
+            $<>value;
+        }
+    }
+}

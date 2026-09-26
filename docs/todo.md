@@ -114,7 +114,6 @@ unlikely to move the needle for most users.
 | B456 | [Writes through a list's own keys drop `list`, while `unset()` of an element keeps it](todo/bugs.md#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it) | Low-Medium | Medium |
 | B459 | [Writing a literal into an array offset widens it to its base type](todo/bugs.md#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
-| B454 | [Comparing a foreach key does not narrow the value it was read with](todo/bugs.md#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with) | Low-Medium | Medium-High |
 | B458 | [An `(array)` cast of a union with a non-array member is plain `array`](todo/bugs.md#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array) | Low | Low |
 | B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
 | B474 | [A magic constant resolves to its base type rather than its value](todo/bugs.md#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value) | Low | Low-Medium |

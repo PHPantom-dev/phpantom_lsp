@@ -32,7 +32,7 @@ class Test {
 				if ($type === 'psr-0' || $type === 'psr-4') {
 
 				} elseif ($type === 'classmap') {
-					assertType('list<string>', $autoloadConfig[$type]); // SKIP: comparing a foreach key does not narrow the value it was read with
+					assertType('list<string>', $autoloadConfig[$type]);
 					implode(', ', $autoloadConfig[$type]);
 				}
 			}
