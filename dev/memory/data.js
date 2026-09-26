@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790414088768,
+  "lastUpdate": 1790415040594,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31687,6 +31687,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "29adbeb681c7dc094bf2f01d26dee118c9c92d45",
+          "message": "A class constant array holding `Foo::class` keeps the class names it\nlists",
+          "timestamp": "2026-09-26T11:14:17+02:00",
+          "tree_id": "c2c965aa2aa447ae90835ca22057737c94d87365",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/29adbeb681c7dc094bf2f01d26dee118c9c92d45"
+        },
+        "date": 1790415031494,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.9,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.9,
             "unit": "MiB"
           }
         ]
