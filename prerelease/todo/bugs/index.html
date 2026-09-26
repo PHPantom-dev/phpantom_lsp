@@ -1160,17 +1160,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b421-aia-does-not-simplify-to-a" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2026,17 +2015,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b421-aia-does-not-simplify-to-a" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2457,32 +2435,17 @@ to its declared return type. A <code>never</code> branch does carry information:
 call does not return.</p>
 <p>Found porting PHPStan's <code>nsrt/template-default.php</code>; the assertion is
 <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b421-aia-does-not-simplify-to-a">B421. <code>(A&amp;I)|A</code> does not simplify to <code>A</code><a class="headerlink" href="#b421-aia-does-not-simplify-to-a" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">class T {</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">    /** @param A|null $arg  @param-out ($arg is null ? A&amp;I : A) $arg */</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    public static function m(?A &amp;$arg = null): void {}</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">}</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">$d = $a-&gt;unknownMethod();</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">T::m($d);</span>
-<a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="x">$d; // should be A, is A&amp;I</span>
-</code></pre></div>
-<p>An argument whose type cannot be resolved leaves the condition undecided,
-so the out type is the union of both branches. A union member that is a
-subtype of another member (<code>A&amp;I</code> of <code>A</code>) is kept rather than absorbed, and
-the class-list conversion then lets the intersection's entry stand in for
-the plain <code>A</code>.</p>
 <p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>; the assertion is <code>// SKIP</code> in
 the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <h3 id="b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type">B420. A value typed as a model's base collection has the custom collection's class but not its type<a class="headerlink" href="#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @param Collection&lt;int, Product&gt; $c */   // Product collects into ProductCollection</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function f(Collection $c): void {</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">    if ($c instanceof ProductCollection) {</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">        takesProducts($c); // reported: expects ProductCollection, got Collection&lt;int, Product&gt;</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">    }</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @param Collection&lt;int, Product&gt; $c */   // Product collects into ProductCollection</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f(Collection $c): void {</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    if ($c instanceof ProductCollection) {</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">        takesProducts($c); // reported: expects ProductCollection, got Collection&lt;int, Product&gt;</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">    }</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>Resolving <code>Eloquent\Collection&lt;int, Product&gt;</code> to classes swaps in the
 model's custom collection (<code>try_swap_custom_collection</code>) while the type
