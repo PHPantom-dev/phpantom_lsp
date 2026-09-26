@@ -1094,10 +1094,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" class="md-nav__link">
+  <a href="#b481-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B479. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code>
+        B481. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code>
       </span>
     </span>
   </a>
@@ -1260,10 +1260,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value" class="md-nav__link">
+  <a href="#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B474. A magic constant resolves to its base type rather than its value
+        B482. <code>__PROPERTY__</code> inside a property hook resolves to its base type rather than its value
       </span>
     </span>
   </a>
@@ -2042,10 +2042,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" class="md-nav__link">
+  <a href="#b481-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B479. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code>
+        B481. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code>
       </span>
     </span>
   </a>
@@ -2208,10 +2208,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value" class="md-nav__link">
+  <a href="#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B474. A magic constant resolves to its base type rather than its value
+        B482. <code>__PROPERTY__</code> inside a property hook resolves to its base type rather than its value
       </span>
     </span>
   </a>
@@ -2469,7 +2469,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p>Joining branches that wrote different shapes leaves a redundant <code>array|array{…}</code> union where the shape is already covered by <code>array</code>, and joining shapes with differing optional keys (<code>Rules/Comparison/data/bug-7898.php</code>) marks keys required that only one branch set.</p>
 <p>Found porting PHPStan's <code>Rules/Variables/data/bug-8113.php</code>, <code>Rules/Comparison/data/bug-7898.php</code> and <code>Rules/Methods/data/bug-5749.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null">B479. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code><a class="headerlink" href="#b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" title="Permanent link">&para;</a></h3>
+<h3 id="b481-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null">B481. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code><a class="headerlink" href="#b481-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">$totals = [];</span>
 <a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">foreach ($items as $item) {</span>
@@ -2588,22 +2588,18 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p>Unifying the parameter's <code>callable(callable(): T): T</code> with the argument's signature should bind <code>T</code> from the outer return type (where the argument says <code>string</code>).</p>
 <p>Found porting PHPStan's <code>Rules/Functions/data/varying-acceptor.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value">B474. A magic constant resolves to its base type rather than its value<a class="headerlink" href="#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">class User {</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">    public function doFoo() {</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">        __LINE__;      // should be the line number, is int</span>
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">        __NAMESPACE__; // should be &#39;App&#39;, is string</span>
-<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">        __FUNCTION__;  // should be &#39;doFoo&#39;, is string</span>
-<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="x">        __METHOD__;    // should be &#39;App\User::doFoo&#39;, is string</span>
-<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="x">        __CLASS__;     // should be &#39;App\User&#39;, is class-string&lt;User&gt;</span>
-<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="x">    }</span>
-<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="x">}</span>
-<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="x">fn() =&gt; __FUNCTION__; // returns &#39;{closure}&#39;</span>
+<h3 id="b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value">B482. <code>__PROPERTY__</code> inside a property hook resolves to its base type rather than its value<a class="headerlink" href="#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">class User {</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">    public string $name {</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">        get {</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">            __PROPERTY__; // should be &#39;name&#39;, is string</span>
+<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">        }</span>
+<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">    }</span>
+<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="x">}</span>
 </code></pre></div>
-<p>Each of these is known at the point it is written. <code>__CLASS__</code> as <code>class-string&lt;User&gt;</code> is already useful, but the literal is exact.</p>
-<p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code> and <code>Rules/Functions/data/bug-anonymous-function-method-constant.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
+<p><code>__PROPERTY__</code> (PHP 8.4) is known at the point it is written, the way <code>__FUNCTION__</code>/<code>__METHOD__</code> are for a method.</p>
+<p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments">B475. A variable a closure captures by reference does not take on the closure's assignments<a class="headerlink" href="#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">$a = 0;</span>
