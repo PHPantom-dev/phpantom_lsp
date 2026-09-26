@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790412492297,
+  "lastUpdate": 1790414088768,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31653,6 +31653,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "41e9b6c29aca2ccb006428d0bd4652b0e42f47b3",
+          "message": "A declared parameter typed as a model's base collection no longer\nover-claims the custom collection",
+          "timestamp": "2026-09-26T10:58:18+02:00",
+          "tree_id": "5c46db91cc5c0bdd2fa8dd618cf41f1a923f181f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/41e9b6c29aca2ccb006428d0bd4652b0e42f47b3"
+        },
+        "date": 1790414079753,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 40.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.4,
             "unit": "MiB"
           }
         ]
