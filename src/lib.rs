@@ -266,6 +266,7 @@ mod highlight;
 mod hover;
 mod indexing;
 pub(crate) mod inheritance;
+pub mod init_wizard;
 mod inlay_hints;
 /// LSP JSON-RPC dispatch for the wasm build, which has no tower-lsp transport.
 /// Kept free of any target-specific code so the marshalling in `wasm_wasi` is

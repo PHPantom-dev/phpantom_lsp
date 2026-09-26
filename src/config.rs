@@ -719,14 +719,20 @@ pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
 /// The subdirectory under the user's XDG config directory.
 const CONFIG_APP_DIR: &str = "phpantom_lsp";
 
-/// Default content for a newly created `.phpantom.toml` file.
-pub const DEFAULT_CONFIG_CONTENT: &str = r#"#:schema https://github.com/PHPantom-dev/phpantom_lsp/raw/main/config-schema.json
+/// Header shared by every generated `.phpantom.toml`: enables
+/// schema-aware editor tooling and points at the docs. `init_wizard`
+/// reuses this so an interactively-built config still starts the same
+/// way as the blank one below.
+pub(crate) const CONFIG_HEADER: &str = r#"#:schema https://github.com/PHPantom-dev/phpantom_lsp/raw/main/config-schema.json
 
 # PHPantom configuration: only add settings you want to override.
 # Editors with TOML schema support (Zed, VS Code + Even Better TOML, Neovim)
 # provide autocomplete and hover documentation for all available options.
 # Full reference: https://phpantom-dev.github.io/phpantom_lsp/configuration/
 "#;
+
+/// Default content for a newly created `.phpantom.toml` file.
+pub const DEFAULT_CONFIG_CONTENT: &str = CONFIG_HEADER;
 
 /// Return the path to the global config file, if the platform's config
 /// directory can be determined.
@@ -764,10 +770,34 @@ pub fn create_global_config() -> Result<(bool, PathBuf), ConfigError> {
     Ok((created, config_path))
 }
 
+/// Same as [`create_default_config`], but with caller-supplied content
+/// (e.g. the answers `init_wizard` collected) instead of the blank
+/// starter config.
+pub fn create_default_config_with_content(
+    workspace_root: &Path,
+    content: &str,
+) -> Result<bool, ConfigError> {
+    write_config_content(&workspace_root.join(CONFIG_FILE_NAME), content)
+}
+
+/// Same as [`create_global_config`], but with caller-supplied content.
+pub fn create_global_config_with_content(content: &str) -> Result<(bool, PathBuf), ConfigError> {
+    let config_path = global_config_path().ok_or(ConfigError::NoConfigDir)?;
+    let created = write_config_content(&config_path, content)?;
+    Ok((created, config_path))
+}
+
 /// Write the starter config to `config_path`, creating any missing
 /// parent directories.  Returns `false` without touching anything when
 /// the file is already there.
 fn write_default_config(config_path: &Path) -> Result<bool, ConfigError> {
+    write_config_content(config_path, DEFAULT_CONFIG_CONTENT)
+}
+
+/// Write `content` to `config_path`, creating any missing parent
+/// directories.  Returns `false` without touching anything when the
+/// file is already there.
+fn write_config_content(config_path: &Path, content: &str) -> Result<bool, ConfigError> {
     if config_path.exists() {
         return Ok(false);
     }
@@ -779,7 +809,7 @@ fn write_default_config(config_path: &Path) -> Result<bool, ConfigError> {
         })?;
     }
 
-    std::fs::write(config_path, DEFAULT_CONFIG_CONTENT).map_err(|e| ConfigError::Io {
+    std::fs::write(config_path, content).map_err(|e| ConfigError::Io {
         path: config_path.display().to_string(),
         source: e,
     })?;

@@ -180,6 +180,11 @@ enum Command {
         /// .phpantom.toml overrides them key by key.
         #[arg(long)]
         global: bool,
+
+        /// Skip the interactive prompts and write a blank starter
+        /// config, the same as running on a non-interactive terminal.
+        #[arg(long, short = 'y')]
+        yes: bool,
     },
 
     /// Check for updates or upgrade to the latest version.
@@ -331,15 +336,29 @@ async fn async_main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Some(Command::Init { global }) => {
+        Some(Command::Init { global, yes }) => {
+            let already_exists = if global {
+                config::global_config_path().is_some_and(|p| p.exists())
+            } else {
+                std::env::current_dir()
+                    .map(|d| d.join(config::CONFIG_FILE_NAME).exists())
+                    .unwrap_or(false)
+            };
+
+            let content = if !already_exists && !yes && atty_stdin() {
+                phpantom_lsp::init_wizard::run()
+            } else {
+                config::DEFAULT_CONFIG_CONTENT.to_string()
+            };
+
             let result = if global {
-                config::create_global_config()
+                config::create_global_config_with_content(&content)
             } else {
                 let cwd = std::env::current_dir().unwrap_or_else(|e| {
                     eprintln!("Error: cannot determine current directory: {}", e);
                     std::process::exit(1);
                 });
-                config::create_default_config(&cwd)
+                config::create_default_config_with_content(&cwd, &content)
                     .map(|created| (created, cwd.join(config::CONFIG_FILE_NAME)))
             };
 
@@ -582,6 +601,12 @@ fn parse_tcp_address(input: &str) -> SocketAddr {
 fn atty_stdout() -> bool {
     use std::io::IsTerminal;
     std::io::stdout().is_terminal()
+}
+
+/// Check if stdin is a terminal (to decide whether `init` can prompt).
+fn atty_stdin() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal()
 }
 
 /// Resolve a `PATH` positional argument against the current working
