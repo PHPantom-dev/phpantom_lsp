@@ -2036,7 +2036,7 @@ pub(super) fn resolve_conditional_return_for_call(
     } else {
         substituted
     };
-    if collapsed.is_uninformative_return() {
+    if collapsed.is_void() {
         None
     } else {
         Some(collapsed)

@@ -437,29 +437,6 @@ The single-argument `array<V>` form has `array-key` keys.
 Found porting PHPStan's `nsrt/key-of-generic.php`; the assertions are
 `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-### B420. A conditional return whose winning branch is `never` reads as the declared type
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @template S = false */
-class Builder {
-    /** @return ($this is self<true> ? void : never) */
-    public function execute(): void {}
-}
-(new Builder())->execute(); // should be never, is null (the declared void)
-```
-
-The condition is decided, but `is_uninformative_return()` treats `void`
-and `never` alike, so a `never` branch is dropped and the call falls back
-to its declared return type. A `never` branch does carry information: the
-call does not return.
-
-Found porting PHPStan's `nsrt/template-default.php`; the assertion is
-`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-Found porting PHPStan's `nsrt/pr-5108.php`; the assertion is `// SKIP` in
-the ported copy under `tests/phpstan_nsrt/`.
-
 ## Laravel
 
 No outstanding items.

@@ -118,7 +118,6 @@ unlikely to move the needle for most users.
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |
 | B408 | [An assignment inside an argument to `new` is not seen](todo/bugs.md#b408-an-assignment-inside-an-argument-to-new-is-not-seen) | Low         | Low         |
 | B411 | [Arithmetic on float literals is not folded](todo/bugs.md#b411-arithmetic-on-float-literals-is-not-folded) | Low         | Low         |
-| B420 | [A conditional return whose winning branch is `never` reads as the declared type](todo/bugs.md#b420-a-conditional-return-whose-winning-branch-is-never-reads-as-the-declared-type) | Low         | Medium      |
 | B423 | [A call inside an invoked closure does not invalidate what the closure captures](todo/bugs.md#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

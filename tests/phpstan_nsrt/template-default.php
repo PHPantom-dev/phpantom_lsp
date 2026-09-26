@@ -94,7 +94,7 @@ function () {
 	assertType('TemplateDefault\\Builder<false, false>', $qb);
 	$qb->one();
 	assertType('TemplateDefault\\Builder<true, false>', $qb);
-	assertType('never', $qb->execute()); // SKIP: a conditional return whose winning branch is `never` falls back to the declared return type
+	assertType('never', $qb->execute());
 };
 
 function () {

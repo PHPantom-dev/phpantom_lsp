@@ -626,7 +626,11 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             }
         }
         _ => {
-            if conditional.is_uninformative_return() {
+            // `void` carries no information beyond the method's declared
+            // return type, so the caller falls back to that. `never` is
+            // different: it means the call provably does not return, which
+            // is informative and must propagate rather than being dropped.
+            if conditional.is_void() {
                 return None;
             }
             Some(conditional.clone())
@@ -1470,7 +1474,10 @@ pub fn resolve_conditional_without_args_and_defaults(
             }
         }
         _ => {
-            if conditional.is_uninformative_return() {
+            // See the matching arm in
+            // `resolve_conditional_with_text_args_and_defaults`: `never`
+            // must propagate as informative, only `void` falls back.
+            if conditional.is_void() {
                 return None;
             }
             Some(conditional.clone())
@@ -1550,7 +1557,7 @@ fn try_resolve_with_template_default(
     } else {
         else_type
     };
-    if branch.is_uninformative_return() {
+    if branch.is_void() {
         return None;
     }
     Some(branch.clone())

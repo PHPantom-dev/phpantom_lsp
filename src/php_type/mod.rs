@@ -3138,18 +3138,6 @@ impl PhpType {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("void"))
     }
 
-    /// Whether this type conveys no useful return type information.
-    ///
-    /// Returns `true` only for `void` and `never` — the two types that
-    /// genuinely carry no value. `mixed` is *informative*: it means "some
-    /// value of unknown type", which downstream narrowing (`is_string`,
-    /// `instanceof`, …) can still refine. Treating `mixed` as uninformative
-    /// here would strip the type entirely and leave the variable untyped, so
-    /// a conditional branch selecting `mixed` must flow `mixed` through.
-    pub fn is_uninformative_return(&self) -> bool {
-        self.is_void() || self.is_never()
-    }
-
     /// Whether this type is a PHP keyword type (scalar, special, or pseudo-type).
     ///
     /// Returns `true` for types like `int`, `string`, `bool`, `array`, `void`,
