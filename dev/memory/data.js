@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790415374674,
+  "lastUpdate": 1790417340612,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31789,6 +31789,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b757a4395be5d31db3134bfd7fe5696b512d7811",
+          "message": "Arithmetic on two literal operands folds to the exact value PHP computes",
+          "timestamp": "2026-09-26T11:51:27+02:00",
+          "tree_id": "bcee52b00f5b156396c57730072e7a21ccd04bba",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b757a4395be5d31db3134bfd7fe5696b512d7811"
+        },
+        "date": 1790417333311,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 81.4,
             "unit": "MiB"
           }
         ]
