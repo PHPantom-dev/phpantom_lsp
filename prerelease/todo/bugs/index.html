@@ -884,28 +884,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B444. A union of array shapes is not narrowed by comparing its tag key
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B445. <code>instanceof</code> on a template-typed value unions the class in rather than intersecting
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -939,32 +917,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B453. <code>is_callable()</code> on <code>Foo|callable(): Foo</code> drops the <code>Foo&amp;callable</code> member
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B454. Comparing a foreach key does not narrow the value it was read with
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B479. A loose comparison against a literal does not narrow <code>mixed</code>
       </span>
     </span>
   </a>
@@ -1887,28 +1843,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B444. A union of array shapes is not narrowed by comparing its tag key
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B445. <code>instanceof</code> on a template-typed value unions the class in rather than intersecting
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1942,32 +1876,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B453. <code>is_callable()</code> on <code>Foo|callable(): Foo</code> drops the <code>Foo&amp;callable</code> member
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
         B454. Comparing a foreach key does not narrow the value it was read with
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B479. A loose comparison against a literal does not narrow <code>mixed</code>
       </span>
     </span>
   </a>
@@ -2412,236 +2324,192 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key">B444. A union of array shapes is not narrowed by comparing its tag key<a class="headerlink" href="#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param array{type: &#39;a&#39;, a: string}|array{type: &#39;b&#39;, b: string} $in */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(array $in) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    if ($in[&#39;type&#39;] === &#39;a&#39;) {</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        $in; // should be array{type: &#39;a&#39;, a: string}, is the whole union</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    }</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>Comparing a shape key against a literal should keep only the union members whose key can hold that literal, in both branches. This is the standard tagged-union idiom, and until it works array key completion offers the keys of every member.</p>
-<p>Found porting PHPStan's <code>Rules/Arrays/data/bug-5758.php</code> and <code>Rules/Arrays/data/bug-6364.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting">B445. <code>instanceof</code> on a template-typed value unions the class in rather than intersecting<a class="headerlink" href="#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @template T @param T $block @return T */</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f(mixed $block): mixed {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    if ($block instanceof A) {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        $block; // should be A&amp;T, is T|A</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    }</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    $block; // should be T again, is T|A</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>Narrowing a template-typed value by <code>instanceof</code> adds the class as a union member instead of intersecting it with the template, and the widened type survives the <code>if</code>, so the value leaves the function as <code>T|A</code> where it was declared <code>T</code>.</p>
-<p>Found porting PHPStan's <code>Rules/Methods/data/bug-6635.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property">B446. Writing into a property's array offset does not narrow the property<a class="headerlink" href="#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @var array{foo?: bool} */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">private array $arr = [];</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">public function f(): bool {</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    if (!isset($this-&gt;arr[&#39;foo&#39;])) {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        $this-&gt;arr[&#39;foo&#39;] = true;</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    $this-&gt;arr; // should be array{foo: bool}, is array{foo?: bool}</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @var array{foo?: bool} */</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">private array $arr = [];</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">public function f(): bool {</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    if (!isset($this-&gt;arr[&#39;foo&#39;])) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">        $this-&gt;arr[&#39;foo&#39;] = true;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    }</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $this-&gt;arr; // should be array{foo: bool}, is array{foo?: bool}</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>An offset write on a local variable updates its shape, but the same write through <code>$this-&gt;prop[...]</code> leaves the property on its declared type, and a nested write (<code>$this-&gt;arr[$i]['foo'] = true</code>) makes the offset read back <code>null</code>.</p>
 <p>Found porting PHPStan's <code>Rules/Arrays/data/bug-11679.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read">B447. <code>array_key_exists()</code> with a variable key does not narrow the offset read<a class="headerlink" href="#b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$results = [];</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($items as $item) {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    $key = $item-&gt;key();</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    if (array_key_exists($key, $results)) {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        $results[$key]; // should be array{...}, includes null</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    $results[$key] = [&#39;count&#39; =&gt; 1];</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$results = [];</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ($items as $item) {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $key = $item-&gt;key();</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    if (array_key_exists($key, $results)) {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        $results[$key]; // should be array{...}, includes null</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    $results[$key] = [&#39;count&#39; =&gt; 1];</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>Inside a guard that proved the key exists, reading that key should not include the <code>null</code> that comes from the array possibly being empty (here, the <code>[]</code> it was initialised with). The same missing proof makes a compound write inside the guard (<code>$results[$key]['count'] += $n</code>) create a new element on the loop's first pass, when the array is still <code>[]</code>, so the array's type after the loop carries a variant with only the written key.</p>
 <p>Found porting PHPStan's <code>Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never">B449. Exhausted narrowing leaves the last type standing instead of <code>never</code><a class="headerlink" href="#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function f(true|null $v) {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    if (is_null($v)) { return; }</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if (is_bool($v)) { return; }</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $v; // should be never, is true</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">function f(true|null $v) {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    if (is_null($v)) { return; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    if (is_bool($v)) { return; }</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $v; // should be never, is true</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>When every member of a type has been ruled out (by type checks, by comparing each enum case, by an <code>@phpstan-assert</code> the value cannot satisfy, or by an impossible <code>count()</code>), the value should be <code>never</code>. Today the narrowing that would remove the last member is skipped, so the branch keeps it.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>, <code>Rules/Comparison/data/bug-8169.php</code>, <code>Rules/Comparison/data/bug-8485.php</code>, <code>Rules/Comparison/data/docblock-assert-equality.php</code> and <code>Rules/Methods/data/true-typehint.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b453-is_callable-on-foocallable-foo-drops-the-foocallable-member">B453. <code>is_callable()</code> on <code>Foo|callable(): Foo</code> drops the <code>Foo&amp;callable</code> member<a class="headerlink" href="#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Route {}</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">/** @var Route|callable():Route */</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">private $foo;</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">if (is_callable($this-&gt;foo)) {</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    $this-&gt;foo;   // should be (Route&amp;callable)|(callable(): Route), is callable(): Route</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    ($this-&gt;foo)(); // should be mixed, is Route</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">}</span>
-</code></pre></div>
-<p>A non-final <code>Route</code> can have a callable subclass, so narrowing by <code>is_callable()</code> has to keep a <code>Route&amp;callable</code> member, and calling the result can return anything. The final-class variant in the same file (where the member drops out) is correct.</p>
-<p>Found porting PHPStan's <code>Rules/Classes/data/bug-5333.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with">B454. Comparing a foreach key does not narrow the value it was read with<a class="headerlink" href="#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @var array{psr-4?: array&lt;string, string&gt;, classmap?: list&lt;string&gt;} $data */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">foreach ($data as $key =&gt; $value) {</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    if ($key === &#39;classmap&#39;) {</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">        $value; // should be list&lt;string&gt;, is the union of every value type</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    }</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @var array{psr-4?: array&lt;string, string&gt;, classmap?: list&lt;string&gt;} $data */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">foreach ($data as $key =&gt; $value) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if ($key === &#39;classmap&#39;) {</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        $value; // should be list&lt;string&gt;, is the union of every value type</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    }</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>Iterating a shape pairs each key with its value type. Narrowing the key to one literal should narrow the value (and <code>$data[$key]</code>) to that key's type.</p>
+<p>Two smaller gaps sit underneath it. The foreach key of a shape is <code>string</code> rather than the union of the shape's keys (<code>'psr-4'|'classmap'</code>), and an offset read whose key variable is already a single literal (<code>$key</code> narrowed to <code>'classmap'</code>) still reads as a dynamic key, yielding every entry's type instead of that key's. Fixing the pairing properly means the scope remembers which key a foreach value was read with, and forgets it when either variable is reassigned.</p>
 <p>Found porting PHPStan's <code>Rules/Arrays/data/bug-6000.php</code> and <code>Rules/Arrays/data/bug-8467a.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed">B479. A loose comparison against a literal does not narrow <code>mixed</code><a class="headerlink" href="#b479-a-loose-comparison-against-a-literal-does-not-narrow-mixed" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">function f(mixed $m) {</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    if ($m == 0) {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">        $m; // should be 0|0.0|string|false|null, is mixed</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    }</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
-</code></pre></div>
-<p>A loose comparison narrows a typed subject to the values that compare equal, but a <code>mixed</code> subject stays <code>mixed</code>. It should narrow to the values of each type that can loosely equal the literal, which PHP 8's comparison rules decide per type (<code>null == ''</code> holds, <code>0 == ''</code> does not).</p>
-<p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>. PHPStan's expected type for <code>$m == ''</code> includes <code>0|0.0</code>, which follows PHP 7's rules; match PHP 8 there instead.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through">B437. <code>self</code> in an inherited property's docblock names the class it is read through<a class="headerlink" href="#b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class A { /** @var string|self */ public $table; }</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">class B extends A {}</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">function f(B $b) { $b-&gt;table; } // should be A|string, is B|string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">class A { /** @var string|self */ public $table; }</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">class B extends A {}</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">function f(B $b) { $b-&gt;table; } // should be A|string, is B|string</span>
 </code></pre></div>
 <p><code>self</code> is lexical: in a docblock it names the class the docblock is written in, wherever the member is inherited to. Reading an inherited property through a subclass rebinds it to that subclass, as if it were <code>static</code>. A subclass that redeclares the property without a type (<code>public $table = 'a';</code>) should inherit the parent's docblock type too.</p>
 <p>Found porting PHPStan's <code>Rules/Properties/data/bug-7839.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b438-an-inline-phpstan-var-above-an-assignment-is-ignored">B438. An inline <code>@phpstan-var</code> above an assignment is ignored<a class="headerlink" href="#b438-an-inline-phpstan-var-above-an-assignment-is-ignored" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @phpstan-var array&lt;Foo&gt; $res */</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">$res = [];</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">$res; // should be array&lt;Foo&gt;, is array{}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @phpstan-var array&lt;Foo&gt; $res */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$res = [];</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$res; // should be array&lt;Foo&gt;, is array{}</span>
 </code></pre></div>
 <p>The same annotation spelled <code>@var</code> works. The inline-<code>@var</code> readers the forward walker and the backward docblock scans use (<code>parse_var_docblock_pairs</code>, <code>parse_inline_var_docblock_no_var</code> and the line scanners in <code>docblock/tags.rs</code>) each match the literal text <code>@var</code>, so the vendor-prefixed <code>@phpstan-var</code> and <code>@psalm-var</code> never match. The mago-based <code>extract_var_type_with_name</code> already reads the vendor spellings first; moving those scanners onto it fixes all of them at once.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-7511.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it">B439. <code>@mixin</code> on a trait is not applied to the class that uses it<a class="headerlink" href="#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">interface Foo { /** @return T */ public function get(); }</span>
-<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">/** @mixin Foo&lt;static&gt; */</span>
-<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">trait FooTrait {}</span>
-<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">class Usages { use FooTrait; }</span>
-<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">function f(Usages $u) { $u-&gt;get(); } // should be Usages, resolves to nothing</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">interface Foo { /** @return T */ public function get(); }</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">/** @mixin Foo&lt;static&gt; */</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">trait FooTrait {}</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">class Usages { use FooTrait; }</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">function f(Usages $u) { $u-&gt;get(); } // should be Usages, resolves to nothing</span>
 </code></pre></div>
 <p>A <code>@mixin</code> tag is read off the class it is declared on, but not off the traits a class uses, so the mixin's members never reach the using class. Once they do, <code>static</code> in the mixin's generic argument has to bind to the class the member is reached through (<code>ChildUsages</code> for a subclass).</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/trait-mixin.php</code>, <code>Rules/Properties/data/trait-mixin.php</code> and <code>Rules/Classes/data/mixin-trait-use.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b440-extract-defines-no-variables">B440. <code>extract()</code> defines no variables<a class="headerlink" href="#b440-extract-defines-no-variables" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/** @return array{x: string, y?: string} */</span>
-<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">function foo(): array { return [&#39;x&#39; =&gt; &#39;foo&#39;]; }</span>
-<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">$x = $y = null;</span>
-<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">extract(foo());</span>
-<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">$x; // should be string, is null</span>
-<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">$y; // should be string|null, is null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @return array{x: string, y?: string} */</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">function foo(): array { return [&#39;x&#39; =&gt; &#39;foo&#39;]; }</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">$x = $y = null;</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">extract(foo());</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">$x; // should be string, is null</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">$y; // should be string|null, is null</span>
 </code></pre></div>
 <p><code>extract()</code> writes one local per key of its array argument. With a shape argument the keys are known, so a required key defines (or overwrites) its variable and an optional one may. Other arguments leave every variable possibly overwritten with anything.</p>
 <p>Found porting PHPStan's <code>Rules/Variables/data/bug-12364.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved">B441. A class constant whose initializer names an enum case is not resolved<a class="headerlink" href="#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">enum E { const FOO = E::A; case A; }</span>
-<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">E::FOO; // should be E, resolves to nothing</span>
-<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>
-<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">enum A: string { case X = &#39;x&#39;; case Y = &#39;y&#39;; }</span>
-<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">class B { public const A = [A::X-&gt;value, A::Y-&gt;value]; }</span>
-<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">B::A; // should be array{&#39;x&#39;, &#39;y&#39;}, is array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">enum E { const FOO = E::A; case A; }</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">E::FOO; // should be E, resolves to nothing</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">enum A: string { case X = &#39;x&#39;; case Y = &#39;y&#39;; }</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">class B { public const A = [A::X-&gt;value, A::Y-&gt;value]; }</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">B::A; // should be array{&#39;x&#39;, &#39;y&#39;}, is array</span>
 </code></pre></div>
 <p>Constant folding stops at an enum case in the initializer, whether the case is the value itself or the case's <code>-&gt;value</code>. A typed constant declared <code>const static FOO = Foo::A</code> inside the enum reads back as <code>static</code> for the same reason.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/return-type-class-constant.php</code> and <code>Rules/Constants/data/bug-8957.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b442-valueclass-resolves-to-nothing">B442. <code>$value::class</code> resolves to nothing<a class="headerlink" href="#b442-valueclass-resolves-to-nothing" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">function f(Foo $o) {</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    $o::class; // should be class-string&lt;Foo&gt;, resolves to nothing</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">function f(Foo $o) {</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $o::class; // should be class-string&lt;Foo&gt;, resolves to nothing</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>Foo::class</code> resolves to <code>class-string&lt;Foo&gt;</code>, but the same fetch on an expression (allowed since PHP 8.0) has no type at all. It should be <code>class-string&lt;T&gt;</code> for whatever <code>T</code> the expression holds, and plain <code>class-string</code> for an <code>object</code>.</p>
 <p>Found porting PHPStan's <code>Rules/Functions/data/bug-7823.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait">B443. A closure parameter is not inferred from a <code>callable(static)</code> type alias declared on a trait<a class="headerlink" href="#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @phpstan-type SettingsFactory callable(static): array&lt;string,mixed&gt; */</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">trait WithConfig {</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    /** @param SettingsFactory $settings */</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    public function setConfig(callable $settings): void {}</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">class A { use WithConfig; }</span>
-<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">function (A $a) {</span>
-<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x">    $a-&gt;setConfig(function ($who) { $who; }); // should be A, resolves to nothing</span>
-<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x">};</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">/** @phpstan-type SettingsFactory callable(static): array&lt;string,mixed&gt; */</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">trait WithConfig {</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    /** @param SettingsFactory $settings */</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    public function setConfig(callable $settings): void {}</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">class A { use WithConfig; }</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">function (A $a) {</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    $a-&gt;setConfig(function ($who) { $who; }); // should be A, resolves to nothing</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">};</span>
 </code></pre></div>
 <p>The same <code>callable(static)</code> written inline in the <code>@param</code> works (the ported file's <code>@method</code> and property variants pass). Through the alias, the closure gets no parameter type: either the alias is not expanded where callable parameter inference reads the signature, or <code>static</code> inside it is not bound to the using class.</p>
 <p>Found porting PHPStan's <code>Rules/Classes/data/bug-11591.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it">B456. Writes through a list's own keys drop <code>list</code>, while <code>unset()</code> of an element keeps it<a class="headerlink" href="#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @param list&lt;array&lt;string, string&gt;&gt; $list */</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">function f(array $list) {</span>
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    foreach ($list as $k =&gt; $v) {</span>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">        unset($list[$k][&#39;abc&#39;]);</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    }</span>
-<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">    $list; // should be list&lt;array&lt;string, string&gt;&gt;, is array&lt;int, ...&gt;</span>
-<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
-<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">    foreach ($list as $k =&gt; $v) {</span>
-<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="x">        if (rand(0, 1)) { unset($list[$k]); }</span>
-<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a><span class="x">    }</span>
-<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="x">    $list; // should be array&lt;int, ...&gt;, is list&lt;...&gt;</span>
-<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">/** @param list&lt;array&lt;string, string&gt;&gt; $list */</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">function f(array $list) {</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    foreach ($list as $k =&gt; $v) {</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">        unset($list[$k][&#39;abc&#39;]);</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    }</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">    $list; // should be list&lt;array&lt;string, string&gt;&gt;, is array&lt;int, ...&gt;</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">    foreach ($list as $k =&gt; $v) {</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="x">        if (rand(0, 1)) { unset($list[$k]); }</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="x">    }</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="x">    $list; // should be array&lt;int, ...&gt;, is list&lt;...&gt;</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="x">}</span>
 </code></pre></div>
 <p>Writing to (or unsetting inside) an element the list already has keeps it a list. Removing an element does not: it leaves a gap in the keys. Both are backwards today. Writing through the keys of a <code>foreach</code> also marks the outer array non-empty, though the loop may not have run at all.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-12927.php</code>, <code>Rules/Variables/data/bug-14124.php</code> and <code>Rules/Variables/data/bug-14124b.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b457-array_push-does-not-change-the-arrays-type">B457. <code>array_push()</code> does not change the array's type<a class="headerlink" href="#b457-array_push-does-not-change-the-arrays-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">$result = [];</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">for ($i = 0; $i &lt; $max; $i++) {</span>
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">    array_push($result, $i);</span>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">}</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">$result; // should be list&lt;int&gt;, is array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">$result = [];</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">for ($i = 0; $i &lt; $max; $i++) {</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">    array_push($result, $i);</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">}</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">$result; // should be list&lt;int&gt;, is array</span>
 </code></pre></div>
 <p><code>array_push($a, ...$values)</code> is <code>$a[] = $value</code> for each value, and should update the array the way the append does. <code>array_unshift()</code> is the same with the new values first.</p>
 <p>Found porting PHPStan's <code>Rules/Variables/data/bug-9403.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array">B458. An <code>(array)</code> cast of a union with a non-array member is plain <code>array</code><a class="headerlink" href="#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @var string|list&lt;string&gt; $var */</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">(array) $var; // should be list&lt;string&gt;, is array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">/** @var string|list&lt;string&gt; $var */</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">(array) $var; // should be list&lt;string&gt;, is array</span>
 </code></pre></div>
 <p>Casting to array is applied member by member: an array stays itself, and a scalar becomes a one-element list of it. The union of those is the result.</p>
 <p>Found porting PHPStan's <code>Rules/Functions/data/bug-8280.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type">B459. Writing a literal into an array offset widens it to its base type<a class="headerlink" href="#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">$a[&#39;bla&#39;] = 1;</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">$a; // should be array{bla: 1}, is array{bla: int}</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">$logs = [];</span>
-<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">$logs[$i] = &#39;&#39;;</span>
-<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">$logs[$i]; // should be &#39;&#39;, is string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$a[&#39;bla&#39;] = 1;</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$a; // should be array{bla: 1}, is array{bla: int}</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">$logs = [];</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">$logs[$i] = &#39;&#39;;</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">$logs[$i]; // should be &#39;&#39;, is string</span>
 </code></pre></div>
 <p>A literal assigned to a variable keeps its literal type, but the same literal written into an array offset (a literal key on an undefined variable, or a dynamic key) is widened to its base type.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code> and <code>Rules/Arrays/data/bug-13538.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b460-array-shape-unions-are-merged-differently-from-phpstan">B460. Array shape unions are merged differently from PHPStan<a class="headerlink" href="#b460-array-shape-unions-are-merged-differently-from-phpstan" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @var mixed[][] $review */</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">$review = [&#39;Review&#39; =&gt; [&#39;id&#39; =&gt; 23], /* … */];</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">if ($cond) {</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    $review[&#39;Review&#39;] = [&#39;id&#39; =&gt; null, &#39;text&#39; =&gt; null];</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">}</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">$review; // should be array&lt;array&lt;mixed&gt;&gt;, is array&lt;int|string, array|array{id: null, text: null}&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">/** @var mixed[][] $review */</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">$review = [&#39;Review&#39; =&gt; [&#39;id&#39; =&gt; 23], /* … */];</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">if ($cond) {</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">    $review[&#39;Review&#39;] = [&#39;id&#39; =&gt; null, &#39;text&#39; =&gt; null];</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">}</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">$review; // should be array&lt;array&lt;mixed&gt;&gt;, is array&lt;int|string, array|array{id: null, text: null}&gt;</span>
 </code></pre></div>
 <p>Joining branches that wrote different shapes leaves a redundant <code>array|array{…}</code> union where the shape is already covered by <code>array</code>, and joining shapes with differing optional keys (<code>Rules/Comparison/data/bug-7898.php</code>) marks keys required that only one branch set.</p>
 <p>Found porting PHPStan's <code>Rules/Variables/data/bug-8113.php</code>, <code>Rules/Comparison/data/bug-7898.php</code> and <code>Rules/Methods/data/bug-5749.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null">B479. <code>??=</code> on an offset whose key is not a variable leaves the offset <code>null</code><a class="headerlink" href="#b479-on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">$totals = [];</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">foreach ($items as $item) {</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    $totals[(string) $item] ??= 0;</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">    $totals[(string) $item]; // should be int, is null</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="x">$totals = [];</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="x">foreach ($items as $item) {</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="x">    $totals[(string) $item] ??= 0;</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="x">    $totals[(string) $item]; // should be int, is null</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>With a plain variable key (<code>$totals[$key] ??= 0</code>) the read afterwards is <code>int</code>. A key that is any other expression (a cast, a call, a concatenation) is not recorded, so the read only sees the empty array the variable started as.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
@@ -2651,154 +2519,154 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <h3 id="b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method">B463. A method template with a bound is shown as its bound inside the method<a class="headerlink" href="#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @template T of A&amp;B @param iterable&lt;T&gt; $items */</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function f($items) {</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">    foreach ($items as $item) {</span>
-<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">        $item; // should be T, is A&amp;B</span>
-<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">    }</span>
-<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @template T of A&amp;B @param iterable&lt;T&gt; $items */</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">function f($items) {</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    foreach ($items as $item) {</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">        $item; // should be T, is A&amp;B</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">    }</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>An unbounded method template, and a class template, keep their name inside the body (<code>T</code>); a method template with a bound is replaced by the bound when the parameter is seeded. The bound is the right thing for completion, but the value is still <code>T</code>, and returning it should keep the template (a method template bounded by a class template shows the class template's name instead).</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-7511.php</code>, <code>Rules/Methods/data/bug-5562.php</code>, <code>Rules/Generics/data/bug-3769.php</code> and <code>Rules/PhpDoc/data/bug-4643.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b464-template-inference-from-a-literal-argument-widens-it">B464. Template inference from a literal argument widens it<a class="headerlink" href="#b464-template-inference-from-a-literal-argument-widens-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/** @template T of int @param T $a @return T */</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">function intBound(int $a) { return $a; }</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">intBound(1); // should be 1, is int</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x">/** @template T @param iterable&lt;T&gt; $it @return iterable&lt;array&lt;T&gt;&gt; */</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">function chunk(iterable $it) {}</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">chunk([1]); // should be iterable&lt;array&lt;1&gt;&gt;, is iterable&lt;array&lt;int&gt;&gt;</span>
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="x">chunk([]);  // should be iterable&lt;array&lt;never&gt;&gt;, is iterable&lt;array&lt;mixed&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/** @template T of int @param T $a @return T */</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">function intBound(int $a) { return $a; }</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">intBound(1); // should be 1, is int</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">/** @template T @param iterable&lt;T&gt; $it @return iterable&lt;array&lt;T&gt;&gt; */</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">function chunk(iterable $it) {}</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">chunk([1]); // should be iterable&lt;array&lt;1&gt;&gt;, is iterable&lt;array&lt;int&gt;&gt;</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">chunk([]);  // should be iterable&lt;array&lt;never&gt;&gt;, is iterable&lt;array&lt;mixed&gt;&gt;</span>
 </code></pre></div>
 <p>An unbounded template bound from a literal keeps it (<code>mixedBound(1)</code> is <code>1</code>), but a template bounded by a scalar type widens it to the bound, and a template bound through an array literal's elements widens them. An empty literal should bind <code>never</code>.</p>
 <p>Found porting PHPStan's <code>Rules/Generics/data/bug-3769.php</code> and <code>Rules/Methods/data/bug-5757.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds">B465. A new object with unbound templates assigned to a generic property keeps the bounds<a class="headerlink" href="#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">/** @var \SplObjectStorage&lt;\DateTimeImmutable, null&gt; */</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">public $dates;</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">public function __construct() {</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">    $this-&gt;dates = new \SplObjectStorage();</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">    $this-&gt;dates; // should be SplObjectStorage&lt;DateTimeImmutable, null&gt;, is SplObjectStorage&lt;object, mixed&gt;</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @var \SplObjectStorage&lt;\DateTimeImmutable, null&gt; */</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">public $dates;</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">public function __construct() {</span>
+<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    $this-&gt;dates = new \SplObjectStorage();</span>
+<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">    $this-&gt;dates; // should be SplObjectStorage&lt;DateTimeImmutable, null&gt;, is SplObjectStorage&lt;object, mixed&gt;</span>
+<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">}</span>
 </code></pre></div>
 <p>When nothing in the constructor call binds a template, the object can still become whatever the declared type of the place it is stored says. PHPStan infers those templates from the property's declared type; here they fall back to their bounds and the read-back type loses the declaration.</p>
 <p>Found porting PHPStan's <code>Rules/Properties/data/bug-3777.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b466-a-template-nested-in-class-stringfoot-is-not-inferred">B466. A template nested in <code>class-string&lt;Foo&lt;T&gt;&gt;</code> is not inferred<a class="headerlink" href="#b466-a-template-nested-in-class-stringfoot-is-not-inferred" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @template T of OptionPresenter</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x"> *  @param class-string&lt;OptionDefinition&lt;T&gt;&gt; $definition @return T */</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">function present($definition) {}</span>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">present(SimpleOptionDefinition::class); // should be SimpleOptionPresenter</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">                                        // (via @implements OptionDefinition&lt;SimpleOptionPresenter&gt;),</span>
-<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="x">                                        // is class-string&lt;SimpleOptionDefinition&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @template T of OptionPresenter</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x"> *  @param class-string&lt;OptionDefinition&lt;T&gt;&gt; $definition @return T */</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">function present($definition) {}</span>
+<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">present(SimpleOptionDefinition::class); // should be SimpleOptionPresenter</span>
+<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">                                        // (via @implements OptionDefinition&lt;SimpleOptionPresenter&gt;),</span>
+<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">                                        // is class-string&lt;SimpleOptionDefinition&gt;</span>
 </code></pre></div>
 <p>Binding <code>T</code> needs the named class's ancestor <code>OptionDefinition&lt;…&gt;</code> arguments. <code>class-string&lt;T&gt;</code> binds directly, but the nested case falls back to the argument's own type.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-4552.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument">B468. A conditional return type on <code>$param is not null</code> does not pick up a template bound by a callable argument<a class="headerlink" href="#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">/** @template T */</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">interface PromiseInterface {</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">    /** @template TFulfilled</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">     *  @param (callable(T): TFulfilled)|null $onFulfilled</span>
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">     *  @return PromiseInterface&lt;($onFulfilled is not null ? TFulfilled : T)&gt; */</span>
-<a id="__codelineno-25-6" name="__codelineno-25-6" href="#__codelineno-25-6"></a><span class="x">    public function then(callable $onFulfilled = null);</span>
-<a id="__codelineno-25-7" name="__codelineno-25-7" href="#__codelineno-25-7"></a><span class="x">}</span>
-<a id="__codelineno-25-8" name="__codelineno-25-8" href="#__codelineno-25-8"></a><span class="x">/** @param PromiseInterface&lt;true&gt; $p */</span>
-<a id="__codelineno-25-9" name="__codelineno-25-9" href="#__codelineno-25-9"></a><span class="x">function f(PromiseInterface $p) {</span>
-<a id="__codelineno-25-10" name="__codelineno-25-10" href="#__codelineno-25-10"></a><span class="x">    $p-&gt;then(static fn (bool $b): bool =&gt; $b); // should be PromiseInterface&lt;bool&gt;, is PromiseInterface&lt;mixed&gt;</span>
-<a id="__codelineno-25-11" name="__codelineno-25-11" href="#__codelineno-25-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">interface PromiseInterface {</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">    /** @template TFulfilled</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="x">     *  @param (callable(T): TFulfilled)|null $onFulfilled</span>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">     *  @return PromiseInterface&lt;($onFulfilled is not null ? TFulfilled : T)&gt; */</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">    public function then(callable $onFulfilled = null);</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">}</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="x">/** @param PromiseInterface&lt;true&gt; $p */</span>
+<a id="__codelineno-21-9" name="__codelineno-21-9" href="#__codelineno-21-9"></a><span class="x">function f(PromiseInterface $p) {</span>
+<a id="__codelineno-21-10" name="__codelineno-21-10" href="#__codelineno-21-10"></a><span class="x">    $p-&gt;then(static fn (bool $b): bool =&gt; $b); // should be PromiseInterface&lt;bool&gt;, is PromiseInterface&lt;mixed&gt;</span>
+<a id="__codelineno-21-11" name="__codelineno-21-11" href="#__codelineno-21-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>The conditional picks its branch, but the template in that branch is bound from the closure's return type, and that binding does not reach the conditional's evaluation.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/conditional-complex-templates.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated">B469. A conditional return type whose subject is an offset of a template is not evaluated<a class="headerlink" href="#b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">/** @template T of list&lt;string&gt;|list&lt;list&lt;string&gt;&gt;</span>
-<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="x"> *  @param T $bar @return (T[0] is string ? array{T} : T) */</span>
-<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="x">function foo(array $bar): array {}</span>
-<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="x">foo([&#39;foo&#39;, &#39;bar&#39;]); // should be array{array{&#39;foo&#39;, &#39;bar&#39;}}, is array{0: &#39;foo&#39;, 1: &#39;bar&#39;}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/** @template T of list&lt;string&gt;|list&lt;list&lt;string&gt;&gt;</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x"> *  @param T $bar @return (T[0] is string ? array{T} : T) */</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">function foo(array $bar): array {}</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x">foo([&#39;foo&#39;, &#39;bar&#39;]); // should be array{array{&#39;foo&#39;, &#39;bar&#39;}}, is array{0: &#39;foo&#39;, 1: &#39;bar&#39;}</span>
 </code></pre></div>
 <p>The subject <code>T[0]</code> is an offset access on the bound template, which has to be evaluated before the condition can be decided. Today the else branch is taken.</p>
 <p>Found porting PHPStan's <code>Rules/PhpDoc/data/bug-8609-function.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b470-an-offset-access-on-a-type-alias-is-not-evaluated">B470. An offset access on a type alias is not evaluated<a class="headerlink" href="#b470-an-offset-access-on-a-type-alias-is-not-evaluated" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">/** @phpstan-type Bob array{a: string, b: bool} */</span>
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="x">class Y {</span>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="x">    /** @template TKey of key-of&lt;Bob&gt; @param TKey $key @return Bob[TKey] */</span>
-<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="x">    public function x(string $key) {}</span>
-<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="x">}</span>
-<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="x">$y-&gt;x(&#39;b&#39;); // should be bool, is Bob[&#39;b&#39;]</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">/** @phpstan-type Bob array{a: string, b: bool} */</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">class Y {</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">    /** @template TKey of key-of&lt;Bob&gt; @param TKey $key @return Bob[TKey] */</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">    public function x(string $key) {}</span>
+<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x">}</span>
+<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x">$y-&gt;x(&#39;b&#39;); // should be bool, is Bob[&#39;b&#39;]</span>
 </code></pre></div>
 <p>The offset access is printed raw rather than resolved: the alias inside it is never expanded, so the key lookup has no shape to read. <code>Alias[value-of&lt;T&gt;]</code> with an enum-case template argument (<code>Rules/PhpDoc/data/bug-11033.php</code>) fails the same way.</p>
 <p>Found porting PHPStan's <code>Rules/PhpDoc/data/bug-13652.php</code> and <code>Rules/PhpDoc/data/bug-11033.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b480-an-argument-outside-a-method-templates-bound-binds-the-template-anyway">B480. An argument outside a method template's bound binds the template anyway<a class="headerlink" href="#b480-an-argument-outside-a-method-templates-bound-binds-the-template-anyway" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="x">/** @template E of Entity */</span>
-<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="x">class Repository {</span>
-<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="x">    /** @template F of E @param F $entity @return F */</span>
-<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="x">    function store(Entity $entity): Entity {}</span>
-<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="x">}</span>
-<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="x">/** @extends Repository&lt;User&gt; */</span>
-<a id="__codelineno-28-7" name="__codelineno-28-7" href="#__codelineno-28-7"></a><span class="x">class UserRepository extends Repository {}</span>
-<a id="__codelineno-28-8" name="__codelineno-28-8" href="#__codelineno-28-8"></a><span class="x">$r-&gt;store(new Article()); // should be User, is Article</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @template E of Entity */</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">class Repository {</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">    /** @template F of E @param F $entity @return F */</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">    function store(Entity $entity): Entity {}</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">}</span>
+<a id="__codelineno-24-6" name="__codelineno-24-6" href="#__codelineno-24-6"></a><span class="x">/** @extends Repository&lt;User&gt; */</span>
+<a id="__codelineno-24-7" name="__codelineno-24-7" href="#__codelineno-24-7"></a><span class="x">class UserRepository extends Repository {}</span>
+<a id="__codelineno-24-8" name="__codelineno-24-8" href="#__codelineno-24-8"></a><span class="x">$r-&gt;store(new Article()); // should be User, is Article</span>
 </code></pre></div>
 <p><code>Article</code> is an <code>Entity</code> but not a <code>User</code>, so it cannot be <code>F</code>. The call binds <code>F</code> to the argument's type regardless of the bound, where it should fall back to the bound it fails to satisfy.</p>
 <p>Found porting PHPStan's <code>Rules/PhpDoc/data/bug-4643.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred">B472. A template bound through a nested callable parameter is not inferred<a class="headerlink" href="#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="x">/** @template T @param callable(callable():T):T $closure @return T */</span>
-<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="x">function bar(callable $closure) {}</span>
-<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="x">/** @param callable(callable():int):string $callable */</span>
-<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="x">function testBar($callable) { bar($callable); } // should be string, is mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">/** @template T @param callable(callable():T):T $closure @return T */</span>
+<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">function bar(callable $closure) {}</span>
+<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">/** @param callable(callable():int):string $callable */</span>
+<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">function testBar($callable) { bar($callable); } // should be string, is mixed</span>
 </code></pre></div>
 <p>Unifying the parameter's <code>callable(callable(): T): T</code> with the argument's signature should bind <code>T</code> from the outer return type (where the argument says <code>string</code>).</p>
 <p>Found porting PHPStan's <code>Rules/Functions/data/varying-acceptor.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value">B474. A magic constant resolves to its base type rather than its value<a class="headerlink" href="#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-30-1" name="__codelineno-30-1" href="#__codelineno-30-1"></a><span class="x">namespace App;</span>
-<a id="__codelineno-30-2" name="__codelineno-30-2" href="#__codelineno-30-2"></a><span class="x">class User {</span>
-<a id="__codelineno-30-3" name="__codelineno-30-3" href="#__codelineno-30-3"></a><span class="x">    public function doFoo() {</span>
-<a id="__codelineno-30-4" name="__codelineno-30-4" href="#__codelineno-30-4"></a><span class="x">        __LINE__;      // should be the line number, is int</span>
-<a id="__codelineno-30-5" name="__codelineno-30-5" href="#__codelineno-30-5"></a><span class="x">        __NAMESPACE__; // should be &#39;App&#39;, is string</span>
-<a id="__codelineno-30-6" name="__codelineno-30-6" href="#__codelineno-30-6"></a><span class="x">        __FUNCTION__;  // should be &#39;doFoo&#39;, is string</span>
-<a id="__codelineno-30-7" name="__codelineno-30-7" href="#__codelineno-30-7"></a><span class="x">        __METHOD__;    // should be &#39;App\User::doFoo&#39;, is string</span>
-<a id="__codelineno-30-8" name="__codelineno-30-8" href="#__codelineno-30-8"></a><span class="x">        __CLASS__;     // should be &#39;App\User&#39;, is class-string&lt;User&gt;</span>
-<a id="__codelineno-30-9" name="__codelineno-30-9" href="#__codelineno-30-9"></a><span class="x">    }</span>
-<a id="__codelineno-30-10" name="__codelineno-30-10" href="#__codelineno-30-10"></a><span class="x">}</span>
-<a id="__codelineno-30-11" name="__codelineno-30-11" href="#__codelineno-30-11"></a><span class="x">fn() =&gt; __FUNCTION__; // returns &#39;{closure}&#39;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-26-1" name="__codelineno-26-1" href="#__codelineno-26-1"></a><span class="x">namespace App;</span>
+<a id="__codelineno-26-2" name="__codelineno-26-2" href="#__codelineno-26-2"></a><span class="x">class User {</span>
+<a id="__codelineno-26-3" name="__codelineno-26-3" href="#__codelineno-26-3"></a><span class="x">    public function doFoo() {</span>
+<a id="__codelineno-26-4" name="__codelineno-26-4" href="#__codelineno-26-4"></a><span class="x">        __LINE__;      // should be the line number, is int</span>
+<a id="__codelineno-26-5" name="__codelineno-26-5" href="#__codelineno-26-5"></a><span class="x">        __NAMESPACE__; // should be &#39;App&#39;, is string</span>
+<a id="__codelineno-26-6" name="__codelineno-26-6" href="#__codelineno-26-6"></a><span class="x">        __FUNCTION__;  // should be &#39;doFoo&#39;, is string</span>
+<a id="__codelineno-26-7" name="__codelineno-26-7" href="#__codelineno-26-7"></a><span class="x">        __METHOD__;    // should be &#39;App\User::doFoo&#39;, is string</span>
+<a id="__codelineno-26-8" name="__codelineno-26-8" href="#__codelineno-26-8"></a><span class="x">        __CLASS__;     // should be &#39;App\User&#39;, is class-string&lt;User&gt;</span>
+<a id="__codelineno-26-9" name="__codelineno-26-9" href="#__codelineno-26-9"></a><span class="x">    }</span>
+<a id="__codelineno-26-10" name="__codelineno-26-10" href="#__codelineno-26-10"></a><span class="x">}</span>
+<a id="__codelineno-26-11" name="__codelineno-26-11" href="#__codelineno-26-11"></a><span class="x">fn() =&gt; __FUNCTION__; // returns &#39;{closure}&#39;</span>
 </code></pre></div>
 <p>Each of these is known at the point it is written. <code>__CLASS__</code> as <code>class-string&lt;User&gt;</code> is already useful, but the literal is exact.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code> and <code>Rules/Functions/data/bug-anonymous-function-method-constant.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments">B475. A variable a closure captures by reference does not take on the closure's assignments<a class="headerlink" href="#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-31-1" name="__codelineno-31-1" href="#__codelineno-31-1"></a><span class="x">$a = 0;</span>
-<a id="__codelineno-31-2" name="__codelineno-31-2" href="#__codelineno-31-2"></a><span class="x">$cb = function () use (&amp;$a): void {</span>
-<a id="__codelineno-31-3" name="__codelineno-31-3" href="#__codelineno-31-3"></a><span class="x">    $a; // should be 0|&#39;s&#39;, is 0</span>
-<a id="__codelineno-31-4" name="__codelineno-31-4" href="#__codelineno-31-4"></a><span class="x">    $a = &#39;s&#39;;</span>
-<a id="__codelineno-31-5" name="__codelineno-31-5" href="#__codelineno-31-5"></a><span class="x">};</span>
-<a id="__codelineno-31-6" name="__codelineno-31-6" href="#__codelineno-31-6"></a><span class="x">$a; // should be 0|&#39;s&#39;, is 0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">$a = 0;</span>
+<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="x">$cb = function () use (&amp;$a): void {</span>
+<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="x">    $a; // should be 0|&#39;s&#39;, is 0</span>
+<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="x">    $a = &#39;s&#39;;</span>
+<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="x">};</span>
+<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="x">$a; // should be 0|&#39;s&#39;, is 0</span>
 </code></pre></div>
 <p>A by-reference capture shares the variable with the closure, and the closure may run any number of times before or after either read. Both sides should see the union of every value the closure assigns.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b476-calling-a-closure-declared-static-gives-a-bare-static">B476. Calling a closure declared <code>: static</code> gives a bare <code>static</code><a class="headerlink" href="#b476-calling-a-closure-declared-static-gives-a-bare-static" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a><span class="x">    public function doBaz() {</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a><span class="x">        $f = function (): static { return new static(); };</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a><span class="x">        $f(); // should be static(Foo), is static</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a><span class="x">    }</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-28-1" name="__codelineno-28-1" href="#__codelineno-28-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-28-2" name="__codelineno-28-2" href="#__codelineno-28-2"></a><span class="x">    public function doBaz() {</span>
+<a id="__codelineno-28-3" name="__codelineno-28-3" href="#__codelineno-28-3"></a><span class="x">        $f = function (): static { return new static(); };</span>
+<a id="__codelineno-28-4" name="__codelineno-28-4" href="#__codelineno-28-4"></a><span class="x">        $f(); // should be static(Foo), is static</span>
+<a id="__codelineno-28-5" name="__codelineno-28-5" href="#__codelineno-28-5"></a><span class="x">    }</span>
+<a id="__codelineno-28-6" name="__codelineno-28-6" href="#__codelineno-28-6"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>static</code> in a closure's return type is bound to the enclosing class like it is in a method's, but calling the closure through its variable skips that binding.</p>
 <p>Found porting PHPStan's <code>Reflection/data/staticReturnType.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 <h3 id="b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower">B477. An arrow function's return type comes from its declared hint even when the body returns something narrower<a class="headerlink" href="#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-33-1" name="__codelineno-33-1" href="#__codelineno-33-1"></a><span class="x">/** @param class-string $classString */</span>
-<a id="__codelineno-33-2" name="__codelineno-33-2" href="#__codelineno-33-2"></a><span class="x">function f(Collection $col, string $classString) {</span>
-<a id="__codelineno-33-3" name="__codelineno-33-3" href="#__codelineno-33-3"></a><span class="x">    $col-&gt;map(static fn (string $v): string =&gt; $classString);</span>
-<a id="__codelineno-33-4" name="__codelineno-33-4" href="#__codelineno-33-4"></a><span class="x">    // should be Collection&lt;int, class-string&gt;, is Collection&lt;int, string&gt;</span>
-<a id="__codelineno-33-5" name="__codelineno-33-5" href="#__codelineno-33-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-29-1" name="__codelineno-29-1" href="#__codelineno-29-1"></a><span class="x">/** @param class-string $classString */</span>
+<a id="__codelineno-29-2" name="__codelineno-29-2" href="#__codelineno-29-2"></a><span class="x">function f(Collection $col, string $classString) {</span>
+<a id="__codelineno-29-3" name="__codelineno-29-3" href="#__codelineno-29-3"></a><span class="x">    $col-&gt;map(static fn (string $v): string =&gt; $classString);</span>
+<a id="__codelineno-29-4" name="__codelineno-29-4" href="#__codelineno-29-4"></a><span class="x">    // should be Collection&lt;int, class-string&gt;, is Collection&lt;int, string&gt;</span>
+<a id="__codelineno-29-5" name="__codelineno-29-5" href="#__codelineno-29-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>A template bound from a closure's return type takes the declared hint. PHPStan takes the body's type when it is narrower than the hint.</p>
 <p>Found porting PHPStan's <code>Rules/Methods/data/bug-5372.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
