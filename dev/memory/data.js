@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790443901307,
+  "lastUpdate": 1790445164640,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -32537,6 +32537,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 81.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "2a79f1872482f360cfadb4dbf939784b073517a4",
+          "message": "A closure's return type hint no longer hides a narrower body",
+          "timestamp": "2026-09-26T19:34:52+02:00",
+          "tree_id": "37c6a3b421dd08893bbfa8ccd785be82c7ffe189",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/2a79f1872482f360cfadb4dbf939784b073517a4"
+        },
+        "date": 1790445154976,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.9,
             "unit": "MiB"
           }
         ]
