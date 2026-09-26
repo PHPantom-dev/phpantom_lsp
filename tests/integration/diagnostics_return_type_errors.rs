@@ -4052,6 +4052,46 @@ function goodEmpty(): array {
     );
 }
 
+// ── An array's type arguments are not a coercion site ───────────────────────
+
+#[test]
+fn flags_int_key_against_string_key_map_without_strict_types() {
+    let php = r#"<?php
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "PHP never coerces an array's keys or values when it is passed whole, so an \
+         `array<int, string>` should not satisfy `array<string, string>` even in a \
+         file without `declare(strict_types=1)`, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_int_key_against_string_key_map_with_strict_types() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Expected return type error for array<int, string> where array<string, string> \
+         is required under strict_types, got: {diags:?}"
+    );
+}
+
 #[test]
 fn docblock_return_type_of_another_files_function_is_not_borrowed() {
     let backend = create_test_backend();

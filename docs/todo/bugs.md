@@ -22,31 +22,6 @@ No outstanding items.
 
 ## Type comparison
 
-### B424. An array's type arguments are checked with scalar coercion in a file without `strict_types`
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-/** @return array<string, string> */
-function f(int $k): array {
-    $r = [];
-    $r[$k] = 'a';
-    return $r; // should be reported, is not; is with declare(strict_types=1)
-}
-```
-
-PHP converts a scalar handed to a parameter in a coercive-mode file, but
-never the keys or values inside an array passed whole, so `array<int, V>`
-is no more an `array<string, V>` in a lenient file than in a strict one.
-The same-base generic rule in `is_type_compatible` already compares class
-type arguments strictly for this reason; array-likes still pass the file's
-`strict_types` through, so `int` satisfies a `string` key (and value) in
-a lenient file. A `list<string>` for a `list<int>` is caught either way,
-since `string` does not coerce to `int`.
-
-**Where to look:** `args_strict` in the same-base generic rule in
-`src/diagnostics/type_errors/compatibility.rs`. Expect new diagnostics on
-lenient projects, so check them against the `projects/` corpus.
-
 ### B425. A declared generic type that omits a defaulted argument does not spell it out
 **Impact: Low · Complexity: Medium**
 
@@ -345,4 +320,18 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B426. `analyze` occasionally reports a member of a vendor interface as unknown
+**Impact: Low · Complexity: Medium**
+
+One `analyze` run over `projects/bladestan` reported
+`Method 'isInClass' not found on class 'PHPStan\Analyser\Scope'` and the
+same for `getClassReflection` (`src/NodeAnalyzer/LaravelViewFunctionMatcher.php`,
+lines 81-82). Four further runs of the same binary on the same tree did not
+report them, so the result depends on something other than the input:
+most likely the order the parallel workers load classes in, leaving the
+`Scope` interface resolved from a partial or not-yet-merged class once.
+
+**Where to look:** how the analyze workers share the resolved-class
+cache, and whether a class read while another worker is still indexing
+its file can be cached incomplete. Reproduce by looping `analyze` on
+`projects/bladestan` and grepping for `isInClass`.

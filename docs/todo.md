@@ -105,7 +105,6 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B379 | [The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after](todo/bugs.md#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after) | Medium      | Medium      |
 | B403 | [`new` of a class that cannot be loaded has no type](todo/bugs.md#b403-new-of-a-class-that-cannot-be-loaded-has-no-type) | Medium      | Low-Medium  |
-| B424 | [An array's type arguments are checked with scalar coercion in a file without `strict_types`](todo/bugs.md#b424-an-arrays-type-arguments-are-checked-with-scalar-coercion-in-a-file-without-strict_types) | Low-Medium  | Low-Medium  |
 | B404 | [`$this` in a `@phpstan-require-extends` trait does not see the required class's members](todo/bugs.md#b404-this-in-a-phpstan-require-extends-trait-does-not-see-the-required-classs-members) | Low-Medium  | Medium      |
 | B380 | [A loop that must run, or a `switch` that cannot fall out, still joins the path that skips it](todo/bugs.md#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it) | Low         | Medium      |
 | B425 | [A declared generic type that omits a defaulted argument does not spell it out](todo/bugs.md#b425-a-declared-generic-type-that-omits-a-defaulted-argument-does-not-spell-it-out) | Low         | Medium      |
@@ -114,6 +113,7 @@ unlikely to move the needle for most users.
 | B407 | [A property inferred from the constructor drops `[]` and does not narrow a readonly union](todo/bugs.md#b407-a-property-inferred-from-the-constructor-drops--and-does-not-narrow-a-readonly-union) | Low         | Low-Medium  |
 | B408 | [An assignment inside an argument to `new` is not seen](todo/bugs.md#b408-an-assignment-inside-an-argument-to-new-is-not-seen) | Low         | Low         |
 | B424 | [A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable](todo/bugs.md#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable) | Low         | Medium      |
+| B426 | [`analyze` occasionally reports a member of a vendor interface as unknown](todo/bugs.md#b426-analyze-occasionally-reports-a-member-of-a-vendor-interface-as-unknown) | Low         | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

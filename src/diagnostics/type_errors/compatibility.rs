@@ -961,11 +961,11 @@ pub(crate) fn is_type_compatible(
 
     // ── Same-base generic covariance ────────────────────────────
     // When both arg and param are generics with the same base name
-    // (e.g. `array<string, HtmlString|string>` vs `array<string, string>`),
+    // (e.g. `array<string, Cat|Dog>` vs `array<string, Animal>`),
     // check each type argument covariantly using `is_type_compatible`
     // (which has all our MAYBE rules) rather than falling through to
     // `is_subtype_of_typed` (which uses strict structural subtyping
-    // and misses Stringable, type juggling, etc.).
+    // and would carry none of them into the arguments).
     if let (TypeKind::Generic(ga), TypeKind::Generic(gp)) = (arg_type.kind(), param_type.kind()) {
         let (name_arg, args_arg) = (&ga.name, &ga.args);
         let (name_param, args_param) = (&gp.name, &gp.args);
@@ -981,11 +981,13 @@ pub(crate) fn is_type_compatible(
             let class_like = !is_array_like_name(name_arg) && !is_array_like_name(name_param);
             // A type argument is not a coercion site.  PHP converts the
             // value handed to an `int` parameter, but never the `T` inside
-            // a `Box<T>` it receives whole, so the juggling rules that a
-            // missing `strict_types` turns on have nothing to act on
-            // between two type arguments: `Box<string>` is no more a
-            // `Box<int>` in a lenient file than in a strict one.
-            let args_strict = strict_types || class_like;
+            // a `Box<T>` it receives whole (nor the keys or values inside
+            // an array passed whole), so the juggling rules that a missing
+            // `strict_types` turns on have nothing to act on between two
+            // type arguments: `Box<string>` is no more a `Box<int>` in a
+            // lenient file than in a strict one, and `array<int, V>` is no
+            // more an `array<string, V>` either.
+            let args_strict = true;
             let all_args_compatible = args_arg
                 .iter()
                 .zip(args_param.iter())
