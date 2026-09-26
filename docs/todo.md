@@ -107,7 +107,7 @@ unlikely to move the needle for most users.
 | B424 | [A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable](todo/bugs.md#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable) | Low         | Medium      |
 | B434 | [An assignment inside an arrow function body is not seen](todo/bugs.md#b434-an-assignment-inside-an-arrow-function-body-is-not-seen) | Low         | Low-Medium  |
 | B427 | [The forward walker ignores `@param-closure-this`](todo/bugs.md#b427-the-forward-walker-ignores-param-closure-this) | Low-Medium  | Medium      |
-| B435 | [A `foreach` that writes every element of an array still joins the elements as they were](todo/bugs.md#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were) | Low-Medium  | Medium      |
+| B436 | [`array_keys()`'s key type widens to `int\|string` only inside a diagnostic-scope walk](todo/bugs.md#b436-array_keyss-key-type-widens-to-intstring-only-inside-a-diagnostic-scope-walk) | Low-Medium  | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

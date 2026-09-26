@@ -667,3 +667,54 @@ class Helper {
         "the guarded offset resolves to Ty: {unresolved:?}"
     );
 }
+
+/// A loop over an array's own keys that writes the element at each key
+/// rewrites every element, whether the loop ran or not: an empty array
+/// has no elements left behind to contradict the claim. The walker used
+/// to join the post-loop element type with the pre-loop one instead, as
+/// it would for a loop that might skip some keys.
+#[test]
+fn foreach_over_array_keys_rewrites_every_element() {
+    let content = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ */
+function add_flag(array $pairs): void {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    echo /*PAIRS*/$pairs;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[(
+            "PAIRS",
+            "non-empty-array<string, array{string, bool, string, array{'I'}}>",
+        )],
+    );
+}
+
+/// Same as above, iterating the array's keys via `$key => $_` instead of
+/// `array_keys()`.
+#[test]
+fn foreach_key_value_rewrites_every_element() {
+    let content = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ */
+function add_flag(array $pairs): void {
+    foreach ($pairs as $cn => $_) {
+        $pairs[$cn][3] = ['I'];
+    }
+    echo /*PAIRS*/$pairs;
+}
+"#;
+    assert_marked_types(
+        content,
+        &[(
+            "PAIRS",
+            "non-empty-array<string, array{string, bool, string, array{'I'}}>",
+        )],
+    );
+}

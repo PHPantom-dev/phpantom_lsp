@@ -496,6 +496,16 @@ pub(crate) fn process_foreach<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    // A loop that walks an array's own keys and unconditionally writes the
+    // entry at each key it visits (`foreach ($pairs as $cn => $_)` /
+    // `foreach (array_keys($pairs) as $cn)` with `$pairs[$cn][...] = …` in
+    // the body) rewrites every entry the array has, whether it has one or
+    // a thousand.  An empty array has no entries to leave behind, so the
+    // claim holds vacuously when the loop does not run at all — see
+    // `own_key_write_element` below for where this is applied.
+    let own_key_write_target = foreach_own_keys(foreach)
+        .filter(|(array_var, key_var)| body_writes_own_key(&body_stmts, array_var, key_var));
+
     // A `foreach` over an array the engine watched being built and knows
     // is still empty runs zero times, so it cannot change any type.  The
     // body is still walked so that a cursor or diagnostic inside it is
@@ -562,6 +572,20 @@ pub(crate) fn process_foreach<'b>(
 
     let exits = exit_frame.pop();
 
+    // Snapshot the array's freshly-written type here, while `scope` still
+    // holds the raw post-body state: it is what every entry looks like
+    // after the write the loop applies to the key it is visiting. A
+    // `break` leaves some entries unvisited (and so unwritten), so the
+    // rewrite-every-entry claim only holds when the loop always runs to
+    // its own end.
+    let own_key_write_element = own_key_write_target
+        .as_ref()
+        .filter(|_| exits.breaks.is_empty() && !scope.unreachable)
+        .and_then(|(array_var, _)| {
+            let written = scope.get(array_var);
+            (!written.is_empty()).then(|| (array_var.clone(), written.to_vec()))
+        });
+
     let written_element = if cursor_in_body {
         None
     } else {
@@ -600,6 +624,9 @@ pub(crate) fn process_foreach<'b>(
         if let (Some((name, element)), Some(before)) = (written_element, iterated_before) {
             write_back_by_ref_element(&name, element, &before, scope);
         }
+        if let Some((array_var, types)) = own_key_write_element {
+            scope.set(&array_var, types);
+        }
         let _ = narrow_iterated_collection(
             foreach,
             &body_stmts,
@@ -609,6 +636,105 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// The (array variable, key variable) a `foreach` binds when it walks an
+/// array's own keys: `foreach ($arr as $key => $_)` or
+/// `foreach (array_keys($arr) as $key)`.
+///
+/// Returns `None` for any other shape of iterable or target, including a
+/// keyed loop over a *different* array than the one the key came from.
+fn foreach_own_keys<'b>(foreach: &'b Foreach<'b>) -> Option<(String, String)> {
+    if let ForeachTarget::KeyValue(kv) = &foreach.target
+        && let Expression::Variable(Variable::Direct(arr_var)) = foreach.expression
+        && let Expression::Variable(Variable::Direct(key_var)) = kv.key
+    {
+        return Some((
+            bytes_to_str(arr_var.name).to_string(),
+            bytes_to_str(key_var.name).to_string(),
+        ));
+    }
+
+    let ForeachTarget::Value(val) = &foreach.target else {
+        return None;
+    };
+    let Expression::Variable(Variable::Direct(key_var)) = val.value else {
+        return None;
+    };
+    let Expression::Call(Call::Function(call)) = foreach.expression else {
+        return None;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return None;
+    };
+    if !crate::util::strip_fqn_prefix(bytes_to_str(ident.value()))
+        .eq_ignore_ascii_case("array_keys")
+    {
+        return None;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let arg = args.next()?;
+    if args.next().is_some() {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(arr_var)) = narrowing::argument_value(arg) else {
+        return None;
+    };
+    Some((
+        bytes_to_str(arr_var.name).to_string(),
+        bytes_to_str(key_var.name).to_string(),
+    ))
+}
+
+/// Whether the loop body unconditionally writes into `array_var[key_var]`
+/// (optionally nested deeper, `array_var[key_var][...] = …`), the pattern
+/// [`foreach_own_keys`] needs to guarantee every entry gets rewritten.
+///
+/// Only walks statements that always run when the body does (`Block`,
+/// plain expression statements): a write nested inside an `if`/`switch`/
+/// `try` may not touch every key, so it does not qualify.
+fn body_writes_own_key(stmts: &[&Statement<'_>], array_var: &str, key_var: &str) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::Block(block) => {
+            let inner: Vec<&Statement<'_>> = block.statements.iter().collect();
+            body_writes_own_key(&inner, array_var, key_var)
+        }
+        Statement::Expression(expr_stmt) => {
+            assignment_targets_own_key(expr_stmt.expression, array_var, key_var)
+        }
+        _ => false,
+    })
+}
+
+/// Whether `expr` is an assignment whose target is `array_var[key_var]`
+/// (or a deeper access through it), as opposed to some unrelated key.
+fn assignment_targets_own_key(expr: &Expression<'_>, array_var: &str, key_var: &str) -> bool {
+    let Expression::Assignment(assign) = expr else {
+        return false;
+    };
+    let outer_access = match assign.lhs {
+        Expression::ArrayAccess(aa) => Some(aa),
+        Expression::ArrayAppend(aa) => match aa.array {
+            Expression::ArrayAccess(inner) => Some(inner),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(outer_access) = outer_access else {
+        return false;
+    };
+    let Some((base_name, key_chain)) =
+        super::super::array_shape_writes::extract_nested_array_access_chain(outer_access)
+    else {
+        return false;
+    };
+    if base_name != array_var {
+        return false;
+    }
+    matches!(
+        key_chain.first(),
+        Some(Expression::Variable(Variable::Direct(dv))) if bytes_to_str(dv.name) == key_var
+    )
 }
 
 /// The element type a by-reference `foreach` leaves in the array it

@@ -154,33 +154,37 @@ needs the same, from the call-argument arms of both walker entry points.
 
 ## Array types
 
-### B435. A `foreach` that writes every element of an array still joins the elements as they were
+### B436. `array_keys()`'s key type widens to `int|string` only inside a diagnostic-scope walk
 **Impact: Low-Medium · Complexity: Medium**
 
 ```php
 /** @param array<string, array{string, bool, string}> $pairs */
-foreach (array_keys($pairs) as $cn) {  // or `foreach ($pairs as $cn => $_)`
-    $pairs[$cn][3] = ['I'];
+function add_flag(array $pairs): array {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
 }
-// should be array<string, array{string, bool, string, array{'I'}}>
-// is array<string, array{string, bool, string}>|non-empty-array<string, array{string, bool, string, array{'I'}}>
 ```
 
-A loop over an array's own keys that writes the element at each key
-rewrites every element, so after the loop the element type is the one the
-body wrote, whether the loop ran or not (an empty array has no elements to
-leave behind). The walker joins the scope from before the loop instead,
-as it would for a loop that might skip some keys, so a declared return
-that spells out the added entry rejects the array. Seen in phpstan-src
-(`build/PHPStan/Build/TurboAttributeCollector.php`, the
-`$pairs[$className][3] = $reflection->getInterfaceNames()` loop), whose
-return type is reported against its own `@return` array shape.
+Hovering `$pairs` right after the loop reports the precise
+`non-empty-array<string, array{string, bool, string, array{'I'}}>`, but
+the return-type diagnostic for the same function sees
+`non-empty-array<string|int, array{string, bool, string, array{'I'}}>`
+for the identical write and flags it as incompatible with the declared
+`@return array<string, array{string, bool, string, array{'I'}}>`. The
+only difference between the two runs is `is_diagnostic_scope_active()`,
+so `$cn`'s key type — correctly narrowed to `string` outside
+diagnostics — falls back to the benevolent `int|string` array-key
+default during a diagnostic-scope walk.
 
-**Where to look:** the `foreach` handling in
-`type_engine/variable/forward_walk/`, where the post-loop scope joins the
-pre-loop one. The body's write to `$arr[$key]` (with `$key` the loop's
-key, or a value iterated from `array_keys($arr)`) would have to replace
-the array's element type rather than join it.
+**Where to look:** `resolve_foreach_iterable_type_raw` and
+`bind_foreach_value` in `type_engine/variable/forward_walk/foreach.rs`,
+and whether the diagnostic-scope cache
+(`type_engine/variable/forward_walk/diagnostic_cache.rs`) or the chain
+resolution cache (`type_engine/resolver/context.rs`) returns a less
+precise resolution for `array_keys($pairs)` during a diagnostic-scope
+walk than the same expression gets outside one.
 
 ## Laravel
 

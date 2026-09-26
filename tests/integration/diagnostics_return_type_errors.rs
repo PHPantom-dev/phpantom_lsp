@@ -2323,6 +2323,28 @@ function get_user(): array {
     );
 }
 
+#[test]
+fn no_diagnostic_for_foreach_key_value_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach ($pairs as $cn => $_) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach ($arr as $key => $_) that rewrites every element should not join \
+         with the pre-loop shape, got: {diags:?}"
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Advanced: real-world patterns with generics and inheritance
 // ═══════════════════════════════════════════════════════════════════════════
