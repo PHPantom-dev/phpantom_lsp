@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790430291191,
+  "lastUpdate": 1790430293951,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -32163,6 +32163,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 74.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d893296d6a31d7df9c56206163d4bbc709f46f69",
+          "message": "A `foreach` that rewrites every element of the array it iterates no\nlonger widens the result with the array's pre-loop shape",
+          "timestamp": "2026-09-26T15:27:10+02:00",
+          "tree_id": "ef9645b1901c372339eaa4881dde5a50c29dc4f9",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d893296d6a31d7df9c56206163d4bbc709f46f69"
+        },
+        "date": 1790430281813,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.2,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 76.9,
             "unit": "MiB"
           }
         ]
