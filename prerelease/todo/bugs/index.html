@@ -1281,17 +1281,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b476-calling-a-closure-declared-static-gives-a-bare-static" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B476. Calling a closure declared <code>: static</code> gives a bare <code>static</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2218,17 +2207,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b476-calling-a-closure-declared-static-gives-a-bare-static" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B476. Calling a closure declared <code>: static</code> gives a bare <code>static</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2589,17 +2567,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p>A by-reference capture shares the variable with the closure, and the closure may run any number of times before or after either read. Both sides should see the union of every value the closure assigns.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b476-calling-a-closure-declared-static-gives-a-bare-static">B476. Calling a closure declared <code>: static</code> gives a bare <code>static</code><a class="headerlink" href="#b476-calling-a-closure-declared-static-gives-a-bare-static" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-27-1" name="__codelineno-27-1" href="#__codelineno-27-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-27-2" name="__codelineno-27-2" href="#__codelineno-27-2"></a><span class="x">    public function doBaz() {</span>
-<a id="__codelineno-27-3" name="__codelineno-27-3" href="#__codelineno-27-3"></a><span class="x">        $f = function (): static { return new static(); };</span>
-<a id="__codelineno-27-4" name="__codelineno-27-4" href="#__codelineno-27-4"></a><span class="x">        $f(); // should be static(Foo), is static</span>
-<a id="__codelineno-27-5" name="__codelineno-27-5" href="#__codelineno-27-5"></a><span class="x">    }</span>
-<a id="__codelineno-27-6" name="__codelineno-27-6" href="#__codelineno-27-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>static</code> in a closure's return type is bound to the enclosing class like it is in a method's, but calling the closure through its variable skips that binding.</p>
-<p>Found porting PHPStan's <code>Reflection/data/staticReturnType.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 
 
 
