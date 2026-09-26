@@ -869,34 +869,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B379. The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B380. A loop that must run, or a <code>switch</code> that cannot fall out, still joins the path that skips it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1591,34 +1563,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B379. The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B380. A loop that must run, or a <code>switch</code> that cannot fall out, still joins the path that skips it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1848,50 +1792,15 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<h3 id="b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after">B379. The <code>try</code> body's variables are missing in <code>catch</code>, and a <code>catch</code> variable is not merged after<a class="headerlink" href="#b379-the-try-bodys-variables-are-missing-in-catch-and-a-catch-variable-is-not-merged-after" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$ex = null;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">try {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $x = 1;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    maybeThrows();</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">} catch (\RuntimeException $ex) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">    $x; // should be 1 (maybe defined), has no type</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">}</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">$ex; // should be RuntimeException|null, is null</span>
-</code></pre></div>
-<p>A <code>catch</code> block starts from the scope before the <code>try</code>, so assignments the
-body made before throwing are invisible there, and the exception variable a
-non-exiting <code>catch</code> binds is not joined into the scope after the statement.</p>
-<p>Found porting PHPStan's <code>nsrt/if.php</code>, which is not ported yet because
-it is too slow under the runner (see
-<a href="../performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65</a>).</p>
-<h3 id="b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it">B380. A loop that must run, or a <code>switch</code> that cannot fall out, still joins the path that skips it<a class="headerlink" href="#b380-a-loop-that-must-run-or-a-switch-that-cannot-fall-out-still-joins-the-path-that-skips-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$v = null;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">for ($i = 0; $i &lt; 1; $i++) { $v = 1; }</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">$v; // should be 1, is 1|null</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">$w = null;</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">switch (doFoo()) {</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    case 1: $w = 1; break;</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    default: throw new \Exception();</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">$w; // should be 1, is 1|null</span>
-</code></pre></div>
-<p>A <code>for</code> whose condition is provably true on entry always runs its body, and a
-<code>switch</code> whose <code>default</code> throws cannot be skipped, but the walker still joins
-the pre-statement scope into the one after.</p>
-<p>Found porting PHPStan's <code>nsrt/if.php</code>, which is not ported yet because
-it is too slow under the runner (see
-<a href="../performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65</a>).</p>
+<p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable">B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable<a class="headerlink" href="#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">while ($this-&gt;running) {</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $cb = function () { $this-&gt;stop(); };</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    call_user_func($cb);</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">while ($this-&gt;running) {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $cb = function () { $this-&gt;stop(); };</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    call_user_func($cb);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>The walker invalidates <code>$this</code> and <code>use (…)</code> captures for a closure
 written inline as the call's own argument, or invoked immediately where
@@ -1913,13 +1822,13 @@ invalidation needs.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <h3 id="b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns">B407. A readonly property is not narrowed to what the constructor assigns<a class="headerlink" href="#b407-a-readonly-property-is-not-narrowed-to-what-the-constructor-assigns" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    private readonly int|float $i;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public function __construct() { $this-&gt;i = getInt(); }</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    public function f() {</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        $this-&gt;i; // should be int, is int|float</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    private readonly int|float $i;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    public function __construct() { $this-&gt;i = getInt(); }</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function f() {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        $this-&gt;i; // should be int, is int|float</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    }</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>A readonly property can only be written once, so what the constructor
 leaves in it is what every other method reads. PHPStan remembers the
@@ -1941,8 +1850,8 @@ needs a keyed guard, since walking the constructor can resolve a
 entry points above.</p>
 <h3 id="b434-an-assignment-inside-an-arrow-function-body-is-not-seen">B434. An assignment inside an arrow function body is not seen<a class="headerlink" href="#b434-an-assignment-inside-an-arrow-function-body-is-not-seen" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$f = fn () =&gt; $x = $this-&gt;make();</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// hovering `$x` inside the arrow body finds no assignment</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$f = fn () =&gt; $x = $this-&gt;make();</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">// hovering `$x` inside the arrow body finds no assignment</span>
 </code></pre></div>
 <p>The forward walker enters an arrow function by seeding its parameters and
 never applies the assignments its body expression makes, so a variable
@@ -1957,13 +1866,13 @@ under the runner; that line is <code>// SKIP</code> in the ported copy under
 <code>try_enter_closure_expr</code> in <code>type_engine/variable/forward_walk/closures.rs</code>.</p>
 <h3 id="b427-the-forward-walker-ignores-param-closure-this">B427. The forward walker ignores <code>@param-closure-this</code><a class="headerlink" href="#b427-the-forward-walker-ignores-param-closure-this" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Reg {</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    /** @param-closure-this Target $cb */</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    public static function on(\Closure $cb): void {}</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">Reg::on(function () {</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">    $t = $this; // should be Target, is the enclosing class</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">});</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Reg {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    /** @param-closure-this Target $cb */</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    public static function on(\Closure $cb): void {}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">}</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">Reg::on(function () {</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    $t = $this; // should be Target, is the enclosing class</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">});</span>
 </code></pre></div>
 <p>Completion and hover on <code>$this-&gt;</code> itself honour the tag, through
 <code>find_closure_this_types</code> in <code>type_engine/variable/closure_resolution.rs</code>,
@@ -1979,12 +1888,12 @@ needs the same, from the call-argument arms of both walker entry points.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it">B429. A <code>class-string</code> key is widened to <code>string</code> when an array is written through it<a class="headerlink" href="#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @param class-string $n */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function f(string $n): array {</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    $mapping = [];</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    $mapping[$n] = &#39;y&#39;; // should be non-empty-array&lt;class-string, &#39;y&#39;&gt;, is non-empty-array&lt;string, string&gt;</span>
-<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">    return $mapping;    // so a declared array&lt;class-string, string&gt; is reported</span>
-<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param class-string $n */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(string $n): array {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    $mapping = [];</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    $mapping[$n] = &#39;y&#39;; // should be non-empty-array&lt;class-string, &#39;y&#39;&gt;, is non-empty-array&lt;string, string&gt;</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    return $mapping;    // so a declared array&lt;class-string, string&gt; is reported</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>normalize_array_key_type</code> maps every non-numeric string domain
 (<code>class-string</code>, <code>interface-string</code>, and the rest) to plain <code>string</code>.
@@ -2001,10 +1910,10 @@ the <code>$mapping[$class-&gt;name] = …</code> loop in <code>getInterfaceTagMa
 <code>type_engine/variable/array_shape_writes.rs</code>.</p>
 <h3 id="b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type">B430. <code>isset()</code> on a constant shape read with a dynamic key loses the element type<a class="headerlink" href="#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$g = [$a];</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$g[] = $b;                         // array{P, P}</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">if (!isset($g[$k])) { return; }    // $k is int</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">$g[$k]-&gt;id;                        // $g[$k] should be P, is mixed</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$g = [$a];</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$g[] = $b;                         // array{P, P}</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">if (!isset($g[$k])) { return; }    // $k is int</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">$g[$k]-&gt;id;                        // $g[$k] should be P, is mixed</span>
 </code></pre></div>
 <p>Without the <code>isset()</code> guard, <code>$g[$k]</code> is <code>P</code>, and the same guard over a
 <code>list&lt;P&gt;</code> keeps <code>P</code> too. Only a constant shape guarded through a
@@ -2019,14 +1928,14 @@ and how the shape's element type is looked up for a key that is not a
 literal.</p>
 <h3 id="b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array">B431. A class constant array keyed by <code>Foo::class</code> is a bare <code>array</code><a class="headerlink" href="#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class C {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    private const B = [\stdClass::class =&gt; &#39;X&#39;];</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    private const A = [&#39;k&#39; =&gt; &#39;X&#39;];</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    public function f(): void {</span>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">        self::B; // should be array{stdClass: &#39;X&#39;}, is array</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">        self::A; // array{k: &#39;X&#39;}, as expected</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">    }</span>
-<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">class C {</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    private const B = [\stdClass::class =&gt; &#39;X&#39;];</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    private const A = [&#39;k&#39; =&gt; &#39;X&#39;];</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    public function f(): void {</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">        self::B; // should be array{stdClass: &#39;X&#39;}, is array</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">        self::A; // array{k: &#39;X&#39;}, as expected</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    }</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>An initialiser whose keys are <code>::class</code> constants is not inferred at
 all, so the constant loses both its keys and its values. A literal
@@ -2040,12 +1949,12 @@ inferred return type.</p>
 calls both), for array keys that are class-constant accesses.</p>
 <h3 id="b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array">B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array<a class="headerlink" href="#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @var array&lt;string, array{string, bool, string}&gt; $pairs */</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">foreach (array_keys($pairs) as $cn) {</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">    $pairs[$cn][3] = [&#39;I&#39;];</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">}</span>
-<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">// should be array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
-<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">// is non-empty-array&lt;string, array{…}|non-empty-array&lt;int, string|bool|array{&#39;I&#39;}&gt;&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">/** @var array&lt;string, array{string, bool, string}&gt; $pairs */</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">foreach (array_keys($pairs) as $cn) {</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $pairs[$cn][3] = [&#39;I&#39;];</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">}</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">// should be array&lt;string, array{string, bool, string, array{&#39;I&#39;}}&gt;</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">// is non-empty-array&lt;string, array{…}|non-empty-array&lt;int, string|bool|array{&#39;I&#39;}&gt;&gt;</span>
 </code></pre></div>
 <p>A write to a literal offset below a dynamic key should add that offset to
 the element shape it reaches. Instead the element is joined with a
