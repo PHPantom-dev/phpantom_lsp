@@ -572,17 +572,30 @@ fn convert_keyword_with_optional_generics(
 
 /// Convert the fields of an `array{…}` or `object{…}` shape to
 /// [`ShapeEntry`] values.
+///
+/// A key written twice is one key, as it is in an array literal: the later
+/// field replaces the earlier one where that one stood.
 fn shape_entries<'a, 'ast: 'a>(
     src: &str,
     fields: impl Iterator<Item = &'a cst::ShapeField<'ast>>,
 ) -> Vec<ShapeEntry> {
-    fields
-        .map(|field| ShapeEntry {
+    let mut entries: Vec<ShapeEntry> = Vec::new();
+    for field in fields {
+        let entry = ShapeEntry {
             key: field.key.as_ref().map(|k| shape_key_text(src, &k.key)),
             optional: field.is_optional(),
             value_type: convert(src, field.value),
-        })
-        .collect()
+        };
+        match entry
+            .key
+            .as_ref()
+            .and_then(|key| entries.iter_mut().find(|e| e.key.as_ref() == Some(key)))
+        {
+            Some(existing) => *existing = entry,
+            None => entries.push(entry),
+        }
+    }
+    entries
 }
 
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.

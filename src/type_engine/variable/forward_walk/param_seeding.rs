@@ -207,13 +207,26 @@ fn finish_constant_operands(ty: &PhpType, ctx: &ForwardWalkCtx<'_>) -> Option<Ph
 }
 
 /// Finish a `@param` type the docblock parser could only read as text:
-/// qualify the class names in it, bind `self` to the enclosing class, then
-/// evaluate the type operators it reads through a constant.
+/// expand the type aliases it names, qualify the class names in it, bind
+/// `self` to the enclosing class, then evaluate the type operators it reads
+/// through a constant.
+///
+/// Aliases go first, while their names are still as written: qualifying
+/// would turn `Shape` into a class name that nothing declares.  Expanding
+/// them here, once, is what lets narrowing see the members of a
+/// `@param Row|null` alias at all.
 ///
 /// Reading the constant here means the body sees the keys the table
 /// actually has, and the declaration is judged a refinement of the native
 /// `string` hint rather than an operator nothing can compare.
 pub(crate) fn resolve_docblock_param_type(raw: &PhpType, ctx: &ForwardWalkCtx<'_>) -> PhpType {
+    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+        raw,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let raw = expanded.as_ref().unwrap_or(raw);
     let resolved = crate::util::resolve_php_type_names(raw, ctx.class_loader);
     let resolved = bind_enclosing_self(&resolved, ctx).unwrap_or(resolved);
     finish_constant_operands(&resolved, ctx).unwrap_or(resolved)
@@ -650,6 +663,13 @@ pub(crate) fn try_resolve_from_merged_class(
     let declared = merged_param.type_hint.as_ref()?;
     // The merged declaration is as much a place a `key-of<CONSTANT>` is read
     // as the source docblock is, and for a method it is the one that wins.
+    let expanded = crate::type_engine::type_resolution::expand_nested_type_aliases(
+        declared,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    let declared = expanded.as_ref().unwrap_or(declared);
     let bound = bind_enclosing_self(declared, ctx);
     let declared = bound.as_ref().unwrap_or(declared);
     let finished = finish_constant_operands(declared, ctx);

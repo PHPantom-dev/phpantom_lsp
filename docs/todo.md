@@ -98,11 +98,54 @@ unlikely to move the needle for most users.
 | T33 | [Class constant on an expression (`$obj::CONST`) resolves to nothing](todo/type-inference.md#t33-class-constant-on-an-expression-objconst-resolves-to-nothing)              | Low-Medium  | Medium      |
 | T6  | `Closure::bind()` / `Closure::fromCallable()` return type preservation                                                                                                      | Low-Medium  | Medium-High |
 | T31 | [Closure literal-return shape inference](todo/type-inference.md#t31-closure-literal-return-shape-inference)                                                                 | Low-Medium  | Medium-High |
+| T44 | [A single enum case has no type](todo/type-inference.md#t44-a-single-enum-case-has-no-type) | Low-Medium | High |
 | T4  | [Non-empty-\* type narrowing and propagation](todo/type-inference.md#t4-non-empty--type-narrowing-and-propagation)                                                          | Low-Medium  | High        |
 | T5  | Fiber type resolution                                                                                                                                                       | Low         | Medium      |
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B457 | [`array_push()` does not change the array's type](todo/bugs.md#b457-array_push-does-not-change-the-arrays-type) | Medium | Low-Medium |
+| B437 | [`self` in an inherited property's docblock names the class it is read through](todo/bugs.md#b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through) | Medium | Medium |
+| B438 | [An inline `@phpstan-var` above an assignment is ignored](todo/bugs.md#b438-an-inline-phpstan-var-above-an-assignment-is-ignored) | Medium | Medium |
+| B471 | [An override with no docblock does not inherit the parent's method templates](todo/bugs.md#b471-an-override-with-no-docblock-does-not-inherit-the-parents-method-templates) | Medium | Medium |
+| B444 | [A union of array shapes is not narrowed by comparing its tag key](todo/bugs.md#b444-a-union-of-array-shapes-is-not-narrowed-by-comparing-its-tag-key) | Medium | Medium-High |
+| B442 | [`$value::class` resolves to nothing](todo/bugs.md#b442-valueclass-resolves-to-nothing) | Low-Medium | Low |
+| B450 | [`@phpstan-assert-if-true` does not narrow an untyped parameter](todo/bugs.md#b450-phpstan-assert-if-true-does-not-narrow-an-untyped-parameter) | Low-Medium | Low-Medium |
+| B439 | [`@mixin` on a trait is not applied to the class that uses it](todo/bugs.md#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it) | Low-Medium | Medium |
+| B445 | [`instanceof` on a template-typed value unions the class in rather than intersecting](todo/bugs.md#b445-instanceof-on-a-template-typed-value-unions-the-class-in-rather-than-intersecting) | Low-Medium | Medium |
+| B446 | [Writing into a property's array offset does not narrow the property](todo/bugs.md#b446-writing-into-a-propertys-array-offset-does-not-narrow-the-property) | Low-Medium | Medium |
+| B456 | [Writes through a list's own keys drop `list`, while `unset()` of an element keeps it](todo/bugs.md#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it) | Low-Medium | Medium |
+| B459 | [Writing a literal into an array offset widens it to its base type](todo/bugs.md#b459-writing-a-literal-into-an-array-offset-widens-it-to-its-base-type) | Low-Medium | Medium |
+| B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
+| B454 | [Comparing a foreach key does not narrow the value it was read with](todo/bugs.md#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with) | Low-Medium | Medium-High |
+| B455 | [The else branch of `is_resource()` drops the possibly closed resource](todo/bugs.md#b455-the-else-branch-of-is_resource-drops-the-possibly-closed-resource) | Low | Low |
+| B458 | [An `(array)` cast of a union with a non-array member is plain `array`](todo/bugs.md#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array) | Low | Low |
+| B462 | [Arithmetic with a `mixed` operand stays `mixed`](todo/bugs.md#b462-arithmetic-with-a-mixed-operand-stays-mixed) | Low | Low |
+| B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
+| B448 | [Falsiness narrowing does not narrow to the falsy values](todo/bugs.md#b448-falsiness-narrowing-does-not-narrow-to-the-falsy-values) | Low | Low-Medium |
+| B451 | [An equality assertion (`@phpstan-assert-if-true =int`) is not read](todo/bugs.md#b451-an-equality-assertion-phpstan-assert-if-true-int-is-not-read) | Low | Low-Medium |
+| B453 | [`is_callable()` on `Foo|callable(): Foo` drops the `Foo&callable` member](todo/bugs.md#b453-is_callable-on-foocallable-foo-drops-the-foocallable-member) | Low | Low-Medium |
+| B467 | [A template default is not used when nothing binds the template](todo/bugs.md#b467-a-template-default-is-not-used-when-nothing-binds-the-template) | Low | Low-Medium |
+| B473 | [Iterating a class whose `getIterator()` declares `Iterator<V>` gives `int|string` keys](todo/bugs.md#b473-iterating-a-class-whose-getiterator-declares-iteratorv-gives-intstring-keys) | Low | Low-Medium |
+| B474 | [A magic constant resolves to its base type rather than its value](todo/bugs.md#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value) | Low | Low-Medium |
+| B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
+| B441 | [A class constant whose initializer names an enum case is not resolved](todo/bugs.md#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved) | Low | Medium |
+| B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |
+| B447 | [`array_key_exists()` with a variable key does not narrow the offset read](todo/bugs.md#b447-array_key_exists-with-a-variable-key-does-not-narrow-the-offset-read) | Low | Medium |
+| B449 | [Exhausted narrowing leaves the last type standing instead of `never`](todo/bugs.md#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never) | Low | Medium |
+| B452 | [`@phpstan-assert-if-false` on a variadic parameter does not narrow the arguments](todo/bugs.md#b452-phpstan-assert-if-false-on-a-variadic-parameter-does-not-narrow-the-arguments) | Low | Medium |
+| B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
+| B461 | [Literal operands are not folded through several operators](todo/bugs.md#b461-literal-operands-are-not-folded-through-several-operators) | Low | Medium |
+| B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
+| B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |
+| B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |
+| B469 | [A conditional return type whose subject is an offset of a template is not evaluated](todo/bugs.md#b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated) | Low | Medium |
+| B470 | [An offset access on a type alias is not evaluated](todo/bugs.md#b470-an-offset-access-on-a-type-alias-is-not-evaluated) | Low | Medium |
+| B472 | [A template bound through a nested callable parameter is not inferred](todo/bugs.md#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred) | Low | Medium |
+| B475 | [A variable a closure captures by reference does not take on the closure's assignments](todo/bugs.md#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments) | Low | Medium |
+| B477 | [An arrow function's return type comes from its declared hint even when the body returns something narrower](todo/bugs.md#b477-an-arrow-functions-return-type-comes-from-its-declared-hint-even-when-the-body-returns-something-narrower) | Low | Medium |
+| B478 | [An assignment inside a `match` arm is not recorded](todo/bugs.md#b478-an-assignment-inside-a-match-arm-is-not-recorded) | Low | Medium |
+| B468 | [A conditional return type on `$param is not null` does not pick up a template bound by a callable argument](todo/bugs.md#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

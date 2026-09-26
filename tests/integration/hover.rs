@@ -5697,6 +5697,59 @@ echo PHP_INT_MAX;
     );
 }
 
+/// The stubs record the PHP build they were generated on; the version
+/// constants describe the configured version instead.
+#[test]
+fn hover_php_version_constants_follow_the_configured_version() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///php_version.php";
+    let content = r#"<?php
+function probe(): void {
+    $major = PHP_MAJOR_VERSION;
+    $id = PHP_VERSION_ID;
+    $major;
+    $id;
+}
+"#;
+    let version = backend.php_version();
+    let major =
+        hover_text(&hover_at(&backend, uri, content, 4, 6).expect("hover $major")).to_string();
+    assert!(
+        major.contains(&version.major.to_string()) && !major.contains('5'),
+        "PHP_MAJOR_VERSION is the configured major version: {major}"
+    );
+    let id = hover_text(&hover_at(&backend, uri, content, 5, 6).expect("hover $id")).to_string();
+    assert!(
+        id.contains("int") && !id.contains("50306"),
+        "PHP_VERSION_ID depends on the patch release, so it is only an int: {id}"
+    );
+}
+
+/// A parameter typed by a `@phpstan-type` alias is seeded with what the
+/// alias stands for, so narrowing sees its members.
+#[test]
+fn hover_alias_typed_parameter_narrows() {
+    let backend = create_test_backend();
+    let uri = "file:///alias_param.php";
+    let content = r#"<?php
+class Foo {}
+/** @phpstan-type MaybeFoo Foo|null */
+class Svc {
+    /** @param MaybeFoo $a */
+    public function run($a): void {
+        if ($a !== null) {
+            $a;
+        }
+    }
+}
+"#;
+    let text = hover_text(&hover_at(&backend, uri, content, 7, 13).expect("hover $a")).to_string();
+    assert!(
+        text.contains("Foo") && !text.contains("null") && !text.contains("MaybeFoo"),
+        "the alias is expanded and null is narrowed away: {text}"
+    );
+}
+
 #[test]
 fn hover_stub_constant_php_eol_shows_value() {
     let backend = create_test_backend_with_function_stubs();

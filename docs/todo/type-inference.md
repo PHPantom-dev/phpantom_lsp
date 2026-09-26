@@ -152,7 +152,9 @@ function's signature as a typed `Closure`.  This is relevant for DI
 containers and middleware patterns but is a niche use case.
 
 See `ClosureBindDynamicReturnTypeExtension` and
-`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan.
+`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan. A
+`Closure::fromCallable($cb)` assertion in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` is `// SKIP` on this.
 
 ---
 
@@ -252,7 +254,12 @@ $fn = function(int $x): string { return (string)$x; };
    should not be re-enriched to `(Closure(): mixed)`.
 
 **After fixing:** verify that extract function docblock generation
-emits the concrete callable signature in the `@param` tag.
+emits the concrete callable signature in the `@param` tag, and un-SKIP
+the `Closure(): 1`-style assertions in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` and the closure calls in
+`tests/phpstan_data/Rules/Functions/bug-anonymous-function-method-constant.php`
+(a closure without a declared return type, whose call reads back as
+`mixed`).
 
 ---
 
@@ -556,7 +563,11 @@ below it needs no change.
 
 **Tests to update once fixed:** upstream's `nsrt/deducted-types.php` has
 a `$foo::INTEGER_CONSTANT` block that was dropped when
-`tests/phpstan_nsrt/deducted-types.php` was ported; port it back.
+`tests/phpstan_nsrt/deducted-types.php` was ported; port it back. The
+`$hw::B`/`$self::FOO` assertions in
+`tests/phpstan_data/Rules/Constants/bug-10212.php` and
+`tests/phpstan_data/Rules/Methods/return-type-class-constant.php` are
+`// SKIP` on this.
 
 ---
 
@@ -785,3 +796,34 @@ it against the *declaring* class's own `type_aliases` map (via
 before substituting it into the parent's template.
 
 **Blocks:** Test Porting Phase 4A pattern 870.
+
+---
+
+## T44. A single enum case has no type
+**Impact: Low-Medium · Complexity: High**
+
+```php
+enum Suit { case Hearts; case Spades; case Clubs; }
+function f(Suit $s) {
+    if ($s === Suit::Hearts) {
+    } elseif ($s === Suit::Spades) {
+    } else {
+        $s; // PHPStan: Suit::Clubs; PHPantom: Suit
+    }
+}
+```
+
+`Suit::Hearts` resolves to the enum class, so narrowing by comparing
+against cases can only ever say "some `Suit`". PHPStan and Psalm give each
+case its own type, a subtype of the enum: comparing narrows to the cases
+left, a `match` over the rest is known exhaustive, a `readonly` property
+assigned one case keeps it, and `->value`/`->name` on it are the case's
+literal values.
+
+The type model needs an enum-case variant (or a literal kind for it) that
+is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
+joins back into the enum when every case is present. Narrowing by `===`
+and `instanceof` then subtracts cases the way it subtracts union members.
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; the
+assertion is `// SKIP` in `tests/phpstan_data/`.

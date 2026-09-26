@@ -1883,6 +1883,9 @@ pub fn resolve_effective_type_typed(
     match (native_type, docblock_type) {
         // Docblock provided, no native hint → use docblock.
         (None, Some(doc)) => Some(doc.clone()),
+        // A declared `never` stands whatever the native hint says: the
+        // function does not return, so what it would have returned is moot.
+        (Some(_), Some(doc)) if doc.is_never() => Some(doc.clone()),
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
             let Some(doc) = doc_members_native_can_hold(doc, native) else {
@@ -1898,10 +1901,11 @@ pub fn resolve_effective_type_typed(
                 // `mixed` is excluded: it accepts null but carries no
                 // explicit null member, so narrowing it through a docblock
                 // is intentional and must not re-add null.
+                let doc = with_native_members_doc_omits(doc, native);
                 if native.accepts_null() && !native.is_mixed() {
-                    Some(doc.clone().or_null())
+                    Some(doc.or_null())
                 } else {
-                    Some(doc.clone())
+                    Some(doc)
                 }
             } else {
                 Some(native.clone())
@@ -1911,6 +1915,61 @@ pub fn resolve_effective_type_typed(
         (Some(native), None) => Some(native.clone()),
         // Neither → nothing.
         (None, None) => None,
+    }
+}
+
+/// `doc` joined with each member of a native union that `doc` says nothing
+/// about, the way the native nullability is kept.
+///
+/// `@param array<int, string>` on `array|false` refines the `array` half
+/// and leaves `false` standing, since the value can still be `false` at
+/// runtime (PHPStan's `decideType` does the same).  Only keyword types are
+/// judged, on both sides: whether a class or a template in the docblock
+/// covers a native member takes the class hierarchy or the template's
+/// bound, neither of which is known here.
+fn with_native_members_doc_omits(doc: &PhpType, native: &PhpType) -> PhpType {
+    let TypeKind::Union(native_members) = native.kind() else {
+        return doc.clone();
+    };
+    let doc_members: Vec<PhpType> = match doc.kind() {
+        TypeKind::Union(members) => members.to_vec(),
+        TypeKind::Nullable(inner) => vec![PhpType::clone(inner), PhpType::null()],
+        _ => vec![doc.clone()],
+    };
+    if !doc_members.iter().all(is_plain_value_type) {
+        return doc.clone();
+    }
+    let omitted: Vec<PhpType> = native_members
+        .iter()
+        .filter(|member| {
+            !member.is_null()
+                && !names_a_class(member)
+                && !doc_members.iter().any(|d| d.is_subtype_of(member))
+        })
+        .cloned()
+        .collect();
+    if omitted.is_empty() {
+        return doc.clone();
+    }
+    let mut members = doc_members.to_vec();
+    members.extend(omitted);
+    PhpType::union(members)
+}
+
+/// Whether `ty` is a keyword, array, or literal type whose relation to a
+/// native keyword member can be judged structurally: no class, template,
+/// or unevaluated type operator (`CONST[T]`, `key-of<…>`, a conditional)
+/// whose meaning depends on something only resolution knows.
+fn is_plain_value_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(_) => !names_a_class(ty),
+        TypeKind::Generic(g) => !names_a_class(ty) && g.args.iter().all(is_plain_value_type),
+        TypeKind::Array(inner) | TypeKind::ListShape(inner) | TypeKind::Nullable(inner) => {
+            is_plain_value_type(inner)
+        }
+        TypeKind::ArrayShape(entries) => entries.iter().all(|e| is_plain_value_type(&e.value_type)),
+        TypeKind::Literal(_) | TypeKind::IntRange(..) => true,
+        _ => false,
     }
 }
 

@@ -1347,7 +1347,12 @@ fn resolve_rhs_expression_inner<'b>(
             {
                 return vec![ResolvedType::from_type_string(ts)];
             }
-            vec![]
+            crate::hover::constants::unversioned_php_version_constant_type(name_clean)
+                .map(|ts| vec![ResolvedType::from_type_string(ts)])
+                .unwrap_or_default()
+        }
+        Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => {
+            vec![ResolvedType::from_type_string(PhpType::bool())]
         }
         // ── Arithmetic and other binary operators ───────────────────
         // `??` and method-chain binaries are peeled off in

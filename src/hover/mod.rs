@@ -15,7 +15,7 @@
 //! Markdown builders.
 
 mod class;
-mod constants;
+pub(crate) mod constants;
 mod formatting;
 mod member;
 mod see_refs;

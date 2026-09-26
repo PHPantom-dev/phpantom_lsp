@@ -1266,32 +1266,41 @@ pub(super) fn resolve_array_literal_generic(
     }
 }
 
-/// Extract the generic type argument at a given position from a resolved type.
+/// Extract the key (`position` 0) or value (`position` 1) type of an
+/// argument bound to an `array<TKey, TValue>`-shaped parameter.
 ///
-/// For `array<int, string>` with position 0 → `int`, position 1 → `string`.
-/// For `list<User>` with position 0 → `User`.
-/// Also handles `PhpType::array_of(inner)` as a single-arg generic.
+/// The positions are the hint's, which always has both arguments (a
+/// single-argument `array<T>` binds as an array element instead), so they
+/// cannot be read off the argument positionally: the argument may spell its
+/// type with one argument (`array<Foo>`, `list<Foo>`) or none (`Foo[]`),
+/// where the only argument is the value and the key is implied.
 pub(super) fn extract_generic_arg_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
-    match ty.kind() {
-        TypeKind::Generic(g) => {
-            // `list<T>` has a single arg (the value type).  When the
-            // binding expects position 1 (value position of `array<K, V>`),
-            // map it to position 0 of the list.  Position 0 of a list
-            // is implicitly `int` (sequential keys).
-            let is_list_like = matches!(
-                g.name.to_ascii_lowercase().as_str(),
-                "list" | "non-empty-list"
-            );
-            if is_list_like && g.args.len() == 1 {
-                return match position {
-                    0 => Some(PhpType::int()),
-                    1 => g.args.first().cloned(),
-                    _ => None,
-                };
-            }
-            g.args.get(position).cloned()
-        }
-        TypeKind::Array(inner) if position == 0 => Some(inner.clone()),
+    match position {
+        0 => ty
+            .extract_key_type(false)
+            .cloned()
+            .or_else(|| match ty.unwrap_nullable().kind() {
+                TypeKind::Generic(g)
+                    if matches!(
+                        g.name.to_ascii_lowercase().as_str(),
+                        "list" | "non-empty-list"
+                    ) =>
+                {
+                    Some(PhpType::int())
+                }
+                TypeKind::Generic(g)
+                    if g.args.len() == 1
+                        && matches!(
+                            g.name.to_ascii_lowercase().as_str(),
+                            "array" | "non-empty-array"
+                        ) =>
+                {
+                    Some(PhpType::union(vec![PhpType::int(), PhpType::string()]))
+                }
+                TypeKind::Array(_) => Some(PhpType::union(vec![PhpType::int(), PhpType::string()])),
+                _ => None,
+            }),
+        1 => ty.extract_value_type(false).cloned(),
         _ => None,
     }
 }

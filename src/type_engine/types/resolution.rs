@@ -699,6 +699,53 @@ pub(crate) fn resolve_type_alias_typed(
     last_resolved
 }
 
+/// Expand every type alias named anywhere inside `ty` (`Shape|null`,
+/// `list<Row>`), or `None` when it names none.
+///
+/// [`resolve_type_alias_typed`] only expands a type that *is* an alias; a
+/// declared type that merely contains one needs this walk.  An alias body
+/// that names another alias is expanded too, up to the same ten levels the
+/// chain lookup allows, so a cycle stops rather than recursing forever.
+pub(crate) fn expand_nested_type_aliases(
+    ty: &PhpType,
+    owning_class_name: &str,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    // Aliases are declared on a class in the file, so a file that declares
+    // none cannot name one.
+    if all_classes.iter().all(|c| c.type_aliases.is_empty()) {
+        return None;
+    }
+    fn walk(
+        ty: &PhpType,
+        depth: u8,
+        owning_class_name: &str,
+        all_classes: &[Arc<ClassInfo>],
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> PhpType {
+        if depth >= 10 {
+            return ty.clone();
+        }
+        if matches!(ty.kind(), TypeKind::Named(_)) {
+            return match resolve_type_alias_typed(ty, owning_class_name, all_classes, class_loader)
+            {
+                Some(expanded) => walk(
+                    &expanded,
+                    depth + 1,
+                    owning_class_name,
+                    all_classes,
+                    class_loader,
+                ),
+                None => ty.clone(),
+            };
+        }
+        ty.map_children(&|child| walk(child, depth, owning_class_name, all_classes, class_loader))
+    }
+    let expanded = walk(ty, 0, owning_class_name, all_classes, class_loader);
+    (expanded != *ty).then_some(expanded)
+}
+
 /// Single-level alias lookup (no chaining).
 fn resolve_type_alias_once(
     hint: &PhpType,

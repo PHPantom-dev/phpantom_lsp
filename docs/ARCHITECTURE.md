@@ -129,7 +129,7 @@ tests/
 ├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
 ├── unit/                   # Unit tests (composer, docblock, named args, …)
 ├── fixtures/               # Fixtures driven by fixture_runner.rs
-├── psalm_assertions/, phpstan_nsrt/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 

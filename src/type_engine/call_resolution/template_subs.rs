@@ -317,12 +317,7 @@ impl Backend {
                                 );
                                 continue;
                             }
-                            let generic_arg_count = param_hint
-                                .and_then(|h| match h.kind() {
-                                    crate::php_type::TypeKind::Generic(g) => Some(g.args.len()),
-                                    _ => None,
-                                })
-                                .unwrap_or(1);
+                            let generic_arg_count = wrapper_arity(param_hint, wrapper_name);
 
                             let concrete = if generic_arg_count <= 1 {
                                 // Single-param: `array<T>`, `list<T>` — T is the value/element type.
@@ -392,12 +387,8 @@ impl Backend {
                                     // `Iterator<int, ASTClass>`), the
                                     // single param-hint arg represents
                                     // the value/last type.
-                                    let param_generic_count = param_hint
-                                        .and_then(|h| match h.kind() {
-                                            TypeKind::Generic(g) => Some(g.args.len()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or(1);
+                                    let param_generic_count =
+                                        wrapper_arity(param_hint, wrapper_name);
                                     if param_generic_count == 1 && args.len() > 1 {
                                         return args.last().cloned();
                                     }
@@ -790,10 +781,18 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.backend
-            && let Some(Some(value)) = backend.lookup_global_constant(trimmed)
-            && let Some(ty) =
-                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)
+            && let Some(ty) = match backend.lookup_global_constant(trimmed) {
+                None => None,
+                Some(Some(value)) => {
+                    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+                        &value,
+                    )
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
+                }
+                Some(None) => {
+                    crate::hover::constants::unversioned_php_version_constant_type(trimmed)
+                }
+            }
         {
             return Some(ty);
         }
@@ -1913,6 +1912,40 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
         },
         TypeKind::Nullable(inner) => unify_template(inner, arg_type.unwrap_nullable(), tpl_name),
         _ => None,
+    }
+}
+
+/// How many arguments the `wrapper_name<…>` in a parameter hint takes, or 1
+/// when the hint holds no such generic.
+///
+/// The wrapper can sit inside a union (`ArrayIterator`'s constructor takes
+/// `array<TKey, TValue>|object`), and reading the arity off the union
+/// itself would count one argument and bind the key template to the value
+/// type.
+fn wrapper_arity(param_hint: Option<&PhpType>, wrapper_name: &str) -> usize {
+    let wrapper_short = crate::util::short_name(wrapper_name);
+    let find = |ty: &PhpType| -> Option<usize> {
+        let members: &[PhpType] = match ty.kind() {
+            TypeKind::Union(members) => members,
+            _ => std::slice::from_ref(ty),
+        };
+        members
+            .iter()
+            .find_map(|m| match m.unwrap_nullable().kind() {
+                TypeKind::Generic(g)
+                    if crate::util::short_name(&g.name).eq_ignore_ascii_case(wrapper_short) =>
+                {
+                    Some(g.args.len())
+                }
+                _ => None,
+            })
+    };
+    match param_hint {
+        Some(hint) => find(hint).unwrap_or(match hint.kind() {
+            TypeKind::Generic(g) => g.args.len(),
+            _ => 1,
+        }),
+        None => 1,
     }
 }
 

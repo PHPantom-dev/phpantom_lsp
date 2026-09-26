@@ -1,6 +1,8 @@
 //! PHPStan `assertType()` fixture runner.
 //!
-//! This harness processes PHP files from PHPStan's `nsrt/` test corpus.
+//! This harness processes PHP files from PHPStan's `assertType()` corpora
+//! (`nsrt/`, and the `data/` fixtures its type-inference tests run under the
+//! default configuration) and from Psalm's extracted assertions.
 //! Each file contains calls like `assertType('expected_type', $expr)`.
 //! The runner:
 //!
@@ -11,8 +13,10 @@
 //! 4. Hovers on each `$__phpantom_assert_N` variable to resolve its type.
 //! 5. Compares the hover type against the expected type string.
 //!
-//! Files are placed in `tests/phpstan_nsrt/` and picked up automatically
-//! by `datatest_stable`. Lines containing `assertNativeType` are ignored
+//! Files are placed in `tests/phpstan_nsrt/`, `tests/phpstan_data/` (laid
+//! out like upstream's `tests/PHPStan/`, minus the `data/` segment) or
+//! `tests/psalm_assertions/`, and picked up automatically by
+//! `datatest_stable`. Lines containing `assertNativeType` are ignored
 //! (PHPantom does not track native vs PHPDoc types separately).
 //!
 //! To skip an assertion that PHPantom cannot yet handle, add `// SKIP`
@@ -267,10 +271,7 @@ fn parse_first_argument(text: &str) -> Option<(String, &str)> {
                 continue;
             }
             if bytes[i] == quote as u8 {
-                let value = &rest[..i];
-                // Unescape the string.
-                let unescaped = value.replace("\\'", "'").replace("\\\"", "\"");
-                return Some((unescaped, &rest[i + 1..]));
+                return Some((unescape_php_string(&rest[..i], quote), &rest[i + 1..]));
             }
             i += 1;
         }
@@ -285,6 +286,26 @@ fn parse_first_argument(text: &str) -> Option<(String, &str)> {
         }
         None
     }
+}
+
+/// Apply PHP's escapes for a quoted string literal's body: `\\` and the
+/// escaped quote character collapse to one character, and any other
+/// backslash is kept (`'Foo\Bar'` stays as written).
+fn unescape_php_string(value: &str, quote: char) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\'
+            && let Some(&next) = chars.peek()
+            && (next == '\\' || next == quote)
+        {
+            out.push(next);
+            chars.next();
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Parse the second argument — the expression to type-check.
@@ -544,7 +565,49 @@ fn normalize_type(ty: &str) -> String {
         }
     }
 
+    let result = expand_nested_nullable(&result)
+        .replace("array<mixed, mixed>", "array")
+        .replace("array<mixed>", "array")
+        .replace("non-empty-array<int|string, ", "non-empty-array<")
+        .replace("non-empty-array<array-key, ", "non-empty-array<");
     canonicalize_union_spelling(&drop_sequential_shape_keys(&strip_template_scopes(&result)))
+}
+
+/// Rewrite a nested `?T` (`list<array<?string>>`) to the `T|null` PHPStan
+/// prints. Only a plain class or keyword name is expanded: `?Foo<int>` would
+/// need its own brackets to stay unambiguous, and neither side prints it.
+fn expand_nested_nullable(ty: &str) -> String {
+    if !ty.chars().skip(1).any(|c| c == '?') {
+        return ty.to_string();
+    }
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '\\';
+    let mut out = String::with_capacity(ty.len() + 8);
+    let mut chars = ty.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        let after_boundary = ty[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|prev| matches!(prev, '<' | ',' | ' ' | '{' | ':' | '('));
+        if ch != '?' || !after_boundary {
+            out.push(ch);
+            continue;
+        }
+        let name_start = i + 1;
+        let name_end = ty[name_start..]
+            .find(|c: char| !is_name_char(c))
+            .map_or(ty.len(), |n| name_start + n);
+        let followed_by_args = ty[name_end..].starts_with(['<', '{', '[', '(']);
+        if name_end == name_start || followed_by_args {
+            out.push(ch);
+            continue;
+        }
+        out.push_str(&ty[name_start..name_end]);
+        out.push_str("|null");
+        while chars.peek().is_some_and(|&(j, _)| j < name_end) {
+            chars.next();
+        }
+    }
+    out
 }
 
 /// Remove the scope PHPStan appends to a template type's name
@@ -558,6 +621,7 @@ fn strip_template_scopes(ty: &str) -> String {
         .min()
     {
         out.push_str(&rest[..pos]);
+        drop_template_bound(&mut out);
         // The scope can itself hold parentheses (`method Foo::bar()`), so
         // find the `)` that closes the one opened at `pos + 1`.
         let mut depth = 0i32;
@@ -584,6 +648,39 @@ fn strip_template_scopes(ty: &str) -> String {
     }
     out.push_str(rest);
     out
+}
+
+/// Cut the ` of Bound` off a template whose scope was just stripped
+/// (`T of Foo&Bar` → `T`): PHPantom names a template without its bound,
+/// the same way PHPStan prints an unbounded one.
+///
+/// Walks back from the end of `out` at bracket depth zero, so a bound that
+/// is itself generic (`TEvent of Event<TTopic>`) or a union (`T of A|B`) is
+/// cut whole.
+fn drop_template_bound(out: &mut String) {
+    let bytes = out.as_bytes();
+    let mut depth = 0i32;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b'>' | b'}' | b')' => depth += 1,
+            b'<' | b'{' | b'(' | b',' if depth == 0 => return,
+            b'<' | b'{' | b'(' => depth -= 1,
+            b' ' if depth == 0 && out[..i].ends_with(" of") => {
+                let name_end = i - " of".len();
+                let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+                let name_start = out[..name_end]
+                    .rfind(|c: char| !is_name_char(c))
+                    .map_or(0, |n| n + 1);
+                if name_start < name_end {
+                    out.truncate(name_end);
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Split `ty` at the `|` separators that are not nested inside brackets,
@@ -654,6 +751,21 @@ fn canonicalize_union_spelling(ty: &str) -> String {
         .collect();
     if members.len() > 1 && members.iter().any(|m| m == "mixed") {
         return "mixed".to_string();
+    }
+    // `scalar` and `true|false` are other spellings of a union PHPStan
+    // prints member by member.
+    let mut members: Vec<String> = members
+        .into_iter()
+        .flat_map(|m| match m.as_str() {
+            "scalar" => ["bool", "float", "int", "string"]
+                .map(String::from)
+                .to_vec(),
+            _ => vec![m],
+        })
+        .collect();
+    if members.iter().any(|m| m == "true") && members.iter().any(|m| m == "false") {
+        members.retain(|m| m != "true" && m != "false");
+        members.push("bool".to_string());
     }
     let has_wider_array = members
         .iter()
@@ -1058,4 +1170,5 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
 datatest_stable::harness! {
     { test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
     { test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
+    { test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },
 }
