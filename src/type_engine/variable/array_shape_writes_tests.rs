@@ -9,15 +9,15 @@ use crate::php_type::{PhpType, ShapeEntry};
 fn collection_key_normalization_preserves_non_numeric_string_domains() {
     assert_eq!(
         normalize_array_key_type(&PhpType::parse("class-string<Foo>")),
-        Some(PhpType::string())
+        Some(PhpType::parse("class-string<Foo>"))
     );
     assert_eq!(
         normalize_array_key_type(&PhpType::parse("interface-string<Foo>")),
-        Some(PhpType::string())
+        Some(PhpType::parse("interface-string<Foo>"))
     );
     assert_eq!(
         normalize_array_key_type(&PhpType::parse("class-string")),
-        Some(PhpType::string())
+        Some(PhpType::parse("class-string"))
     );
     assert_eq!(
         normalize_array_key_type(&PhpType::string())
@@ -123,6 +123,49 @@ fn element_writes_refine_the_type_they_are_written_into() {
             "string",
         ),
         "non-empty-array<string, list<string>>"
+    );
+}
+
+/// A written-out integer the shape does not have yet adds that slot, and a
+/// write below a dynamic key replaces the element it started from rather
+/// than joining it, so the added slot can be read back as present.
+#[test]
+fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
+    let write = |base: &str, keys: Vec<ArrayWriteKey>, value: &str| {
+        merge_nested_array_write(&PhpType::parse(base), &keys, &PhpType::parse(value), false)
+            .to_string()
+    };
+    let slot = |index: usize| ArrayWriteKey::Keyed {
+        key_type: PhpType::literal_int(index.to_string()),
+        slot: Some(index),
+    };
+
+    assert_eq!(
+        write("array{string, bool}", vec![slot(2)], "int"),
+        "array{string, bool, int}"
+    );
+    assert_eq!(
+        write("array{string, bool}", vec![slot(5)], "int"),
+        "array{string, bool, 5: int}"
+    );
+    // An empty shape has no arity to keep.
+    assert_eq!(
+        write("array{}", vec![slot(0)], "int"),
+        "non-empty-array<int, int>"
+    );
+    assert_eq!(
+        write(
+            "array<string, array{string, bool, string}>",
+            vec![
+                ArrayWriteKey::Keyed {
+                    key_type: PhpType::string(),
+                    slot: None,
+                },
+                slot(3),
+            ],
+            "array{'I'}",
+        ),
+        "non-empty-array<string, array{string, bool, string, array{'I'}}>"
     );
 }
 

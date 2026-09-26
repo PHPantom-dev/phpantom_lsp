@@ -512,6 +512,27 @@ function f(array $m): void {
     );
 }
 
+/// A variable index can address any entry of a constant shape, so a guard
+/// through one keeps the union of the shape's values rather than `mixed`.
+#[test]
+fn isset_guard_on_a_shape_read_with_a_variable_key_keeps_the_element_type() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_shape_dynamic_key.php";
+    let content = r#"<?php
+class P { public int $id = 0; }
+function f(P $a, P $b, int $k): void {
+    $g = [$a];
+    $g[] = $b;
+    if (!isset($g[$k])) { return; }
+    $x = $g[$k];
+    $x; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("$x = P"), "expected P, got: {text}");
+}
+
 // ─── An optional shape key may not be there at all ─────────────────────────
 
 /// Reading a key the shape marks optional yields the `null` PHP gives for an

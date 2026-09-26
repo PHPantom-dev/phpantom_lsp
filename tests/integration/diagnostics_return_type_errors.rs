@@ -4753,3 +4753,25 @@ function f(int|string $k): array {
         "got: {diags:?}"
     );
 }
+
+/// A class name can never be a decimal integer, so PHP stores it as the key
+/// it is and an array built by writing through it keeps `class-string` keys.
+#[test]
+fn a_write_through_a_class_string_key_keeps_the_class_string() {
+    let php = r#"<?php
+/**
+ * @param class-string $n
+ * @return array<class-string, string>
+ */
+function f(string $n): array {
+    $mapping = [];
+    $mapping[$n] = 'y';
+    return $mapping;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}

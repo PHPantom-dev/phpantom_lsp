@@ -157,6 +157,14 @@ fn resolve_array_key_type(
         let element_type = key_name
             .and_then(|name| rt.type_string.extract_shape_key_type(name))
             .or_else(|| rt.type_string.extract_value_type(false).cloned())
+            // A variable index can address any entry of a shape, so it
+            // reads the union of the shape's values, as an offset read does.
+            .or_else(|| {
+                key_name
+                    .is_none()
+                    .then(|| rt.type_string.iterable_element_type())
+                    .flatten()
+            })
             // An empty shape has no entry any key could address, so the
             // read is a guaranteed miss and yields `null` — the same
             // answer the offset-read path gives.  Widening to `mixed`

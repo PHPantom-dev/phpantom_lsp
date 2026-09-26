@@ -14203,6 +14203,32 @@ fn hover_class_constant_resolves_to_class_string() {
     );
 }
 
+/// A class constant array keyed by `Foo::class` keeps its keys, qualified
+/// against the file's namespace, and its values.
+#[test]
+fn hover_class_constant_array_keyed_by_class_constant() {
+    let backend = create_test_backend();
+    let uri = "file:///classconst_keys.php";
+    let content = concat!(
+        "<?php\n",
+        "namespace App;\n",
+        "class Widget {}\n",
+        "class C {\n",
+        "    private const B = [Widget::class => 'X', \\stdClass::class => 'Y'];\n",
+        "    public function f(): void {\n",
+        "        $b = self::B;\n",
+        "        $b;\n",
+        "    }\n",
+        "}\n",
+    );
+    let hover = hover_at(&backend, uri, content, 7, 10).expect("hover $b");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains(r"array{'App\\Widget': 'X', stdClass: 'Y'}"),
+        "the constant should keep its class-name keys, got: {text}"
+    );
+}
+
 /// A heterogeneous array literal used as a fixed tuple resolves its
 /// foreach element to a union of positional shapes. Indexing a position
 /// that only exists on one arm, combined with a `??` class-string

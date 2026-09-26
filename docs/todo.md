@@ -107,10 +107,7 @@ unlikely to move the needle for most users.
 | B424 | [A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable](todo/bugs.md#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable) | Low         | Medium      |
 | B434 | [An assignment inside an arrow function body is not seen](todo/bugs.md#b434-an-assignment-inside-an-arrow-function-body-is-not-seen) | Low         | Low-Medium  |
 | B427 | [The forward walker ignores `@param-closure-this`](todo/bugs.md#b427-the-forward-walker-ignores-param-closure-this) | Low-Medium  | Medium      |
-| B429 | [A `class-string` key is widened to `string` when an array is written through it](todo/bugs.md#b429-a-class-string-key-is-widened-to-string-when-an-array-is-written-through-it) | Low-Medium  | Low         |
-| B430 | [`isset()` on a constant shape read with a dynamic key loses the element type](todo/bugs.md#b430-isset-on-a-constant-shape-read-with-a-dynamic-key-loses-the-element-type) | Low-Medium  | Low-Medium  |
-| B431 | [A class constant array keyed by `Foo::class` is a bare `array`](todo/bugs.md#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array) | Low-Medium  | Low-Medium  |
-| B432 | [A write through a dynamic key into a nested offset turns each shape entry into a generic array](todo/bugs.md#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array) | Low-Medium  | Medium      |
+| B435 | [A `foreach` that writes every element of an array still joins the elements as they were](todo/bugs.md#b435-a-foreach-that-writes-every-element-of-an-array-still-joins-the-elements-as-they-were) | Low-Medium  | Medium      |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

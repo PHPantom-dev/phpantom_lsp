@@ -148,19 +148,60 @@ fn merge_nested_array_write_inner(
                 updated[index].optional = false;
                 return PhpType::array_shape(updated);
             }
+            // A written-out index the shape does not have yet adds that
+            // slot, the same way a string key adds its entry. An empty
+            // shape is left to the generic pair: it has no arity to keep,
+            // and a run of `$data[0] = …; $data[1] = …;` onto `[]` is
+            // rarely a promise about how many entries there are.
+            if let Some(slot) = slot
+                && let TypeKind::ArrayShape(entries) = base.kind()
+                && !entries.is_empty()
+                && let Some(runtime_keys) = runtime_shape_keys(entries)
+            {
+                let slot_key = slot.to_string();
+                if !runtime_keys.contains(&slot_key) {
+                    let inner_merged = if keys.len() == 1 {
+                        value_type.clone()
+                    } else {
+                        merge_nested_array_write(
+                            &PhpType::array_shape(Vec::new()),
+                            &keys[1..],
+                            value_type,
+                            in_loop,
+                        )
+                    }
+                    .widen_scalar_literals();
+                    if i64::try_from(*slot).ok() == next_append_index(entries) {
+                        return append_to_shape(base, entries, &inner_merged);
+                    }
+                    let mut updated: Vec<ShapeEntry> = entries.to_vec();
+                    updated.push(ShapeEntry {
+                        key: Some(slot_key),
+                        value_type: inner_merged,
+                        optional: false,
+                    });
+                    return PhpType::array_shape(updated);
+                }
+            }
             if keys.len() == 1
                 && let Some(entries) = base.shape_entries()
                 && let Some(updated) = write_literal_keys_into_shape(entries, key_type, value_type)
             {
                 return updated;
             }
-            let inner_merged = if keys.len() == 1 {
-                value_type.clone()
-            } else {
-                let inner_base = keyed_slot_base(base);
-                merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop)
-            };
-            merge_keyed_type(base, key_type, &inner_merged)
+            if keys.len() == 1 {
+                return merge_keyed_type(base, key_type, value_type);
+            }
+            // The inner write started from the element type the array
+            // already holds, so what it produced is that element after the
+            // write rather than a new value beside it, and it replaces the
+            // element type instead of joining it. Joining would keep the
+            // element as it was before the write, so a key added below a
+            // dynamic key could never be read back as present.
+            let inner_base = keyed_slot_base(base);
+            let inner_merged =
+                merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop);
+            merge_keyed_type_inner(base, key_type, &inner_merged, false)
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");
@@ -559,6 +600,18 @@ pub(super) fn merge_keyed_type(
     key_type: &PhpType,
     value_type: &PhpType,
 ) -> PhpType {
+    merge_keyed_type_inner(base, key_type, value_type, true)
+}
+
+/// [`merge_keyed_type`], but with `union_values` false the written value
+/// replaces the base's value type instead of joining it. The keys still
+/// join either way.
+fn merge_keyed_type_inner(
+    base: &PhpType,
+    key_type: &PhpType,
+    value_type: &PhpType,
+    union_values: bool,
+) -> PhpType {
     // Normalizing rebuilds a key through `kind()`, which sees straight
     // through the benevolence marker, so the leniency decision below reads
     // the types as they arrived rather than as they normalize.
@@ -589,7 +642,7 @@ pub(super) fn merge_keyed_type(
 
     // Collect existing value types from the base.
     let mut elem_types: Vec<PhpType> = Vec::new();
-    let existing_elem = base.iterable_element_type();
+    let existing_elem = base.iterable_element_type().filter(|_| union_values);
     if let Some(existing_elem) = &existing_elem {
         for member in existing_elem.union_members() {
             if !member.is_empty() {
@@ -780,7 +833,14 @@ pub(super) fn normalize_array_key_type(ty: &PhpType) -> Option<PhpType> {
                 push_unique(normalized, PhpType::int());
                 true
             }
-            _ if ty.is_string_subtype() || is_non_numeric_string_domain(ty) => {
+            // A class, interface, or callable name can never be a decimal
+            // integer, so PHP stores it as the string it is and the refined
+            // type is already a valid key.
+            _ if is_non_numeric_string_domain(ty) => {
+                push_unique(normalized, ty.clone());
+                true
+            }
+            _ if ty.is_string_subtype() => {
                 // Only a *literal* decimal-integer string is known to become
                 // an int key (handled above).  A broad string keeps `string`,
                 // because widening it to `int|string` would mismatch every

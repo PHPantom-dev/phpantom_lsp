@@ -1546,9 +1546,15 @@ pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 /// array element: as the literal string, not the wrapper type a bare
 /// `Foo::class` expression resolves to on its own.
 fn class_const_fetch_as_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    class_const_fetch_name(value, resolve).map(|name| PhpType::literal_string_value(&name))
+}
+
+/// The class name a `Foo::class` expression names, resolved against the
+/// reading file.
+fn class_const_fetch_name(value: &str, resolve: TextResolver<'_>) -> Option<String> {
     match resolve(value)?.kind() {
         TypeKind::ClassString(Some(inner)) => match inner.kind() {
-            TypeKind::Named(name) => Some(PhpType::literal_string_value(name.as_str())),
+            TypeKind::Named(name) => Some(name.trim_start_matches('\\').to_string()),
             _ => None,
         },
         _ => None,
@@ -1592,7 +1598,12 @@ fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option
         let (key, value) = match split_top_level_arrow(item) {
             Some((key_text, value_text)) => {
                 keyed = true;
-                let key = literal_shape_key(key_text.trim())?;
+                let key_text = key_text.trim();
+                let key = literal_shape_key(key_text).or_else(|| {
+                    // A class name is never a decimal integer, so a
+                    // `Foo::class` key stays the string it names.
+                    class_const_fetch_name(key_text, resolve?)
+                })?;
                 (Some(key), value_text)
             }
             None => (None, item),

@@ -154,108 +154,33 @@ needs the same, from the call-argument arms of both walker entry points.
 
 ## Array types
 
-### B429. A `class-string` key is widened to `string` when an array is written through it
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-/** @param class-string $n */
-function f(string $n): array {
-    $mapping = [];
-    $mapping[$n] = 'y'; // should be non-empty-array<class-string, 'y'>, is non-empty-array<string, string>
-    return $mapping;    // so a declared array<class-string, string> is reported
-}
-```
-
-`normalize_array_key_type` maps every non-numeric string domain
-(`class-string`, `interface-string`, and the rest) to plain `string`.
-PHP never coerces those keys, so the refined type is a valid key as it
-stands, and PHPStan keeps it. Erasing it makes every
-`array<class-string, …>` return that is built by writing keys reject its
-own value. The unit test
-`collection_key_normalization_preserves_non_numeric_string_domains` in
-`array_shape_writes_tests.rs` pins the current `string` answer, so
-changing this means deciding against that test.
-
-Seen in phpstan-src (`src/DependencyInjection/ValidateServiceTagsExtension.php`,
-the `$mapping[$class->name] = …` loop in `getInterfaceTagMapping()`).
-
-**Where to look:** `normalize_array_key_type` in
-`type_engine/variable/array_shape_writes.rs`.
-
-### B430. `isset()` on a constant shape read with a dynamic key loses the element type
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-$g = [$a];
-$g[] = $b;                         // array{P, P}
-if (!isset($g[$k])) { return; }    // $k is int
-$g[$k]->id;                        // $g[$k] should be P, is mixed
-```
-
-Without the `isset()` guard, `$g[$k]` is `P`, and the same guard over a
-`list<P>` keeps `P` too. Only a constant shape guarded through a
-non-literal key comes out `mixed`, which then reports
-`Cannot verify property 'id'` on the read. Seen in a Laravel feature
-test that indexes a two-element list of models with the entries of a
-data-provider array.
-
-**Where to look:** the `isset`/`!isset` arm of the null narrowing that
-records the synthetic `$g[$k]` key
-(`type_engine/variable/forward_walk/cond_narrowing/null_narrowing.rs`),
-and how the shape's element type is looked up for a key that is not a
-literal.
-
-### B431. A class constant array keyed by `Foo::class` is a bare `array`
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class C {
-    private const B = [\stdClass::class => 'X'];
-    private const A = ['k' => 'X'];
-    public function f(): void {
-        self::B; // should be array{stdClass: 'X'}, is array
-        self::A; // array{k: 'X'}, as expected
-    }
-}
-```
-
-An initialiser whose keys are `::class` constants is not inferred at
-all, so the constant loses both its keys and its values. A literal
-string key works. Seen in phpstan-src
-(`build/PHPStan/Build/TurboAttributeCollector.php`, `VENDORED_PAIRS`),
-where the bare `array` survives as the `array|` at the front of the
-inferred return type.
-
-**Where to look:** the constant-initialiser inference behind
-`infer_type_from_constant_value_resolved` and
-`folded_class_constant_type` (`rhs_resolution/property_access.rs`
-calls both), for array keys that are class-constant accesses.
-
-### B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array
+### B435. A `foreach` that writes every element of an array still joins the elements as they were
 **Impact: Low-Medium · Complexity: Medium**
 
 ```php
-/** @var array<string, array{string, bool, string}> $pairs */
-foreach (array_keys($pairs) as $cn) {
+/** @param array<string, array{string, bool, string}> $pairs */
+foreach (array_keys($pairs) as $cn) {  // or `foreach ($pairs as $cn => $_)`
     $pairs[$cn][3] = ['I'];
 }
 // should be array<string, array{string, bool, string, array{'I'}}>
-// is non-empty-array<string, array{…}|non-empty-array<int, string|bool|array{'I'}>>
+// is array<string, array{string, bool, string}>|non-empty-array<string, array{string, bool, string, array{'I'}}>
 ```
 
-A write to a literal offset below a dynamic key should add that offset to
-the element shape it reaches. Instead the element is joined with a
-generic `non-empty-array<int, …>` holding every value, so the shape is
-lost and any declared element shape rejects it. Seen in phpstan-src
+A loop over an array's own keys that writes the element at each key
+rewrites every element, so after the loop the element type is the one the
+body wrote, whether the loop ran or not (an empty array has no elements to
+leave behind). The walker joins the scope from before the loop instead,
+as it would for a loop that might skip some keys, so a declared return
+that spells out the added entry rejects the array. Seen in phpstan-src
 (`build/PHPStan/Build/TurboAttributeCollector.php`, the
 `$pairs[$className][3] = $reflection->getInterfaceNames()` loop), whose
-return type is reported against its own `@return` array shape. That
-report also carries
-[B431](#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array).
+return type is reported against its own `@return` array shape.
 
-**Where to look:** `merge_nested_array_write` in
-`type_engine/variable/array_shape_writes.rs`, for an `ArrayWriteKey::Keyed`
-level followed by an `ArrayWriteKey::Shape` one.
+**Where to look:** the `foreach` handling in
+`type_engine/variable/forward_walk/`, where the post-loop scope joins the
+pre-loop one. The body's write to `$arr[$key]` (with `$key` the loop's
+key, or a value iterated from `array_keys($arr)`) would have to replace
+the array's element type rather than join it.
 
 ## Laravel
 
