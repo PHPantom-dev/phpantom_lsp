@@ -112,5 +112,44 @@ pub(crate) fn process_nested_assignments<'b>(
             };
             process_nested_assignments(arg_expr, scope, ctx);
         }
+        return;
+    }
+    // Assignment in a constructor argument, or in an array literal:
+    //   `new Foo([$x = 1])`.
+    match expr {
+        Expression::Instantiation(inst) => {
+            if let Some(arg_list) = &inst.argument_list {
+                for arg in arg_list.arguments.iter() {
+                    process_nested_assignments(arg.value(), scope, ctx);
+                }
+            }
+        }
+        Expression::Array(array) => {
+            for elem in array.elements.iter() {
+                process_nested_assignments_in_element(elem, scope, ctx);
+            }
+        }
+        Expression::LegacyArray(array) => {
+            for elem in array.elements.iter() {
+                process_nested_assignments_in_element(elem, scope, ctx);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn process_nested_assignments_in_element<'b>(
+    elem: &'b ArrayElement<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    match elem {
+        ArrayElement::KeyValue(kv) => {
+            process_nested_assignments(kv.key, scope, ctx);
+            process_nested_assignments(kv.value, scope, ctx);
+        }
+        ArrayElement::Value(v) => process_nested_assignments(v.value, scope, ctx),
+        ArrayElement::Variadic(v) => process_nested_assignments(v.value, scope, ctx),
+        ArrayElement::Missing(_) => {}
     }
 }

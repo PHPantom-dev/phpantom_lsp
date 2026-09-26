@@ -1,0 +1,12 @@
+// test: invoking a closure held in a variable returns its scalar return type
+// feature: hover
+// expect: $s = string
+---
+<?php
+
+function test(): void
+{
+    $c = function (): string { return ''; };
+    $s = $c();
+    echo $<>s;
+}

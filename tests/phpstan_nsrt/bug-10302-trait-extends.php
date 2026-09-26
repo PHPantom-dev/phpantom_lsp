@@ -11,8 +11,8 @@ trait myTrait
 {
 	function test(): void
 	{
-		assertType('int', $this->x); // SKIP: $this in a @phpstan-require-extends trait does not see the required class's members
-		assertType('string', $this->y); // SKIP: $this in a @phpstan-require-extends trait does not see the required class's members
+		assertType('int', $this->x);
+		assertType('string', $this->y);
 		assertType('*ERROR*', $this->z);
 	}
 }

@@ -1,0 +1,11 @@
+// test: `new` of a class that cannot be loaded still has the named type
+// feature: hover
+// expect: $x = UndeclaredFoo
+---
+<?php
+
+function test(): void
+{
+    $x = new UndeclaredFoo();
+    echo $<>x;
+}

@@ -182,6 +182,40 @@ pub(crate) fn seed_closure_captures(
     }
 }
 
+/// The scope to enter the closure literal of `(closure)->call($obj)` from,
+/// or `None` when `mc` is not that call.
+///
+/// `Closure::call()` runs the closure with `$this` bound to its first
+/// argument, so the closure captures that instead of the enclosing
+/// `$this`, along with nothing recorded against the old one.
+pub(crate) fn closure_call_scope(
+    mc: &MethodCall<'_>,
+    outer: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<ScopeState> {
+    let ClassLikeMemberSelector::Identifier(ident) = &mc.method else {
+        return None;
+    };
+    if !bytes_to_str(ident.value).eq_ignore_ascii_case("call")
+        || !matches!(
+            crate::parser::unwrap_parens(mc.object),
+            Expression::Closure(_) | Expression::ArrowFunction(_)
+        )
+    {
+        return None;
+    }
+    let new_this = mc.argument_list.arguments.first()?.value();
+    let bound = resolve_rhs_with_scope(new_this, outer, ctx);
+    if bound.is_empty() {
+        return None;
+    }
+    let mut scope = outer.clone();
+    scope.remove("$this");
+    scope.invalidate_dependent_keys("$this");
+    scope.set("$this", bound);
+    Some(scope)
+}
+
 /// Try to enter a closure or arrow function if the cursor is inside one.
 ///
 /// Returns `true` if the cursor was inside a closure and the scope was
@@ -344,6 +378,13 @@ pub(crate) fn try_enter_closure_expr<'b>(
             return try_enter_closure_expr(assignment.rhs, scope, ctx, None);
         }
         Expression::Call(call) => {
+            if let Call::Method(mc) = call
+                && let Some(mut call_scope) = closure_call_scope(mc, scope, ctx)
+                && try_enter_closure_expr(mc.object, &mut call_scope, ctx, None)
+            {
+                *scope = call_scope;
+                return true;
+            }
             // Check if any argument is a closure containing the cursor.
             // Infer callable parameter types from the function/method
             // signature so closure params get generic-substituted types

@@ -55,7 +55,7 @@ class Foo
 		assertType('stdClass', $this->stdClassProp);
 		assertType('stdClass', $this->unrelatedDocComment);
 		assertType('mixed', $this->explicitMixed);
-		assertType('array<mixed, mixed>', $this->array); // SKIP: a property inferred from the constructor drops [] and does not narrow a readonly union
+		assertType('array<mixed, mixed>', $this->array);
 	}
 
 }

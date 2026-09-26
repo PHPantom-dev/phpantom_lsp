@@ -1347,14 +1347,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 .map(|t| crate::util::resolve_php_type_names(&t, class_loader))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
-            let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                ret_type,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
+            let resolved = callable_return_resolution(ret_type, ctx);
             if !resolved.is_empty() {
-                return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                return resolved;
             }
         }
 
@@ -1367,19 +1362,22 @@ pub(super) fn resolve_rhs_function_call<'b>(
         let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
         for rt in &var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    ret_type,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved = callable_return_resolution(ret_type, ctx);
                 if !resolved.is_empty() {
-                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                    return resolved;
                 }
             }
         }
 
-        // 3. Check for __invoke().  When $f holds an object with an
+        // 3. An array callable, `[$obj, 'method']`, calls the method.
+        for rt in &var_types {
+            let resolved = array_callable_return(&rt.type_string, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+
+        // 4. Check for __invoke().  When $f holds an object with an
         //    __invoke() method, $f() should return __invoke()'s return
         //    type.
         let var_classes = ResolvedType::into_arced_classes(var_types);
@@ -1447,22 +1445,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // back to `__invoke()`.
         for rt in &callee_results {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    ret_type,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved = callable_return_resolution(ret_type, ctx);
                 if !resolved.is_empty() {
-                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
-                }
-                if !ret_type.is_empty() {
-                    return vec![resolved_type_with_lookup(
-                        ret_type.clone(),
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                    )];
+                    return resolved;
                 }
             }
         }
@@ -1492,6 +1477,102 @@ pub(super) fn resolve_rhs_function_call<'b>(
         }
     }
 
+    vec![]
+}
+
+/// What calling a value whose callable type returns `ret_type` produces.
+fn callable_return_resolution(ret_type: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        ret_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    if !resolved.is_empty() {
+        return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+    }
+    if ret_type.is_empty() {
+        return vec![];
+    }
+    vec![resolved_type_with_lookup(
+        ret_type.clone(),
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    )]
+}
+
+/// What `(closure)->call($obj)` returns: whatever the closure literal does,
+/// run with `$this` bound to `$obj`.
+fn closure_call_return(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let closure = crate::parser::unwrap_parens(object);
+    if let Some(declared) = extract_closure_or_arrow_return_type(closure) {
+        let resolved = callable_return_resolution(&declared, ctx);
+        return (!resolved.is_empty()).then_some(resolved);
+    }
+    let Expression::ArrowFunction(arrow) = closure else {
+        return None;
+    };
+    let mut body_ctx = ctx.clone();
+    if let Some(new_this) = argument_list.arguments.first() {
+        let bound = resolve_rhs_expression(new_this.value(), ctx);
+        if !bound.is_empty() {
+            body_ctx
+                .match_arm_narrowing
+                .insert("$this".to_string(), bound);
+        }
+    }
+    let resolved = resolve_rhs_expression(arrow.expression, &body_ctx);
+    (!resolved.is_empty()).then_some(resolved)
+}
+
+/// What calling the array callable `callable` (`[$obj, 'method']`) returns.
+///
+/// Only an object in the first slot is read: `['Foo', 'bar']` calls `bar`
+/// statically, which is a different call with rules of its own.
+fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let Some([receiver, method]) = callable.shape_entries() else {
+        return vec![];
+    };
+    let positional = |entry: &crate::php_type::ShapeEntry, index: &str| {
+        !entry.optional && entry.key.as_deref().is_none_or(|k| k == index)
+    };
+    if !positional(receiver, "0") || !positional(method, "1") {
+        return vec![];
+    }
+    let TypeKind::Literal(literal) = method.value_type.kind() else {
+        return vec![];
+    };
+    let Some(method_name) = literal.string_content() else {
+        return vec![];
+    };
+    if !receiver.value_type.is_object_like() {
+        return vec![];
+    }
+    let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &receiver.value_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    for owner in &owners {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            owner,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if let Some(ret) = merged
+            .get_method(&method_name)
+            .and_then(|m| m.return_type.as_ref())
+        {
+            let ret = ret.replace_self_bound(&owner.fqn(), None);
+            return callable_return_resolution(&ret, ctx);
+        }
+    }
     vec![]
 }
 
@@ -1592,6 +1673,11 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         // `runtime_named_member_type`.
         _ => return super::runtime_named_member_type(),
     };
+    if method_name.eq_ignore_ascii_case("call")
+        && let Some(returned) = closure_call_return(object, argument_list, ctx)
+    {
+        return returned;
+    }
     let (owner_classes, receiver_resolved) =
         receiver.unwrap_or_else(|| resolve_method_receiver(object, ctx));
 
@@ -2536,9 +2622,11 @@ pub(super) fn resolve_rhs_static_call(
         Expression::Self_(_)
         | Expression::Static(_)
         | Expression::Parent(_)
-        | Expression::Identifier(_) => {
-            crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)
-        }
+        | Expression::Identifier(_) => crate::class_lookup::class_expression_name(
+            static_call.class,
+            ctx.current_class,
+            ctx.class_loader,
+        ),
         // ── `$var::method()` where `$var` holds a class-string ──
         Expression::Variable(Variable::Direct(dv)) => {
             let var_name = bytes_to_str(dv.name).to_string();

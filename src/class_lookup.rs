@@ -155,16 +155,25 @@ pub(crate) fn find_class_by_name<'a>(
 /// forwards it), and `parent` with its parent, or `None` when it has
 /// none.
 ///
+/// A name is resolved the way PHP resolves it in source (see
+/// [`crate::util::resolve_source_class_name`]): a class in the current
+/// namespace shadows a global one of the same name.
+///
 /// Every other expression kind (a variable holding a class-string, a call)
 /// needs resolution this cannot do and yields `None`; a caller that
 /// handles one matches it before reaching here.
 pub(crate) fn class_expression_name(
     expr: &mago_syntax::cst::Expression<'_>,
     current_class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
     match expr {
-        Expression::Identifier(ident) => Some(crate::atom::bytes_to_str(ident.value()).to_string()),
+        Expression::Identifier(ident) => Some(crate::util::resolve_source_class_name(
+            crate::atom::bytes_to_str(ident.value()),
+            current_class.file_namespace.as_deref(),
+            class_loader,
+        )),
         Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
         Expression::Parent(_) => current_class.parent_class.map(|a| a.to_string()),
         _ => None,

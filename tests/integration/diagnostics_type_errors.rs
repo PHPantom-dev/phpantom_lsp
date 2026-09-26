@@ -12764,3 +12764,78 @@ namespace App {
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// `Event::class` inside `Acme\Model\Events` names the `Event` declared in
+/// that namespace, even when a global class of the same short name is
+/// loaded (the `event` extension's `Event`, say).
+#[test]
+fn class_constant_names_the_same_namespace_class_over_a_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nfinal class Event {}\n");
+    backend.update_ast(
+        "file:///Model.php",
+        "<?php\nnamespace Acme\\Model;\nabstract class Model {}\n",
+    );
+    backend.update_ast(
+        "file:///Event.php",
+        "<?php\nnamespace Acme\\Model\\Events;\nuse Acme\\Model\\Model;\nclass Event extends Model {}\n",
+    );
+    let php = r#"<?php
+namespace Acme\Model\Events;
+
+use Acme\Model\Model;
+
+final class EventSubcategory extends Model
+{
+    /** @param class-string<Model> $related */
+    public function belongsTo(string $related): void {}
+
+    public function takesModel(Model $model): void {}
+
+    public function event(): void
+    {
+        $this->belongsTo(Event::class);
+        $class = Event::class;
+        $this->belongsTo($class);
+        $this->takesModel(new $class());
+    }
+}
+"#;
+    let messages = messages_with_code(
+        &collect_diagnostics_with(&backend, php, Backend::collect_argument_type_diagnostics),
+        "type_mismatch_argument",
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A branch that `!== null` makes impossible, after an `instanceof` chain
+/// has ruled out every class the value could be, holds `never` there, so
+/// nothing used inside it is checked against the `null` already excluded.
+#[test]
+fn no_argument_error_in_branch_a_null_check_makes_impossible() {
+    let php = r#"<?php
+class A {}
+class B {}
+class Item {
+    /** @var A|B|null */
+    public $key;
+}
+function describe(object $o): string { return ''; }
+function f(Item $item, ?A $p): void {
+    if ($item->key instanceof A) {
+        return;
+    } elseif ($item->key instanceof B) {
+        return;
+    } elseif ($item->key !== null) {
+        describe($item->key);
+    }
+    if ($p instanceof A) {
+        return;
+    } elseif ($p !== null) {
+        describe($p);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}

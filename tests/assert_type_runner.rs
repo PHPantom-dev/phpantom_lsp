@@ -691,6 +691,11 @@ fn types_match(expected: &str, actual: &str) -> bool {
         return true;
     }
 
+    // `*NEVER*` is how PHPStan prints the bottom type.
+    if ne == "*NEVER*" && na == "never" {
+        return true;
+    }
+
     // Generator<K, V> is semantically equivalent to Generator<K, V, mixed, mixed>.
     // Normalize both sides to compare without trailing `mixed` params.
     let ne_gen = normalize_generator_params(&ne);
@@ -708,9 +713,21 @@ fn types_match(expected: &str, actual: &str) -> bool {
         return true;
     }
 
-    // Union type order may differ: sort members and compare.
-    let mut ne_parts: Vec<&str> = ne_short.split('|').collect();
-    let mut na_parts: Vec<&str> = na_short.split('|').collect();
+    // Union and intersection member order may differ: sort members and
+    // compare.
+    let sorted_members = |ty: &str| {
+        ty.split('|')
+            .map(|part| {
+                let mut members: Vec<&str> = part.split('&').collect();
+                members.sort();
+                members.join("&")
+            })
+            .collect::<Vec<_>>()
+    };
+    let ne_members = sorted_members(&ne_short);
+    let na_members = sorted_members(&na_short);
+    let mut ne_parts: Vec<&str> = ne_members.iter().map(String::as_str).collect();
+    let mut na_parts: Vec<&str> = na_members.iter().map(String::as_str).collect();
     ne_parts.sort();
     na_parts.sort();
     if ne_parts == na_parts {

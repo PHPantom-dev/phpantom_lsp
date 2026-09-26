@@ -71,8 +71,7 @@ pub(crate) fn seed_params<'b>(
 
         let param_results = resolve_param_type(
             &pname,
-            native_type.as_ref(),
-            is_variadic,
+            param,
             &EnclosingMethod {
                 span_start: method_span_start,
                 name: method_name,
@@ -261,8 +260,7 @@ pub(crate) struct EnclosingMethod<'a> {
 /// methods with no body).
 pub(crate) fn resolve_param_type(
     pname: &str,
-    native_type: Option<&PhpType>,
-    is_variadic: bool,
+    param: &FunctionLikeParameter<'_>,
     enclosing: &EnclosingMethod<'_>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
@@ -272,23 +270,36 @@ pub(crate) fn resolve_param_type(
         has_scope_attr,
         trait_prototype,
     } = *enclosing;
+    let is_variadic = param.ellipsis.is_some();
+    // The hint as written, which is what the declarations it is compared
+    // against below record.
+    let raw_native = param.hint.as_ref().map(|h| extract_hint_type(h));
+    // A `null` default makes the parameter accept null whatever its type
+    // says (`bool $a = null` is `?bool`).
+    let default_is_null = crate::parser::param_default_is_null(param);
+    let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
+    let native_type = raw_native.clone().map(accept_default);
+    let native_type = native_type.as_ref();
     // Eloquent scope Builder enrichment: when the enclosing class
     // extends Eloquent Model and this is a scope method (convention
     // or #[Scope] attribute), enrich bare `Builder` to
     // `Builder<EnclosingModel>`.
-    let enriched_type = native_type.and_then(|nt| {
-        if let Some(mname) = method_name {
-            super::super::resolution::enrich_builder_type_in_scope(
-                nt,
-                mname,
-                has_scope_attr,
-                ctx.current_class,
-                ctx.class_loader,
-            )
-        } else {
-            None
-        }
-    });
+    let enriched_type = raw_native
+        .as_ref()
+        .and_then(|nt| {
+            if let Some(mname) = method_name {
+                super::super::resolution::enrich_builder_type_in_scope(
+                    nt,
+                    mname,
+                    has_scope_attr,
+                    ctx.current_class,
+                    ctx.class_loader,
+                )
+            } else {
+                None
+            }
+        })
+        .map(accept_default);
 
     // Check the `@param` docblock annotation.
     let raw_docblock_type = super::super::resolution::declared_param_docblock_type(
@@ -302,7 +313,7 @@ pub(crate) fn resolve_param_type(
     // which `@extends`/`@implements` template substitution may have
     // narrowed below the native hint PHP forced the override to restate.
     let inherited_refinement = if raw_docblock_type.is_none() && enriched_type.is_none() {
-        inherited_param_refinement(pname, method_name, native_type, ctx)
+        inherited_param_refinement(pname, method_name, raw_native.as_ref(), ctx).map(accept_default)
     } else {
         None
     };
@@ -313,7 +324,9 @@ pub(crate) fn resolve_param_type(
     let trait_refinement =
         if inherited_refinement.is_none() && raw_docblock_type.is_none() && enriched_type.is_none()
         {
-            trait_prototype.and_then(|proto| prototype_param_refinement(proto, pname, native_type))
+            trait_prototype
+                .and_then(|proto| prototype_param_refinement(proto, pname, raw_native.as_ref()))
+                .map(accept_default)
         } else {
             None
         };
@@ -330,10 +343,27 @@ pub(crate) fn resolve_param_type(
     // the generic args survive into the resolved ClassInfo.
     let native_for_effective = type_for_resolution.cloned();
     let doc_parsed = raw_docblock_type.clone();
+    // A template can take the `null` itself, so it keeps its own name
+    // (`@param T $t = null` stays `T`).
+    let doc_accepts_default = default_is_null
+        && !doc_parsed.as_ref().is_some_and(|doc| {
+            super::super::resolution::references_method_template(
+                doc,
+                ctx.content,
+                method_span_start as usize,
+            )
+        });
     let effective_type = crate::docblock::resolve_effective_type_typed(
         native_for_effective.as_ref(),
         doc_parsed.as_ref(),
-    );
+    )
+    .map(|ty| {
+        if doc_accepts_default {
+            ty.or_null()
+        } else {
+            ty
+        }
+    });
 
     // Substitute method-level template params with their bounds.
     let effective_type = effective_type.map(|ty| {
@@ -453,30 +483,32 @@ pub(crate) fn resolve_param_type(
         }
     }
 
-    // A variadic parameter collects its arguments into an array.  Named
-    // arguments land in it under their names, so its keys are
-    // `int|string` rather than a list's (PHPStan and Psalm agree).  The
-    // array exists even when the elements are untyped.
     if is_variadic {
-        let variadic_array = |elem: PhpType| {
-            PhpType::generic(
-                "array",
-                vec![
-                    PhpType::union(vec![PhpType::int(), PhpType::string()]),
-                    elem,
-                ],
-            )
-        };
-        if param_results.is_empty() {
-            param_results.push(ResolvedType::from_type_string(PhpType::mixed()));
-        }
-        for rt in &mut param_results {
-            rt.type_string = variadic_array(rt.type_string.clone());
-            rt.class_info = None;
-        }
+        wrap_variadic(&mut param_results);
     }
 
     param_results
+}
+
+/// Turn a variadic parameter's element types into the array it receives.
+///
+/// Named arguments land in it under their names, so its keys are
+/// `int|string` rather than a list's (PHPStan and Psalm agree).  The array
+/// exists even when the elements are untyped.
+pub(crate) fn wrap_variadic(param_results: &mut Vec<ResolvedType>) {
+    if param_results.is_empty() {
+        param_results.push(ResolvedType::from_type_string(PhpType::mixed()));
+    }
+    for rt in param_results {
+        rt.type_string = PhpType::generic(
+            "array",
+            vec![
+                PhpType::union(vec![PhpType::int(), PhpType::string()]),
+                rt.type_string.clone(),
+            ],
+        );
+        rt.class_info = None;
+    }
 }
 
 /// The declaration a trait's own method implements.

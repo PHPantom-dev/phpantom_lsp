@@ -282,6 +282,11 @@ pub(super) fn resolve_rhs_instantiation(
             return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 
+        // A class that cannot be loaded is still the type `new` produces,
+        // just without members to offer.
+        if classes.is_empty() {
+            return vec![ResolvedType::from_type_string(parsed_name)];
+        }
         return ResolvedType::from_classes_with_hint(classes, parsed_name);
     }
 

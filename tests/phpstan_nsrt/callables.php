@@ -17,10 +17,10 @@ class Foo
 		$stringWithStaticMethod = 'Callables\\Foo::doFoo';
 		$arrayWithInstanceMethod = [$this, 'doFoo'];
 		assertType('int', $foo());
-		assertType('string', $closure()); // SKIP: a closure called through ->call() or a callable held in a variable is not resolved
+		assertType('string', $closure());
 		assertType('*ERROR*', $arrayWithStaticMethod());
 		assertType('*ERROR*', $stringWithStaticMethod());
-		assertType('float', $arrayWithInstanceMethod()); // SKIP: a closure called through ->call() or a callable held in a variable is not resolved
+		assertType('float', $arrayWithInstanceMethod());
 		assertType('mixed', $closureObject());
 	}
 

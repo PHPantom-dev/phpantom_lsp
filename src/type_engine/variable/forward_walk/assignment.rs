@@ -1066,18 +1066,12 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
         && ident.value == b"class"
     {
-        let class_name = match cca.class {
-            Expression::Identifier(id) => Some(bytes_to_str(id.value()).to_string()),
-            Expression::Self_(_) | Expression::Static(_) => {
-                if !ctx.current_class.name.is_empty() {
-                    Some(ctx.current_class.name.to_string())
-                } else {
-                    None
-                }
-            }
-            Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-            _ => None,
-        };
+        let class_name = crate::class_lookup::class_expression_name(
+            cca.class,
+            ctx.current_class,
+            ctx.class_loader,
+        )
+        .filter(|name| !name.is_empty());
         if let Some(name) = class_name {
             let resolved_name = name.strip_prefix('\\').unwrap_or(&name);
             // Resolve the class so we can store a proper ResolvedType

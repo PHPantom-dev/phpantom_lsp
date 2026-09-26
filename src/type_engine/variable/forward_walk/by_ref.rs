@@ -701,9 +701,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return,
             };
-            let Some(class_name) =
-                crate::class_lookup::class_expression_name(sc.class, ctx.current_class)
-            else {
+            let Some(class_name) = crate::class_lookup::class_expression_name(
+                sc.class,
+                ctx.current_class,
+                ctx.class_loader,
+            ) else {
                 return;
             };
             let Some((parameters, callee)) = resolved_method_callee(&class_name, &method_name, ctx)

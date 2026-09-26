@@ -165,6 +165,14 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
         // impossible `null` receiver there erase what the live paths
         // knew — which is what a first-iteration `if ($acc === null)`
         // seed/merge accumulator depends on.
+        //
+        // Inside that path the variable holds nothing at all, which is
+        // `never`: left on `null`, every use of it there was checked
+        // against the value the condition just ruled out.
+        scope.set(
+            var_name,
+            vec![ResolvedType::from_type_string(PhpType::never())],
+        );
         scope.unreachable = true;
     }
 }

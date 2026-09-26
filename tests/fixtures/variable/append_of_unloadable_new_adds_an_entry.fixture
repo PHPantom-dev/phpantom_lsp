@@ -1,0 +1,12 @@
+// test: appending `new` of a class that cannot be loaded adds an entry
+// feature: hover
+// expect: array{UndeclaredFoo}
+---
+<?php
+
+function test(): void
+{
+    $arr = [];
+    $arr[] = new UndeclaredFoo();
+    echo $a<>rr;
+}

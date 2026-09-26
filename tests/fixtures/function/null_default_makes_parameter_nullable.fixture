@@ -1,0 +1,10 @@
+// test: a `null` default makes a typed parameter nullable, in any casing
+// feature: hover
+// expect: $a = ?bool
+---
+<?php
+
+function g(bool $a = Null): void
+{
+    echo $<>a;
+}

@@ -399,7 +399,10 @@ pub(crate) fn walk_closures_in_call<'b>(
             });
         }
         Call::Method(mc) => {
-            walk_closures_in_expr(mc.object, outer_scope, ctx, None);
+            match closure_call_scope(mc, outer_scope, ctx) {
+                Some(call_scope) => walk_closures_in_expr(mc.object, &call_scope, ctx, None),
+                None => walk_closures_in_expr(mc.object, outer_scope, ctx, None),
+            }
 
             let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
                 Some(bytes_to_str(ident.value).to_string())
@@ -635,7 +638,14 @@ pub(crate) fn seed_closure_params(
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
 
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+        // A `null` default makes the parameter accept null whatever its
+        // type says (`bool $a = null` is `?bool`).
+        let default_is_null = crate::parser::param_default_is_null(param);
+        let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
+        let native_type = param
+            .hint
+            .as_ref()
+            .map(|h| accept_default(extract_hint_type(h)));
 
         // Check the `@param` docblock annotation.
         //
@@ -654,10 +664,27 @@ pub(crate) fn seed_closure_params(
         .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
         .map(|t| super::param_seeding::resolve_docblock_param_type(&t, ctx));
 
+        // A template can take the `null` itself, so it keeps its own name
+        // (`@param T $t = null` stays `T`).
+        let doc_accepts_default = default_is_null
+            && !raw_docblock_type.as_ref().is_some_and(|doc| {
+                super::super::resolution::references_method_template(
+                    doc,
+                    ctx.content,
+                    fn_span_start as usize,
+                )
+            });
         let effective_type = crate::docblock::resolve_effective_type_typed(
             native_type.as_ref(),
             raw_docblock_type.as_ref(),
-        );
+        )
+        .map(|ty| {
+            if doc_accepts_default {
+                ty.or_null()
+            } else {
+                ty
+            }
+        });
 
         // Substitute method-level template params with their bounds.
         let effective_type = effective_type.map(|ty| {
@@ -805,12 +832,8 @@ pub(crate) fn seed_closure_params(
             vec![]
         };
 
-        // Variadic parameter wrapping.
-        if is_variadic && !param_results.is_empty() {
-            for rt in &mut param_results {
-                rt.type_string = PhpType::list(rt.type_string.clone());
-                rt.class_info = None;
-            }
+        if is_variadic {
+            super::param_seeding::wrap_variadic(&mut param_results);
         }
 
         // Closure/arrow-function parameters shadow same-named outer

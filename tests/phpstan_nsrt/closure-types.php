@@ -55,7 +55,7 @@ class Foo
 		}
 
 		(function () {
-			assertType('DateTimeInterface&stdClass', $this); // SKIP: a closure called through ->call() or a callable held in a variable is not resolved
+			assertType('DateTimeInterface&stdClass', $this);
 		})->call($foo);
 	}
 
@@ -64,7 +64,7 @@ class Foo
 			return;
 		}
 
-		(fn () => assertType('DateTimeInterface&stdClass', $this))->call($foo); // SKIP: a closure called through ->call() or a callable held in a variable is not resolved
+		(fn () => assertType('DateTimeInterface&stdClass', $this))->call($foo); // SKIP: an assignment inside an arrow function body is not seen
 	}
 
 }

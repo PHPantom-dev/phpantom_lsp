@@ -28,7 +28,7 @@ class FooWithAnonymousFunction
 			assertType('TypesNamespaceTypehints\Lorem', $loremObject);
 			assertType('mixed', $mixed);
 			assertType('array', $array);
-			assertType('bool|null', $isNullable); // SKIP: closure parameters: variadics are lists or untyped, and = Null is not nullable
+			assertType('bool|null', $isNullable);
 			assertType('callable(): mixed', $callable);
 			assertType('TypesNamespaceTypehints\FooWithAnonymousFunction', $self);
 		};

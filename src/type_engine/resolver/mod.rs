@@ -350,22 +350,24 @@ fn resolve_target_classes_expr_inner(
             // means `$this` is the subclass.  The scope only wins when it is
             // strictly narrower; otherwise it holds the lexically captured
             // `$this` the tag is there to replace.
-            if let Some(override_cls) =
-                super::variable::closure_resolution::find_closure_this_override(ctx)
-            {
+            if let Some(bound) = super::variable::closure_resolution::find_closure_this_types(ctx) {
                 let narrowed = from_scope.filter(|types| {
                     !types.is_empty()
                         && types.iter().all(|rt| {
                             rt.class_info.as_ref().is_some_and(|ci| {
-                                crate::class_lookup::is_subclass_of(
-                                    &ci.fqn(),
-                                    &override_cls.fqn(),
-                                    class_loader,
-                                )
+                                bound.iter().any(|b| {
+                                    b.class_info.as_ref().is_some_and(|bound_cls| {
+                                        crate::class_lookup::is_subclass_of(
+                                            &ci.fqn(),
+                                            &bound_cls.fqn(),
+                                            class_loader,
+                                        )
+                                    })
+                                })
                             })
                         })
                 });
-                return narrowed.unwrap_or_else(|| vec![ResolvedType::from_class(override_cls)]);
+                return narrowed.unwrap_or(bound);
             }
 
             let mut this_types = if let Some(scope_types) = from_scope {

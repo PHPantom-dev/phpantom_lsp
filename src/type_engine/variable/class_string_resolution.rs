@@ -36,7 +36,14 @@ fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mu
         .flatten();
     if let Some(cls) = local {
         ClassInfo::push_unique(results, ClassInfo::clone(cls));
-    } else if let Some(cls) = (ctx.class_loader)(name) {
+        return;
+    }
+    let fqn = crate::util::resolve_source_class_name(
+        name,
+        ctx.current_class.file_namespace.as_deref(),
+        ctx.class_loader,
+    );
+    if let Some(cls) = (ctx.class_loader)(&fqn) {
         ClassInfo::push_unique(results, Arc::unwrap_or_clone(cls));
     }
 }

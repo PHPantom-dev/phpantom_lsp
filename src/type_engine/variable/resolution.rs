@@ -1472,9 +1472,6 @@ fn resolve_abstract_method_param(
             continue;
         }
 
-        let is_variadic = param.ellipsis.is_some();
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
-
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
             current_class: ctx.current_class,
             all_classes: ctx.all_classes,
@@ -1494,8 +1491,7 @@ fn resolve_abstract_method_param(
 
         return super::forward_walk::resolve_param_type(
             pname,
-            native_type.as_ref(),
-            is_variadic,
+            param,
             &super::forward_walk::EnclosingMethod {
                 span_start: method.span().start.offset,
                 name: Some(&method_name_str),
@@ -1557,6 +1553,21 @@ pub(super) fn substitute_template_param_bounds(
     }
 
     ty.substitute(&subs)
+}
+
+/// Whether `ty` names one of the `@template` parameters the declaration
+/// starting at `method_start_offset` introduces.
+pub(super) fn references_method_template(
+    ty: &PhpType,
+    content: &str,
+    method_start_offset: usize,
+) -> bool {
+    if !type_may_contain_template_param(ty) {
+        return false;
+    }
+    extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
+        ty.references_any_template_param(&docblock::extract_template_params(docblock))
+    })
 }
 
 /// Check whether a `PhpType` tree may contain a bare template parameter
@@ -2086,8 +2097,11 @@ fn try_resolve_static_method_params<'a>(
         _ => return None,
     };
 
-    let class_name =
-        crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)?;
+    let class_name = crate::class_lookup::class_expression_name(
+        static_call.class,
+        ctx.current_class,
+        ctx.class_loader,
+    )?;
 
     let cls = (ctx.class_loader)(&class_name)?;
     let method_info = cls.get_method(method_name)?;
@@ -2107,7 +2121,11 @@ fn try_resolve_constructor_params<'a>(
     &'a ArgumentList<'a>,
     OutParamCallee,
 )> {
-    let class_name = crate::class_lookup::class_expression_name(inst.class, ctx.current_class)?;
+    let class_name = crate::class_lookup::class_expression_name(
+        inst.class,
+        ctx.current_class,
+        ctx.class_loader,
+    )?;
 
     let args = inst.argument_list.as_ref()?;
     let cls = (ctx.class_loader)(&class_name)?;

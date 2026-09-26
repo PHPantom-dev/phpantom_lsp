@@ -1648,6 +1648,18 @@ impl Backend {
                                     .and_then(|p| p.type_hint.clone())
                             }
                         }
+                        // The `[]` a collection starts out as is kept as the
+                        // empty shape until every assignment is in: see below.
+                        Expression::Array(array) => Some(if array.elements.is_empty() {
+                            PhpType::array_shape(Vec::new())
+                        } else {
+                            PhpType::array()
+                        }),
+                        Expression::LegacyArray(array) => Some(if array.elements.is_empty() {
+                            PhpType::array_shape(Vec::new())
+                        } else {
+                            PhpType::array()
+                        }),
                         _ => None,
                     };
 
@@ -1664,6 +1676,18 @@ impl Backend {
                 }
             }
             for (prop_name, mut types) in inferred {
+                // An empty array is a value of every array type, so a typed
+                // array assigned elsewhere already covers the `[]` the
+                // property starts out as.  On its own it stands for any
+                // array, since the property is filled in later.
+                let empty = PhpType::array_shape(Vec::new());
+                if types.contains(&empty) {
+                    let covered = types.iter().any(|t| *t != empty && t.is_array_like());
+                    types.retain(|t| *t != empty);
+                    if !covered {
+                        types.push(PhpType::array());
+                    }
+                }
                 if let Some(prop) = properties.iter_mut().find(|p| {
                     p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
                 }) {
@@ -1856,6 +1880,32 @@ class Holder {
         assert_eq!(property_type(&classes, "Holder", "typed"), "User");
         assert_eq!(property_type(&classes, "Holder", "doc"), "Widget");
         assert_eq!(property_type(&classes, "Holder", "joined"), "<none>");
+    }
+
+    /// An array literal makes an untyped property an `array`, and the `[]`
+    /// it starts out as gives way to a typed array assigned elsewhere.
+    #[test]
+    fn untyped_property_infers_array_from_array_literal() {
+        let src = r#"<?php
+class Holder {
+    private $plain;
+    private $filled;
+    private $legacy;
+    public function __construct() {
+        $this->plain = [];
+        $this->filled = [];
+        $this->legacy = array(1, 2);
+    }
+    /** @param list<User> $users */
+    public function setFilled(array $users) {
+        $this->filled = $users;
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "Holder", "plain"), "array");
+        assert_eq!(property_type(&classes, "Holder", "filled"), "list<User>");
+        assert_eq!(property_type(&classes, "Holder", "legacy"), "array");
     }
 
     /// `$this->prop = new ClassName()` infers in any method, not just the

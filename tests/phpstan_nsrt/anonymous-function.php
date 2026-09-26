@@ -8,7 +8,7 @@ function () {
 	$integer = 1;
 	function (string $str, ...$arr) use ($integer, $bar) {
 		assertType('string', $str);
-		assertType('array<int|string, mixed>', $arr); // SKIP: closure parameters: variadics are lists or untyped, and = Null is not nullable
+		assertType('array<int|string, mixed>', $arr);
 		assertType('1', $integer);
 		assertType('*ERROR*', $bar);
 	};

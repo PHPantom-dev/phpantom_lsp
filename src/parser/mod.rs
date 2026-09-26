@@ -1281,11 +1281,23 @@ pub(crate) fn extract_parameters(
 ///
 /// Used to detect the implicit-nullable form `Type $x = null`, which PHP
 /// treats as `?Type` (mandatory before 8.4, still permitted after).
-fn param_default_is_null(param: &function_like::parameter::FunctionLikeParameter<'_>) -> bool {
+pub(crate) fn param_default_is_null(
+    param: &function_like::parameter::FunctionLikeParameter<'_>,
+) -> bool {
     let Some(dv) = param.default_value.as_ref() else {
         return false;
     };
-    matches!(dv.value, Expression::Literal(Literal::Null(_)))
+    match dv.value {
+        Expression::Literal(Literal::Null(_)) => true,
+        // `Null`, `NULL` and `\null` are the same constant.
+        Expression::ConstantAccess(ca) => {
+            let name = bytes_to_str(ca.name.value());
+            name.strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case("null")
+        }
+        _ => false,
+    }
 }
 
 /// Resolve a class name from a parameter default (`Foo::class`) to its FQN

@@ -95,7 +95,11 @@ pub(super) fn resolve_rhs_property_access(
     // check whether the constant is an enum case (→ type is the enum
     // itself) or a typed constant (→ use its type_hint).
     if let Access::ClassConstant(cca) = access {
-        let class_name = crate::class_lookup::class_expression_name(cca.class, ctx.current_class);
+        let class_name = crate::class_lookup::class_expression_name(
+            cca.class,
+            ctx.current_class,
+            ctx.class_loader,
+        );
         if let Some(class_name) = class_name {
             let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
             let resolved_typed = PhpType::named(atom(resolved_name));
@@ -225,7 +229,11 @@ pub(super) fn resolve_rhs_property_access(
 
     // ── Static property access: `self::$prop`, `static::$prop`, `Foo::$prop` ──
     if let Access::StaticProperty(spa) = access {
-        let class_name = crate::class_lookup::class_expression_name(spa.class, ctx.current_class);
+        let class_name = crate::class_lookup::class_expression_name(
+            spa.class,
+            ctx.current_class,
+            ctx.class_loader,
+        );
         let prop_name = match &spa.property {
             Variable::Direct(dv) => {
                 let raw = bytes_to_str(dv.name).to_string();
@@ -414,12 +422,49 @@ pub(super) fn resolve_rhs_property_access(
                 ResolvedType::into_arced_classes(resolved)
             };
             let owner_classes: Vec<Arc<ClassInfo>> = if receiver_is_this {
-                all_classes
+                let mut owners: Vec<Arc<ClassInfo>> = all_classes
                     .iter()
                     .find(|c| c.name == current_class_name)
                     .map(Arc::clone)
                     .into_iter()
-                    .collect()
+                    .collect();
+                // Inside a trait `$this` is also whatever the trait's users
+                // are guaranteed to be, whose properties the trait's code
+                // reads like its own.  A private one stays out of reach:
+                // the trait runs as part of a class that only inherits it.
+                // The walker seeds `$this` with those bounds once per body,
+                // so read them from its scope rather than searching the
+                // trait's users again for every property read.
+                let bounds = if ctx.current_class.kind != crate::types::ClassLikeKind::Trait {
+                    Vec::new()
+                } else if let Some(resolver) = ctx.scope_var_resolver {
+                    let trait_fqn = ctx.current_class.fqn();
+                    ResolvedType::into_arced_classes(resolver("$this"))
+                        .into_iter()
+                        .filter(|cls| cls.fqn() != trait_fqn)
+                        .collect()
+                } else {
+                    crate::type_engine::trait_context::trait_this_bounds(
+                        ctx.current_class,
+                        all_classes,
+                        class_loader,
+                        ctx.backend,
+                    )
+                };
+                for bound in bounds {
+                    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &bound,
+                        class_loader,
+                        ctx.resolved_class_cache,
+                    );
+                    if merged
+                        .get_property(&prop_name)
+                        .is_some_and(|p| p.visibility != crate::types::Visibility::Private)
+                    {
+                        owners.push(bound);
+                    }
+                }
+                owners
             } else if let Expression::Variable(Variable::Direct(dv)) = obj {
                 let var = bytes_to_str(dv.name).to_string();
                 // Check match-arm narrowing override first.

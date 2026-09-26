@@ -78,7 +78,7 @@ class NarrowsNativeUnion {
 	}
 
 	public function doFoo(): void {
-		assertType('int', $this->i); // SKIP: a property inferred from the constructor drops [] and does not narrow a readonly union
+		assertType('int', $this->i); // SKIP: a readonly property is not narrowed to what the constructor assigns
 		assertNativeType('int', $this->i);
 	}
 }

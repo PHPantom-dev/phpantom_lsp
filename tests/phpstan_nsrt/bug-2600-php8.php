@@ -84,5 +84,5 @@ function foo($x, string ...$y): void
 
 function ($x, string ...$y): void {
 	assertType('mixed', $x);
-	assertType('array<int|string, string>', $y); // SKIP: closure parameters: variadics are lists or untyped, and = Null is not nullable
+	assertType('array<int|string, string>', $y);
 };

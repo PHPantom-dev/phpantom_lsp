@@ -26,31 +26,38 @@ No outstanding items.
 
 ## Standard-library return types
 
-No outstanding items.
-
-## Reachability
-
-### B417. An argument in a branch a `!== null` test rules out is still checked
-**Impact: Low-Medium · Complexity: Low-Medium**
+### B433. A method `@template` that shadows its class's template of the same name is bound as the class's
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-function takesNode(Node $n): void {}
-function f(?Node $x): void {
-    if ($x instanceof Node) { return; }
-    if ($x !== null) { takesNode($x); } // reported: expects Node, got null
+foreach ($reflection->getAttributes(Ref::class) as $attr) { // $reflection: \ReflectionClass
+    $attr->newInstance();      // should be Ref, is object
+    $attr->newInstance()->key; // should be string, has no type
 }
 ```
 
-With `$x` down to `null`, `strip_null_from_scope` marks the branch
-unreachable, but the argument check inside it still resolves `$x` as
-`null` and reports it. A branch nothing can enter should either resolve
-its variables to `never` or not be checked at all. `get_class()` on a
-property narrowed the same way reports `expects object, got null`, which
-is how it turned up in phpstan-src (`src/PhpDoc/TypeNodeResolver.php`).
+`ReflectionClass` is `@template T of object`, and its `getAttributes()`
+declares a method-level `@template T` of its own, bound by
+`@param class-string<T>|null $name` and returned as
+`ReflectionAttribute<T>[]`. The method's `T` shadows the class's, so the
+call should give `ReflectionAttribute<Ref>`. Instead the class's `T`
+(erased to its `object` bound on an unparameterised `\ReflectionClass`)
+is substituted into the signature first, and the argument never gets to
+bind anything. Any class and method pair that reuses a template name is
+affected, not just reflection: `make(string $name): list<T>` declared
+`@template T` inside a `@template T of object` class gives `list<object>`
+for `$holder->make(Ref::class)`.
 
-**Where to look:** `strip_null_from_scope` in
-`type_engine/variable/forward_walk/cond_narrowing/scope_edits.rs` and how
-the argument diagnostics treat an unreachable scope.
+Seen in phpstan-src (`build/PHPStan/Build/TurboAttributeCollector.php`),
+where it feeds the return-type mismatch described under
+[B432](#b432-a-write-through-a-dynamic-key-into-a-nested-offset-turns-each-shape-entry-into-a-generic-array).
+
+**Where to look:** where a method's signature is substituted with the
+receiver's class-level template arguments (`inheritance/generics.rs`,
+`type_engine/call_resolution/template_subs.rs`): names the method
+declares as its own templates must be left for call-site binding.
+
+## Reachability
 
 ### B379. The `try` body's variables are missing in `catch`, and a `catch` variable is not merged after
 **Impact: Medium · Complexity: Medium**
@@ -124,10 +131,10 @@ Found porting PHPStan's `nsrt/bug-10566.php`; two of its cases stay
 **Where to look:** `type_engine/variable/forward_walk/receiver_mutation.rs`
 (`collect_closure_invalidations`), and whatever tracks the closure
 literal a plain assignment (`$cb = function () {...};`) stores, if
-anything currently does. Related to
-[B405](#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved),
-which needs the same "what closure does this variable hold" link for a
-different purpose (its return type).
+anything currently does. Invoking such a variable already resolves
+through the callable type the assignment records (`Closure(): T`), but
+that type does not carry the literal's body, which is what the
+invalidation needs.
 
 ## Arithmetic
 
@@ -135,161 +142,194 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B418. `Foo::class` of a class in the file's own namespace can stay unqualified
-**Impact: Medium · Complexity: Medium**
-
-```php
-namespace Acme\Model\Events;
-
-use Illuminate\Database\Eloquent\Model;
-
-final class EventSubcategory extends Model {
-    public function event(): BelongsTo {
-        // reported: expects class-string<Model>, got class-string<Event>
-        return $this->belongsTo(Event::class, 'event_id');
-    }
-}
-```
-
-`Event` is `Acme\Model\Events\Event`, a model in the same directory and
-namespace, and no `use` names it. In a full-project `analyze` of a
-Laravel app the argument resolves to the unqualified `class-string<Event>`,
-which means the `::class` arm in `rhs_resolution/property_access.rs`
-found no class and fell back to the spelling. The bare `Event` then loads
-as Laravel's global `Event` facade alias, which is not a `Model`.
-Analysing only that directory resolves it correctly, so it depends on
-what else the run has loaded first. No standalone reproduction yet.
-
-**Where to look:** the `::class` arm of `Access::ClassConstant` in
-`type_engine/variable/rhs_resolution/property_access.rs`, and the
-namespace-relative lookup `type_hint_to_classes_typed` does against the
-facade alias fallback in `resolution.rs`.
-
-### B403. `new` of a class that cannot be loaded has no type
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$x = new UndeclaredFoo(); // should be UndeclaredFoo, has no type
-$arr = [];
-$arr[] = new UndeclaredFoo(); // should gain an UndeclaredFoo entry, stays array{}
-```
-
-`new` resolves to the classes the name loads, and an unloadable name gives an
-empty list, so hover is empty and appends of the value are skipped. The
-named type is known regardless and should be kept without its `ClassInfo`.
-
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
-
-**Where to look:** `type_engine/variable/rhs_resolution/instantiation.rs`.
-
-### B404. `$this` in a `@phpstan-require-extends` trait does not see the required class's members
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @phpstan-require-extends SomeClass */
-trait T {
-    function f(): void {
-        $this->x; // should be int, has no type
-    }
-}
-class SomeClass { public int $x = 1; }
-```
-
-The static-access half of this is
-[C13](completion.md#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members).
-In PHPStan's fixture the required class is declared after the trait.
-
-Found porting PHPStan's `nsrt/bug-10302-trait-extends.php`; the
-assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B405. A closure called through `->call()`, or a callable held in a variable, is not resolved
+### B407. A readonly property is not narrowed to what the constructor assigns
 **Impact: Low · Complexity: Medium**
 
 ```php
 class Foo {
-    public function doFoo(): float { return 1.0; }
-    public function f(\stdClass $o): void {
-        (fn () => $this)->call($o); // should be stdClass, is Foo
-        $c = function (): string {};
-        $c();                        // should be string, is mixed
-        $cb = [$this, 'doFoo'];
-        $cb();                       // should be float, has no type
+    private readonly int|float $i;
+    public function __construct() { $this->i = getInt(); }
+    public function f() {
+        $this->i; // should be int, is int|float
     }
 }
 ```
 
-`Closure::call()` rebinds `$this` to its argument, and invoking a variable
-that holds a closure or an array callable resolves to its target's return.
+A readonly property can only be written once, so what the constructor
+leaves in it is what every other method reads. PHPStan remembers the
+constructor's final scope and applies its readonly properties to the other
+methods of the class, keeping the declared type where the constructor's is
+not narrower (`?int` assigned to an `int` property stays `int`).
 
-Found porting PHPStan's `nsrt/callables.php`, `nsrt/closure-types.php`;
-the assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
+Doing the same here means walking the constructor when another method's
+scope is seeded, which neither walker entry point
+(`resolve_in_method_body` for hover and completion,
+`seed_and_walk_function_body` for diagnostics) can do today: both are
+handed one method's parameters and statements, not its siblings. It also
+needs a keyed guard, since walking the constructor can resolve a
+`$this->method()` whose body seeds `$this` again.
 
-### B406. Closure variadics are lists or untyped, and a `null` default does not always make a parameter nullable
-**Impact: Low · Complexity: Low**
+Found porting PHPStan's
+`nsrt/remember-non-nullable-property-non-strict.php`; the assertion is
+`// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-```php
-$c = function (string $s, string ...$y) {}; // $y should be array<int|string, string>, is list<string>
-$d = function (...$arr) {};                 // $arr should be array<int|string, mixed>, has no type
-$e = function (bool $a = null) {};          // $a should be bool|null, is bool
-function g(bool $a = Null) {}               // $a should be bool|null, is bool
-```
+**Where to look:** `seed_this` in
+`type_engine/variable/forward_walk/callable_inference.rs`, and the two
+entry points above.
 
-Named arguments put string keys in a variadic, which a named function's
-variadic already reflects. A `null` default makes a typed parameter nullable;
-a closure never gets that, and a named function misses it when the default is
-spelled in another casing (`Null`, `NULL`).
-
-Found porting PHPStan's `nsrt/anonymous-function.php`,
-`nsrt/bug-2600-php8.php`, `nsrt/typehints-anonymous-function.php`; the
-assertions are `// SKIP` in the ported copies under
-`tests/phpstan_nsrt/`.
-
-### B407. A property inferred from the constructor drops `[]` and does not narrow a readonly union
+### B434. An assignment inside an arrow function body is not seen
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-class Foo {
-    private $items;
-    private readonly int|float $i;
-    public function __construct() { $this->items = []; $this->i = getInt(); }
-    public function f() {
-        $this->items; // should be array, has no type
-        $this->i;     // should be int, is int|float
+$f = fn () => $x = $this->make();
+// hovering `$x` inside the arrow body finds no assignment
+```
+
+The forward walker enters an arrow function by seeding its parameters and
+never applies the assignments its body expression makes, so a variable
+assigned there has no type at the cursor. A statement body is walked
+statement by statement up to the cursor; an arrow body needs the same for
+the sub-expressions that run before it.
+
+Found porting PHPStan's `nsrt/closure-types.php`, whose `assertType()`
+inside an arrow function passed to `->call()` becomes such an assignment
+under the runner; that line is `// SKIP` in the ported copy under
+`tests/phpstan_nsrt/`.
+
+**Where to look:** the `Expression::ArrowFunction` arm of
+`try_enter_closure_expr` in `type_engine/variable/forward_walk/closures.rs`.
+
+### B427. The forward walker ignores `@param-closure-this`
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+class Reg {
+    /** @param-closure-this Target $cb */
+    public static function on(\Closure $cb): void {}
+}
+Reg::on(function () {
+    $t = $this; // should be Target, is the enclosing class
+});
+```
+
+Completion and hover on `$this->` itself honour the tag, through
+`find_closure_this_types` in `type_engine/variable/closure_resolution.rs`,
+but the walker seeds every closure scope with the enclosing `$this`
+(`seed_closure_captures`), so anything that reads `$this` through the
+scope, a variable assigned from it or a diagnostic on it, sees the
+lexical class. `Closure::call()` already rebinds the walker's scope
+(`closure_call_scope`); a closure passed to a parameter carrying the tag
+needs the same, from the call-argument arms of both walker entry points.
+
+**Where to look:** `try_enter_closure_expr` in
+`type_engine/variable/forward_walk/closures.rs` and
+`walk_closures_in_call` in `type_engine/variable/forward_walk/diagnostic_walk.rs`.
+
+## Array types
+
+### B429. A `class-string` key is widened to `string` when an array is written through it
+**Impact: Low-Medium · Complexity: Low**
+
+```php
+/** @param class-string $n */
+function f(string $n): array {
+    $mapping = [];
+    $mapping[$n] = 'y'; // should be non-empty-array<class-string, 'y'>, is non-empty-array<string, string>
+    return $mapping;    // so a declared array<class-string, string> is reported
+}
+```
+
+`normalize_array_key_type` maps every non-numeric string domain
+(`class-string`, `interface-string`, and the rest) to plain `string`.
+PHP never coerces those keys, so the refined type is a valid key as it
+stands, and PHPStan keeps it. Erasing it makes every
+`array<class-string, …>` return that is built by writing keys reject its
+own value. The unit test
+`collection_key_normalization_preserves_non_numeric_string_domains` in
+`array_shape_writes_tests.rs` pins the current `string` answer, so
+changing this means deciding against that test.
+
+Seen in phpstan-src (`src/DependencyInjection/ValidateServiceTagsExtension.php`,
+the `$mapping[$class->name] = …` loop in `getInterfaceTagMapping()`).
+
+**Where to look:** `normalize_array_key_type` in
+`type_engine/variable/array_shape_writes.rs`.
+
+### B430. `isset()` on a constant shape read with a dynamic key loses the element type
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+$g = [$a];
+$g[] = $b;                         // array{P, P}
+if (!isset($g[$k])) { return; }    // $k is int
+$g[$k]->id;                        // $g[$k] should be P, is mixed
+```
+
+Without the `isset()` guard, `$g[$k]` is `P`, and the same guard over a
+`list<P>` keeps `P` too. Only a constant shape guarded through a
+non-literal key comes out `mixed`, which then reports
+`Cannot verify property 'id'` on the read. Seen in a Laravel feature
+test that indexes a two-element list of models with the entries of a
+data-provider array.
+
+**Where to look:** the `isset`/`!isset` arm of the null narrowing that
+records the synthetic `$g[$k]` key
+(`type_engine/variable/forward_walk/cond_narrowing/null_narrowing.rs`),
+and how the shape's element type is looked up for a key that is not a
+literal.
+
+### B431. A class constant array keyed by `Foo::class` is a bare `array`
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class C {
+    private const B = [\stdClass::class => 'X'];
+    private const A = ['k' => 'X'];
+    public function f(): void {
+        self::B; // should be array{stdClass: 'X'}, is array
+        self::A; // array{k: 'X'}, as expected
     }
 }
 ```
 
-The empty-array literal is dropped when inferring an untyped property, and a
-readonly property assigned once in the constructor could take the assigned
-type.
+An initialiser whose keys are `::class` constants is not inferred at
+all, so the constant loses both its keys and its values. A literal
+string key works. Seen in phpstan-src
+(`build/PHPStan/Build/TurboAttributeCollector.php`, `VENDORED_PAIRS`),
+where the bare `array` survives as the `array|` at the front of the
+inferred return type.
 
-Found porting PHPStan's
-`nsrt/infer-private-property-type-from-constructor.php`,
-`nsrt/remember-non-nullable-property-non-strict.php`; the assertions are
-`// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
+**Where to look:** the constant-initialiser inference behind
+`infer_type_from_constant_value_resolved` and
+`folded_class_constant_type` (`rhs_resolution/property_access.rs`
+calls both), for array keys that are class-constant accesses.
 
-### B408. An assignment inside an argument to `new` is not seen
-**Impact: Low · Complexity: Low**
+### B432. A write through a dynamic key into a nested offset turns each shape entry into a generic array
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
-new Foo([$inArray = 1]);
-$inArray; // should be 1, has no type
-foo($direct = 3); // this one works
+/** @var array<string, array{string, bool, string}> $pairs */
+foreach (array_keys($pairs) as $cn) {
+    $pairs[$cn][3] = ['I'];
+}
+// should be array<string, array{string, bool, string, array{'I'}}>
+// is non-empty-array<string, array{…}|non-empty-array<int, string|bool|array{'I'}>>
 ```
 
-Nested assignments are collected from call arguments but not from an array
-literal inside a `new` argument list.
+A write to a literal offset below a dynamic key should add that offset to
+the element shape it reaches. Instead the element is joined with a
+generic `non-empty-array<int, …>` holding every value, so the shape is
+lost and any declared element shape rejects it. Seen in phpstan-src
+(`build/PHPStan/Build/TurboAttributeCollector.php`, the
+`$pairs[$className][3] = $reflection->getInterfaceNames()` loop), whose
+return type is reported against its own `@return` array shape. That
+report also carries
+[B431](#b431-a-class-constant-array-keyed-by-fooclass-is-a-bare-array)
+and [B433](#b433-reflectionclassgetattributesfooclass-does-not-carry-foo-to-newinstance).
 
-Found porting PHPStan's `nsrt/if.php`, which is not ported yet because
-it is too slow under the runner (see
-[P65](performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss)).
-
-## Array types
-
-No outstanding items.
+**Where to look:** `merge_nested_array_write` in
+`type_engine/variable/array_shape_writes.rs`, for an `ArrayWriteKey::Keyed`
+level followed by an `ArrayWriteKey::Shape` one.
 
 ## Laravel
 
