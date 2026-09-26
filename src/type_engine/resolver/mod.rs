@@ -1555,6 +1555,32 @@ fn resolve_class_string_inner_classes(
         }
     }
 
+    // A literal string that names a class is as usable for `::` access as
+    // `class-string<T>` is: PHP resolves the static call through whatever
+    // class name the string holds at runtime, whether or not the analyser
+    // wrapped it in `class-string`. This is what lets a foreach variable
+    // bound to a `Foo::class` array element (a literal `'Foo'`, not a
+    // `class-string<Foo>`, per PHPStan's own reading of such a constant)
+    // still dispatch `$item::method()`.
+    fn literal_string_class_names(ty: &PhpType) -> Vec<String> {
+        match ty.kind() {
+            TypeKind::Literal(literal) => match &**literal {
+                crate::php_type::LiteralValue::String(raw) => {
+                    crate::util::unescape_php_string_literal(raw)
+                        .into_iter()
+                        .collect()
+                }
+                _ => vec![],
+            },
+            TypeKind::Nullable(inner) => literal_string_class_names(inner),
+            TypeKind::Union(members) => members
+                .iter()
+                .flat_map(literal_string_class_names)
+                .collect(),
+            _ => vec![],
+        }
+    }
+
     let mut results = Vec::new();
     for inner in inner_types(ty) {
         let resolved = super::type_resolution::type_hint_to_classes_typed(
@@ -1564,6 +1590,11 @@ fn resolve_class_string_inner_classes(
             class_loader,
         );
         ClassInfo::extend_unique_arc(&mut results, resolved);
+    }
+    for name in literal_string_class_names(ty) {
+        if let Some(cls) = class_loader(&name) {
+            ClassInfo::extend_unique_arc(&mut results, vec![cls]);
+        }
     }
     results
 }

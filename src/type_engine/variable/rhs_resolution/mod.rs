@@ -1530,6 +1530,29 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     }
 }
 
+/// Resolver from an expression's source text to its type, as
+/// [`crate::Backend::resolve_arg_text_to_type`] provides.
+pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
+
+/// The literal `class-string` a `Foo::class` array element resolves to,
+/// e.g. `'Foo'` for `Foo::class`.
+///
+/// A shape entry has to be a [`TypeKind::Literal`] to mean anything (a
+/// non-literal element falls back to plain `array`, see
+/// [`literal_array_shape`]), so a resolved `class-string<Foo>` is unwrapped
+/// down to the class name it names, matching how PHPStan reads a `::class`
+/// array element: as the literal string, not the wrapper type a bare
+/// `Foo::class` expression resolves to on its own.
+fn class_const_fetch_as_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    match resolve(value)?.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => Some(PhpType::literal_string_value(name.as_str())),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The contents of an array literal's brackets, or `None` when the text
 /// is not one.
 fn strip_array_literal(value: &str) -> Option<&str> {
@@ -1549,7 +1572,7 @@ fn strip_array_literal(value: &str) -> Option<&str> {
 /// be resolved (a constant, a call, a concatenation), because a shape
 /// missing one of its slots would claim the array is smaller than it is.
 /// The caller then falls back to an unconstrained `array`.
-fn literal_array_shape(inner: &str) -> Option<PhpType> {
+fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option<PhpType> {
     use crate::php_type::ShapeEntry;
 
     if inner.trim().is_empty() {
@@ -1572,9 +1595,11 @@ fn literal_array_shape(inner: &str) -> Option<PhpType> {
             }
             None => (None, item),
         };
+        let value_type = infer_type_from_constant_value_inner(value, resolve)
+            .or_else(|| resolve.and_then(|resolve| class_const_fetch_as_literal(value, resolve)))?;
         entries.push(ShapeEntry {
             key,
-            value_type: infer_type_from_constant_value(value)?,
+            value_type,
             optional: false,
         });
     }
@@ -1617,6 +1642,27 @@ fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
 /// assignment resolves.  Returns `None` for expressions that cannot be
 /// trivially classified (e.g. concatenation, function calls).
 pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
+    infer_type_from_constant_value_inner(value, None)
+}
+
+/// [`infer_type_from_constant_value`], but an array element that the fixed
+/// literal patterns below can't classify (currently just `Foo::class`) is
+/// offered to `resolve` before the whole array gives up and falls back to
+/// plain `array`. Text scanning alone can tell that `Foo::class` names a
+/// class, but not which one: `Foo` may need qualifying against the
+/// reading file's namespace or `use` imports, which only a resolver with
+/// access to the class loader can do.
+pub(crate) fn infer_type_from_constant_value_resolved(
+    value: &str,
+    resolve: TextResolver<'_>,
+) -> Option<PhpType> {
+    infer_type_from_constant_value_inner(value, Some(resolve))
+}
+
+fn infer_type_from_constant_value_inner(
+    value: &str,
+    resolve: Option<TextResolver<'_>>,
+) -> Option<PhpType> {
     let v = value.trim();
     if v.is_empty() {
         return None;
@@ -1642,7 +1688,7 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
     // `foreach (self::APPROVED as $entry)` see the values the constant
     // names rather than an unconstrained `array`.
     if let Some(inner) = strip_array_literal(v) {
-        return Some(literal_array_shape(inner).unwrap_or_else(PhpType::array));
+        return Some(literal_array_shape(inner, resolve).unwrap_or_else(PhpType::array));
     }
 
     let lower = v.to_lowercase();
@@ -2141,6 +2187,41 @@ mod tests {
         );
         assert_eq!(
             infer_type_from_constant_value("[$key => 1]"),
+            Some(PhpType::array())
+        );
+    }
+
+    #[test]
+    fn a_class_const_fetch_array_element_resolves_via_the_resolver() {
+        let entry = |value_type: PhpType| crate::php_type::ShapeEntry {
+            key: None,
+            value_type,
+            optional: false,
+        };
+        let resolve = |text: &str| -> Option<PhpType> {
+            (text == "Foo::class").then(|| PhpType::class_string(Some(PhpType::named(atom("Foo")))))
+        };
+
+        // Without a resolver, `Foo::class` can't be classified and the
+        // whole array falls back to unconstrained `array`.
+        assert_eq!(
+            infer_type_from_constant_value("[Foo::class]"),
+            Some(PhpType::array())
+        );
+
+        // With one, the element becomes the literal class name PHPStan
+        // itself reads a `::class` array element as.
+        assert_eq!(
+            infer_type_from_constant_value_resolved("[Foo::class]", &resolve),
+            Some(PhpType::list_shape(vec![entry(
+                PhpType::literal_string_value("Foo")
+            )]))
+        );
+
+        // An element the resolver can't turn into a `class-string` still
+        // leaves the whole array unconstrained, same as with no resolver.
+        assert_eq!(
+            infer_type_from_constant_value_resolved("[1, self::OTHER]", &resolve),
             Some(PhpType::array())
         );
     }

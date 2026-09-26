@@ -984,9 +984,14 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         // case resolves to the case's class, which the structural check
         // rejects, leaving the declared type as before.
         if let Some(ref val) = constant.value {
+            let resolve = |text: &str| {
+                Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, &merged), ctx)
+            };
             let inferred =
-                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(val)
-                    .or_else(|| folded_class_constant_type(&merged, _member, val, ctx));
+                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(
+                    val, &resolve,
+                )
+                .or_else(|| folded_class_constant_type(&merged, _member, val, ctx));
             if let Some(ty) = inferred.filter(|ty| {
                 constant
                     .type_hint
@@ -1060,7 +1065,10 @@ pub(crate) fn folded_global_constant_type(
 /// `text` with a leading `self::`/`static::`/`parent::` replaced by the class
 /// it names, so a term read out of a constant's initialiser resolves against
 /// the class that declared it rather than the one being read from.
-fn qualify_class_keyword<'t>(text: &'t str, class: &ClassInfo) -> std::borrow::Cow<'t, str> {
+pub(crate) fn qualify_class_keyword<'t>(
+    text: &'t str,
+    class: &ClassInfo,
+) -> std::borrow::Cow<'t, str> {
     let (keyword, rest) = match text.split_once("::") {
         Some(parts) => parts,
         None => return std::borrow::Cow::Borrowed(text),

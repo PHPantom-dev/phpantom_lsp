@@ -17,7 +17,7 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::{infer_type_from_constant_value, resolve_rhs_expression, resolved_type_with_lookup};
+use super::{resolve_rhs_expression, resolved_type_with_lookup};
 
 /// Resolve property access: `$this->prop`, `$obj->prop`, `$obj?->prop`.
 pub(super) fn resolve_rhs_property_access(
@@ -183,14 +183,26 @@ pub(super) fn resolve_rhs_property_access(
                         // (`const FLAGS = JSON_THROW_ON_ERROR;`) to the value
                         // it holds.
                         if let Some(ref val) = c.value
-                            && let Some(ts) = infer_type_from_constant_value(val).or_else(|| {
-                                crate::type_engine::call_resolution::folded_class_constant_type(
-                                    cls,
-                                    &const_name,
-                                    val,
-                                    &ctx.as_resolution_ctx(),
-                                )
-                            })
+                            && let Some(ts) = {
+                                let resolution_ctx = ctx.as_resolution_ctx();
+                                let resolve = |text: &str| {
+                                    crate::Backend::resolve_arg_text_to_type(
+                                        &crate::type_engine::call_resolution::qualify_class_keyword(
+                                            text, cls,
+                                        ),
+                                        &resolution_ctx,
+                                    )
+                                };
+                                super::infer_type_from_constant_value_resolved(val, &resolve)
+                                    .or_else(|| {
+                                        crate::type_engine::call_resolution::folded_class_constant_type(
+                                            cls,
+                                            &const_name,
+                                            val,
+                                            &resolution_ctx,
+                                        )
+                                    })
+                            }
                         {
                             let resolved =
                                 crate::type_engine::type_resolution::type_hint_to_classes_typed(

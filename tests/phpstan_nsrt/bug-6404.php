@@ -28,7 +28,7 @@ class Bar
 	{
 		foreach (self::FOOS as $fooClass) {
 			if (is_a($fooClass, Foo::class, true)) {
-				assertType("'Bug6404\\\\Foo'", $fooClass); // SKIP: a class constant array holding Foo::class is plain array
+				assertType("'Bug6404\\\\Foo'", $fooClass);
 				assertType('int', $fooClass::getCode());
 				$this->someMap[$fooClass::getCode()] = true;
 			}

@@ -300,30 +300,6 @@ it is too slow under the runner (see
 
 ## Array types
 
-### B422. A class constant array holding `Foo::class` is plain `array`
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class Bar {
-    private const NAMES = ['a', 'b'];
-    private const FOOS = [Foo::class];
-    public function f(): void {
-        self::NAMES; // list{'a', 'b'}
-        self::FOOS;  // should be list{'Foo'}, is array
-        foreach (self::FOOS as $class) {
-            $class;  // should be 'Foo', is mixed
-        }
-    }
-}
-```
-
-A constant initialiser of string literals becomes a shape, but one whose
-elements are `::class` fetches falls back to bare `array`, so iterating
-it gives `mixed`.
-
-Found porting PHPStan's `nsrt/bug-6404.php`; the assertion is `// SKIP`
-in the ported copy under `tests/phpstan_nsrt/`.
-
 ### B419. Writing through a key of unknown type makes the keys `int|string`
 **Impact: Low · Complexity: Low**
 
