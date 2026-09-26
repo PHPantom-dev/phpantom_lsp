@@ -1174,23 +1174,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B420. A value typed as a model's base collection has the custom collection's class but not its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2029,23 +2012,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Laravel">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B420. A value typed as a model's base collection has the custom collection's class but not its type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2438,29 +2404,7 @@ call does not return.</p>
 <p>Found porting PHPStan's <code>nsrt/pr-5108.php</code>; the assertion is <code>// SKIP</code> in
 the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
-<h3 id="b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type">B420. A value typed as a model's base collection has the custom collection's class but not its type<a class="headerlink" href="#b420-a-value-typed-as-a-models-base-collection-has-the-custom-collections-class-but-not-its-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @param Collection&lt;int, Product&gt; $c */   // Product collects into ProductCollection</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f(Collection $c): void {</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">    if ($c instanceof ProductCollection) {</span>
-<a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="x">        takesProducts($c); // reported: expects ProductCollection, got Collection&lt;int, Product&gt;</span>
-<a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="x">    }</span>
-<a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>Resolving <code>Eloquent\Collection&lt;int, Product&gt;</code> to classes swaps in the
-model's custom collection (<code>try_swap_custom_collection</code>) while the type
-string keeps naming the base collection. <code>instanceof ProductCollection</code>
-then finds the class already narrow enough and keeps the stale type string,
-which the argument check compares against. The swap is also too eager for a
-declared parameter: the caller may hand over a plain collection it built
-itself, so completion offering <code>ProductCollection</code> methods there is an
-over-claim. Only a collection Eloquent produces (a <code>get()</code> return, a
-<code>chunk()</code> callback argument) is known to be the custom one; that direction
-is already handled by <code>replace_eloquent_collections_in_type</code>.</p>
-<p><strong>Where to look:</strong> <code>try_swap_custom_collection</code> in
-<code>src/virtual_members/laravel/mod.rs</code>, called from <code>type_hint_to_classes_typed</code>,
-and the "already subtypes" shortcut in <code>apply_instanceof_inclusion</code>
-(<code>src/type_engine/types/narrowing/instanceof.rs</code>).</p>
+<p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
