@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790425112542,
+  "lastUpdate": 1790425393057,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -31993,6 +31993,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.2,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "66f23ec9a93b0e7611abd088a8bef509fde2c407",
+          "message": "`analyze` no longer intermittently misses a member of a class reached\nonly through a type hint",
+          "timestamp": "2026-09-26T14:05:52+02:00",
+          "tree_id": "44974ac3d1c3815a6549c78727bb3b4261baf48e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/66f23ec9a93b0e7611abd088a8bef509fde2c407"
+        },
+        "date": 1790425384037,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.4,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 78.5,
             "unit": "MiB"
           }
         ]
