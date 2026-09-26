@@ -1132,17 +1132,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B475. A variable a closure captures by reference does not take on the closure's assignments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1920,17 +1909,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B475. A variable a closure captures by reference does not take on the closure's assignments
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2178,17 +2156,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>__PROPERTY__</code> (PHP 8.4) is known at the point it is written, the way <code>__FUNCTION__</code>/<code>__METHOD__</code> are for a method.</p>
-<p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
-<h3 id="b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments">B475. A variable a closure captures by reference does not take on the closure's assignments<a class="headerlink" href="#b475-a-variable-a-closure-captures-by-reference-does-not-take-on-the-closures-assignments" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">$a = 0;</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">$cb = function () use (&amp;$a): void {</span>
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    $a; // should be 0|&#39;s&#39;, is 0</span>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    $a = &#39;s&#39;;</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">};</span>
-<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a><span class="x">$a; // should be 0|&#39;s&#39;, is 0</span>
-</code></pre></div>
-<p>A by-reference capture shares the variable with the closure, and the closure may run any number of times before or after either read. Both sides should see the union of every value the closure assigns.</p>
 <p>Found porting PHPStan's <code>Analyser/Fiber/data/fnsr.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_data/</code>.</p>
 
 
