@@ -7,11 +7,11 @@ use std::sync::Arc;
 
 use mago_span::HasSpan;
 
-use crate::atom::bytes_to_str;
+use crate::atom::{atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 
-use super::scope_state::MemberInvalidation;
+use super::scope_state::{ClosureCaptureEffect, MemberInvalidation};
 
 /// Drop what a state-changing call could have altered.
 ///
@@ -313,11 +313,20 @@ fn collect_call_invalidations<'b>(
             // state-changing call inside it reaches the same `$this` and
             // captured variables the outer scope already tracks under
             // those names, exactly as if the body were inlined at the
-            // call site.
-            if let Call::Function(fc) = call
-                && let Expression::Closure(closure) = crate::parser::unwrap_parens(fc.function)
-            {
-                collect_closure_invalidations(closure, scope, ctx, out);
+            // call site. `$cb()` is the same thing one step removed: `$cb`
+            // is provably invoked (calling a variable always runs
+            // whatever it holds), so whatever the closure literal last
+            // assigned to it was proven to do applies here too.
+            if let Call::Function(fc) = call {
+                match crate::parser::unwrap_parens(fc.function) {
+                    Expression::Closure(closure) => {
+                        collect_closure_invalidations(closure, scope, ctx, out);
+                    }
+                    Expression::Variable(Variable::Direct(dv)) => {
+                        apply_stored_closure_effects(scope, bytes_to_str(dv.name), out);
+                    }
+                    _ => {}
+                }
             }
 
             let mut next_positional = 0usize;
@@ -327,10 +336,21 @@ fn collect_call_invalidations<'b>(
                 // returning (`call_user_func($cb)`, `array_map($cb, …)`)
                 // runs the same way; one it merely stores away for later
                 // is not provably run at all, so it is left alone here.
-                if let Expression::Closure(closure) = arg_expr
-                    && call_invokes_arg_immediately(call, &selector, scope, ctx)
-                {
-                    collect_closure_invalidations(closure, scope, ctx, out);
+                // The closure itself may be written inline, or named by a
+                // variable it was assigned to earlier (`$cb = function ()
+                // {…}; call_user_func($cb);`) — either way, what it does
+                // to its captures was already worked out where it was
+                // assigned or is worked out here.
+                if call_invokes_arg_immediately(call, &selector, scope, ctx) {
+                    match arg_expr {
+                        Expression::Closure(closure) => {
+                            collect_closure_invalidations(closure, scope, ctx, out);
+                        }
+                        Expression::Variable(Variable::Direct(dv)) => {
+                            apply_stored_closure_effects(scope, bytes_to_str(dv.name), out);
+                        }
+                        _ => collect_call_invalidations(arg_expr, scope, ctx, out),
+                    }
                 } else {
                     collect_call_invalidations(arg_expr, scope, ctx, out);
                 }
@@ -478,6 +498,34 @@ fn collect_closure_invalidations<'b>(
                 || narrowing::key_reads_variable(&invalidation.subject, name)
         })
     }));
+}
+
+/// What invoking `closure` does to its captures, computed once at the
+/// point it is assigned to a variable so [`process_receiver_mutation`] can
+/// apply it later without the closure's body in view (`$cb =
+/// function () { $this->stop(); }; call_user_func($cb);`).
+///
+/// Runs [`collect_closure_invalidations`] against a throwaway clone of
+/// `scope`: that walk can itself mutate scope state (`forget_stat_cache`
+/// for a body that calls `unlink()`), which must not fire before the
+/// closure is actually invoked. Only the resulting invalidations, not the
+/// mutated clone, are worth keeping.
+pub(crate) fn closure_literal_capture_effects<'b>(
+    closure: &'b Closure<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ClosureCaptureEffect> {
+    let mut invalidations = Vec::new();
+    collect_closure_invalidations(closure, &mut scope.clone(), ctx, &mut invalidations);
+    invalidations
+        .into_iter()
+        .map(|inv| ClosureCaptureEffect {
+            subject: atom(&inv.subject),
+            made: inv.made.as_deref().map(atom),
+            members: inv.members,
+            method: inv.method.as_deref().map(atom),
+        })
+        .collect()
 }
 
 fn collect_call_invalidations_in_stmts<'b>(
@@ -636,6 +684,24 @@ fn push_argument_invalidations(
                 made: None,
                 members: true,
                 method: None,
+            },
+        );
+    }
+}
+
+/// Apply what invoking the closure literal `var_name` was last assigned
+/// was proven to do, recorded by [`closure_literal_capture_effects`] at
+/// the assignment that put it there.  A no-op when the variable never held
+/// a closure literal, or the closure it held had nothing worth recording.
+fn apply_stored_closure_effects(scope: &ScopeState, var_name: &str, out: &mut Vec<Invalidation>) {
+    for effect in scope.closure_capture_effects(var_name) {
+        push_unique(
+            out,
+            Invalidation {
+                subject: effect.subject.to_string(),
+                made: effect.made.as_ref().map(|m| m.to_string()),
+                members: effect.members,
+                method: effect.method.as_ref().map(|m| m.to_string()),
             },
         );
     }

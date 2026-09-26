@@ -683,6 +683,15 @@ pub(crate) fn process_assignment_expr<'b>(
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
         scope.invalidate_proofs(&lhs_name);
+        // `$cb = function () { $this->stop(); };` — work out now what
+        // invoking this closure does to its captures, so a later
+        // `call_user_func($cb)` can apply it without the closure's body in
+        // view.  `invalidate_proofs` above already dropped whatever was
+        // recorded for a closure `$cb` held before this assignment.
+        if let Expression::Closure(closure) = crate::parser::unwrap_parens(assignment.rhs) {
+            let effects = closure_literal_capture_effects(closure, scope, ctx);
+            scope.set_closure_capture_effects(&lhs_name, effects);
+        }
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.get(&lhs_name).is_empty()

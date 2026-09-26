@@ -84,7 +84,7 @@ final class StreamSelectLoop
 			};
 			assertType('true', $s->running);
 			call_user_func($cb);
-			assertType('bool', $s->running); // SKIP: only a closure literal at the call site is recognised as invoked; one passed by variable is not
+			assertType('bool', $s->running);
 
 			if (!$s->running) {
 				$timeout = 0;
@@ -104,7 +104,7 @@ final class StreamSelectLoop
 			};
 			assertType('true', $this->running);
 			call_user_func($cb);
-			assertType('bool', $this->running); // SKIP: only a closure literal at the call site is recognised as invoked; one passed by variable is not
+			assertType('bool', $this->running);
 
 			if (!$this->running) {
 				$timeout = 0;

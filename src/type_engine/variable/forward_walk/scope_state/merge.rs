@@ -18,6 +18,7 @@ impl ScopeState {
             || self.assertions != other.assertions
             || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
+            || self.closure_captures != other.closure_captures
             || !same_implied_narrowings(&self.implied_narrowings, &other.implied_narrowings)
         {
             return false;
@@ -105,6 +106,13 @@ impl ScopeState {
         if !self.preg_outcomes.is_empty() {
             self.preg_outcomes
                 .retain(|name, outcome| other.preg_outcomes.get(name) == Some(outcome));
+        }
+
+        // Likewise: a variable only counts as still naming the closure it
+        // was assigned when every incoming path assigned it the same one.
+        if !self.closure_captures.is_empty() {
+            self.closure_captures
+                .retain(|name, effects| other.closure_captures.get(name) == Some(effects));
         }
 
         for (name, other_types) in &other.locals {

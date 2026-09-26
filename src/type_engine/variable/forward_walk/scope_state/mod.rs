@@ -68,6 +68,28 @@ pub(crate) enum MemberInvalidation {
     Members { kept: Vec<String> },
 }
 
+/// One thing invoking a closure literal does to a capture, worked out once
+/// when the closure is assigned to a variable rather than re-derived from
+/// its body at every call site.
+///
+/// `$cb = function () { $this->stop(); }; call_user_func($cb);` invalidates
+/// `$this` exactly as if `$this->stop()` were written inline at the
+/// `call_user_func` call, but by the time that call is walked the closure's
+/// body is gone from view — only the variable that named it is left. See
+/// [`ScopeState::closure_capture_effects`].
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ClosureCaptureEffect {
+    /// Scope key the effect targets (e.g. `"$this"`, `"$counter"`).
+    pub subject: Atom,
+    /// Key of the call doing the invalidating, whose own proof survives.
+    pub made: Option<Atom>,
+    /// Whether property paths through the subject go too, not just call
+    /// results.
+    pub members: bool,
+    /// The method called on the subject, when it is the receiver.
+    pub method: Option<Atom>,
+}
+
 /// What has to be shown about a proof's holder before the proof applies.
 #[derive(Clone, Debug)]
 pub(crate) enum ProofTrigger {
@@ -263,6 +285,16 @@ pub(crate) struct ScopeState {
     /// behind.
     pub ruled_out: AtomMap<Vec<PhpType>>,
 
+    /// Variable name → what invoking the closure literal it was last
+    /// assigned does to its captures, precomputed at the assignment so a
+    /// later call through the variable can apply it without the closure's
+    /// body in view.
+    ///
+    /// Cleared whenever the variable is reassigned or removed (see
+    /// [`Self::invalidate_proofs`]), the same as every other proof keyed on
+    /// a variable's identity.
+    pub closure_captures: AtomMap<Vec<ClosureCaptureEffect>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -295,8 +327,33 @@ impl ScopeState {
             preg_outcomes: AtomMap::default(),
             unresolved: AtomSet::default(),
             ruled_out: AtomMap::default(),
+            closure_captures: AtomMap::default(),
             unreachable: false,
         }
+    }
+
+    /// What invoking the closure literal `var_name` last held does to its
+    /// captures, or `&[]` when it never held one (or the closure's body has
+    /// no state-changing effect worth recording).
+    pub fn closure_capture_effects(&self, var_name: &str) -> &[ClosureCaptureEffect] {
+        self.closure_captures
+            .get(&atom(var_name))
+            .map_or(&[], |v| v.as_slice())
+    }
+
+    /// Record what invoking the closure literal just assigned to `var_name`
+    /// does to its captures.  A no-op for an empty list, matching
+    /// [`Self::set`]: nothing worth recording is the same as nothing
+    /// recorded.
+    pub fn set_closure_capture_effects(
+        &mut self,
+        var_name: &str,
+        effects: Vec<ClosureCaptureEffect>,
+    ) {
+        if effects.is_empty() {
+            return;
+        }
+        self.closure_captures.insert(atom(var_name), effects);
     }
 
     /// Borrow the proofs this scope holds that are not variable types.
@@ -395,6 +452,7 @@ impl ScopeState {
         let key = atom(var_name);
         self.locals.remove(&key);
         self.unresolved.remove(&key);
+        self.closure_captures.remove(&key);
         self.invalidate_proofs(var_name);
     }
 
@@ -475,6 +533,7 @@ impl ScopeState {
     /// stop being a pair the moment one of them is written on its own.
     pub fn invalidate_proofs(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.closure_captures.remove(&key);
         let stale = |subject: &Atom| {
             *subject == key
                 || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
