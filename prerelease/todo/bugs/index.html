@@ -923,10 +923,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures" class="md-nav__link">
+  <a href="#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B423. A call inside an invoked closure does not invalidate what the closure captures
+        B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable
       </span>
     </span>
   </a>
@@ -1722,10 +1722,10 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures" class="md-nav__link">
+  <a href="#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        B423. A call inside an invoked closure does not invalidate what the closure captures
+        B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable
       </span>
     </span>
   </a>
@@ -2056,26 +2056,29 @@ the pre-statement scope into the one after.</p>
 it is too slow under the runner (see
 <a href="../performance/#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65</a>).</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
-<h3 id="b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures">B423. A call inside an invoked closure does not invalidate what the closure captures<a class="headerlink" href="#b423-a-call-inside-an-invoked-closure-does-not-invalidate-what-the-closure-captures" title="Permanent link">&para;</a></h3>
+<h3 id="b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable">B424. A closure invalidates receiver state only when it is a literal at the call site, not when held in a variable<a class="headerlink" href="#b424-a-closure-invalidates-receiver-state-only-when-it-is-a-literal-at-the-call-site-not-when-held-in-a-variable" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">while ($this-&gt;running) {</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    call_user_func(function () {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">        $this-&gt;stop();       // void, so it may change $this-&gt;running</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    });</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">}</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    $cb = function () { $this-&gt;stop(); };</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    call_user_func($cb);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $this-&gt;running;          // should be bool, is true</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
 </code></pre></div>
-<p>A call on an object forgets what was proved about that object's
-properties and call results when the call returns <code>void</code>, returns
-<code>$this</code>, or is <code>@phpstan-impure</code>. The same call made inside a closure
-that runs on the spot (<code>(function () { … })()</code>, <code>call_user_func($cb)</code>,
-an immediately invoked callable parameter) should forget it for <code>$this</code>
-and for every variable the closure captures, and does not.</p>
-<p>Found porting PHPStan's <code>nsrt/bug-10566.php</code>; the assertions are
-<code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p>The walker invalidates <code>$this</code> and <code>use (…)</code> captures for a closure
+written inline as the call's own argument, or invoked immediately where
+it is defined. A closure assigned to a variable first and passed by that
+variable is not recognised: nothing records that <code>$cb</code> still names that
+literal at the call site, so the call is walked as if the callee were
+opaque.</p>
+<p>Found porting PHPStan's <code>nsrt/bug-10566.php</code>; two of its cases stay
+<code>// SKIP</code> for this reason.</p>
 <p><strong>Where to look:</strong> <code>type_engine/variable/forward_walk/receiver_mutation.rs</code>
-(<code>collect_call_invalidations</code>), and the by-reference capture handling
-the walker already runs for invoked closures.</p>
+(<code>collect_closure_invalidations</code>), and whatever tracks the closure
+literal a plain assignment (<code>$cb = function () {...};</code>) stores, if
+anything currently does. Related to
+<a href="#b405-a-closure-called-through--call-or-a-callable-held-in-a-variable-is-not-resolved">B405</a>,
+which needs the same "what closure does this variable hold" link for a
+different purpose (its return type).</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
