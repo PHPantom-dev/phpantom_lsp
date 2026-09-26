@@ -1,0 +1,13 @@
+// test: a compound assignment to an array offset updates the element
+// feature: hover
+// expect: amount: float
+// expect: count: int
+---
+<?php
+
+function test(): void {
+    $totals = ['amount' => null, 'count' => 'none'];
+    $totals['amount'] += 1.5;
+    $totals['count'] %= 2;
+    $<>totals;
+}

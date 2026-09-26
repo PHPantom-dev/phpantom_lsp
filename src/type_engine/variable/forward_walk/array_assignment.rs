@@ -165,10 +165,22 @@ pub(crate) fn process_array_key_assignment<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+    process_array_key_write(array_access, rhs_types, scope, ctx);
+}
+
+/// Store `value_types` at the element `$var['key']…` names, the write both a
+/// plain `=` and a compound assignment (`+=`, `.=`, …) perform.
+pub(crate) fn process_array_key_write<'b>(
+    array_access: &'b ArrayAccess<'b>,
+    value_types: Vec<ResolvedType>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     if let Some((base_name, key_chain)) =
         super::super::array_shape_writes::extract_nested_array_access_chain(array_access)
     {
-        apply_array_write(&base_name, &key_chain, false, assignment, scope, ctx);
+        apply_array_write(&base_name, &key_chain, false, value_types, scope, ctx);
     }
 }
 
@@ -182,7 +194,8 @@ pub(crate) fn process_array_append<'b>(
     match array_append.array {
         Expression::Variable(Variable::Direct(dv)) => {
             let base_name = bytes_to_str(dv.name).to_string();
-            apply_array_write(&base_name, &[], true, assignment, scope, ctx);
+            let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+            apply_array_write(&base_name, &[], true, rhs_types, scope, ctx);
         }
         // `$var['a'][$i][] = …` — the append lands on the innermost level
         // of an array-access chain rather than on the variable itself.
@@ -190,14 +203,15 @@ pub(crate) fn process_array_append<'b>(
             if let Some((base_name, key_chain)) =
                 super::super::array_shape_writes::extract_nested_array_access_chain(inner)
             {
-                apply_array_write(&base_name, &key_chain, true, assignment, scope, ctx);
+                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                apply_array_write(&base_name, &key_chain, true, rhs_types, scope, ctx);
             }
         }
         _ => {}
     }
 }
 
-/// Merge the RHS of an element write into the base variable's type.
+/// Merge the value of an element write into the base variable's type.
 ///
 /// `key_chain` holds the array-access keys from outermost to innermost;
 /// `append` marks a trailing `[]` past the last key. Literal-string keys
@@ -207,11 +221,10 @@ fn apply_array_write<'b>(
     base_name: &str,
     key_chain: &[&Expression<'b>],
     append: bool,
-    assignment: &'b Assignment<'b>,
+    rhs_types: Vec<ResolvedType>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
     // An append with no inferable element type leaves the variable alone
     // rather than widening a tracked `list<T>` with `mixed`. A keyed write
     // records `mixed` so the key itself still shows up in the shape.

@@ -7,7 +7,7 @@
 // expect_hover: $sub => 1
 // expect_hover: $mul => 4
 // expect_hover: $div => 2
-// expect_hover: $mod => int
+// expect_hover: $mod => 0
 // expect_hover: $pow => 8
 ---
 <?php

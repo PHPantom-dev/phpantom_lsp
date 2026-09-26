@@ -28,18 +28,20 @@ namespace PsalmTest_binary_operation_3 {
     $d = 25.5 % 2.5;
     $e = 25 % 1;
 
-    assertType('int', $a);
+    // PHPantom folds `%` over two integer literals to the exact value.
+    assertType('1', $a);
     assertType('int', $b);
     assertType('int', $c);
     assertType('int', $d);
-    assertType('int', $e);
+    assertType('0', $e);
 }
 
 // Test: concatenationWithTwoLiteralInt
 namespace PsalmTest_binary_operation_4 {
     $a = 7 . 5;
 
-    assertType('string', $a);
+    // PHPantom folds concatenation of known scalars to the literal.
+    assertType("'75'", $a);
 }
 
 // Test: bitwiseoperations
@@ -103,7 +105,8 @@ namespace PsalmTest_binary_operation_9 {
     $c = ~4.4;
     $d = ~"a";
 
-    assertType('int', $a);
+    // PHPantom folds `~` over an integer literal to the exact value.
+    assertType('-5', $a);
     assertType('int', $b);
     assertType('int', $c);
     assertType('string', $d);

@@ -64,7 +64,7 @@ class Foo
 	{
 		assertType('int', $a % $b);
 		assertNativeType('int', $a % $b);
-		assertType('0', 1 % 1); // SKIP: literal operands are not folded through this operator
+		assertType('0', 1 % 1);
 		assertNativeType('0', 1 % 1);
 		assertType('int', $c % $d);
 		assertNativeType('int', $c % $d);
@@ -94,7 +94,7 @@ class Foo
 	{
 		assertType('int', ~$a);
 		assertNativeType('int', ~$b);
-		assertType('-2', ~1); // SKIP: literal operands are not folded through this operator
+		assertType('-2', ~1);
 		assertNativeType('-2', ~1);
 		assertType('int', ~$b);
 		assertNativeType('int', ~$b);
@@ -184,7 +184,7 @@ class Foo
 	{
 		assertType('string', $a . $b);
 		assertNativeType('string', $a . $b);
-		assertType("'1a'", '1' . 'a'); // SKIP: literal operands are not folded through this operator
+		assertType("'1a'", '1' . 'a');
 		assertNativeType("'1a'", '1' . 'a');
 		assertType('string', $c . $d);
 		assertNativeType('string', $c . $d);
@@ -197,7 +197,7 @@ class Foo
 	{
 		$a = '1';
 
-		assertType('1', +$a); // SKIP: literal operands are not folded through this operator
+		assertType('1', +$a);
 		assertNativeType('1', +$a);
 		assertType('int', +$i);
 		assertNativeType('int', +$i);
@@ -208,7 +208,7 @@ class Foo
 	function doUnaryMinus(int $i) {
 		$a = '1';
 
-		assertType('-1', -$a); // SKIP: literal operands are not folded through this operator
+		assertType('-1', -$a);
 		assertNativeType('-1', -$a);
 		assertType('int', -$i);
 		assertNativeType('int', -$i);
@@ -252,7 +252,7 @@ class Foo
 	public function doSpaceship($a, $b, string $c, string $d): void
 	{
 		assertNativeType('int<-1, 1>', $a <=> $b);
-		assertType('-1', '1' <=> 'a'); // SKIP: literal operands are not folded through this operator
+		assertType('-1', '1' <=> 'a');
 		assertNativeType('-1', '1' <=> 'a');
 		assertNativeType('int<-1, 1>', $c <=> $d);
 	}
@@ -260,15 +260,15 @@ class Foo
 	function doCast() {
 		$a = '1';
 
-		assertType('1', (int) $a); // SKIP: literal operands are not folded through this operator
-		assertType("array{'1'}", (array) $a); // SKIP: literal operands are not folded through this operator
+		assertType('1', (int) $a);
+		assertType("array{'1'}", (array) $a);
 		// PHPantom is more precise than PHPStan here: casting a scalar to object stores it in a `scalar` property.
 		assertType('object{scalar: string}&stdClass', (object) $a);
-		assertType('1.0', (double) $a); // SKIP: literal operands are not folded through this operator
-		assertType("'1'", (string) $a); // SKIP: literal operands are not folded through this operator
+		assertType('1.0', (double) $a);
+		assertType("'1'", (string) $a);
 
 		$f = 1.1;
-		assertType('1', (int) $f); // SKIP: literal operands are not folded through this operator
+		assertType('1', (int) $f);
 	}
 
 	/**
@@ -277,9 +277,9 @@ class Foo
 	function doInterpolatedString(string $b) {
 		$a = '1';
 
-		assertType("'1'", "$a"); // SKIP: literal operands are not folded through this operator
+		assertType("'1'", "$a");
 		assertNativeType("'1'", "$a");
-		assertType("'1'", "$b"); // SKIP: literal operands are not folded through this operator
+		assertType("'1'", "$b");
 		assertNativeType("string", "$b");
 	}
 

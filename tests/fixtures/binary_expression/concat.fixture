@@ -1,11 +1,18 @@
 // test: concatenation resolves to string
 // feature: hover
 // Adapted from phpactor binary-expression/concat.test
-// expect_hover: $a => string
+// Two operands with known values fold to the literal PHP builds.
+// expect_hover: $a => 'ab'
+// expect_hover: $b => '1a2.5'
+// expect_hover: $c => string
 ---
 <?php
 
-function test(): void {
+function test(string $s): void {
     $a = 'a' . 'b';
+    $b = 1 . 'a' . 2.5;
+    $c = 'a' . $s;
     $<>a;
+    $b;
+    $c;
 }

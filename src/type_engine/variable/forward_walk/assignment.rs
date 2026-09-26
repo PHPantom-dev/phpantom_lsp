@@ -10,6 +10,7 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+    infer_modulo_result_type,
 };
 
 // ─── Statement processing ───────────────────────────────────────────────────
@@ -893,6 +894,23 @@ pub(crate) fn process_compound_assignment<'b>(
                 None => return,
             }
         }
+        // `$totals[$key]['count'] += $n;` writes the operator's result back
+        // into the element, the same as spelling it out with `=` would.
+        Expression::ArrayAccess(array_access) => {
+            if let Some(result_type) = compound_assignment_result(
+                &assignment.operator,
+                || resolve_rhs_with_scope(assignment.lhs, scope, ctx),
+                || resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+            ) {
+                super::array_assignment::process_array_key_write(
+                    array_access,
+                    vec![ResolvedType::from_type_string(result_type)],
+                    scope,
+                    ctx,
+                );
+            }
+            return;
+        }
         _ => return,
     };
     if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) {
@@ -942,8 +960,8 @@ fn compound_assignment_result(
 ) -> Option<PhpType> {
     match operator {
         AssignmentOperator::Concat(_) => Some(PhpType::string()),
-        AssignmentOperator::Modulo(_)
-        | AssignmentOperator::LeftShift(_)
+        AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
+        AssignmentOperator::LeftShift(_)
         | AssignmentOperator::RightShift(_)
         | AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
@@ -1117,10 +1135,11 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // unified resolver below, which preserves signed numeric literals and
     // falls back to `int|float` for non-literal operands.
     if let Expression::UnaryPrefix(prefix) = rhs
-        && let Some(ty) =
-            super::super::rhs_resolution::unary_prefix_result_type(&prefix.operator, || {
-                resolve_rhs_with_scope(prefix.operand, scope, ctx)
-            })
+        && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
+            &prefix.operator,
+            prefix.operand,
+            || resolve_rhs_with_scope(prefix.operand, scope, ctx),
+        )
     {
         return vec![ResolvedType::from_type_string(ty)];
     }

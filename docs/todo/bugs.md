@@ -99,7 +99,7 @@ foreach ($items as $item) {
 }
 ```
 
-Inside a guard that proved the key exists, reading that key should not include the `null` that comes from the array possibly being empty (here, the `[]` it was initialised with).
+Inside a guard that proved the key exists, reading that key should not include the `null` that comes from the array possibly being empty (here, the `[]` it was initialised with). The same missing proof makes a compound write inside the guard (`$results[$key]['count'] += $n`) create a new element on the loop's first pass, when the array is still `[]`, so the array's type after the loop carries a variant with only the written key.
 
 Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
@@ -232,34 +232,7 @@ Found porting PHPStan's `Analyser/data/is-resource-specified.php`; the assertion
 
 ## Arithmetic
 
-### B461. Literal operands are not folded through several operators
-**Impact: Low · Complexity: Medium**
-
-```php
-1 % 1;        // should be 0, is int
-~1;           // should be -2, is int
-'1' . 'a';    // should be '1a', is string
-+$one; -$one; // should be 1 and -1, are int|float
-'1' <=> 'a';  // should be -1, is int
-(int) '1'; (string) 1; (float) 1; (array) '1'; // should be literals, are base types
-"$one";       // should be '1', is string
-PHP_INT_MIN;  // should be -9223372036854775808, is int
-```
-
-Arithmetic on literal operands already folds (`1 + 1` is `2`). The operators above, casts, string interpolation, and the stub's `-9223372036854775807 - 1` initializer for `PHP_INT_MIN` are not folded yet.
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php` and `Analyser/data/predefined-constants-64bit.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B462. Arithmetic with a `mixed` operand stays `mixed`
-**Impact: Low · Complexity: Low**
-
-```php
-$results[$key]['count'] += $mixed; // should be array|float|int, stays mixed
-```
-
-Whatever a `mixed` operand holds, `+` can only produce a number or an array (and the other arithmetic operators only a number, or throw).
-
-Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
+No outstanding items.
 
 ## Symbol resolution
 
@@ -451,6 +424,19 @@ $review; // should be array<array<mixed>>, is array<int|string, array|array{id: 
 Joining branches that wrote different shapes leaves a redundant `array|array{…}` union where the shape is already covered by `array`, and joining shapes with differing optional keys (`Rules/Comparison/data/bug-7898.php`) marks keys required that only one branch set.
 
 Found porting PHPStan's `Rules/Variables/data/bug-8113.php` and `Rules/Comparison/data/bug-7898.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+
+### B479. `??=` on an offset whose key is not a variable leaves the offset `null`
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$totals = [];
+foreach ($items as $item) {
+    $totals[(string) $item] ??= 0;
+    $totals[(string) $item]; // should be int, is null
+}
+```
+
+With a plain variable key (`$totals[$key] ??= 0`) the read afterwards is `int`. A key that is any other expression (a cast, a call, a concatenation) is not recorded, so the read only sees the empty array the variable started as.
 
 ## Laravel
 

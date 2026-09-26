@@ -76,7 +76,7 @@ class Foo
 		assertType('0.5', 1 / 2);
 		assertType('1', 1 * 1);
 		assertType('1', 1 ** 1);
-		assertType('int', 1 % 1);
+		assertType('0', 1 % 1);
 
 		// ── Arithmetic: literal float op float ──────────────────────────
 
@@ -166,7 +166,7 @@ class Foo
 
 		// ── Spaceship ───────────────────────────────────────────────────
 
-		assertType('int', 'foo' <=> 'bar');
+		assertType('1', 'foo' <=> 'bar');
 
 		// ── Bitwise operators: int operands ─────────────────────────────
 

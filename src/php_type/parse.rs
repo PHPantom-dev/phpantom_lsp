@@ -195,16 +195,14 @@ pub(crate) fn parse_php_int_literal(raw: &str) -> Option<i64> {
         (10, clean.as_str())
     };
 
-    if digits.is_empty() {
+    if !digits.starts_with(|c: char| c.is_ascii_alphanumeric()) {
         return None;
     }
 
-    let unsigned = i64::from_str_radix(digits, radix).ok()?;
-    if negative {
-        unsigned.checked_neg()
-    } else {
-        Some(unsigned)
-    }
+    // The magnitude is read unsigned so `-9223372036854775808`, whose
+    // magnitude is one past `i64::MAX`, still reads as `i64::MIN`.
+    let magnitude = i128::from(u64::from_str_radix(digits, radix).ok()?);
+    i64::try_from(if negative { -magnitude } else { magnitude }).ok()
 }
 
 pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {

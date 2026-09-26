@@ -919,11 +919,12 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
         resolve_literal_test_var(content, "$broad_string_map"),
         "non-empty-array<string, string>"
     );
-    // An explicit `(string)` cast and an int-typed step expression keep their
-    // own key domain rather than falling back to `array-key`.
+    // `(string) 1` folds to `'1'`, which PHP stores as the integer key `1`;
+    // an int-typed step expression keeps its own key domain rather than
+    // falling back to `array-key`.
     assert_eq!(
         resolve_literal_test_var(content, "$cast_map"),
-        "non-empty-array<string, string>"
+        "non-empty-array<int, string>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$pre_increment_map"),

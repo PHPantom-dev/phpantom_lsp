@@ -454,6 +454,25 @@ impl LiteralValue {
             .is_some_and(|content| is_php_numeric_string(&content))
     }
 
+    /// The number a numeric-string literal holds, as PHP reads it in an
+    /// arithmetic context: `'1'` is `1`, `' 1.5 '` is `1.5`, and an integer
+    /// spelling too large for `int` is a float. `None` for anything that is
+    /// not a numeric string.
+    pub fn numeric_string_value(&self) -> Option<LiteralValue> {
+        let content = self.string_content()?;
+        if !is_php_numeric_string(&content) {
+            return None;
+        }
+        let trimmed = content.trim_matches(|c: char| c.is_ascii_whitespace());
+        if !trimmed.contains(['.', 'e', 'E'])
+            && let Ok(value) = trimmed.parse::<i64>()
+        {
+            return Some(LiteralValue::int(value.to_string()));
+        }
+        let value = trimmed.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        Some(LiteralValue::float(format!("{value:?}")))
+    }
+
     /// Whether PHP 8's `==` holds between the two values, or `None` when a
     /// literal's value cannot be read.
     ///

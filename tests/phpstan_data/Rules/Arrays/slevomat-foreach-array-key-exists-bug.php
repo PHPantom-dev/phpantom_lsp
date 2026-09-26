@@ -17,22 +17,22 @@ class Foo
 					if (array_key_exists($key, $intervalResults)) {
 						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 						$intervalResults[$key]['itemsCount'] += $itemsCount;
-						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]); // SKIP: arithmetic with a mixed operand stays mixed
+						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 					} else {
-						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
+						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 						$intervalResults[$key] = [
 							'itemsCount' => $itemsCount,
 							'interval' => $percentageInterval,
 						];
-						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
+						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]);
 					}
 				}
 			}
 		}
 
-		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
+		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array_key_exists() with a variable key does not narrow the offset read
 		foreach ($intervalResults as $data) {
 			echo $data['interval'];
 		}

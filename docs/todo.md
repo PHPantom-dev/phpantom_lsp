@@ -120,7 +120,6 @@ unlikely to move the needle for most users.
 | B454 | [Comparing a foreach key does not narrow the value it was read with](todo/bugs.md#b454-comparing-a-foreach-key-does-not-narrow-the-value-it-was-read-with) | Low-Medium | Medium-High |
 | B455 | [The else branch of `is_resource()` drops the possibly closed resource](todo/bugs.md#b455-the-else-branch-of-is_resource-drops-the-possibly-closed-resource) | Low | Low |
 | B458 | [An `(array)` cast of a union with a non-array member is plain `array`](todo/bugs.md#b458-an-array-cast-of-a-union-with-a-non-array-member-is-plain-array) | Low | Low |
-| B462 | [Arithmetic with a `mixed` operand stays `mixed`](todo/bugs.md#b462-arithmetic-with-a-mixed-operand-stays-mixed) | Low | Low |
 | B476 | [Calling a closure declared `: static` gives a bare `static`](todo/bugs.md#b476-calling-a-closure-declared--static-gives-a-bare-static) | Low | Low |
 | B448 | [Falsiness narrowing does not narrow to the falsy values](todo/bugs.md#b448-falsiness-narrowing-does-not-narrow-to-the-falsy-values) | Low | Low-Medium |
 | B451 | [An equality assertion (`@phpstan-assert-if-true =int`) is not read](todo/bugs.md#b451-an-equality-assertion-phpstan-assert-if-true-int-is-not-read) | Low | Low-Medium |
@@ -128,6 +127,7 @@ unlikely to move the needle for most users.
 | B467 | [A template default is not used when nothing binds the template](todo/bugs.md#b467-a-template-default-is-not-used-when-nothing-binds-the-template) | Low | Low-Medium |
 | B473 | [Iterating a class whose `getIterator()` declares `Iterator<V>` gives `int|string` keys](todo/bugs.md#b473-iterating-a-class-whose-getiterator-declares-iteratorv-gives-intstring-keys) | Low | Low-Medium |
 | B474 | [A magic constant resolves to its base type rather than its value](todo/bugs.md#b474-a-magic-constant-resolves-to-its-base-type-rather-than-its-value) | Low | Low-Medium |
+| B479 | [`??=` on an offset whose key is not a variable leaves the offset `null`](todo/bugs.md#b479--on-an-offset-whose-key-is-not-a-variable-leaves-the-offset-null) | Low | Low-Medium |
 | B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
 | B441 | [A class constant whose initializer names an enum case is not resolved](todo/bugs.md#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved) | Low | Medium |
 | B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |
@@ -135,7 +135,6 @@ unlikely to move the needle for most users.
 | B449 | [Exhausted narrowing leaves the last type standing instead of `never`](todo/bugs.md#b449-exhausted-narrowing-leaves-the-last-type-standing-instead-of-never) | Low | Medium |
 | B452 | [`@phpstan-assert-if-false` on a variadic parameter does not narrow the arguments](todo/bugs.md#b452-phpstan-assert-if-false-on-a-variadic-parameter-does-not-narrow-the-arguments) | Low | Medium |
 | B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
-| B461 | [Literal operands are not folded through several operators](todo/bugs.md#b461-literal-operands-are-not-folded-through-several-operators) | Low | Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
 | B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |
 | B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |

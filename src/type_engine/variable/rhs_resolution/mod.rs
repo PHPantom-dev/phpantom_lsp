@@ -55,6 +55,7 @@ mod array_access;
 mod calls;
 mod instantiation;
 mod property_access;
+mod scalar_fold;
 
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
@@ -64,6 +65,7 @@ use property_access::resolve_rhs_property_access;
 
 pub(crate) use arithmetic::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+    infer_modulo_result_type,
 };
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
@@ -118,7 +120,11 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
                 };
                 Some(PhpType::literal_float(signed))
             }
-            LiteralValue::String(_) => None,
+            // A numeric string reads as the number it spells (`-'1'` is
+            // `-1`); any other string warns or throws.
+            LiteralValue::String(_) => value
+                .numeric_string_value()
+                .and_then(|number| apply_numeric_sign(&PhpType::literal(number), negated)),
         },
         TypeKind::Union(members) => {
             let mut signed = Vec::with_capacity(members.len());
@@ -568,8 +574,14 @@ fn resolve_assignment_as_value<'b>(
             }
         }
         AssignmentOperator::Concat(_) => vec![ResolvedType::from_type_string(PhpType::string())],
-        AssignmentOperator::Modulo(_)
-        | AssignmentOperator::LeftShift(_)
+        AssignmentOperator::Modulo(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(infer_modulo_result_type(
+                &lhs_types, &rhs_types,
+            ))]
+        }
+        AssignmentOperator::LeftShift(_)
         | AssignmentOperator::RightShift(_)
         | AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
@@ -1180,7 +1192,7 @@ fn resolve_rhs_expression_inner<'b>(
         // operator, not on how the expression is reached, so a cast in a
         // ternary branch resolves the same as one assigned directly.
         Expression::UnaryPrefix(unary) => {
-            match unary_prefix_result_type(&unary.operator, || {
+            match unary_prefix_result_type(&unary.operator, unary.operand, || {
                 resolve_rhs_expression(unary.operand, ctx)
             }) {
                 Some(ty) => vec![ResolvedType::from_type_string(ty)],
@@ -1311,8 +1323,35 @@ fn resolve_rhs_expression_inner<'b>(
             resolve_var_types(&rhs_var, ctx, ctx.cursor_offset)
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
+        // Two operands that each hold one known scalar concatenate to the
+        // literal PHP would build (`'1' . 'a'` is `'1a'`).
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            vec![ResolvedType::from_type_string(PhpType::string())]
+            let folded = (scalar_fold::is_cheap_scalar_operand(binary.lhs)
+                && scalar_fold::is_cheap_scalar_operand(binary.rhs))
+            .then(|| {
+                let lhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.lhs, ctx))?;
+                let rhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.rhs, ctx))?;
+                scalar_fold::fold_concat(&lhs, &rhs)
+            })
+            .flatten();
+            vec![ResolvedType::from_type_string(
+                folded.unwrap_or_else(PhpType::string),
+            )]
+        }
+        // ── Interpolated strings: `"$a-$b"`, heredocs ───────────────
+        // Command substitution (backticks) is not a plain string and is
+        // left unresolved.
+        Expression::CompositeString(string)
+            if !matches!(
+                string,
+                mago_syntax::cst::string::CompositeString::ShellExecute(_)
+            ) =>
+        {
+            let folded =
+                scalar_fold::fold_interpolated(string, |part| resolve_rhs_expression(part, ctx));
+            vec![ResolvedType::from_type_string(
+                folded.unwrap_or_else(PhpType::string),
+            )]
         }
         // ── Magic constants: `__LINE__`, `__FILE__`, `__CLASS__`, … ─
         Expression::MagicConstant(magic) => {
@@ -1395,19 +1434,31 @@ fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) ->
 /// result is determined by the operator plus (for `(object)` and `~`) the
 /// operand type.
 ///
-/// `resolve_operand` is only called for those two operators, so callers
-/// that reach this on a plain cast pay nothing for it.
+/// A cast or `~` of an operand that holds one known scalar folds to the
+/// value PHP computes (`(int) '1'` is `1`, `~1` is `-2`). `resolve_operand`
+/// is always called for `(object)` and `~`, and for the other casts only
+/// when `operand` is cheap to resolve (a literal, variable, or constant), so
+/// a cast of a call pays nothing for it.
 ///
 /// Returns `None` for operators the caller must resolve itself: `-`/`+`
 /// need the full expression resolver to keep signed numeric literals
 /// exact, and `@`/`&`/`++`/`--` take the type of their operand.
 pub(crate) fn unary_prefix_result_type(
     operator: &unary::UnaryPrefixOperator<'_>,
+    operand: &Expression<'_>,
     resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
 ) -> Option<PhpType> {
     use unary::UnaryPrefixOperator;
 
-    Some(match operator {
+    let base = match operator {
+        UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
+        UnaryPrefixOperator::BitwiseNot(_) => {
+            let resolved = resolve_operand();
+            if let Some(scalar_fold::Scalar::Int(value)) = scalar_fold::single_scalar(&resolved) {
+                return Some(PhpType::literal_int((!value).to_string()));
+            }
+            return Some(bitwise_not_type(&resolved));
+        }
         UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
         UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
             PhpType::string()
@@ -1417,24 +1468,30 @@ pub(crate) fn unary_prefix_result_type(
         | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
         UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
         UnaryPrefixOperator::ArrayCast(..) => PhpType::array(),
-        UnaryPrefixOperator::UnsetCast(..) => PhpType::named(atom("null")),
-        UnaryPrefixOperator::Not(_) => PhpType::bool(),
-        UnaryPrefixOperator::ObjectCast(..) => object_cast_type(resolve_operand()),
-        // `~` yields a string for string operands and an int otherwise.
-        UnaryPrefixOperator::BitwiseNot(_) => {
-            let operand = resolve_operand();
-            let is_string = !operand.is_empty()
-                && operand
-                    .iter()
-                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-            if is_string {
-                PhpType::string()
-            } else {
-                PhpType::int()
-            }
-        }
+        UnaryPrefixOperator::UnsetCast(..) => return Some(PhpType::named(atom("null"))),
+        UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
         _ => return None,
-    })
+    };
+    if scalar_fold::is_cheap_scalar_operand(operand)
+        && let Some(folded) = scalar_fold::single_scalar(&resolve_operand())
+            .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
+    {
+        return Some(folded);
+    }
+    Some(base)
+}
+
+/// `~` yields a string for string operands and an int otherwise.
+fn bitwise_not_type(operand: &[ResolvedType]) -> PhpType {
+    let is_string = !operand.is_empty()
+        && operand
+            .iter()
+            .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
+    if is_string {
+        PhpType::string()
+    } else {
+        PhpType::int()
+    }
 }
 
 /// The type `++`/`--` produces for a numeric operand.

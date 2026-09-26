@@ -14,6 +14,7 @@ use crate::type_engine::types::const_fold::{self, BitwiseOp};
 use crate::types::ResolvedType;
 
 use super::resolve_rhs_expression;
+use super::scalar_fold;
 
 /// The result type a binary operator produces, or `None` for an operator
 /// this module does not classify (concatenation and `??` are handled by
@@ -22,9 +23,20 @@ pub(super) fn resolve_binary_result_type<'b>(
     binary: &'b Binary<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
-    // Spaceship (<=>): always int (-1, 0, or 1).
+    // Spaceship (<=>): always int (-1, 0, or 1), and exactly one of them
+    // when both operands are known scalars.
     if matches!(binary.operator, BinaryOperator::Spaceship(_)) {
-        return Some(vec![ResolvedType::from_type_string(PhpType::int())]);
+        let folded = (scalar_fold::is_cheap_scalar_operand(binary.lhs)
+            && scalar_fold::is_cheap_scalar_operand(binary.rhs))
+        .then(|| {
+            let lhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.lhs, ctx))?;
+            let rhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.rhs, ctx))?;
+            scalar_fold::fold_spaceship(&lhs, &rhs)
+        })
+        .flatten();
+        return Some(vec![ResolvedType::from_type_string(
+            folded.unwrap_or_else(PhpType::int),
+        )]);
     }
 
     // A comparison between two known numbers has one answer, which is what
@@ -58,7 +70,11 @@ pub(super) fn resolve_binary_result_type<'b>(
 
     // Modulo (%): always int.
     if matches!(binary.operator, BinaryOperator::Modulo(_)) {
-        return Some(vec![ResolvedType::from_type_string(PhpType::int())]);
+        let lhs_types = resolve_rhs_expression(binary.lhs, ctx);
+        let rhs_types = resolve_rhs_expression(binary.rhs, ctx);
+        return Some(vec![ResolvedType::from_type_string(
+            infer_modulo_result_type(&lhs_types, &rhs_types),
+        )]);
     }
 
     // Addition (+): PHP overloads this for array union vs numeric addition.
@@ -158,6 +174,9 @@ pub(crate) fn classify_numeric_operand(types: &[ResolvedType]) -> Option<bool> {
     } else if saw_float {
         Some(true)
     } else if saw_int {
+        Some(false)
+    } else if types.iter().all(|rt| rt.type_string.is_null()) {
+        // An operand that is only ever `null` is `0` to arithmetic.
         Some(false)
     } else {
         None
@@ -269,8 +288,8 @@ pub(crate) fn infer_arithmetic_result_type(
     // zero and the handful of other cases PHP itself has no single value
     // for fall through to the classification below instead.
     if let (Some(lhs_lit), Some(rhs_lit)) = (
-        single_literal_number(lhs_types),
-        single_literal_number(rhs_types),
+        single_arithmetic_number(lhs_types),
+        single_arithmetic_number(rhs_types),
     ) && let Some(folded) = fold_literal_arithmetic(op_kind, lhs_lit, rhs_lit)
     {
         return folded;
@@ -362,7 +381,37 @@ pub(crate) fn infer_addition_result_type(
     if lhs_is_array || rhs_is_array {
         return PhpType::array();
     }
+    // Two operands nobody typed may both be arrays, and `+` then unions
+    // them; any other operator (or an operand known to be a number) can
+    // only produce a number.
+    if operand_is_undecided(lhs_types) && operand_is_undecided(rhs_types) {
+        return PhpType::benevolent(PhpType::union(vec![
+            PhpType::array(),
+            PhpType::int(),
+            PhpType::float(),
+        ]));
+    }
     infer_arithmetic_result_type(lhs_types, rhs_types, ArithmeticOpKind::Addition)
+}
+
+/// Infer the result type of `%` / `%=`: always an `int`, and the exact one
+/// when both operands are known integers.
+pub(crate) fn infer_modulo_result_type(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> PhpType {
+    match (
+        single_arithmetic_number(lhs_types),
+        single_arithmetic_number(rhs_types),
+    ) {
+        // `checked_rem` gives up on a zero divisor (PHP throws) and on
+        // `PHP_INT_MIN % -1`.
+        (Some(LiteralNumber::Int(lhs)), Some(LiteralNumber::Int(rhs))) => lhs
+            .checked_rem(rhs)
+            .map(literal_int)
+            .unwrap_or_else(PhpType::int),
+        _ => PhpType::int(),
+    }
 }
 
 /// The bitwise operator `operator` is, or `None` for every other binary
@@ -378,11 +427,12 @@ fn bitwise_op(operator: &BinaryOperator<'_>) -> Option<BitwiseOp> {
     })
 }
 
-/// Whether an operand says nothing about which of PHP's two bitwise
-/// overloads applies — either it resolved to nothing at all, or every
-/// branch it resolved to is `mixed`.
+/// Whether an operand says nothing about which of PHP's overloads applies
+/// (a bitwise operator on strings or numbers, `+` on arrays or numbers):
+/// either it resolved to nothing at all, or one of its branches is `mixed`,
+/// which absorbs the rest (`mixed|null` is still `mixed`).
 fn operand_is_undecided(types: &[ResolvedType]) -> bool {
-    types.is_empty() || types.iter().all(|rt| rt.type_string.is_mixed())
+    types.is_empty() || types.iter().any(|rt| rt.type_string.is_mixed())
 }
 
 /// Whether an operand leaves the arithmetic result unenforceable — either
@@ -479,6 +529,24 @@ fn fold_literal_arithmetic(
             i64::try_from(result).ok().map(literal_int)
         }
         (ArithmeticOpKind::Exponentiation, _, _) => literal_float(lhs.as_f64().powf(rhs.as_f64())),
+    }
+}
+
+/// [`single_literal_number`], also reading a numeric-string literal as the
+/// number it spells, the way PHP's arithmetic operators do (`'1' + 1` is
+/// `2`). Comparisons keep to [`single_literal_number`]: `'1' === 1` is
+/// false, so a numeric string is not interchangeable with its number there.
+fn single_arithmetic_number(types: &[ResolvedType]) -> Option<LiteralNumber> {
+    if let Some(number) = single_literal_number(types) {
+        return Some(number);
+    }
+    let [only] = types else {
+        return None;
+    };
+    let number = only.type_string.as_literal()?.numeric_string_value()?;
+    match number.parse_i64() {
+        Some(value) => Some(LiteralNumber::Int(value)),
+        None => number.parse_f64().map(LiteralNumber::Float),
     }
 }
 

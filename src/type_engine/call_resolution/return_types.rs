@@ -1127,7 +1127,8 @@ fn resolve_hint_keywords(
 /// through the AST-based `resolve_conditional_chain`.
 ///
 /// A full three-part ternary (`$a ? $b : $c`) and arithmetic operators
-/// (`+`, `-`, `*`, …) are deliberately left unanswered here: arithmetic's
+/// (`+`, `-`, `*`, …) are deliberately left unanswered here, unless every
+/// operand is a known integer and the result is one too: arithmetic's
 /// result depends on whether its operands are int or float (and `+` alone
 /// can mean array union), which the source text can't decide without
 /// resolving both operands' concrete types.
@@ -1135,11 +1136,12 @@ pub(super) fn resolve_operator_type(text: &str, ctx: &ResolutionCtx<'_>) -> Opti
     if contains_top_level_concat(text) {
         return Some(PhpType::named(atom("string")));
     }
-    // A bitwise expression over constants is the value PHP computes for it
-    // (`JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR` is one mask, not two flags).
+    // A bitwise or integer expression over constants is the value PHP
+    // computes for it (`JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR` is one mask,
+    // not two flags).
     // Only an expression that actually has an operator folds: a single term
     // would ask this very resolver about the same text again.
-    if crate::type_engine::types::const_fold::has_top_level_bitwise_operator(text) {
+    if crate::type_engine::types::const_fold::has_top_level_int_operator(text) {
         let resolve = |term: &str| Backend::resolve_arg_text_to_type(term, ctx);
         if let Some(value) =
             crate::type_engine::types::const_fold::fold_int_expression(text, &resolve)

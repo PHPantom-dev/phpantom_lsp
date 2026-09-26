@@ -12,8 +12,8 @@
 //!
 //! Reading the initialiser as text stops at the first name. This module folds
 //! the rest: names are resolved through the shared resolver the caller hands
-//! in, and the bitwise operators PHP allows in a constant expression are
-//! applied to the integers they come back as. A term that cannot be pinned
+//! in, and the bitwise and integer arithmetic operators PHP allows in a
+//! constant expression are applied to the integers they come back as. A term that cannot be pinned
 //! down leaves the whole expression unfolded, so a mask nobody can read stays
 //! unread rather than becoming a wrong number.
 //!
@@ -72,11 +72,46 @@ pub(crate) fn literal_int_value(ty: &PhpType) -> Option<i64> {
     ty.as_literal().and_then(LiteralValue::parse_i64)
 }
 
+/// An operator [`fold_int_expression`] splits an expression at.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum IntOp {
+    Bitwise(BitwiseOp),
+    Add,
+    Sub,
+    Mul,
+}
+
+impl IntOp {
+    /// How tightly the operator binds; the lower, the earlier the split.
+    fn precedence(self) -> u8 {
+        match self {
+            IntOp::Bitwise(BitwiseOp::Or) => 0,
+            IntOp::Bitwise(BitwiseOp::Xor) => 1,
+            IntOp::Bitwise(BitwiseOp::And) => 2,
+            IntOp::Bitwise(BitwiseOp::LeftShift | BitwiseOp::RightShift) => 3,
+            IntOp::Add | IntOp::Sub => 4,
+            IntOp::Mul => 5,
+        }
+    }
+
+    /// The integer `lhs op rhs` produces, or `None` when PHP would produce a
+    /// float instead (an overflow) or no value at all.
+    fn apply(self, lhs: i64, rhs: i64) -> Option<i64> {
+        match self {
+            IntOp::Bitwise(op) => apply_bitwise(op, lhs, rhs),
+            IntOp::Add => lhs.checked_add(rhs),
+            IntOp::Sub => lhs.checked_sub(rhs),
+            IntOp::Mul => lhs.checked_mul(rhs),
+        }
+    }
+}
+
 /// The integer the constant expression `text` folds to.
 ///
 /// Handles the operators PHP allows in a constant expression that produce an
-/// integer from integers: `|`, `^`, `&`, `<<`, `>>`, unary `~`/`-`/`+`, and
-/// parentheses. Every other term is handed to `resolve` and folds only when it
+/// integer from integers: `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `*`, unary
+/// `~`/`-`/`+`, and parentheses. An arithmetic result that overflows into a
+/// float leaves the expression unfolded. Every other term is handed to `resolve` and folds only when it
 /// comes back a literal integer, which covers a global constant, a class
 /// constant, and a variable holding one.
 pub(crate) fn fold_int_expression(text: &str, resolve: TextResolver<'_>) -> Option<i64> {
@@ -85,47 +120,41 @@ pub(crate) fn fold_int_expression(text: &str, resolve: TextResolver<'_>) -> Opti
         Some((index, op_len, op)) => {
             let lhs = fold_int_expression(&text[..index], resolve)?;
             let rhs = fold_int_expression(&text[index + op_len..], resolve)?;
-            apply_bitwise(op, lhs, rhs)
+            op.apply(lhs, rhs)
         }
         None => fold_term(text, resolve),
     }
 }
 
-/// Whether `text` has a bitwise operator outside any nested expression, i.e.
-/// whether [`fold_int_expression`] would read it as an operator expression
-/// rather than as a single term.
+/// Whether `text` has a bitwise or integer arithmetic operator outside any
+/// nested expression, i.e. whether [`fold_int_expression`] would read it as
+/// an operator expression rather than as a single term.
 ///
 /// Callers that resolve arbitrary expression text consult this first: folding
 /// a single term asks `resolve` about that same text, which for a caller
 /// reached *from* `resolve` would not terminate.
-pub(crate) fn has_top_level_bitwise_operator(text: &str) -> bool {
+pub(crate) fn has_top_level_int_operator(text: &str) -> bool {
     split_point(strip_wrapping_parens(text.trim())).is_some()
 }
 
 /// Where [`fold_int_expression`] splits `text`, as the byte index of the
 /// operator, its length, and which operator it is.
 ///
-/// The split goes at the loosest-binding bitwise operator the expression has,
-/// and at its last occurrence within that tier, so the recursion reproduces
-/// PHP's precedence and left associativity. Quoted text and anything inside a
-/// bracket pair is not top level, and the doubled forms `||` and `&&` are the
-/// boolean operators rather than this one. Returns `None` for an expression
-/// with no bitwise operator of its own.
-fn split_point(text: &str) -> Option<(usize, usize, BitwiseOp)> {
-    /// How tightly an operator binds; the lower, the earlier the split.
-    fn precedence(op: BitwiseOp) -> u8 {
-        match op {
-            BitwiseOp::Or => 0,
-            BitwiseOp::Xor => 1,
-            BitwiseOp::And => 2,
-            BitwiseOp::LeftShift | BitwiseOp::RightShift => 3,
-        }
-    }
-
+/// The split goes at the loosest-binding operator the expression has, and at
+/// its last occurrence within that tier, so the recursion reproduces PHP's
+/// precedence and left associativity. Quoted text and anything inside a
+/// bracket pair is not top level, the doubled forms `||` and `&&` are the
+/// boolean operators rather than the bitwise ones, and a `+`/`-` that does
+/// not follow an operand is a sign rather than a binary operator. Returns
+/// `None` for an expression with no operator of its own.
+fn split_point(text: &str) -> Option<(usize, usize, IntOp)> {
     let bytes = text.as_bytes();
     let mut depth: u32 = 0;
     let mut quote: Option<u8> = None;
-    let mut best: Option<(usize, usize, BitwiseOp)> = None;
+    let mut best: Option<(usize, usize, IntOp)> = None;
+    // Whether the last significant byte ended an operand, which is what makes
+    // a following `+`/`-` a binary operator rather than a sign.
+    let mut after_operand = false;
     let mut i = 0;
     while i < bytes.len() {
         let byte = bytes[i];
@@ -140,33 +169,63 @@ fn split_point(text: &str) -> Option<(usize, usize, BitwiseOp)> {
             i += 1;
             continue;
         }
+        if byte.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
         match byte {
-            b'\'' | b'"' => quote = Some(byte),
+            b'\'' | b'"' => {
+                quote = Some(byte);
+                after_operand = true;
+                i += 1;
+                continue;
+            }
             b'(' | b'[' | b'{' => depth += 1,
-            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-            b'|' | b'&' if bytes.get(i + 1) == Some(&byte) => {
+            b')' | b']' | b'}' => {
+                depth = depth.saturating_sub(1);
+                after_operand = true;
+                i += 1;
+                continue;
+            }
+            b'|' | b'&' | b'*' if bytes.get(i + 1) == Some(&byte) => {
+                // `||`, `&&` and `**` are not operators this folds, so they
+                // are never a split point either.
+                after_operand = false;
+                i += 2;
+                continue;
+            }
+            b'-' if bytes.get(i + 1) == Some(&b'>') => {
                 i += 2;
                 continue;
             }
             _ if depth == 0 => {
                 let matched = match byte {
-                    b'|' => Some((1, BitwiseOp::Or)),
-                    b'^' => Some((1, BitwiseOp::Xor)),
-                    b'&' => Some((1, BitwiseOp::And)),
-                    b'<' if bytes.get(i + 1) == Some(&b'<') => Some((2, BitwiseOp::LeftShift)),
-                    b'>' if bytes.get(i + 1) == Some(&b'>') => Some((2, BitwiseOp::RightShift)),
+                    b'|' => Some((1, IntOp::Bitwise(BitwiseOp::Or))),
+                    b'^' => Some((1, IntOp::Bitwise(BitwiseOp::Xor))),
+                    b'&' => Some((1, IntOp::Bitwise(BitwiseOp::And))),
+                    b'<' if bytes.get(i + 1) == Some(&b'<') => {
+                        Some((2, IntOp::Bitwise(BitwiseOp::LeftShift)))
+                    }
+                    b'>' if bytes.get(i + 1) == Some(&b'>') => {
+                        Some((2, IntOp::Bitwise(BitwiseOp::RightShift)))
+                    }
+                    b'+' if after_operand => Some((1, IntOp::Add)),
+                    b'-' if after_operand => Some((1, IntOp::Sub)),
+                    b'*' => Some((1, IntOp::Mul)),
                     _ => None,
                 };
                 if let Some((op_len, op)) = matched {
-                    if best.is_none_or(|(_, _, found)| precedence(op) <= precedence(found)) {
+                    if best.is_none_or(|(_, _, found)| op.precedence() <= found.precedence()) {
                         best = Some((i, op_len, op));
                     }
+                    after_operand = false;
                     i += op_len;
                     continue;
                 }
             }
             _ => {}
         }
+        after_operand = byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'$' | b'\\');
         i += 1;
     }
     best
@@ -288,7 +347,7 @@ pub(crate) fn folded_constant_type(
     let value = strip_wrapping_parens(value.trim());
 
     // An operator expression is folded operand by operand.
-    if has_top_level_bitwise_operator(value) || value.starts_with(['~', '-', '+']) {
+    if has_top_level_int_operator(value) || value.starts_with(['~', '-', '+']) {
         return fold_int_expression(value, resolve)
             .map(|folded| PhpType::literal_int(folded.to_string()));
     }
@@ -373,6 +432,25 @@ mod tests {
     }
 
     #[test]
+    fn integer_arithmetic_folds() {
+        // The stub initialiser of `PHP_INT_MIN`.
+        assert_eq!(fold("-9223372036854775807 - 1"), Some(i64::MIN));
+        assert_eq!(fold("2 + 3 * 4"), Some(14));
+        assert_eq!(fold("10 - 3 - 2"), Some(5));
+        assert_eq!(fold("-5 - -1"), Some(-4));
+        assert_eq!(fold("1 << 2 + 1"), Some(8));
+        assert_eq!(fold("JSON_PRETTY_PRINT - 1"), Some(127));
+    }
+
+    #[test]
+    fn integer_arithmetic_that_overflows_or_is_not_integer_stays_unfolded() {
+        assert_eq!(fold("9223372036854775807 + 1"), None);
+        assert_eq!(fold("2 ** 3"), None);
+        assert_eq!(fold("2 * 3 ** 2"), None);
+        assert_eq!(fold("$flags - 1"), None);
+    }
+
+    #[test]
     fn a_negative_shift_count_has_no_value() {
         assert_eq!(fold("1 << -1"), None);
         assert_eq!(fold("1 << 64"), Some(0));
@@ -381,13 +459,15 @@ mod tests {
 
     #[test]
     fn boolean_operators_are_not_bitwise_ones() {
-        assert!(!has_top_level_bitwise_operator("$a || JSON_THROW_ON_ERROR"));
-        assert!(!has_top_level_bitwise_operator("$a && $b"));
-        assert!(!has_top_level_bitwise_operator("$foo->bar"));
-        assert!(!has_top_level_bitwise_operator("mask(1 | 2)"));
-        assert!(has_top_level_bitwise_operator("1 | 2"));
-        assert!(has_top_level_bitwise_operator("(1 | 2)"));
-        assert!(has_top_level_bitwise_operator("(1 | 2) << 4"));
+        assert!(!has_top_level_int_operator("$a || JSON_THROW_ON_ERROR"));
+        assert!(!has_top_level_int_operator("$a && $b"));
+        assert!(!has_top_level_int_operator("$foo->bar"));
+        assert!(!has_top_level_int_operator("mask(1 | 2)"));
+        assert!(has_top_level_int_operator("1 | 2"));
+        assert!(has_top_level_int_operator("(1 | 2)"));
+        assert!(has_top_level_int_operator("(1 | 2) << 4"));
+        assert!(!has_top_level_int_operator("-1"));
+        assert!(has_top_level_int_operator("-1 - 1"));
     }
 
     #[test]
