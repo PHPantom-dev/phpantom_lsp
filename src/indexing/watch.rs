@@ -1223,7 +1223,9 @@ mod tests {
 
         let params = DidChangeWatchedFilesParams {
             changes: vec![FileEvent {
-                uri: Url::from_file_path(real.join("src/Help.php")).unwrap(),
+                // Resolve system temp-directory symlinks as well as the watched link.
+                uri: Url::from_file_path(real.join("src/Help.php").canonicalize().unwrap())
+                    .unwrap(),
                 typ: FileChangeType::CREATED,
             }],
         };

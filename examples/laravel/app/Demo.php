@@ -29,6 +29,12 @@ use App\Models\ReviewCollection;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
+use Illuminate\Container\Attributes\Auth as InjectAuth;
+use Illuminate\Container\Attributes\Authenticated as InjectAuthenticated;
+use Illuminate\Container\Attributes\Cache as InjectCache;
+use Illuminate\Container\Attributes\Database as InjectDatabase;
+use Illuminate\Container\Attributes\Log as InjectLog;
+use Illuminate\Container\Attributes\Storage as InjectStorage;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -40,11 +46,16 @@ use Illuminate\Support\Env;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Response;
@@ -974,6 +985,46 @@ class Demo
     }
 
 
+    // ── Config-backed Laravel resource names ───────────────────────────
+
+    public function injectedNamedResources(
+        #[InjectAuth(guard: 'admin')] mixed $guard,
+        #[InjectAuthenticated(guard: 'admin')] mixed $user,
+        #[InjectCache(store: 'memory')] mixed $cache,
+        #[InjectLog(channel: 'daily')] mixed $logger,
+        #[InjectStorage(disk: 'pantry')] mixed $disk,
+        #[InjectDatabase(connection: 'mysql')] mixed $database,
+    ): void
+    {
+        // Contextual-attribute arguments complete and navigate against the
+        // same family-specific config entries as their facade counterparts.
+    }
+
+    public function namedLaravelResources(): void
+    {
+        // Hover identifies each resource family, Ctrl+Click opens its config
+        // entry, and references include direct config() access to that entry.
+        auth('admin');
+        Auth::guard('admin');
+        Cache::store('memory');
+        Log::channel('daily');
+        Log::stack(['daily', 'stderr']);
+        Storage::disk('pantry');
+        DB::connection('mysql');
+        DB::connection('mysql::read');
+        Queue::connection('redis');
+        Mail::mailer('transactional');
+        Broadcast::connection('internal');
+        Route::middleware(['auth:admin']);
+        config('cache.stores.memory');
+
+        // Laravel supplies these null drivers at runtime even though no
+        // matching child needs to exist in cache.php or queue.php.
+        Cache::store('null');
+        Queue::connection('null');
+    }
+
+
     // ── Cache::remember() — closure return type binding ─────────────────
 
     public function cacheRemember(): void
@@ -1249,16 +1300,15 @@ class Demo
     {
         // fake() declares the Filesystem contract but always builds a
         // FilesystemAdapter, so the adapter-only assertion helpers resolve.
-        // Disk names complete from config/filesystems.php, hover as their full
-        // config keys, and navigate back to their declarations — in the
-        // #[Storage] attribute above as much as in the calls below.
+        // Disk names complete from config/filesystems.php, hover with their
+        // resource family, and navigate back to their declarations.
         Storage::fake('avatars')->assertExists('me.png');
         Storage::persistentFake(disk: 'logs')->assertMissing('old.log');
 
         // forgetDisk() takes one name or a list of them, and tolerates a disk
         // that was never configured, so an unknown name here is not flagged.
         Storage::forgetDisk('avatars');
-        Storage::forgetDisk(['avatars', 'logs']);
+        Storage::forgetDisk(disk: ['avatars', 'logs']);
     }
 
 

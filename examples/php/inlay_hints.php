@@ -99,4 +99,3 @@ class InlayHintsDemo
     /** @param callable(Scaffolding\User): bool $fn */
     public function filterOrders(callable $fn): array { return []; }
 }
-
