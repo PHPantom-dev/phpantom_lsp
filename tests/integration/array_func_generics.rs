@@ -38,7 +38,7 @@ function probe(array $byName, array $users, array $bare): void {
         content,
         &[
             ("$names", "list<string>"),
-            ("$indices", "list<int>"),
+            ("$indices", "list<int<0, max>>"),
             ("$first", "string|null"),
             ("$last", "string|null"),
             ("$cursor", "string|null"),
@@ -65,7 +65,7 @@ function probe(array $byName, array $names): void {
 "#;
     assert_assigned_types(
         content,
-        &[("$key", "string|false"), ("$index", "int|false")],
+        &[("$key", "string|false"), ("$index", "int<0, max>|false")],
     );
 }
 
@@ -124,7 +124,8 @@ function probe(array $names, array $users, array $bare): void {
 }
 
 /// The element-extracting family has the same scalar blind spot:
-/// `array_pop(list<string>)` is a `string`, not `mixed`.
+/// `array_pop(list<string>)` is a `string`, not `mixed`.  The `null` or
+/// `false` an empty array gives stays alongside it.
 #[test]
 fn element_extractors_keep_scalar_elements() {
     let content = r#"<?php
@@ -143,10 +144,50 @@ function probe(array $names, array $users): void {
     assert_assigned_types(
         content,
         &[
-            ("$popped", "string"),
-            ("$shifted", "string"),
-            ("$cursor", "string"),
-            ("$object", "User"),
+            ("$popped", "string|null"),
+            ("$shifted", "string|null"),
+            ("$cursor", "string|false"),
+            ("$object", "User|null"),
+        ],
+    );
+}
+
+/// An element function hands back `null` or `false` when the array has no
+/// entry to give, so the sentinel is dropped only for an array that is
+/// provably non-empty.  `next()`, `prev()` and `array_find()` can miss on
+/// any array, so they always keep it.
+#[test]
+fn element_extractors_add_the_sentinel_an_empty_array_gives() {
+    let content = r#"<?php
+class User {}
+/**
+ * @param list<User> $users
+ * @param non-empty-list<User> $some
+ */
+function probe(array $users, array $some): void {
+    $first = reset($users);
+    $last = end($some);
+    $popped = array_pop($some);
+    $none = array_shift([]);
+    $after = next($some);
+    $found = array_find($some, fn (User $u) => true);
+    $pieces = explode('/', 'a/b');
+    $tail = end($pieces);
+    $trimmed = explode('/', 'a/b', -1);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "User|false"),
+            ("$last", "User"),
+            ("$popped", "User"),
+            ("$none", "null"),
+            ("$after", "User|false"),
+            ("$found", "User|null"),
+            ("$pieces", "non-empty-list<string>"),
+            ("$tail", "string"),
+            ("$trimmed", "list<string>"),
         ],
     );
 }
@@ -236,7 +277,10 @@ function probe(?int $w, ?bool $a, ?string $s, ?DateTime $d): void {
 "#;
     assert_assigned_types(
         content,
-        &[("$filtered", "array<string, int|true|string|DateTime>")],
+        &[(
+            "$filtered",
+            "array{w?: int, a?: true, s?: string, d?: DateTime}",
+        )],
     );
 }
 
@@ -307,7 +351,7 @@ function probe(array $rows, array $names): void {
         content,
         &[
             ("$picked", "array<string, int>"),
-            ("$listed", "array<int, string>"),
+            ("$listed", "array<int<0, max>, string>"),
         ],
     );
 }
@@ -638,9 +682,9 @@ function probe(string $contents, int $start): void {
     assert_assigned_types(
         content,
         &[
-            ("$offsets", "array<int, string>"),
-            ("$doubled", "non-empty-array<int, string>"),
-            ("$counted", "non-empty-array<int, string>"),
+            ("$offsets", "non-empty-array<int, string>"),
+            ("$doubled", "non-empty-array<int, 'a'|'b'>"),
+            ("$counted", "non-empty-array<int, 'c'>"),
         ],
     );
 }
@@ -666,7 +710,7 @@ function probe(array $counts, array $users): void {
         content,
         &[
             ("$total", "int"),
-            ("$last", "User"),
+            ("$last", "User|null"),
             ("$kept", "array<int, User>"),
         ],
     );
@@ -725,7 +769,7 @@ function probe(array $weights, array $tallies): void {
             ("$proven", "int"),
             ("$declared", "string"),
             ("$current", "string"),
-            ("$literal", "string"),
+            ("$literal", "'a'"),
         ],
     );
 }
@@ -822,7 +866,7 @@ function probe(array $users, array $orders, array $byName): void {
         &[
             ("$seeded", "list<User>"),
             ("$both", "list<User|Order>"),
-            ("$three", "array<int|string, User|Order>"),
+            ("$three", "array<int<0, max>|string, User|Order>"),
         ],
     );
 }
@@ -857,7 +901,7 @@ function probe(array $users, array $byName, array $ordersByName, array $loose, a
         content,
         &[
             ("$strings", "array<string, User|Order>"),
-            ("$mixed", "array<int|string, User>"),
+            ("$mixed", "array<int<0, max>|string, User>"),
             ("$open", "array<User>"),
             ("$shorthandOpen", "array<User>"),
         ],
@@ -867,7 +911,8 @@ function probe(array $users, array $byName, array $ordersByName, array $loose, a
 /// An argument the rule cannot read could contribute anything, so it declines
 /// and leaves the stub's bare `array` standing rather than claim a union that
 /// is missing a member. A bare `array` names no element type, and a spread
-/// holds the arrays to merge rather than one of them.
+/// holds the arrays to merge rather than one of them. Two empty literals are
+/// shapes it can read, and merge to the empty shape.
 #[test]
 fn array_merge_declines_on_arguments_it_cannot_read() {
     let content = r#"<?php
@@ -887,7 +932,81 @@ function probe(array $users, array $groups, array $bare): void {
         &[
             ("$withBare", "array"),
             ("$spread", "array"),
-            ("$empty", "array"),
+            ("$empty", "array{}"),
         ],
+    );
+}
+
+/// Merging shapes keeps their entries: a later string key overwrites an
+/// earlier one in place (joining both values when it is optional), and
+/// integer keys are renumbered in the order they are appended.
+#[test]
+fn array_merge_of_shapes_keeps_their_entries() {
+    let content = r#"<?php
+/**
+ * @param array{id: int, name: string} $row
+ * @param array{name?: null} $patch
+ */
+function probe(array $row, array $patch): void {
+    $renumbered = array_merge(['a' => 1, 5 => 'x'], [7 => 'y']);
+    $patched = array_merge($row, $patch);
+    $overwritten = array_merge($row, ['id' => 'new']);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$renumbered", "array{a: 1, 0: 'x', 1: 'y'}"),
+            ("$patched", "array{id: int, name: string|null}"),
+            ("$overwritten", "array{id: 'new', name: string}"),
+        ],
+    );
+}
+
+/// A callback held in a variable as one of several type-check names keeps
+/// whatever any of them accepts.
+#[test]
+fn array_filter_with_a_callable_string_variable_narrows_by_each_alternative() {
+    let content = r#"<?php
+/** @param array<string, int|string|float|null> $map */
+function probe(array $map, bool $flag): void {
+    $single = 'is_string';
+    $either = $flag ? 'is_string' : 'is_int';
+    $strings = array_filter($map, $single);
+    $scalars = array_filter($map, $either);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$strings", "array<string, string>"),
+            ("$scalars", "array<string, string|int>"),
+        ],
+    );
+}
+
+/// A first-class callable hands `array_map` the method or function itself,
+/// so its declared return is what each element becomes. Without it the
+/// element passed straight through, and `array_map(Row::fromCache(...),
+/// $rows)` read back as the rows it was built from.
+#[test]
+fn array_map_with_a_first_class_callable_returns_what_the_callable_returns() {
+    let content = r#"<?php
+class Row {
+    /** @param array{id: int} $data */
+    public static function fromCache(array $data): self { return new self(); }
+}
+/**
+ * @param list<array{id: int}> $rows
+ * @param list<Stringable> $labels
+ */
+function probe(array $rows, array $labels): void {
+    $objects = array_map(Row::fromCache(...), $rows);
+    $texts = array_map(strval(...), $labels);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[("$objects", "list<Row>"), ("$texts", "list<string>")],
     );
 }

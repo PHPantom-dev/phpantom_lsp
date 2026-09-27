@@ -24,10 +24,10 @@ impl Backend {
     /// Waits for the initial workspace index but does not refresh it.  A
     /// user command that should also discover files created without a
     /// watcher event runs [`Self::ensure_workspace_indexed_for_request`]
-    /// itself, *before* it reads `content`: the refresh re-infers Blade
-    /// templates, which rewrites their virtual PHP, so a template's
-    /// `content` and `position` read ahead of it would no longer be the
-    /// text its symbol map describes.
+    /// itself, *before* it reads `content`: a refresh that parses new files
+    /// re-infers Blade templates, which can rewrite their virtual PHP, so a
+    /// template's `content` and `position` read ahead of it would no longer
+    /// be the text its symbol map describes.
     pub fn find_references(
         &self,
         uri: &str,
@@ -234,7 +234,7 @@ impl Backend {
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
-                let fqn = build_fqn(name, ctx.namespace.as_deref());
+                let fqn = build_fqn(name, ctx.namespace_at(span_start).as_deref());
                 self.find_class_references(&fqn, include_declaration)
             }
             SymbolKind::MemberAccess {
@@ -359,13 +359,21 @@ impl Backend {
                 let (hierarchy, declaration_scope) = self
                     .resolve_member_declaration_scopes(uri, span_start, name, *is_static, mode)
                     .unzip();
-                self.find_member_references(
+                let mut locations = self.find_member_references(
                     name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
                     declaration_scope.flatten().as_ref(),
-                )
+                );
+                if let Some(magic) = self.eloquent_magic_member_at(uri, span_start, name) {
+                    locations.extend(
+                        self.eloquent_magic_references_batch(&[&magic], None)
+                            .into_iter()
+                            .flatten(),
+                    );
+                }
+                locations
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 // `$this` is a file-local variable, not a cross-file class search.
@@ -401,18 +409,12 @@ impl Backend {
                 if !self.resolved_class_cache.read().is_laravel() {
                     return Vec::new();
                 }
-                let snapshot = if include_declaration
-                    && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
-                {
-                    self.user_file_symbol_maps()
-                } else {
-                    self.user_file_symbol_maps_for_reference_keys(&[
-                        ReferenceIndexKey::LaravelString {
-                            kind: kind.clone(),
-                            key: key.to_string(),
-                        },
-                    ])
-                };
+                // Config resources and their generic config spelling share a
+                // canonical index identity. Declaration lookup is independent
+                // of this usage snapshot, so every request stays narrow.
+                let reference_key =
+                    crate::reference_index::laravel_string_reference_key(*kind, key);
+                let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
                 laravel::find_laravel_string_key_references(
                     self,
                     kind,

@@ -1592,3 +1592,51 @@ async fn test_goto_definition_docblock_callable_no_return_type() {
     );
     assert_location(result.unwrap(), &uri, 1);
 }
+
+// ─── A docblock template shadows a same-named class ─────────────────────────
+
+/// Under `@template T`, the `T` in `@param T $item` is the template even when
+/// a class `T` exists; the `T` in `new T()` in the body is still the class.
+#[tokio::test]
+async fn test_goto_definition_docblock_template_shadows_same_named_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///template_shadows_class.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class T {}\n",
+        "/**\n",
+        " * @template T\n",
+        " * @param T $item\n",
+        " * @return T\n",
+        " */\n",
+        "function identity($item) {\n",
+        "    $made = new T();\n",
+        "    return $item;\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let in_docblock = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, 4, 10).await,
+    );
+    assert_eq!(
+        in_docblock
+            .iter()
+            .map(|l| (l.range.start.line, l.range.start.character))
+            .collect::<Vec<_>>(),
+        vec![(3, 13)],
+        "the docblock `T` should go to the `@template T` declaration"
+    );
+
+    let in_code = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, 8, 16).await,
+    );
+    assert_eq!(
+        in_code
+            .iter()
+            .map(|l| l.range.start.line)
+            .collect::<Vec<_>>(),
+        vec![1],
+        "`new T()` should go to class T"
+    );
+}

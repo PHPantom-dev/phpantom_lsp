@@ -8,6 +8,7 @@ const COMPOSER_JSON: &str = r#"{
     "autoload": {
         "psr-4": {
             "App\\Models\\": "src/Models/",
+            "App\\Relations\\": "src/Relations/",
             "App\\Casts\\": "src/Casts/",
             "App\\Collections\\": "src/Collections/",
             "App\\Concerns\\": "src/Concerns/",
@@ -84,8 +85,9 @@ namespace Illuminate\\Database\\Eloquent;
 /**
  * @template TKey of array-key
  * @template TModel
+ * @extends \\Illuminate\\Support\\Collection<TKey, TModel>
  */
-class Collection {
+class Collection extends \\Illuminate\\Support\\Collection {
     /** @return int */
     public function count(): int { return 0; }
     /** @return TModel|null */
@@ -511,6 +513,318 @@ fn make_workspace(app_files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfil
     let mut files: Vec<(&str, &str)> = framework_stubs();
     files.extend_from_slice(app_files);
     create_psr4_workspace(COMPOSER_JSON, &files)
+}
+
+#[tokio::test]
+async fn phpstan_model_type_operators_resolve_custom_types_and_relations() {
+    let user = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nuse Illuminate\\Database\\Eloquent\\Relations\\HasMany;\n#[\\Illuminate\\Database\\Eloquent\\Attributes\\CollectedBy(\\App\\Collections\\UserCollection::class)]\n#[\\Illuminate\\Database\\Eloquent\\Attributes\\UseFactory(\\Database\\Factories\\AttributeFactory::class)]\nclass User extends Model {\n    public static $factory = \\Database\\Factories\\UserFactory::class;\n    public function posts(): HasMany { return $this->hasMany(Post::class); }\n    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }\n    protected static function newFactory(): \\Illuminate\\Database\\Eloquent\\Factories\\Factory { return new \\Database\\Factories\\MethodFactory(); }\n}\n";
+    let post = "<?php\nnamespace App\\Models;\nuse Illuminate\\Database\\Eloquent\\Model;\nuse Illuminate\\Database\\Eloquent\\Relations\\HasMany;\nclass Post extends Model {\n    /** @return HasMany<User, $this> */\n    public function comments(): HasMany { return $this->hasMany(User::class); }\n    public function newEloquentBuilder($query): PostBuilder { return new PostBuilder(); }\n}\n";
+    let service = "<?php\nnamespace App\\Models;\n/** @param builder-of<User> $query */\nfunction userQuery($query) { $query->userOnly(); }\n/** @param builder-of<User, 'posts'> $query */\nfunction postQuery($query) { $query->postOnly(); }\n/** @param collection-of<string, User> $users */\nfunction users($users) { $users->collectionOnly(); }\n/** @param factory-of<User> $factory */\nfunction factory($factory) { $factory->factoryOnly(); }\n/** @return builder-of<User> */\nfunction makeQuery(): \\Illuminate\\Database\\Eloquent\\Builder { return User::query(); }\nmakeQuery()->userOnly();\n/**\n * @template T of User\n * @param class-string<T> $model\n * @return builder-of<T>\n */\nfunction queryFor(string $model): \\Illuminate\\Database\\Eloquent\\Builder { return $model::query(); }\nqueryFor(User::class)->userOnly();\nuserQuery(User::query());\nuserQuery(Post::query());\n/** @param builder-of<User, 'posts.comments'> $query */\nfunction commentQuery($query) { $query->userOnly(); }\n";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", user),
+        ("src/Models/Post.php", post),
+        (
+            "src/Models/UserBuilder.php",
+            "<?php namespace App\\Models; class UserBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function userOnly() {} }",
+        ),
+        (
+            "src/Models/PostBuilder.php",
+            "<?php namespace App\\Models; class PostBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function postOnly() {} }",
+        ),
+        (
+            "src/Collections/UserCollection.php",
+            "<?php namespace App\\Collections; class UserCollection extends \\Illuminate\\Database\\Eloquent\\Collection { public function collectionOnly() {} }",
+        ),
+        (
+            "database/factories/UserFactory.php",
+            "<?php namespace Database\\Factories; class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function propertyOnly() {} }",
+        ),
+        (
+            "database/factories/AttributeFactory.php",
+            "<?php namespace Database\\Factories; class AttributeFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function attributeOnly() {} }",
+        ),
+        (
+            "database/factories/MethodFactory.php",
+            "<?php namespace Database\\Factories; class MethodFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function factoryOnly() {} }",
+        ),
+        ("src/Models/Service.php", service),
+    ]);
+    for (line, expected) in [
+        (3, "userOnly"),
+        (5, "postOnly"),
+        (7, "collectionOnly"),
+        (9, "factoryOnly"),
+        (12, "userOnly"),
+        (19, "userOnly"),
+        (23, "userOnly"),
+    ] {
+        let character = service.lines().nth(line).unwrap().find("->").unwrap() as u32 + 2;
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/Service.php",
+            service,
+            line as u32,
+            character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "line {line}: {expected} missing: {:?}",
+            method_names(&items)
+        );
+    }
+    let uri = Url::from_file_path(dir.path().join("src/Models/Service.php")).unwrap();
+    let mut diagnostics = Vec::new();
+    backend.collect_argument_type_diagnostics(uri.as_str(), service, &mut diagnostics);
+    let mismatches = crate::common::messages_with_code(&diagnostics, "type_mismatch_argument");
+    assert_eq!(mismatches.len(), 1, "{mismatches:?}");
+}
+
+#[tokio::test]
+async fn factory_of_uses_property_attribute_and_convention() {
+    let service = "<?php\nnamespace App\\Models;\n/** @param factory-of<PropertyUser> $factory */\nfunction propertyFactory($factory) { $factory->propertyOnly(); }\n/** @param factory-of<AttributeUser> $factory */\nfunction attributeFactory($factory) { $factory->attributeOnly(); }\n/** @param factory-of<ConventionUser> $factory */\nfunction conventionFactory($factory) { $factory->conventionOnly(); }\n";
+    let (backend, dir) = make_workspace(&[
+        (
+            "src/Models/PropertyUser.php",
+            "<?php namespace App\\Models; class PropertyUser extends \\Illuminate\\Database\\Eloquent\\Model { public static $factory = \\Database\\Factories\\PropertyFactory::class; }",
+        ),
+        (
+            "src/Models/AttributeUser.php",
+            "<?php namespace App\\Models; #[\\Illuminate\\Database\\Eloquent\\Attributes\\UseFactory(\\Database\\Factories\\AttributeFactory::class)] class AttributeUser extends \\Illuminate\\Database\\Eloquent\\Model {}",
+        ),
+        (
+            "src/Models/ConventionUser.php",
+            "<?php namespace App\\Models; class ConventionUser extends \\Illuminate\\Database\\Eloquent\\Model {}",
+        ),
+        (
+            "database/factories/PropertyFactory.php",
+            "<?php namespace Database\\Factories; class PropertyFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function propertyOnly() {} }",
+        ),
+        (
+            "database/factories/AttributeFactory.php",
+            "<?php namespace Database\\Factories; class AttributeFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function attributeOnly() {} }",
+        ),
+        (
+            "database/factories/ConventionUserFactory.php",
+            "<?php namespace Database\\Factories; class ConventionUserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function conventionOnly() {} }",
+        ),
+        ("src/Models/Service.php", service),
+    ]);
+    for (line, expected) in [
+        (3, "propertyOnly"),
+        (5, "attributeOnly"),
+        (7, "conventionOnly"),
+    ] {
+        let character = service.lines().nth(line).unwrap().find("->").unwrap() as u32 + 2;
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/Service.php",
+            service,
+            line as u32,
+            character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "line {line}: {expected} missing: {:?}",
+            method_names(&items)
+        );
+    }
+}
+
+#[tokio::test]
+async fn relation_of_resolves_final_relation_and_its_models() {
+    let service = r#"<?php
+namespace App\Models;
+/** @param relation-of<User, 'posts'> $relation */
+function posts($relation) { $relation->manyOnly(); }
+/** @param relation-of<User, 'posts.comments'> $relation */
+function comments($relation) { $relation->belongsToOnly(); }
+/** @param relation-of<User, 'posts.comments'> $relation */
+function related($relation) { $relation->getRelated()->commentOnly(); }
+/** @param relation-of<User, 'posts.comments'> $relation */
+function declaring($relation) { $relation->getParent()->postOnly(); }
+/** @param relation-of<User, 'posts.noSuchRelation'> $relation */
+function unknown($relation) { $relation->belongsToOnly(); }
+/** @param relation-of<User, 'posts.special'> $relation */
+function special($relation) { $relation->specialOnly(); }
+/** @param relation-of<User, 'posts.comments'|'posts.special'> $relation */
+function either($relation) { $relation->specialOnly(); }
+"#;
+    let (backend, dir) = make_workspace(&[
+        (
+            "vendor/illuminate/Eloquent/Relations/HasMany.php",
+            r#"<?php namespace Illuminate\Database\Eloquent\Relations;
+/** @template TRelated of \Illuminate\Database\Eloquent\Model
+ * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model */
+class HasMany { public function manyOnly(): void {} }
+"#,
+        ),
+        (
+            "vendor/illuminate/Eloquent/Relations/BelongsTo.php",
+            r#"<?php namespace Illuminate\Database\Eloquent\Relations;
+/** @template TRelated of \Illuminate\Database\Eloquent\Model
+ * @template TDeclaringModel of \Illuminate\Database\Eloquent\Model */
+class BelongsTo {
+    public function belongsToOnly(): void {}
+    /** @return TRelated */
+    public function getRelated(): \Illuminate\Database\Eloquent\Model { return new \Illuminate\Database\Eloquent\Model(); }
+    /** @return TDeclaringModel */
+    public function getParent(): \Illuminate\Database\Eloquent\Model { return new \Illuminate\Database\Eloquent\Model(); }
+}
+"#,
+        ),
+        (
+            "src/Models/User.php",
+            r#"<?php namespace App\Models;
+class User extends \Illuminate\Database\Eloquent\Model {
+    /** @return \Illuminate\Database\Eloquent\Relations\HasMany<Post, $this> */
+    public function posts() { return $this->hasMany(Post::class); }
+}
+"#,
+        ),
+        (
+            "src/Models/Post.php",
+            r#"<?php namespace App\Models;
+class Post extends \Illuminate\Database\Eloquent\Model {
+    public function postOnly(): void {}
+    /** @return \Illuminate\Database\Eloquent\Relations\BelongsTo<Comment, $this> */
+    public function comments() { return $this->belongsTo(Comment::class); }
+    /** @return \App\Relations\SpecialBelongsTo<Comment, $this> */
+    public function special() { return new \App\Relations\SpecialBelongsTo(); }
+}
+"#,
+        ),
+        (
+            "src/Relations/SpecialBelongsTo.php",
+            "<?php namespace App\\Relations; class SpecialBelongsTo extends \\Illuminate\\Database\\Eloquent\\Relations\\BelongsTo { public function specialOnly(): void {} }",
+        ),
+        (
+            "src/Models/Comment.php",
+            "<?php namespace App\\Models; class Comment extends \\Illuminate\\Database\\Eloquent\\Model { public function commentOnly(): void {} }",
+        ),
+        ("src/Models/Service.php", service),
+    ]);
+    for (line, expected) in [
+        (3, "manyOnly"),
+        (5, "belongsToOnly"),
+        (7, "commentOnly"),
+        (9, "postOnly"),
+    ] {
+        let character = service.lines().nth(line).unwrap().rfind("->").unwrap() as u32 + 2;
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/Service.php",
+            service,
+            line as u32,
+            character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "line {line}: {expected} missing: {:?}",
+            method_names(&items)
+        );
+    }
+    // A path naming a relation the model does not declare falls back to the
+    // base `Relation`, which still carries the query methods, rather than
+    // resolving to nothing.
+    let character = service.lines().nth(11).unwrap().find("->").unwrap() as u32 + 2;
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/Service.php",
+        service,
+        11,
+        character,
+    )
+    .await;
+    let methods = method_names(&items);
+    assert!(!methods.contains(&"belongsToOnly"), "{methods:?}");
+    assert!(methods.contains(&"where"), "{methods:?}");
+    // A project's own relation subclass is what the method hands back, so
+    // the path keeps it — including as one alternative of a union of paths.
+    for line in [13, 15] {
+        let character = service.lines().nth(line).unwrap().find("->").unwrap() as u32 + 2;
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/Service.php",
+            service,
+            line as u32,
+            character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&"specialOnly"),
+            "line {line}: {:?}",
+            method_names(&items)
+        );
+    }
+}
+
+/// Every operator answers with the framework's base class when the model,
+/// the customisation it declares, or the relation path cannot be resolved.
+/// A pseudo-type left standing resolves to no class at all, so the subject
+/// would lose every member; the base class keeps the ones the framework
+/// declares.
+#[tokio::test]
+async fn model_type_operators_fall_back_to_base_classes_in_the_editor() {
+    let service = r#"<?php
+namespace App\Models;
+/** @param builder-of<Ghost> $query */
+function unknownModelBuilder($query) { $query->where('a', 1); }
+/** @param collection-of<Ghost> $items */
+function unknownModelCollection($items) { $items->count(); }
+/** @param factory-of<Ghost> $factory */
+function unknownModelFactory($factory) { $factory->makeOne(); }
+/** @param relation-of<Ghost, 'anything'> $relation */
+function unknownModelRelation($relation) { $relation->where('a', 1); }
+/** @param builder-of<Widget> $query */
+function missingCustomBuilder($query) { $query->where('a', 1); }
+/** @param collection-of<Widget> $items */
+function missingCustomCollection($items) { $items->count(); }
+"#;
+    let (backend, dir) = make_workspace(&[
+        (
+            "src/Models/Widget.php",
+            // Both customisations name classes the project never declares.
+            r#"<?php namespace App\Models;
+#[\Illuminate\Database\Eloquent\Attributes\CollectedBy(\App\Collections\Missing::class)]
+class Widget extends \Illuminate\Database\Eloquent\Model {
+    public function newEloquentBuilder($query): \App\Builders\Missing { return new \App\Builders\Missing(); }
+}
+"#,
+        ),
+        ("src/Models/Service.php", service),
+    ]);
+    for (line, expected) in [
+        (3, "where"),
+        (5, "count"),
+        (7, "makeOne"),
+        (9, "where"),
+        (11, "where"),
+        (13, "count"),
+    ] {
+        let character = service.lines().nth(line).unwrap().find("->").unwrap() as u32 + 2;
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/Service.php",
+            service,
+            line as u32,
+            character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "line {line}: {expected} missing: {:?}",
+            method_names(&items)
+        );
+    }
 }
 
 /// Helper: open a file of the workspace and trigger completion in it,
@@ -5544,8 +5858,14 @@ class Project extends Model {
     );
 }
 
+/// `#[CollectedBy]` is read by `HasCollection::newCollection()` itself
+/// (`$this->resolveCollectionFromAttribute()`), so a model that overrides
+/// that method replaces the whole lookup and the attribute never runs.
+/// The override is therefore what the model actually builds, whatever the
+/// attribute says, which is also the order the Laravel PHPStan extensions
+/// resolve these in.
 #[tokio::test]
-async fn test_collected_by_takes_priority_over_new_collection() {
+async fn test_new_collection_takes_priority_over_collected_by() {
     let collection_a_php = "\
 <?php
 namespace App\\Collections;
@@ -5602,13 +5922,13 @@ class Widget extends Model {
     let methods = method_names(&items);
 
     assert!(
-        methods.contains(&"fromAttribute"),
-        "#[CollectedBy] should take priority over newCollection(), got: {:?}",
+        methods.contains(&"fromMethod"),
+        "newCollection() should take priority over #[CollectedBy], got: {:?}",
         methods
     );
     assert!(
-        !methods.contains(&"fromMethod"),
-        "newCollection() should NOT be used when #[CollectedBy] is present, got: {:?}",
+        !methods.contains(&"fromAttribute"),
+        "#[CollectedBy] should NOT be used when newCollection() overrides the lookup that reads it, got: {:?}",
         methods
     );
 }
@@ -15499,5 +15819,206 @@ class MPFilterTest {
         !labels.contains(&"status"),
         "Should NOT offer 'status' when partial is 'na', got: {:?}",
         labels
+    );
+}
+
+/// A `builder-of<static>` written inside a `Closure(…)` parameter types
+/// the closure's argument, the way the `Closure(TFactory)` beside it
+/// already does. `static` binds to the model the call is made on, and the
+/// model's own builder is what the closure receives.
+#[tokio::test]
+async fn a_closure_parameter_typed_builder_of_seeds_the_closure() {
+    let user = r#"<?php
+namespace App\Models;
+use Closure;
+use Illuminate\Database\Eloquent\Model;
+
+class User extends Model {
+    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }
+
+    /**
+     * @param (Closure(builder-of<static>): mixed)|null $query
+     * @param (Closure(factory-of<static>): mixed)|null $factory
+     */
+    public static function randomOrFactory(?Closure $query = null, ?Closure $factory = null): mixed
+    {
+        return null;
+    }
+
+    public function callers(): void
+    {
+        User::randomOrFactory(
+            fn ($q) => $q->userOnly(),
+            fn ($f) => $f->factoryOnly(),
+        );
+    }
+}
+"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/User.php", user),
+        (
+            "src/Models/UserBuilder.php",
+            "<?php namespace App\\Models; class UserBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function userOnly() {} }",
+        ),
+        (
+            "database/factories/UserFactory.php",
+            "<?php namespace Database\\Factories; class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function factoryOnly() {} }",
+        ),
+    ]);
+
+    for (needle, expected) in [("$q->", "userOnly"), ("$f->", "factoryOnly")] {
+        let offset = user.find(needle).unwrap() + needle.len();
+        let line = user[..offset].matches('\n').count() as u32;
+        let character = (offset - user[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32;
+        let items = complete_at(&backend, &dir, "src/Models/User.php", user, line, character).await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "{needle} should offer {expected}, got: {:?}",
+            method_names(&items)
+        );
+    }
+}
+
+/// The shape a real application writes it in: the annotation lives on a
+/// generic trait the model composes, `static` therefore means the model
+/// the call names rather than the trait, the model's builder comes from
+/// `@use HasBuilder<…>`, and the call is made from another file entirely.
+#[tokio::test]
+async fn builder_of_static_on_a_trait_binds_the_model_the_call_names() {
+    let has_builder = r#"<?php
+namespace App\Concerns;
+/**
+ * @template TBuilder of \Illuminate\Database\Eloquent\Builder
+ * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ */
+trait HasBuilder {}
+"#;
+    let has_factory = r#"<?php
+namespace App\Concerns;
+use Closure;
+use Illuminate\Database\Eloquent\Factories\Factory;
+/**
+ * @template TFactory of Factory
+ * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ */
+trait HasFactory
+{
+    /**
+     * @param (Closure(builder-of<static>): mixed)|null $query
+     * @param (Closure(TFactory): TFactory)|null $factory
+     */
+    public static function randomOrFactory(?Closure $query = null, ?Closure $factory = null): mixed
+    {
+        return null;
+    }
+}
+"#;
+    let user = r#"<?php
+namespace App\Models;
+use App\Concerns\HasBuilder;
+use App\Concerns\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+
+class User extends Model {
+    /** @use HasBuilder<\App\Models\UserBuilder> */
+    use HasBuilder;
+    /** @use HasFactory<\Database\Factories\UserFactory> */
+    use HasFactory;
+
+    public function newEloquentBuilder($query): UserBuilder { return new UserBuilder(); }
+}
+"#;
+    let caller = r#"<?php
+namespace App\Models;
+
+final class DivisionFactory
+{
+    public function forHead(): void
+    {
+        User::randomOrFactory(
+            function ($q) { $q->eagleOnly(); return $q; },
+            fn ($f) => $f->factoryOnly(),
+        );
+    }
+}
+"#;
+    let (backend, dir) = make_workspace(&[
+        ("src/Concerns/HasBuilder.php", has_builder),
+        ("src/Concerns/HasFactory.php", has_factory),
+        ("src/Models/User.php", user),
+        (
+            "src/Models/UserBuilder.php",
+            "<?php namespace App\\Models; class UserBuilder extends \\Illuminate\\Database\\Eloquent\\Builder { public function eagleOnly() {} }",
+        ),
+        (
+            "database/factories/UserFactory.php",
+            "<?php namespace Database\\Factories; class UserFactory extends \\Illuminate\\Database\\Eloquent\\Factories\\Factory { public function factoryOnly() {} }",
+        ),
+        ("src/Models/DivisionFactory.php", caller),
+    ]);
+
+    let position_after = |needle: &str| {
+        let offset = caller.find(needle).unwrap() + needle.len();
+        Position {
+            line: caller[..offset].matches('\n').count() as u32,
+            character: (offset - caller[..offset].rfind('\n').map_or(0, |i| i + 1)) as u32,
+        }
+    };
+
+    for (needle, expected) in [("$q->", "eagleOnly"), ("$f->", "factoryOnly")] {
+        let at = position_after(needle);
+        let items = complete_at(
+            &backend,
+            &dir,
+            "src/Models/DivisionFactory.php",
+            caller,
+            at.line,
+            at.character,
+        )
+        .await;
+        assert!(
+            method_names(&items).contains(&expected),
+            "{needle} should offer {expected}, got: {:?}",
+            method_names(&items)
+        );
+    }
+
+    // The forward walker seeds the closure for every consumer, so the
+    // same binding has to carry hover and go-to-definition, not just the
+    // completion list.
+    let uri = Url::from_file_path(dir.path().join("src/Models/DivisionFactory.php")).unwrap();
+    let on_method = position_after("$q->eagle");
+    let targets = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, on_method.line, on_method.character)
+            .await,
+    );
+    assert!(
+        targets
+            .iter()
+            .any(|target| target.uri.as_str().ends_with("/UserBuilder.php")),
+        "go-to-definition on the closure's method should reach UserBuilder, got {targets:?}"
+    );
+
+    // On the variable itself, in the body — not the parameter it was
+    // declared as.
+    let on_var = position_after("return $");
+    let hover = backend
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: on_var,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("hover on the closure parameter");
+    let text = match hover.contents {
+        HoverContents::Markup(markup) => markup.value,
+        other => panic!("expected markup hover, got {other:?}"),
+    };
+    assert!(
+        text.contains("UserBuilder"),
+        "hover on the closure parameter should name UserBuilder, got: {text}"
     );
 }

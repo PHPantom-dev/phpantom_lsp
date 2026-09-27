@@ -458,13 +458,8 @@ impl Backend {
         }
 
         let local_classes = &ctx.file.classes;
-        let class_loader =
-            self.class_loader_with(local_classes, &ctx.file.use_map, &ctx.file.namespace);
-        let function_loader = self.function_loader_with(
-            ctx.file.resolved_names.as_deref(),
-            &ctx.file.use_map,
-            &ctx.file.namespace,
-        );
+        let class_loaders = self.class_loaders(&ctx.file);
+        let function_loaders = self.function_loaders(&ctx.file);
         let symbol_map = &ctx.symbol_map;
         let Some(source) = symbol_map.source(content) else {
             return;
@@ -489,6 +484,7 @@ impl Backend {
             }
 
             let current_class = find_innermost_enclosing_class(local_classes, span.start);
+            let class_loader = class_loaders.at(span.start);
 
             // A trait body is incomplete by nature: the property it
             // writes may be declared by any host class, and the trait
@@ -514,7 +510,7 @@ impl Backend {
                         .classes
                         .get(&class.start_offset)
                         .is_some_and(|facts| facts.covers_initializer(span.start))
-                        && declares_property(class, member_name, &class_loader, &mut Vec::new())
+                        && declares_property(class, member_name, class_loader, &mut Vec::new())
                 })
             {
                 continue;
@@ -527,7 +523,7 @@ impl Backend {
                     local_classes,
                     content,
                     span.start,
-                    CtxLoaders::without_macro_this(&class_loader, &function_loader),
+                    CtxLoaders::without_macro_this(class_loader, function_loaders.at(span.start)),
                 )
             };
             let SubjectOutcome::Resolved(receivers) =
@@ -547,7 +543,7 @@ impl Backend {
             };
             let mut verdict: Option<Verdict> = None;
             for receiver in &receivers {
-                let judged = self.judge_readonly_write(receiver, &site, &writes, &class_loader);
+                let judged = self.judge_readonly_write(receiver, &site, &writes, class_loader);
                 if matches!(judged, Verdict::Ok) {
                     verdict = None;
                     break;

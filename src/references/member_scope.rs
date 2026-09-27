@@ -202,10 +202,38 @@ impl Backend {
         access_offset: u32,
         content: &str,
     ) -> Vec<String> {
-        let class_loader = self.class_loader(ctx);
-        let function_loader = self.function_loader(ctx);
-        let use_map = &ctx.use_map;
-        let namespace = &ctx.namespace;
+        match self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content) {
+            Some(php_type) => {
+                self.class_names_to_fqns(php_type.top_level_class_names(), ctx, access_offset)
+            }
+            None => self.resolve_static_laravel_builder_subject_to_fqns(
+                subject_text,
+                ctx.use_map_at(access_offset),
+                ctx.namespace_at(access_offset),
+                &self.class_loader_with(
+                    &ctx.classes,
+                    ctx.use_map_at(access_offset),
+                    ctx.namespace_at(access_offset),
+                ),
+            ),
+        }
+    }
+
+    /// The type a member-access subject resolves to, through the shared
+    /// subject-resolution utility.
+    pub(super) fn resolve_subject_type_at(
+        &self,
+        subject_text: &str,
+        is_static: bool,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+        content: &str,
+    ) -> Option<crate::php_type::PhpType> {
+        let use_map = ctx.use_map_at(access_offset);
+        let namespace = ctx.namespace_at(access_offset);
+        let class_loader = self.class_loader_with(&ctx.classes, use_map, namespace);
+        let function_loader =
+            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
             use_map,
@@ -215,38 +243,40 @@ impl Backend {
             backend: Some(self),
             function_loader: &function_loader,
         };
-
-        match crate::type_engine::subject_resolution::resolve_subject_type(
+        crate::type_engine::subject_resolution::resolve_subject_type(
             subject_text,
             is_static,
             access_offset,
             &resolution_ctx,
-        ) {
-            Some(php_type) => php_type
-                .top_level_class_names()
-                .into_iter()
-                .map(|n| {
-                    let normalized = normalize_fqn(&n);
-                    // top_level_class_names() may return short names
-                    // (e.g. "BlogAuthor" instead of
-                    // "App\Models\BlogAuthor").  Resolve them through
-                    // the file's use-map and namespace so they match
-                    // the FQNs used in the hierarchy set.
-                    if normalized.contains('\\') {
-                        normalized.to_string()
-                    } else {
-                        normalize_fqn(&Self::resolve_to_fqn(&normalized, use_map, namespace))
-                            .to_string()
-                    }
-                })
-                .collect(),
-            None => self.resolve_static_laravel_builder_subject_to_fqns(
-                subject_text,
-                use_map,
-                namespace,
-                &class_loader,
-            ),
-        }
+        )
+    }
+
+    /// Normalize class names a resolved type carries into FQNs.
+    ///
+    /// A type may carry short names (`BlogAuthor` instead of
+    /// `App\Models\BlogAuthor`), which are resolved through the file's
+    /// use-map and namespace so they match the FQNs in a hierarchy set.
+    pub(super) fn class_names_to_fqns(
+        &self,
+        names: Vec<String>,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+    ) -> Vec<String> {
+        names
+            .into_iter()
+            .map(|n| {
+                let normalized = normalize_fqn(&n);
+                if normalized.contains('\\') {
+                    normalized
+                } else {
+                    normalize_fqn(&Self::resolve_to_fqn(
+                        &normalized,
+                        ctx.use_map_at(access_offset),
+                        ctx.namespace_at(access_offset),
+                    ))
+                }
+            })
+            .collect()
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -363,7 +393,7 @@ impl Backend {
     }
 
     /// The scope of the classes that inherit the member from `roots`.
-    fn descendant_scope(&self, roots: HashSet<String>) -> MemberScope {
+    pub(super) fn descendant_scope(&self, roots: HashSet<String>) -> MemberScope {
         let indexed = self.descendants_closure(roots.iter().cloned());
         MemberScope::descendants_of(roots, indexed)
     }

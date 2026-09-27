@@ -615,11 +615,11 @@ function test(
 }
 
 /// Writing an array literal states its contents, so the values it names
-/// survive into its type. Mutating one afterwards does not: a push or a
-/// keyed write says the array is being built up rather than written out,
-/// and the value arriving there stands in for however many more follow.
+/// survive into its type. A keyed write or a `[]` append outside a loop
+/// runs exactly once, so it keeps the exact value it wrote the same way,
+/// and the append keeps the shape's arity too.
 #[test]
-fn collection_tracking_widens_at_mutation_but_not_at_construction() {
+fn collection_tracking_keeps_the_values_construction_and_straight_line_writes_store() {
     let content = r#"<?php
 /**
  * @param Iterator<int, 'draft'> $iterator
@@ -680,15 +680,15 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$pushed"),
-        "non-empty-list<string>"
+        "array{'left'|'right'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$written"),
-        "array{state: string}"
+        "array{state: 'draft'|'published'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$dynamic"),
-        "non-empty-array<string, int>"
+        "non-empty-array<string, 1|2>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$from_variable"),
@@ -696,13 +696,16 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$spread"),
-        "list<'draft'>"
+        "array{'draft'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$tuple_spread"),
-        "list<'left'|'right'>"
+        "array{'left', 'right'}"
     );
-    assert_eq!(resolve_literal_test_var(content, "$mapped"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$mapped"),
+        "array{string}"
+    );
     assert_eq!(
         resolve_literal_test_var(content, "$converted"),
         "array<int, string>"
@@ -804,19 +807,19 @@ function test(bool $flag) {
     assert_eq!(resolve_literal_test_var(content, "$text"), "string");
     assert_eq!(
         resolve_literal_test_var(content, "$string_object"),
-        "object{scalar: string}"
+        "object{scalar: string}&stdClass"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$int_object"),
-        "object{scalar: int}"
+        "object{scalar: int}&stdClass"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_object"),
-        "object{scalar: int|string}"
+        "object{scalar: int|string}&stdClass"
     );
-    assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "int");
-    assert_eq!(resolve_literal_test_var(content, "$float_sum"), "float");
-    assert_eq!(resolve_literal_test_var(content, "$division"), "int|float");
+    assert_eq!(resolve_literal_test_var(content, "$integer_sum"), "3");
+    assert_eq!(resolve_literal_test_var(content, "$float_sum"), "3.5");
+    assert_eq!(resolve_literal_test_var(content, "$division"), "0.5");
 }
 
 #[test]
@@ -885,72 +888,112 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
 
     assert_eq!(
         resolve_literal_test_var(content, "$int_map"),
-        "non-empty-array<int, string>"
+        "array{1: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$float_map"),
-        "non-empty-array<int, string>"
+        "non-empty-array<int, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_map"),
-        "non-empty-array<int|string, string>"
+        "array{1: 'x'}|array{id: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$null_map"),
-        "non-empty-array<string, string>"
+        "non-empty-array<string, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$nullable_map"),
-        "non-empty-array<int|string, string>"
+        "non-empty-array<int|string, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$decimal_string_map"),
-        "non-empty-array<int, string>"
+        "array{8: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$leading_zero_map"),
-        "non-empty-array<string, string>"
+        "array{'08': 'x'}"
     );
     // A broad `string` key stays `string`: only a *literal* decimal-integer
     // string is known to become an int key at runtime.
     assert_eq!(
         resolve_literal_test_var(content, "$broad_string_map"),
-        "non-empty-array<string, string>"
+        "non-empty-array<string, 'x'>"
     );
-    // An explicit `(string)` cast and an int-typed step expression keep their
-    // own key domain rather than falling back to `array-key`.
+    // `(string) 1` folds to `'1'`, which PHP stores as the integer key `1`.
     assert_eq!(
         resolve_literal_test_var(content, "$cast_map"),
-        "non-empty-array<string, string>"
+        "array{1: 'x'}"
     );
+    // An int-typed step expression keeps its own key domain rather than
+    // falling back to `array-key`.
     assert_eq!(
         resolve_literal_test_var(content, "$pre_increment_map"),
-        "non-empty-array<int, string>"
+        "non-empty-array<int, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$post_increment_map"),
-        "non-empty-array<int, string>"
+        "array{'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_map"),
-        "non-empty-array<int, string>"
+        "array{8: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_negative_map"),
-        "non-empty-array<int, string>"
+        "non-empty-array<int, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_leading_zero_map"),
-        "array{08: string}"
+        "array{'08': 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_plus_map"),
-        "array{+8: string}"
+        "array{'+8': 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_float_map"),
-        "array{'1.5': string}"
+        "array{'1.5': 'x'}"
     );
+}
+
+#[test]
+fn an_offset_read_sees_writes_below_it() {
+    let content = r#"<?php
+function test() {
+    $nested = ['b' => 'c'];
+    $nested['d'] = ['e' => 'f'];
+    $nested['d']['e'] = 5;
+    $nested_read = $nested['d'];
+
+    $appended = [];
+    $appended['d'] = ['x'];
+    $appended['d'][] = 'y';
+    $appended_read = $appended['d'];
+
+    $replaced = [];
+    $replaced['d']['e'] = 1;
+    $replaced['d'] = ['e' => 2];
+    $replaced_read = $replaced['d']['e'];
+
+    $sibling = ['d' => ['e' => 1, 'f' => 2]];
+    $sibling['d']['e'] = 3;
+    $sibling_read = $sibling['d']['f'];
+
+    echo $nested_read, $appended_read, $replaced_read, $sibling_read;
+}
+"#;
+
+    assert_eq!(
+        resolve_literal_test_var(content, "$nested_read"),
+        "array{e: 5}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$appended_read"),
+        "array{'x', 'y'}"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$replaced_read"), "2");
+    assert_eq!(resolve_literal_test_var(content, "$sibling_read"), "2");
 }
 
 #[test]
@@ -1019,12 +1062,12 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert!(
-        ts.contains("name: string"),
-        "Shape should contain 'name: string', got: {ts}"
+        ts.contains("name: 'John'"),
+        "Shape should contain 'name: 'John'', got: {ts}"
     );
     assert!(
-        ts.contains("age: int"),
-        "Shape should contain 'age: int', got: {ts}"
+        ts.contains("age: 42"),
+        "Shape should contain 'age: 42', got: {ts}"
     );
 }
 
@@ -1054,10 +1097,10 @@ function test() {
 
     assert!(!results.is_empty(), "Should resolve $config to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
-    // The base array{host: string} should be merged with the new key.
+    // The base array{host: 'localhost'} should be merged with the new key.
     assert!(
-        ts.contains("port: int"),
-        "Shape should contain 'port: int', got: {ts}"
+        ts.contains("host: 'localhost', port: 3306"),
+        "Shape should contain 'port: 3306', got: {ts}"
     );
 }
 
@@ -1088,26 +1131,30 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert!(
-        ts.contains("value: int"),
-        "Shape key 'value' should be overridden to int, got: {ts}"
+        ts.contains("value: 42"),
+        "Shape key 'value' should be overridden to 42, got: {ts}"
     );
     assert!(
-        !ts.contains("value: string"),
-        "Old type 'string' should be gone, got: {ts}"
+        !ts.contains("'hello'"),
+        "Old value 'hello' should be gone, got: {ts}"
     );
 }
 
 // ── List tracking: push assignments ─────────────────────────────────
 
-/// `$items = []; $items[] = new User();`
-/// The unified pipeline should produce `list<User>`.
+/// `$items = []; do { $items[] = new User(); } while (false);`
+/// A push inside a loop cannot know how many times it runs, so the
+/// unified pipeline should produce `list<User>` rather than a tracked
+/// shape.
 #[test]
 fn resolve_var_list_from_push_assignments() {
     let content = r#"<?php
 class User { public string $name; }
 function test() {
     $items = [];
-    $items[] = new User();
+    do {
+        $items[] = new User();
+    } while (false);
     $items[0]->
 }
 "#;
@@ -1146,14 +1193,17 @@ function test() {
     );
 }
 
-/// Multiple push assignments with different types should union.
+/// Multiple push assignments inside a loop, with different types, should
+/// union into the list element type.
 #[test]
 fn resolve_var_list_from_push_union() {
     let content = r#"<?php
 function test() {
     $items = [];
-    $items[] = 'hello';
-    $items[] = 42;
+    do {
+        $items[] = 'hello';
+        $items[] = 42;
+    } while (false);
     $items[0]
 }
 "#;
@@ -1178,14 +1228,17 @@ function test() {
     );
 }
 
-/// Push of the same type should not duplicate.
+/// Repeated pushes of the same type inside a loop should not duplicate the
+/// list's element type.
 #[test]
 fn resolve_var_list_push_deduplicates() {
     let content = r#"<?php
 function test() {
     $items = [];
-    $items[] = 'a';
-    $items[] = 'b';
+    do {
+        $items[] = 'a';
+        $items[] = 'b';
+    } while (false);
     $items[0]
 }
 "#;
@@ -1210,16 +1263,19 @@ function test() {
     );
 }
 
-/// Reassignment resets push tracking: `$x = []; $x[] = 1; $x = []; $x[] = 'a';`
-/// should produce `list<string>`, not `list<int|string>`.
+/// Reassignment resets push tracking inside a loop: pushing an `int` before
+/// reassigning `$x` back to `[]` and pushing a `string` should produce
+/// `list<string>`, not `list<int|string>`.
 #[test]
 fn resolve_var_reassignment_resets_push_tracking() {
     let content = r#"<?php
 function test() {
     $x = [];
-    $x[] = 1;
-    $x = [];
-    $x[] = 'hello';
+    do {
+        $x[] = 1;
+        $x = [];
+        $x[] = 'hello';
+    } while (false);
     $x[0]
 }
 "#;
@@ -1244,9 +1300,9 @@ function test() {
     );
 }
 
-/// Numeric keys in `$var[0] = expr` should NOT be treated as shape entries.
+/// Integer-literal writes onto `[]` build the shape PHP builds.
 #[test]
-fn resolve_var_numeric_key_not_tracked_as_shape() {
+fn resolve_var_numeric_key_writes_build_a_shape() {
     let content = r#"<?php
 function test() {
     $data = [];
@@ -1255,31 +1311,39 @@ function test() {
     echo $data;
 }
 "#;
-    let cursor_offset = content.find("echo $data").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$data",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
+    assert_eq!(
+        resolve_literal_test_var(content, "$data"),
+        "array{'hello', 42}"
     );
+}
 
-    // Numeric keys are not shape entries, so the type should stay as
-    // the base `array` from `$data = []`.  The results may be empty
-    // (just `array`) or contain `array` as a type string.
-    let ts = if results.is_empty() {
-        "array".to_string()
-    } else {
-        ResolvedType::types_joined(&results).to_string()
-    };
-    assert!(
-        !ts.contains('{'),
-        "Numeric keys should not produce a shape, got: {ts}"
+/// A spread whose values are not known leaves the literal's values unknown,
+/// rather than just the ones written beside it.
+#[test]
+fn spreading_an_untyped_array_keeps_its_values_unknown() {
+    let content = r#"<?php
+function test($rest) {
+    $merged = ['a' => 1, ...$rest];
+    echo $merged;
+}
+"#;
+    assert_eq!(
+        resolve_literal_test_var(content, "$merged"),
+        "array{a: mixed, ...<array-key, mixed>}"
     );
+}
+
+/// Destructuring a union with no `null` in it reads each member's element.
+#[test]
+fn destructuring_a_non_nullable_union_reads_every_member() {
+    let content = r#"<?php
+/** @param array{int}|array{string} $pair */
+function test(array $pair) {
+    [$first] = $pair;
+    echo $first;
+}
+"#;
+    assert_eq!(resolve_literal_test_var(content, "$first"), "int|string");
 }
 
 #[test]
@@ -1399,8 +1463,8 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $b to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert!(
-        ts.contains("a: array{a: string}"),
-        "Shape should contain nested 'a: array{{a: string}}', got: {ts}"
+        ts.contains("a: array{a: 'a'}"),
+        "Shape should contain nested 'a: array{{a: 'a'}}', got: {ts}"
     );
 }
 
@@ -1430,7 +1494,7 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $config to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert!(
-        ts.contains("db: array{host: array{primary: string}}"),
+        ts.contains("db: array{host: array{primary: 'localhost'}}"),
         "Shape should contain deeply nested keys, got: {ts}"
     );
 }
@@ -1462,16 +1526,16 @@ function test() {
     assert!(!results.is_empty(), "Should resolve $data to a type");
     let ts = ResolvedType::types_joined(&results).to_string();
     assert!(
-        ts.contains("name: string"),
-        "Shape should contain 'name: string', got: {ts}"
+        ts.contains("name: 'John'"),
+        "Shape should contain 'name: 'John'', got: {ts}"
     );
     assert!(
-        ts.contains("city: string"),
-        "Shape should contain nested 'city: string', got: {ts}"
+        ts.contains("city: 'NYC'"),
+        "Shape should contain nested 'city: 'NYC'', got: {ts}"
     );
     assert!(
-        ts.contains("zip: string"),
-        "Shape should contain nested 'zip: string', got: {ts}"
+        ts.contains("zip: '10001'"),
+        "Shape should contain nested 'zip: '10001'', got: {ts}"
     );
 }
 
@@ -2307,10 +2371,12 @@ fn stub_function_info(name: &str, return_type: Option<PhpType>) -> crate::types:
         deprecated_replacement: None,
         template_params: Vec::new(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         template_param_bounds: Default::default(),
         throws: Vec::new(),
         is_polyfill: false,
         overloads: vec![],
         is_pure: false,
+        is_impure: false,
     }
 }

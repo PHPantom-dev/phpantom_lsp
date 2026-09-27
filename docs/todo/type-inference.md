@@ -152,7 +152,9 @@ function's signature as a typed `Closure`.  This is relevant for DI
 containers and middleware patterns but is a niche use case.
 
 See `ClosureBindDynamicReturnTypeExtension` and
-`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan.
+`ClosureFromCallableDynamicReturnTypeExtension` in PHPStan. A
+`Closure::fromCallable($cb)` assertion in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` is `// SKIP` on this.
 
 ---
 
@@ -252,7 +254,12 @@ $fn = function(int $x): string { return (string)$x; };
    should not be re-enriched to `(Closure(): mixed)`.
 
 **After fixing:** verify that extract function docblock generation
-emits the concrete callable signature in the `@param` tag.
+emits the concrete callable signature in the `@param` tag, and un-SKIP
+the `Closure(): 1`-style assertions in
+`tests/phpstan_data/Analyser/Fiber/fnsr.php` and the closure calls in
+`tests/phpstan_data/Rules/Functions/bug-anonymous-function-method-constant.php`
+(a closure without a declared return type, whose call reads back as
+`mixed`).
 
 ---
 
@@ -336,13 +343,24 @@ raw strings.
 
 ---
 
-## T26. Globbed constant unions (`Foo::BAR_*`)
+## T26. Class constants named as docblock types (`Foo::BAR`, `Foo::BAR_*`)
 
-**Impact: Low · Complexity: Medium**
+**Impact: Low-Medium · Complexity: Medium**
 
-Resolve wildcard constant patterns like `Foo::BAR_*` to the union of
-all matching constant types on the class. PHPStan supports this syntax
-in docblock type strings:
+A class constant named in a type position is not read at all: `@param
+Foo::BAR $x`, `@param self::FOO|self::BAR $x` and `@param C::class|D::class
+$x` all stay as unresolved text (or fall back to the native hint), where
+PHPStan and Psalm give the constant's value (`'bar'`, `'bar'|'foo'`,
+`'App\C'|'App\D'`). The same constants are read when they are the operand
+of `key-of<>`/`value-of<>`, through `constant_operand_shape`, so the value
+lookup exists; the bare reference just never reaches it. Found porting
+Psalm's `ConstValuesTest` and `ReconcilerTest`; the assertions are `// SKIP`
+in `tests/psalm_assertions/const_values.php` and
+`tests/psalm_assertions/type_reconciliation_reconciler.php`.
+
+The wildcard form resolves a pattern like `Foo::BAR_*` to the union of all
+matching constant types on the class. PHPStan supports this syntax in
+docblock type strings:
 
 ```php
 class Status {
@@ -455,6 +473,12 @@ intentional).
 4. Future diagnostic (D-series) can warn on access of possibly-undefined
    variables.
 
+Knowing that a target is definitely set also settles `??=`: on a target
+that is set and never null (a non-nullable parameter, a required shape
+key) the fallback can never be assigned, so `$string ??= 1` is still
+`string`. Today the fallback is always added; the assertions in
+`tests/phpstan_nsrt/coalesce-assign.php` are `// SKIP` against this item.
+
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
@@ -545,7 +569,11 @@ below it needs no change.
 
 **Tests to update once fixed:** upstream's `nsrt/deducted-types.php` has
 a `$foo::INTEGER_CONSTANT` block that was dropped when
-`tests/phpstan_nsrt/deducted-types.php` was ported; port it back.
+`tests/phpstan_nsrt/deducted-types.php` was ported; port it back. The
+`$hw::B`/`$self::FOO` assertions in
+`tests/phpstan_data/Rules/Constants/bug-10212.php` and
+`tests/phpstan_data/Rules/Methods/return-type-class-constant.php` are
+`// SKIP` on this.
 
 ---
 
@@ -585,7 +613,9 @@ to the current class name identically to `Expression::Self_`.
 **Tests to update once fixed:** the `static::`/`$this::` assertions in
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
-`self::` cases survive); port them back.
+`self::` cases survive); port them back. The `static::`/`$this::`
+assertions in `tests/phpstan_nsrt/class-constant-native-type.php` are
+`// SKIP` against this item.
 
 
 ---
@@ -774,3 +804,39 @@ it against the *declaring* class's own `type_aliases` map (via
 before substituting it into the parent's template.
 
 **Blocks:** Test Porting Phase 4A pattern 870.
+
+---
+
+## T44. A single enum case has no type
+**Impact: Low-Medium · Complexity: High**
+
+```php
+enum Suit { case Hearts; case Spades; case Clubs; }
+function f(Suit $s) {
+    if ($s === Suit::Hearts) {
+    } elseif ($s === Suit::Spades) {
+    } else {
+        $s; // PHPStan: Suit::Clubs; PHPantom: Suit
+    }
+}
+```
+
+`Suit::Hearts` resolves to the enum class, so narrowing by comparing
+against cases can only ever say "some `Suit`". PHPStan and Psalm give each
+case its own type, a subtype of the enum: comparing narrows to the cases
+left, a `match` over the rest is known exhaustive, a `readonly` property
+assigned one case keeps it, and `->value`/`->name` on it are the case's
+literal values.
+
+The type model needs an enum-case variant (or a literal kind for it) that
+is a subtype of its enum in `is_subtype_of`, prints as `Enum::CASE`, and
+joins back into the enum when every case is present. Narrowing by `===`
+and `instanceof` then subtracts cases the way it subtracts union members,
+and a branch that has compared away every case holds `never`.
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php` and `Rules/Methods/data/return-type-class-constant.php`; both its
+case and its `never` assertion are `// SKIP` in the ported copy under
+`tests/phpstan_data/`.
+
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; the
+assertion is `// SKIP` in `tests/phpstan_data/`.

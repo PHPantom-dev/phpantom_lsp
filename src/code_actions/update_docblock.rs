@@ -164,7 +164,7 @@ impl Backend {
             None => return,
         };
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, cursor_offset);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
 

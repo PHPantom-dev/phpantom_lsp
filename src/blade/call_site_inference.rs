@@ -1029,9 +1029,8 @@ impl Backend {
         offsets: &[u32],
     ) -> Vec<ResolvedViewCall> {
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_call_site_inference", |program, content| {
             let default_class = ClassInfo::default();
@@ -1050,6 +1049,9 @@ impl Backend {
 
             let mut result = Vec::new();
             for site in collected {
+                let class_loader = class_loaders.at(site.offset);
+                let function_loader = function_loaders.at(site.offset);
+                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let enclosing =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, site.offset);
                 let current_class = enclosing.unwrap_or(&default_class);
@@ -1064,7 +1066,7 @@ impl Backend {
                         &file_ctx.classes,
                         content,
                         site.offset,
-                        &class_loader,
+                        class_loader,
                     )
                 };
 
@@ -1092,7 +1094,7 @@ impl Backend {
                                     site.offset,
                                     Some(current_class),
                                     &file_ctx.classes,
-                                    &class_loader,
+                                    class_loader,
                                     Some(self),
                                     Loaders::with_function(Some(&function_loader_cl)),
                                 ),
@@ -1111,7 +1113,7 @@ impl Backend {
                                 site.offset,
                                 Some(current_class),
                                 &file_ctx.classes,
-                                &class_loader,
+                                class_loader,
                                 Some(self),
                                 loaders,
                             )
@@ -1138,7 +1140,7 @@ impl Backend {
                                 Some(entries) => {
                                     vars.extend(entries.into_iter().map(|(name, ty)| PassedVar {
                                         name,
-                                        ty: qualify_class_names(ty, &class_loader),
+                                        ty: qualify_class_names(ty, class_loader),
                                         key_range: range,
                                         value_range: range,
                                         framework_bound: false,
@@ -1151,7 +1153,7 @@ impl Backend {
                     };
                     vars.push(PassedVar {
                         name,
-                        ty: qualify_class_names(ty, &class_loader),
+                        ty: qualify_class_names(ty, class_loader),
                         key_range,
                         value_range,
                         framework_bound,

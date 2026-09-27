@@ -54,26 +54,35 @@ mod arithmetic;
 mod array_access;
 mod calls;
 mod instantiation;
+mod magic_constants;
 mod property_access;
+mod scalar_fold;
+
+pub(crate) use scalar_fold::fold_concat_types;
 
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
+use magic_constants::{EnclosingFunction, enclosing_context_at};
 use property_access::resolve_rhs_property_access;
 
 pub(crate) use arithmetic::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+    infer_modulo_result_type,
 };
 
-pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
+pub(crate) use array_access::{class_string_inner_binding, insert_or_union, offset_read_type};
 pub(crate) use calls::{
-    build_function_template_subs, infer_closure_literal_type, is_array_like_wrapper,
+    ArgWalkerTypes, build_function_template_subs, infer_closure_literal_type,
+    is_array_like_wrapper, resolve_arg_call_raw_type, resolve_arg_iterable_raw_type,
     resolve_arg_variable_raw_type, substitute_function_templates, walker_arg_types,
 };
 pub(crate) use instantiation::{
-    TemplateBindingMode, array_element_binding, classify_template_binding, extract_array_position,
-    extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
+    TemplateBindingMode, array_element_binding, bound_binding_hint, candidate_binding_modes,
+    class_string_generic_binding, classify_template_binding, extract_array_position,
+    extract_generic_arg_from_ancestor, extract_generic_args_from_ancestor,
+    remap_inherited_ctor_subs, resolve_array_literal_generic, type_contains_name,
 };
 
 /// The type of a member access whose name PHP only works out at runtime.
@@ -86,6 +95,88 @@ pub(crate) use instantiation::{
 /// the engine rather than at code PHP itself leaves open.
 pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
     vec![ResolvedType::from_type_string(PhpType::mixed())]
+}
+
+/// Whether a member access's receiver can be `null`, as far as a
+/// short-circuiting `?->` is concerned.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReceiverNullability {
+    Never,
+    Maybe,
+    Always,
+}
+
+impl ReceiverNullability {
+    /// Read the nullability off a receiver's resolved types.  `mixed`
+    /// counts as non-null: whatever a member of it reads is `mixed`
+    /// already, so the extra `null` would say nothing.
+    pub(super) fn of(resolved: &[ResolvedType]) -> Self {
+        let mut any_null = false;
+        let mut all_null = !resolved.is_empty();
+        for rt in resolved {
+            let ty = &rt.type_string;
+            if ty.is_null() {
+                any_null = true;
+            } else {
+                all_null = false;
+                any_null |= matches!(ty.kind(), TypeKind::Nullable(_))
+                    || matches!(ty.kind(), TypeKind::Union(members) if members.iter().any(PhpType::is_null));
+            }
+        }
+        match (all_null, any_null) {
+            (true, _) => Self::Always,
+            (false, true) => Self::Maybe,
+            (false, false) => Self::Never,
+        }
+    }
+}
+
+/// Whether a member access chain runs through a `?->` before reaching
+/// `expr`'s own link, so that a `null` there short-circuits the rest of
+/// the chain rather than being read through.
+pub(super) fn chain_has_nullsafe<'b>(mut expr: &'b Expression<'b>) -> bool {
+    loop {
+        expr = peel_type_transparent(expr);
+        expr = match expr {
+            Expression::Access(Access::NullSafeProperty(_))
+            | Expression::Call(Call::NullSafeMethod(_)) => return true,
+            Expression::Access(Access::Property(pa)) => pa.object,
+            Expression::Call(Call::Method(mc)) => mc.object,
+            Expression::ArrayAccess(aa) => aa.array,
+            _ => return false,
+        };
+    }
+}
+
+/// Fold a `?->` short-circuit into a member access's result.
+///
+/// A nullsafe link whose receiver is `null` evaluates to `null` without
+/// reading the member, and so does every link after it in the same chain.
+/// `nullsafe` is whether this link is `?->` itself; `object` is its
+/// receiver expression, consulted only when the receiver can be `null`.
+pub(super) fn apply_nullsafe_short_circuit(
+    result: &mut Vec<ResolvedType>,
+    receiver: ReceiverNullability,
+    nullsafe: bool,
+    object: &Expression<'_>,
+) {
+    if receiver == ReceiverNullability::Never || !(nullsafe || chain_has_nullsafe(object)) {
+        return;
+    }
+    if receiver == ReceiverNullability::Always {
+        *result = vec![ResolvedType::from_type_string(PhpType::null())];
+        return;
+    }
+    if result.is_empty() || result.iter().any(|rt| rt.type_string.accepts_null()) {
+        return;
+    }
+    // A lone entry carries the `null` in its own type, the way a `?Foo`
+    // return does, so narrowing that rules the class in rules it out.
+    if let [only] = result.as_mut_slice() {
+        only.type_string = std::mem::replace(&mut only.type_string, PhpType::null()).or_null();
+        return;
+    }
+    result.push(ResolvedType::from_type_string(PhpType::null()));
 }
 
 /// Apply unary `+` or `-` to an already-resolved numeric type.
@@ -118,7 +209,11 @@ fn apply_numeric_sign(ty: &PhpType, negated: bool) -> Option<PhpType> {
                 };
                 Some(PhpType::literal_float(signed))
             }
-            LiteralValue::String(_) => None,
+            // A numeric string reads as the number it spells (`-'1'` is
+            // `-1`); any other string warns or throws.
+            LiteralValue::String(_) => value
+                .numeric_string_value()
+                .and_then(|number| apply_numeric_sign(&PhpType::literal(number), negated)),
         },
         TypeKind::Union(members) => {
             let mut signed = Vec::with_capacity(members.len());
@@ -532,17 +627,131 @@ pub(in crate::type_engine) fn resolve_rhs_expression<'b>(
         Expression::Call(Call::Method(_) | Call::NullSafeMethod(_)) => {
             resolve_method_chain(expr, ctx)
         }
+        Expression::Assignment(assignment) => resolve_assignment_as_value(assignment, ctx),
         _ => resolve_rhs_expression_inner(expr, ctx),
     }
 }
 
+/// Resolve an assignment expression used as a value, not just a
+/// statement: `$x = ($y = 1)`, `$x = $a ?? ($y = 1) ?? 1`.
+///
+/// PHP assignment is itself an expression whose value is whatever ends
+/// up in the target. Plain `=` yields the RHS's own value; the other
+/// operators combine it with the target's current value the same way a
+/// statement-level compound assignment does, so an operand position
+/// (`??` chain, ternary, match arm) gets the same answer a top-level
+/// `$y = expr;` statement would.
+///
+/// Recording the target itself, so a later read of `$y` sees this
+/// write, is the forward walker's job (`process_nested_assignments` /
+/// `process_assignment_expr`), not this read-only pipeline's.
+fn resolve_assignment_as_value<'b>(
+    assignment: &'b Assignment<'b>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    use mago_syntax::cst::assignment::AssignmentOperator;
+    match assignment.operator {
+        AssignmentOperator::Assign(_) => resolve_rhs_expression(assignment.rhs, ctx),
+        AssignmentOperator::Coalesce(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            let combined = coalesce_assign_value(lhs_types, rhs_types);
+            if combined.is_empty() {
+                vec![ResolvedType::from_type_string(PhpType::mixed())]
+            } else {
+                combined
+            }
+        }
+        AssignmentOperator::Concat(_) => vec![ResolvedType::from_type_string(PhpType::string())],
+        AssignmentOperator::Modulo(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(infer_modulo_result_type(
+                &lhs_types, &rhs_types,
+            ))]
+        }
+        AssignmentOperator::LeftShift(_)
+        | AssignmentOperator::RightShift(_)
+        | AssignmentOperator::BitwiseAnd(_)
+        | AssignmentOperator::BitwiseOr(_)
+        | AssignmentOperator::BitwiseXor(_) => vec![ResolvedType::from_type_string(PhpType::int())],
+        AssignmentOperator::Addition(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(infer_addition_result_type(
+                &lhs_types, &rhs_types,
+            ))]
+        }
+        AssignmentOperator::Subtraction(_)
+        | AssignmentOperator::Multiplication(_)
+        | AssignmentOperator::Division(_)
+        | AssignmentOperator::Exponentiation(_) => {
+            let op_kind = match assignment.operator {
+                AssignmentOperator::Subtraction(_) => ArithmeticOpKind::Subtraction,
+                AssignmentOperator::Multiplication(_) => ArithmeticOpKind::Multiplication,
+                AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
+                AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
+                _ => unreachable!("outer match already narrowed to arithmetic operators"),
+            };
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(
+                infer_arithmetic_result_type(&lhs_types, &rhs_types, op_kind),
+            )]
+        }
+    }
+}
+
+/// The value a `??=` used as a value leaves behind: the target's current
+/// type with `null` stripped, unioned with the fallback's type.
+///
+/// Mirrors the forward walker's own `coalesce_assign_value` (in
+/// `forward_walk::assignment`), which combines the same pair for a
+/// statement-level `??=` target. That copy folds the result into a
+/// mutable `ScopeState`; this one only answers "what does this
+/// expression evaluate to" for a caller that treats the assignment as
+/// one operand among others, so it works from two already-resolved
+/// `Vec<ResolvedType>` instead.
+fn coalesce_assign_value(
+    lhs_types: Vec<ResolvedType>,
+    rhs_types: Vec<ResolvedType>,
+) -> Vec<ResolvedType> {
+    let mut combined: Vec<ResolvedType> = lhs_types
+        .into_iter()
+        .filter(|rt| !rt.type_string.is_null())
+        .map(|mut rt| {
+            if let Some(non_null) = rt.type_string.non_null_type() {
+                rt.type_string = non_null;
+            }
+            rt
+        })
+        .collect();
+    ResolvedType::extend_unique(&mut combined, rhs_types);
+    let class_backed: Vec<PhpType> = combined
+        .iter()
+        .filter(|rt| rt.class_info.is_some())
+        .map(|rt| rt.type_string.clone())
+        .collect();
+    combined.retain(|rt| rt.class_info.is_some() || !class_backed.contains(&rt.type_string));
+    combined
+}
+
 /// Strip wrappers that cannot change the type of the expression they
-/// wrap: parentheses and the error-suppression operator `@`.
+/// wrap: parentheses, the error-suppression operator `@`, and `&`.
+///
+/// `&$expr` used as a value (`$a =& $var`'s own value, an argument to a
+/// legacy by-ref call) is whatever `$expr` currently holds; the operator
+/// only affects how the *target* is bound, which is the forward walker's
+/// concern (`process_nested_assignments` / `process_assignment_expr`),
+/// not this read-only pipeline's.
 fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
     loop {
         match expr {
             Expression::Parenthesized(parenthesized) => expr = parenthesized.expression,
-            Expression::UnaryPrefix(unary) if unary.operator.is_error_control() => {
+            Expression::UnaryPrefix(unary)
+                if unary.operator.is_error_control()
+                    || matches!(unary.operator, unary::UnaryPrefixOperator::Reference(_)) =>
+            {
                 expr = unary.operand
             }
             _ => return expr,
@@ -579,7 +788,14 @@ fn resolve_null_coalesce_chain<'b>(
             _ => false,
         };
         let lhs_results = resolve_rhs_expression(current.lhs, ctx);
-        if lhs_results.is_empty() {
+        if lhs_results.is_empty() && operand_is_null_only(current.lhs, ctx) {
+            // A bare variable with no entry in scope has not been
+            // assigned on any path reaching this point, so it is
+            // undefined here — which PHP evaluates as `null` (with a
+            // notice), not "could be anything".  It contributes nothing
+            // to the union, the same as a resolved-but-stripped `null`
+            // a few lines down.
+        } else if lhs_results.is_empty() {
             // A genuinely unresolvable operand. At runtime it could hold
             // any value, so represent it as `mixed` and keep unioning
             // the rest of the chain.
@@ -605,6 +821,28 @@ fn resolve_null_coalesce_chain<'b>(
             }
         }
     }
+}
+
+/// Whether an empty-resolving `??` operand is a bare variable that was
+/// never assigned on any path reaching this point, rather than one that
+/// was assigned but whose type the resolver failed to work out.
+///
+/// `resolve_rhs_expression` returns an empty `Vec` for both: the forward
+/// walker's `ScopeState` answers an unassigned name and an
+/// assigned-but-unresolved one the same way through `scope_var_resolver`
+/// (see `ScopeState::snapshot_resolver`).  `scope_contains_resolver` is
+/// the one signal that tells them apart, so this only fires when it is
+/// available; a caller without a forward-walker scope (e.g. the
+/// backward-scan cold path) keeps the existing `mixed`-widening
+/// behaviour.
+fn operand_is_null_only(expr: &Expression<'_>, ctx: &VarResolutionCtx<'_>) -> bool {
+    let Expression::Variable(Variable::Direct(dv)) = peel_type_transparent(expr) else {
+        return false;
+    };
+    let Some(contains) = ctx.scope_contains_resolver else {
+        return false;
+    };
+    !contains(bytes_to_str(dv.name))
 }
 
 /// Turn a branch that resolved to nothing into `mixed`.
@@ -814,6 +1052,7 @@ struct ChainLink<'b> {
     object: &'b Expression<'b>,
     method: &'b ClassLikeMemberSelector<'b>,
     argument_list: &'b ArgumentList<'b>,
+    nullsafe: bool,
 }
 
 /// Resolve a method call, walking its receiver spine iteratively.
@@ -847,12 +1086,14 @@ fn resolve_method_chain<'b>(
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
+                nullsafe: false,
             },
             Expression::Call(Call::NullSafeMethod(call)) => ChainLink {
                 call: peeled,
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
+                nullsafe: true,
             },
             // The base of the spine.  It is left to the innermost link,
             // which knows how to read it as a receiver.
@@ -864,13 +1105,18 @@ fn resolve_method_chain<'b>(
 
     let mut receiver: Option<MethodReceiver> = None;
     for link in links.iter().rev() {
+        let (owners, receiver_resolved) =
+            receiver.unwrap_or_else(|| calls::resolve_method_receiver(link.object, ctx));
+        let nullability = ReceiverNullability::of(&receiver_resolved);
         let mut resolved = resolve_method_call_on_receiver(
             link.object,
             link.method,
             link.argument_list,
-            receiver,
+            Some((owners, receiver_resolved)),
             ctx,
         );
+        calls::finish_return_constant_operands(&mut resolved, ctx);
+        apply_nullsafe_short_circuit(&mut resolved, nullability, link.nullsafe, link.object);
         // A check written on the call itself (`if ($h->get() instanceof
         // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
         // call's own text, so a later occurrence of that text reads the
@@ -1051,7 +1297,7 @@ fn resolve_rhs_expression_inner<'b>(
         // operator, not on how the expression is reached, so a cast in a
         // ternary branch resolves the same as one assigned directly.
         Expression::UnaryPrefix(unary) => {
-            match unary_prefix_result_type(&unary.operator, || {
+            match unary_prefix_result_type(&unary.operator, unary.operand, || {
                 resolve_rhs_expression(unary.operand, ctx)
             }) {
                 Some(ty) => vec![ResolvedType::from_type_string(ty)],
@@ -1182,8 +1428,35 @@ fn resolve_rhs_expression_inner<'b>(
             resolve_var_types(&rhs_var, ctx, ctx.cursor_offset)
         }
         // ── Concatenation: `"prefix" . $var` → string ───────────────
+        // Two operands that each hold one known scalar concatenate to the
+        // literal PHP would build (`'1' . 'a'` is `'1a'`).
         Expression::Binary(binary) if binary.operator.is_concatenation() => {
-            vec![ResolvedType::from_type_string(PhpType::string())]
+            let folded = (scalar_fold::is_cheap_scalar_operand(binary.lhs)
+                && scalar_fold::is_cheap_scalar_operand(binary.rhs))
+            .then(|| {
+                let lhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.lhs, ctx))?;
+                let rhs = scalar_fold::single_scalar(&resolve_rhs_expression(binary.rhs, ctx))?;
+                scalar_fold::fold_concat(&lhs, &rhs)
+            })
+            .flatten();
+            vec![ResolvedType::from_type_string(
+                folded.unwrap_or_else(PhpType::string),
+            )]
+        }
+        // ── Interpolated strings: `"$a-$b"`, heredocs ───────────────
+        // Command substitution (backticks) is not a plain string and is
+        // left unresolved.
+        Expression::CompositeString(string)
+            if !matches!(
+                string,
+                mago_syntax::cst::string::CompositeString::ShellExecute(_)
+            ) =>
+        {
+            let folded =
+                scalar_fold::fold_interpolated(string, |part| resolve_rhs_expression(part, ctx));
+            vec![ResolvedType::from_type_string(
+                folded.unwrap_or_else(PhpType::string),
+            )]
         }
         // ── Magic constants: `__LINE__`, `__FILE__`, `__CLASS__`, … ─
         Expression::MagicConstant(magic) => {
@@ -1206,19 +1479,15 @@ fn resolve_rhs_expression_inner<'b>(
                 }
                 _ => {}
             }
-            if let Some(maybe_value) = ctx.lookup_constant(&name, ca.name.span().start.offset)
-                && let Some(ref value) = maybe_value
-                && let Some(ts) = infer_type_from_constant_value(value).or_else(|| {
-                    crate::type_engine::call_resolution::folded_global_constant_type(
-                        name_clean,
-                        value,
-                        &ctx.as_resolution_ctx(),
-                    )
-                })
-            {
+            if let Some(ts) = global_constant_type(&name, ca.name.span().start.offset, ctx) {
                 return vec![ResolvedType::from_type_string(ts)];
             }
-            vec![]
+            crate::hover::constants::unversioned_php_version_constant_type(name_clean)
+                .map(|ts| vec![ResolvedType::from_type_string(ts)])
+                .unwrap_or_default()
+        }
+        Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => {
+            vec![ResolvedType::from_type_string(PhpType::bool())]
         }
         // ── Arithmetic and other binary operators ───────────────────
         // `??` and method-chain binaries are peeled off in
@@ -1234,18 +1503,63 @@ fn resolve_rhs_expression_inner<'b>(
     }
 }
 
+/// The type the global constant `name` holds, read from its initializer.
+///
+/// `offset` is where `name` is written, or `0` when it was not written in
+/// the file at all. A name the initializer itself uses is looked up through
+/// the same constant loader, so an unqualified `ONE` in `const TWO = ONE * 2;`
+/// finds the reading namespace's `ONE` the way the reference to `TWO` found
+/// that namespace's `TWO`. The text-only resolver the fold falls back to has
+/// no namespace to try.
+fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+    let value = ctx.lookup_constant(name, offset)??;
+    infer_type_from_constant_value(&value).or_else(|| {
+        let rctx = ctx.as_resolution_ctx();
+        let resolve = |text: &str| {
+            let text = text.trim();
+            let is_constant_name = text
+                .bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_' || b == b'\\')
+                && text
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\');
+            is_constant_name
+                .then(|| global_constant_type(text, 0, ctx))
+                .flatten()
+                .or_else(|| crate::Backend::resolve_arg_text_to_type(text, &rctx))
+        };
+        crate::type_engine::types::const_fold::folded_constant_type(
+            strip_fqn_prefix(name),
+            &value,
+            &resolve,
+        )
+    })
+}
+
 /// The type a magic constant holds.
 ///
-/// `__LINE__` is the only one PHP gives a number; every other magic
-/// constant is a string. `__CLASS__` narrows further to
-/// `class-string<Foo>`, the way `Foo::class` does, so the class identity
-/// survives into `new $class` and `class-string` parameters. A trait body
-/// only knows it will be *some* class name at runtime (the using class,
-/// not the trait), so it gets a bare `class-string`, and code outside any
-/// class-like gets the plain `string` the empty value is.
+/// Every magic constant's value is known at the point it is written, so
+/// each resolves to the exact literal rather than its base type:
+/// `__LINE__` to the literal line number, `__NAMESPACE__`/`__FUNCTION__`/
+/// `__METHOD__`/`__TRAIT__`/`__PROPERTY__` to the literal string PHP would
+/// substitute there. `__CLASS__` narrows further to `class-string<Foo>`, the way
+/// `Foo::class` does, so the class identity survives into `new $class`
+/// and `class-string` parameters — the named inner type already pins it
+/// exactly. A trait body only knows it will be *some* class name at
+/// runtime (the using class, not the trait), so `__CLASS__` gets a bare
+/// `class-string` there, and code outside any class-like gets the plain
+/// `string` the empty value is.
 fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) -> PhpType {
     match magic {
-        MagicConstant::Line(_) => PhpType::int(),
+        MagicConstant::Line(_) => {
+            let offset = magic.span().start.offset as usize;
+            let line = crate::text_position::offset_to_position(ctx.content, offset).line + 1;
+            PhpType::literal_int(line.to_string())
+        }
+        MagicConstant::Namespace(_) => {
+            PhpType::literal_string_value(ctx.current_class.file_namespace.as_deref().unwrap_or(""))
+        }
         MagicConstant::Class(_) if ctx.current_class.name.is_empty() => PhpType::string(),
         MagicConstant::Class(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
             PhpType::class_string(None)
@@ -1253,7 +1567,46 @@ fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) ->
         MagicConstant::Class(_) => {
             PhpType::class_string(Some(PhpType::named(ctx.current_class.fqn())))
         }
+        MagicConstant::Trait(_) if ctx.current_class.kind == ClassLikeKind::Trait => {
+            PhpType::literal_string_value(ctx.current_class.fqn())
+        }
+        MagicConstant::Trait(_) => PhpType::literal_string_value(""),
+        MagicConstant::Function(_) => {
+            PhpType::literal_string_value(enclosing_function_display_name(magic, ctx))
+        }
+        MagicConstant::Method(_) => {
+            let name = enclosing_function_display_name(magic, ctx);
+            if name.is_empty() || ctx.current_class.name.is_empty() {
+                PhpType::literal_string_value(name)
+            } else {
+                PhpType::literal_string_value(format!("{}::{}", ctx.current_class.fqn(), name))
+            }
+        }
+        MagicConstant::Property(_) => {
+            let offset = magic.span().start.offset;
+            PhpType::literal_string_value(
+                enclosing_context_at(ctx.content, offset)
+                    .property
+                    .unwrap_or_default(),
+            )
+        }
         _ => PhpType::string(),
+    }
+}
+
+/// The bare name `__FUNCTION__`/`__METHOD__` substitute for the function,
+/// method, closure, or arrow function directly enclosing `magic` — its
+/// declared name, `{closure}` for an anonymous one, or the empty string
+/// for top-level code outside any function-like construct.
+fn enclosing_function_display_name(
+    magic: &MagicConstant<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> String {
+    let offset = magic.span().start.offset;
+    match enclosing_context_at(ctx.content, offset).function {
+        Some(EnclosingFunction::Named(name)) => name,
+        Some(EnclosingFunction::Closure) => "{closure}".to_string(),
+        None => String::new(),
     }
 }
 
@@ -1261,19 +1614,31 @@ fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) ->
 /// result is determined by the operator plus (for `(object)` and `~`) the
 /// operand type.
 ///
-/// `resolve_operand` is only called for those two operators, so callers
-/// that reach this on a plain cast pay nothing for it.
+/// A cast or `~` of an operand that holds one known scalar folds to the
+/// value PHP computes (`(int) '1'` is `1`, `~1` is `-2`). `resolve_operand`
+/// is always called for `(object)`, `(array)` and `~`, and for the other casts only
+/// when `operand` is cheap to resolve (a literal, variable, or constant), so
+/// a cast of a call pays nothing for it.
 ///
 /// Returns `None` for operators the caller must resolve itself: `-`/`+`
 /// need the full expression resolver to keep signed numeric literals
 /// exact, and `@`/`&`/`++`/`--` take the type of their operand.
 pub(crate) fn unary_prefix_result_type(
     operator: &unary::UnaryPrefixOperator<'_>,
+    operand: &Expression<'_>,
     resolve_operand: impl FnOnce() -> Vec<ResolvedType>,
 ) -> Option<PhpType> {
     use unary::UnaryPrefixOperator;
 
-    Some(match operator {
+    let base = match operator {
+        UnaryPrefixOperator::ObjectCast(..) => return Some(object_cast_type(resolve_operand())),
+        UnaryPrefixOperator::BitwiseNot(_) => {
+            let resolved = resolve_operand();
+            if let Some(scalar_fold::Scalar::Int(value)) = scalar_fold::single_scalar(&resolved) {
+                return Some(PhpType::literal_int((!value).to_string()));
+            }
+            return Some(bitwise_not_type(&resolved));
+        }
         UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => PhpType::int(),
         UnaryPrefixOperator::StringCast(..) | UnaryPrefixOperator::BinaryCast(..) => {
             PhpType::string()
@@ -1282,25 +1647,31 @@ pub(crate) fn unary_prefix_result_type(
         | UnaryPrefixOperator::DoubleCast(..)
         | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
         UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
-        UnaryPrefixOperator::ArrayCast(..) => PhpType::array(),
-        UnaryPrefixOperator::UnsetCast(..) => PhpType::named(atom("null")),
-        UnaryPrefixOperator::Not(_) => PhpType::bool(),
-        UnaryPrefixOperator::ObjectCast(..) => object_cast_type(resolve_operand()),
-        // `~` yields a string for string operands and an int otherwise.
-        UnaryPrefixOperator::BitwiseNot(_) => {
-            let operand = resolve_operand();
-            let is_string = !operand.is_empty()
-                && operand
-                    .iter()
-                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-            if is_string {
-                PhpType::string()
-            } else {
-                PhpType::int()
-            }
-        }
+        UnaryPrefixOperator::ArrayCast(..) => return Some(array_cast_type(resolve_operand())),
+        UnaryPrefixOperator::UnsetCast(..) => return Some(PhpType::named(atom("null"))),
+        UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
         _ => return None,
-    })
+    };
+    if scalar_fold::is_cheap_scalar_operand(operand)
+        && let Some(folded) = scalar_fold::single_scalar(&resolve_operand())
+            .and_then(|scalar| scalar_fold::fold_cast(operator, &scalar))
+    {
+        return Some(folded);
+    }
+    Some(base)
+}
+
+/// `~` yields a string for string operands and an int otherwise.
+fn bitwise_not_type(operand: &[ResolvedType]) -> PhpType {
+    let is_string = !operand.is_empty()
+        && operand
+            .iter()
+            .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
+    if is_string {
+        PhpType::string()
+    } else {
+        PhpType::int()
+    }
 }
 
 /// The type `++`/`--` produces for a numeric operand.
@@ -1339,37 +1710,100 @@ fn push_unique_type(types: &mut Vec<PhpType>, member: PhpType) {
 
 /// The object shape `(object) $expr` produces: an array shape casts
 /// key-for-key, a scalar becomes `object{scalar: T}`, and anything else
-/// (including an unresolved operand) falls back to `stdClass`.
+/// (including an unresolved operand) falls back to `stdClass`. A cast
+/// always produces a `stdClass` instance, so a shape result keeps
+/// `stdClass`'s class identity via an intersection.
 ///
 /// The cast does not preserve literal precision, so shape values widen.
 fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
     let inner =
         (!operand.is_empty()).then(|| ResolvedType::types_joined(&operand).widen_scalar_literals());
+    let std_class = || PhpType::named(atom("stdClass"));
     match inner.as_ref().map(PhpType::kind) {
         // `(object) []` is a `stdClass` with no properties; an `object{}`
         // shape would say the same thing in a spelling nothing else uses.
-        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => {
-            PhpType::named(atom("stdClass"))
-        }
-        Some(TypeKind::ArrayShape(entries)) => PhpType::object_shape(
-            entries
-                .iter()
-                .map(|e| ShapeEntry {
-                    key: e.key.clone(),
-                    value_type: e.value_type.widen_scalar_literals(),
-                    optional: e.optional,
-                })
-                .collect(),
-        ),
+        Some(TypeKind::ArrayShape(entries)) if entries.is_empty() => std_class(),
+        Some(TypeKind::ArrayShape(entries)) => PhpType::intersection(vec![
+            PhpType::object_shape(
+                entries
+                    .iter()
+                    .map(|e| ShapeEntry {
+                        key: e.key.clone(),
+                        value_type: e.value_type.widen_scalar_literals(),
+                        optional: e.optional,
+                    })
+                    .collect(),
+            ),
+            std_class(),
+        ]),
         Some(_) if inner.as_ref().is_some_and(is_object_cast_scalar_type) => {
-            PhpType::object_shape(vec![ShapeEntry {
-                key: Some("scalar".to_string()),
-                value_type: inner.as_ref().unwrap().clone(),
-                optional: false,
-            }])
+            PhpType::intersection(vec![
+                PhpType::object_shape(vec![ShapeEntry {
+                    key: Some("scalar".to_string()),
+                    value_type: inner.as_ref().unwrap().clone(),
+                    optional: false,
+                }]),
+                std_class(),
+            ])
         }
-        _ => PhpType::named(atom("stdClass")),
+        _ => std_class(),
     }
+}
+
+/// `(array) $expr`, applied member by member: an array stays as it is,
+/// `null` becomes `[]`, and a scalar becomes the one-entry list holding it.
+/// An object (its properties) or a value of unknown type is some array.
+fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
+    fn cast_member(member: &PhpType, scalar: &PhpType, out: &mut Vec<PhpType>) {
+        match member.kind() {
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    cast_member(member, scalar, out);
+                }
+            }
+            TypeKind::Nullable(inner) => {
+                cast_member(inner, scalar, out);
+                out.push(PhpType::array_shape(Vec::new()));
+            }
+            _ if member.is_null() => out.push(PhpType::array_shape(Vec::new())),
+            // `iterable` may be a `Traversable`, which casts to its
+            // properties rather than to the values it yields.
+            _ if member.is_array_like() && !member.is_named("iterable") => {
+                out.push(member.clone());
+            }
+            _ if member.is_subtype_of(scalar) => out.push(PhpType::array_shape(vec![ShapeEntry {
+                key: None,
+                value_type: member.clone(),
+                optional: false,
+            }])),
+            _ => out.push(PhpType::array()),
+        }
+    }
+
+    if operand.is_empty() {
+        return PhpType::array();
+    }
+    let scalar = PhpType::union(vec![
+        PhpType::int(),
+        PhpType::float(),
+        PhpType::string(),
+        PhpType::bool(),
+    ]);
+    let mut members = Vec::new();
+    cast_member(&ResolvedType::types_joined(&operand), &scalar, &mut members);
+    // The shape a scalar casts to adds nothing beside an array member that
+    // already holds it: `string|list<string>` casts to `list<string>`.
+    let keep: Vec<bool> = members
+        .iter()
+        .map(|member| {
+            member.shape_entries().is_none()
+                || !members
+                    .iter()
+                    .any(|other| other.shape_entries().is_none() && member.is_subtype_of(other))
+        })
+        .collect();
+    crate::util::retain_by_mask(&mut members, &keep);
+    PhpType::join_runtime_value_types(members)
 }
 
 /// Whether `(object) $expr` on this type produces an `object{scalar: T}`
@@ -1396,6 +1830,46 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
     }
 }
 
+/// Resolver from an expression's source text to its type, as
+/// [`crate::Backend::resolve_arg_text_to_type`] provides.
+pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
+
+/// The literal an array element that names something resolves to: `'Foo'`
+/// for `Foo::class`, or the value a constant or an enum case's `->value`
+/// holds.
+///
+/// A shape entry has to be a [`TypeKind::Literal`] to mean anything (a
+/// non-literal element falls back to plain `array`, see
+/// [`literal_array_shape`]), so a resolved `class-string<Foo>` is unwrapped
+/// down to the class name it names, matching how PHPStan reads a `::class`
+/// array element: as the literal string, not the wrapper type a bare
+/// `Foo::class` expression resolves to on its own.
+fn resolved_element_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let ty = resolve(value)?;
+    match ty.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => {
+                Some(PhpType::literal_string_value(name.trim_start_matches('\\')))
+            }
+            _ => None,
+        },
+        TypeKind::Literal(_) => Some(ty),
+        _ => None,
+    }
+}
+
+/// The class name a `Foo::class` expression names, resolved against the
+/// reading file.
+fn class_const_fetch_name(value: &str, resolve: TextResolver<'_>) -> Option<String> {
+    match resolve(value)?.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => Some(name.trim_start_matches('\\').to_string()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// The contents of an array literal's brackets, or `None` when the text
 /// is not one.
 fn strip_array_literal(value: &str) -> Option<&str> {
@@ -1415,7 +1889,7 @@ fn strip_array_literal(value: &str) -> Option<&str> {
 /// be resolved (a constant, a call, a concatenation), because a shape
 /// missing one of its slots would claim the array is smaller than it is.
 /// The caller then falls back to an unconstrained `array`.
-fn literal_array_shape(inner: &str) -> Option<PhpType> {
+fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option<PhpType> {
     use crate::php_type::ShapeEntry;
 
     if inner.trim().is_empty() {
@@ -1430,25 +1904,58 @@ fn literal_array_shape(inner: &str) -> Option<PhpType> {
         if item.is_empty() {
             continue;
         }
+        // A spread copies a shape's entries across, keeping string keys
+        // and renumbering integer ones onto the end.
+        if let Some(source) = item.strip_prefix("...") {
+            let source = resolve?(source.trim())?;
+            for (key, value_type) in
+                crate::type_engine::variable::raw_type_inference::spread_entries(&source)?
+            {
+                keyed |= key.is_some();
+                put_shape_entry(&mut entries, key, value_type);
+            }
+            continue;
+        }
         let (key, value) = match split_top_level_arrow(item) {
             Some((key_text, value_text)) => {
                 keyed = true;
-                let key = literal_shape_key(key_text.trim())?;
+                let key_text = key_text.trim();
+                let key = literal_shape_key(key_text).or_else(|| {
+                    // A class name is never a decimal integer, so a
+                    // `Foo::class` key stays the string it names.
+                    class_const_fetch_name(key_text, resolve?)
+                })?;
                 (Some(key), value_text)
             }
             None => (None, item),
         };
-        entries.push(ShapeEntry {
-            key,
-            value_type: infer_type_from_constant_value(value)?,
-            optional: false,
-        });
+        let value_type = infer_type_from_constant_value_inner(value, resolve)
+            .or_else(|| resolve.and_then(|resolve| resolved_element_literal(value, resolve)))?;
+        put_shape_entry(&mut entries, key, value_type);
     }
     Some(if keyed {
         PhpType::array_shape(entries)
     } else {
         PhpType::list_shape(entries)
     })
+}
+
+/// Write `value_type` under `key`, or under the next position when `key` is
+/// `None`. A key written again keeps its place and takes the later value,
+/// as PHP does.
+fn put_shape_entry(entries: &mut Vec<ShapeEntry>, key: Option<String>, value_type: PhpType) {
+    if let Some(existing) = key
+        .as_ref()
+        .and_then(|key| entries.iter_mut().find(|e| e.key.as_ref() == Some(key)))
+    {
+        existing.value_type = value_type;
+        return;
+    }
+    entries.push(ShapeEntry {
+        key,
+        value_type,
+        optional: false,
+    });
 }
 
 /// The key text of a shape entry, for the literal keys PHP allows: a
@@ -1483,6 +1990,27 @@ fn split_top_level_arrow(item: &str) -> Option<(&str, &str)> {
 /// assignment resolves.  Returns `None` for expressions that cannot be
 /// trivially classified (e.g. concatenation, function calls).
 pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
+    infer_type_from_constant_value_inner(value, None)
+}
+
+/// [`infer_type_from_constant_value`], but an array element that the fixed
+/// literal patterns below can't classify (currently just `Foo::class`) is
+/// offered to `resolve` before the whole array gives up and falls back to
+/// plain `array`. Text scanning alone can tell that `Foo::class` names a
+/// class, but not which one: `Foo` may need qualifying against the
+/// reading file's namespace or `use` imports, which only a resolver with
+/// access to the class loader can do.
+pub(crate) fn infer_type_from_constant_value_resolved(
+    value: &str,
+    resolve: TextResolver<'_>,
+) -> Option<PhpType> {
+    infer_type_from_constant_value_inner(value, Some(resolve))
+}
+
+fn infer_type_from_constant_value_inner(
+    value: &str,
+    resolve: Option<TextResolver<'_>>,
+) -> Option<PhpType> {
     let v = value.trim();
     if v.is_empty() {
         return None;
@@ -1508,7 +2036,7 @@ pub(crate) fn infer_type_from_constant_value(value: &str) -> Option<PhpType> {
     // `foreach (self::APPROVED as $entry)` see the values the constant
     // names rather than an unconstrained `array`.
     if let Some(inner) = strip_array_literal(v) {
-        return Some(literal_array_shape(inner).unwrap_or_else(PhpType::array));
+        return Some(literal_array_shape(inner, resolve).unwrap_or_else(PhpType::array));
     }
 
     let lower = v.to_lowercase();
@@ -2007,6 +2535,41 @@ mod tests {
         );
         assert_eq!(
             infer_type_from_constant_value("[$key => 1]"),
+            Some(PhpType::array())
+        );
+    }
+
+    #[test]
+    fn a_class_const_fetch_array_element_resolves_via_the_resolver() {
+        let entry = |value_type: PhpType| crate::php_type::ShapeEntry {
+            key: None,
+            value_type,
+            optional: false,
+        };
+        let resolve = |text: &str| -> Option<PhpType> {
+            (text == "Foo::class").then(|| PhpType::class_string(Some(PhpType::named(atom("Foo")))))
+        };
+
+        // Without a resolver, `Foo::class` can't be classified and the
+        // whole array falls back to unconstrained `array`.
+        assert_eq!(
+            infer_type_from_constant_value("[Foo::class]"),
+            Some(PhpType::array())
+        );
+
+        // With one, the element becomes the literal class name PHPStan
+        // itself reads a `::class` array element as.
+        assert_eq!(
+            infer_type_from_constant_value_resolved("[Foo::class]", &resolve),
+            Some(PhpType::list_shape(vec![entry(
+                PhpType::literal_string_value("Foo")
+            )]))
+        );
+
+        // An element the resolver can't turn into a `class-string` still
+        // leaves the whole array unconstrained, same as with no resolver.
+        assert_eq!(
+            infer_type_from_constant_value_resolved("[1, self::OTHER]", &resolve),
             Some(PhpType::array())
         );
     }

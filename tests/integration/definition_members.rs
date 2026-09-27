@@ -5943,3 +5943,89 @@ async fn test_goto_definition_overriding_method_declaration_returns_self_locatio
         "should point back to Dog::speak, not Animal::speak on line 2"
     );
 }
+
+// ─── Semi-reserved keywords used as member names ────────────────────────────
+
+/// `$n->class`, `$n->list`, `$n->default()`, `$n->match()`: a member whose
+/// name is also a PHP keyword is an ordinary member access, not a keyword
+/// the resolver should fall past.
+#[tokio::test]
+async fn test_goto_definition_member_named_like_a_keyword() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///keyword_members.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Node {\n",
+        "    public string $class = '';\n",
+        "    public array $list = [];\n",
+        "    public function default(): void {}\n",
+        "    public function match(): void {}\n",
+        "    public static function print(): void {}\n",
+        "}\n",
+        "function test(Node $n): void {\n",
+        "    $n->class;\n",
+        "    $n->list;\n",
+        "    $n->default();\n",
+        "    $n->match();\n",
+        "    Node::print();\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    for (line, character, declared_on) in
+        [(9, 9, 2), (10, 9, 3), (11, 9, 4), (12, 9, 5), (13, 11, 6)]
+    {
+        let locations = crate::common::definition_locations(
+            crate::common::goto_definition_at(&backend, &uri, line, character).await,
+        );
+        assert_eq!(
+            locations
+                .iter()
+                .map(|l| l.range.start.line)
+                .collect::<Vec<_>>(),
+            vec![declared_on],
+            "line {line}: the keyword-named member should resolve to its declaration"
+        );
+    }
+}
+
+// ─── `parent::CONST` resolves on the parent, not the redeclaring child ──────
+
+#[tokio::test]
+async fn test_goto_definition_parent_constant_skips_the_child_redeclaration() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///parent_const.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "class Base {\n",
+        "    const LIMIT = 1;\n",
+        "}\n",
+        "class Child extends Base {\n",
+        "    const LIMIT = 2;\n",
+        "    public function f(): int {\n",
+        "        return parent::LIMIT + self::LIMIT;\n",
+        "    }\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let parent = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, 7, 25).await,
+    );
+    assert_eq!(
+        parent
+            .iter()
+            .map(|l| l.range.start.line)
+            .collect::<Vec<_>>(),
+        vec![2],
+        "parent::LIMIT should resolve to Base::LIMIT"
+    );
+    let own = crate::common::definition_locations(
+        crate::common::goto_definition_at(&backend, &uri, 7, 41).await,
+    );
+    assert_eq!(
+        own.iter().map(|l| l.range.start.line).collect::<Vec<_>>(),
+        vec![5],
+        "self::LIMIT should resolve to Child::LIMIT"
+    );
+}

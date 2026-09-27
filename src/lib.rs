@@ -266,6 +266,7 @@ mod highlight;
 mod hover;
 mod indexing;
 pub(crate) mod inheritance;
+pub mod init_wizard;
 mod inlay_hints;
 /// LSP JSON-RPC dispatch for the wasm build, which has no tower-lsp transport.
 /// Kept free of any target-specific code so the marshalling in `wasm_wasi` is
@@ -1974,6 +1975,10 @@ impl Backend {
             }
         }
 
+        // The refreshed discovery indexes may add or remove a namespace-local
+        // `auth()` or a real global class that shadows a Laravel facade alias.
+        // Re-evaluate only maps that recorded one of those dormant candidates.
+        self.refresh_all_published_laravel_candidates();
         // The purge above took the files' symbol maps and reference-index
         // entries with it, and a completed workspace index is never walked
         // again to put them back, so the reference-count lenses would stop
@@ -2225,14 +2230,23 @@ impl Backend {
     /// the given PHP version.
     pub fn set_php_version(&self, version: types::PhpVersion) {
         *self.workspace.php_version.lock() = version;
-        self.stub_function_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_function_removed(source, name, version));
-        self.stub_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_class_removed(source, name, version));
-        self.stub_constant_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_constant_removed(source, name, version));
+        // Every symbol a stub file declares shares that file's `&'static str`,
+        // so whether the file mentions `@removed` at all is answered once per
+        // file rather than rescanning it for each of its thousands of symbols.
+        let mut mentions_removed: HashMap<usize, bool> = HashMap::new();
+        let mut may_be_removed = |source: &str| {
+            *mentions_removed
+                .entry(source.as_ptr() as usize)
+                .or_insert_with(|| source.contains("@removed"))
+        };
+        self.stub_function_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_function_removed(source, name, version)
+        });
+        self.stub_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_class_removed(source, name, version)
+        });
+        self.stub_constant_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_constant_removed(source, name, version)
+        });
     }
 }

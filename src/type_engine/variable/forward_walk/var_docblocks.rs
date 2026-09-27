@@ -8,7 +8,6 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
-use crate::docblock::type_strings::split_type_token;
 use crate::php_type::PhpType;
 
 pub(crate) fn preceding_docblock_text(content: &str, node_start: usize) -> Option<&str> {
@@ -48,10 +47,10 @@ pub(crate) fn try_process_inline_var_override<'b>(
     // variables (e.g. `/** @var App $app  @var array{…} $params */`).
     let multi = parse_var_docblock_pairs(doc_text);
     if !multi.is_empty() {
-        // The blocks further back run first, so a name this docblock also
-        // declares ends up carrying the type written closest to the
-        // expression.
-        apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+        // A name this docblock declares carries the type written closest
+        // to the expression, so the blocks further back skip it.
+        let mut declared: Vec<String> = multi.iter().map(|(name, _)| name.clone()).collect();
+        apply_var_docblock_stack(&trimmed[..doc_start], scope, ctx, |_| true, &mut declared);
         // When the cursor is inside the RHS of an assignment, skip
         // overriding the LHS variable so that hover/completion on the
         // RHS sees the pre-override type.  E.g.:
@@ -91,13 +90,14 @@ pub(crate) fn try_process_inline_var_override<'b>(
         // The @var sets `$items` in scope (done above), and the caller
         // must also process `$item = array_shift($items)`.
         //
-        // When any @var name matches the LHS, return NamedVar so the
-        // caller skips the assignment (the @var type is authoritative).
+        // When any @var name in the stack of docblocks matches the LHS,
+        // return NamedVar so the caller skips the assignment (the @var
+        // type is authoritative).
         if let Expression::Assignment(assignment) = expr
             && let Expression::Variable(Variable::Direct(dv)) = assignment.lhs
         {
-            let lhs_name = bytes_to_str(dv.name).to_string();
-            if !multi.iter().any(|(n, _)| *n == lhs_name) {
+            let lhs_name = bytes_to_str(dv.name);
+            if !declared.iter().any(|n| n == lhs_name) {
                 return VarOverrideResult::None;
             }
         }
@@ -140,6 +140,27 @@ pub(crate) fn try_process_inline_var_override<'b>(
                 apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
                 scope.set(&var_name, resolved);
                 return VarOverrideResult::NoVar;
+            } else if let Expression::ArrayAccess(array_access) = assignment.lhs {
+                // Same rules as the plain-variable case above, applied to
+                // an array-element target:
+                // `/** @var string */ $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;`
+                let rhs_span = assignment.rhs.span();
+                let cursor_in_rhs = ctx.cursor_offset >= rhs_span.start.offset
+                    && ctx.cursor_offset <= rhs_span.end.offset;
+                if cursor_in_rhs {
+                    return VarOverrideResult::None;
+                }
+
+                let native_type = resolve_rhs_native_type(assignment.rhs, scope, ctx);
+                if let Some(ref native) = native_type
+                    && !crate::docblock::should_override_type_typed(&php_type, native)
+                {
+                    return VarOverrideResult::None;
+                }
+
+                apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+                process_array_key_write(array_access, resolved, scope, ctx);
+                return VarOverrideResult::NoVar;
             }
         } else if let Expression::Variable(Variable::Direct(dv)) = expr {
             let var_name = bytes_to_str(dv.name).to_string();
@@ -165,11 +186,25 @@ pub(crate) fn apply_preceding_var_docblocks(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    apply_var_docblock_stack(before, scope, ctx, |_| true, &mut Vec::new())
+}
+
+/// [`apply_preceding_var_docblocks`], restricted to the variables `applies`
+/// accepts.
+///
+/// Every name applied is pushed onto `declared`.  The blocks are visited
+/// nearest first, so a name already in `declared` (from a nearer block, or
+/// seeded by the caller) is not overwritten by a further one that repeats
+/// it.
+fn apply_var_docblock_stack(
+    before: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    applies: impl Fn(&str) -> bool,
+    declared: &mut Vec<String>,
+) -> bool {
     let mut applied = false;
     let mut remaining = trim_trailing_line_comments(before);
-    // The blocks are visited nearest first, so a name a nearer one already
-    // declared is not overwritten by a further one that repeats it.
-    let mut declared: Vec<String> = Vec::new();
     // Keep scanning as long as the preceding text ends with a docblock.
     while let Some(doc_text) = trailing_docblock(remaining) {
         let doc_start = remaining.len() - doc_text.len();
@@ -179,7 +214,7 @@ pub(crate) fn apply_preceding_var_docblocks(
             break;
         }
         for (var_name, php_type) in &vars {
-            if declared.iter().any(|seen| seen == var_name) {
+            if !applies(var_name) || declared.iter().any(|seen| seen == var_name) {
                 continue;
             }
             let resolved = resolve_type_to_resolved_types(php_type, ctx);
@@ -282,6 +317,41 @@ pub(crate) fn apply_standalone_var_docblocks(
     apply_preceding_var_docblocks(&ctx.content[..offset], scope, ctx)
 }
 
+/// Apply the `@var` docblocks above a `global` statement to the variables
+/// it imports.
+///
+/// A named `@var` types only a variable the statement imports; one naming
+/// anything else is not about this statement.  A nameless `@var` is
+/// unambiguous only when a single variable is imported.
+///
+/// Returns whether any `@var` annotation was applied.
+pub(crate) fn apply_global_var_docblocks(
+    stmt_offset: u32,
+    imported: &[&str],
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let offset = (stmt_offset as usize).min(ctx.content.len());
+    if offset == 0 {
+        return false;
+    }
+    let before = &ctx.content[..offset];
+    if let [only] = imported
+        && let Some(php_type) = find_preceding_nameless_var_cast(ctx.content, offset)
+    {
+        let resolved = resolve_type_to_resolved_types(&php_type, ctx);
+        scope.set(only, resolved);
+        return true;
+    }
+    apply_var_docblock_stack(
+        before,
+        scope,
+        ctx,
+        |name| imported.contains(&name),
+        &mut Vec::new(),
+    )
+}
+
 /// Look up a standalone `/** @var Type */` docblock (no variable name)
 /// immediately preceding the statement starting at `stmt_start`.
 ///
@@ -305,24 +375,6 @@ pub(crate) fn find_preceding_nameless_var_cast(
     parse_inline_var_docblock_no_var(doc_text)
 }
 
-/// Strip the `/**`…`*/` wrapper from a docblock and collapse its
-/// line-continuation markers into a single space-joined string.
-///
-/// This flattens type strings that span multiple lines (e.g. a
-/// `array{...}` shape written across several ` * ` lines) so they can be
-/// parsed as one token sequence instead of retaining the leading `*`
-/// markers, which [`PhpType::parse`] cannot interpret.
-pub(crate) fn flatten_docblock_inner(doc_text: &str) -> Option<String> {
-    let inner = doc_text.strip_prefix("/**")?.strip_suffix("*/")?;
-    Some(
-        inner
-            .lines()
-            .map(|l| l.trim().trim_start_matches('*').trim())
-            .collect::<Vec<_>>()
-            .join(" "),
-    )
-}
-
 /// Parse ALL `@var Type $varName` pairs from a docblock.  Returns an
 /// empty vec when none are found.  Handles multi-line docblocks with one
 /// annotation per line as well as a single annotation whose type spans
@@ -341,68 +393,47 @@ pub(crate) fn flatten_docblock_inner(doc_text: &str) -> Option<String> {
 ///  * } $pair
 ///  */
 /// ```
+///
+/// The vendor spellings `@phpstan-var` and `@psalm-var` are read too, and
+/// win over a plain `@var` naming the same variable.
 pub(crate) fn parse_var_docblock_pairs(doc_text: &str) -> Vec<(String, PhpType)> {
-    let inner = match flatten_docblock_inner(doc_text) {
-        Some(s) => s,
-        None => return vec![],
-    };
-    let inner = inner.as_str();
-
-    let mut results = Vec::new();
-
-    // Split on `@var` and process each occurrence.
-    let mut search_from = 0;
-    while let Some(pos) = inner[search_from..].find("@var") {
-        let abs_pos = search_from + pos;
-        let tag_start = abs_pos + 4;
-        let after = inner[tag_start..].trim_start();
-        let leading_ws = inner[tag_start..].len() - after.len();
-
-        // Split off the type token, respecting `()`/`<>`/`{}` nesting, so a
-        // closure signature's own `$`-prefixed parameter names (e.g.
-        // `\Closure(\App\Models\User $user): string`) are not mistaken for
-        // the variable this `@var` annotates.
-        let (type_str, remainder) = split_type_token(after);
-        if !type_str.is_empty()
-            && let Some(var_name) = remainder.split_whitespace().next()
-            && var_name.starts_with('$')
-        {
-            let php_type = PhpType::parse(type_str);
-            results.push((var_name.to_string(), php_type));
-        }
-
-        search_from = tag_start + leading_ws + type_str.len();
+    // Every spelling of the tag ends in `var`; skip the docblock parse for
+    // the many docblocks that have none.
+    if !doc_text.contains("var") {
+        return vec![];
     }
-
+    let Some(info) = crate::docblock::parse_docblock_for_tags(doc_text) else {
+        return vec![];
+    };
+    let mut results: Vec<(String, PhpType)> = Vec::new();
+    for tag in info.tags_by_kind_vendor_first(crate::docblock::TagKind::Var) {
+        let (Some(var_name), Some(type_text)) = (tag.variable(), tag.type_text()) else {
+            continue;
+        };
+        if results.iter().any(|(seen, _)| *seen == var_name) {
+            continue;
+        }
+        if let Some(php_type) = crate::docblock::sanitise_and_parse_docblock_type(&type_text) {
+            results.push((var_name.into_owned(), php_type));
+        }
+    }
     results
 }
 
 /// Parse `/** @var Type */` (without variable name) and return the PhpType.
+///
+/// Reads the highest-precedence spelling of the tag (`@phpstan-var`, then
+/// `@psalm-var`, then `@var`); a docblock whose tag names a variable is
+/// not the no-var form.
 pub(crate) fn parse_inline_var_docblock_no_var(doc_text: &str) -> Option<PhpType> {
-    // Flatten line-continuation markers so a `array{...}` shape spread
-    // across several lines is parsed as one type string.
-    let inner = flatten_docblock_inner(doc_text)?;
-    let inner = inner.trim().strip_prefix("@var")?.trim();
-
-    // Stop at the next docblock tag so trailing tags (e.g. `@psalm-suppress`)
-    // do not corrupt the type string.
-    let type_str = match inner.find(" @") {
-        Some(pos) => inner[..pos].trim(),
-        None => inner,
-    };
-    // Strip a trailing `*` that may remain from `* @var Type *` formatting.
-    let type_str = type_str.trim_end_matches('*').trim();
-
-    // If there's a `$` it has a variable name — not the no-var form.
-    if type_str.contains('$') {
+    if !doc_text.contains("var") {
         return None;
     }
-
-    if type_str.is_empty() {
+    let (php_type, var_name) = crate::docblock::extract_var_type_with_name(doc_text)?;
+    if var_name.is_some() {
         return None;
     }
-
-    Some(PhpType::parse(type_str))
+    Some(php_type)
 }
 
 #[cfg(test)]
@@ -474,6 +505,34 @@ mod tests {
         assert_eq!(
             pairs[0].1.to_string(),
             "\\Closure(\\App\\Models\\User): string"
+        );
+    }
+
+    #[test]
+    fn vendor_var_tags_are_read_and_win_over_plain_var() {
+        let pairs = parse_var_docblock_pairs(
+            "/**\n * @var array $res\n * @phpstan-var array<Foo> $res\n * @psalm-var int $n\n */",
+        );
+        let types: Vec<(String, String)> = pairs
+            .into_iter()
+            .map(|(name, ty)| (name, ty.to_string()))
+            .collect();
+        assert_eq!(
+            types,
+            vec![
+                ("$res".to_string(), "array<Foo>".to_string()),
+                ("$n".to_string(), "int".to_string()),
+            ]
+        );
+
+        assert_eq!(
+            parse_inline_var_docblock_no_var("/**\n * @var array\n * @psalm-var list<int>\n */")
+                .map(|ty| ty.to_string()),
+            Some("list<int>".to_string())
+        );
+        assert_eq!(
+            parse_inline_var_docblock_no_var("/** @phpstan-var Foo $x */"),
+            None
         );
     }
 }

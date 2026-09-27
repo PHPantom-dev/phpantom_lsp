@@ -652,15 +652,7 @@ fn check_param_list(
 
         let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
 
-        // Try @param docblock type.
-        let docblock_type =
-            docblock::find_iterable_raw_type_in_source(content, method_start_offset, var_name)
-                .or_else(|| {
-                    content
-                        .get(..method_start_offset)
-                        .and_then(extract_preceding_docblock)
-                        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
-                });
+        let docblock_type = declared_param_docblock_type(content, method_start_offset, pname);
 
         let effective =
             docblock::resolve_effective_type_typed(native_type.as_ref(), docblock_type.as_ref());
@@ -790,6 +782,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 resolved_class_cache: ctx.resolved_class_cache,
                 enclosing_return_type: None,
                 top_level_scope: None,
+                in_loop: false,
+                template_markers: None,
             };
             let mut tl_scope = super::forward_walk::ScopeState::new();
             super::forward_walk::walk_top_level_for_globals(
@@ -946,6 +940,8 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: None,
+            in_loop: false,
+            template_markers: None,
         };
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
@@ -1214,6 +1210,8 @@ fn try_resolve_in_function(
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: enclosing_ret,
         top_level_scope: ctx.top_level_scope.clone(),
+        in_loop: false,
+        template_markers: None,
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -1367,6 +1365,8 @@ fn resolve_variable_in_members<'b>(
                         resolved_class_cache: ctx.resolved_class_cache,
                         enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
+                        in_loop: false,
+                        template_markers: None,
                     };
                     let method_name_str = bytes_to_str(method.name.value).to_string();
                     let is_static = method.modifiers.contains_static();
@@ -1433,6 +1433,8 @@ fn resolve_variable_in_property_hooks(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
+            template_markers: None,
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -1475,9 +1477,6 @@ fn resolve_abstract_method_param(
             continue;
         }
 
-        let is_variadic = param.ellipsis.is_some();
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
-
         let fw_ctx = super::forward_walk::ForwardWalkCtx {
             current_class: ctx.current_class,
             all_classes: ctx.all_classes,
@@ -1489,6 +1488,8 @@ fn resolve_abstract_method_param(
             resolved_class_cache: ctx.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
+            in_loop: false,
+            template_markers: None,
         };
 
         let trait_prototype =
@@ -1496,8 +1497,7 @@ fn resolve_abstract_method_param(
 
         return super::forward_walk::resolve_param_type(
             pname,
-            native_type.as_ref(),
-            is_variadic,
+            param,
             &super::forward_walk::EnclosingMethod {
                 span_start: method.span().start.offset,
                 name: Some(&method_name_str),
@@ -1511,14 +1511,16 @@ fn resolve_abstract_method_param(
     vec![]
 }
 
-/// Substitute method/function-level template parameter names with their
-/// upper bounds from `@template T of Bound` annotations.
+/// Mark the method/function-level template parameters a type names with
+/// the upper bounds their `@template T of Bound` annotations give them.
 ///
 /// This handles the general case where a parameter type IS a template
 /// parameter (e.g. `@param T $query` where `@template T of Builder`).
-/// Without this substitution, `T` remains an unresolvable named type
-/// and member access on `$query` fails with "subject type 'T' could not
-/// be resolved".
+/// A bare `T` is an unresolvable named type, so member access on `$query`
+/// would fail with "subject type 'T' could not be resolved".  Each bounded
+/// `T` becomes a [`TemplateParam`](crate::php_type::TypeKind::TemplateParam)
+/// instead, which is still displayed and substituted as `T` but resolves
+/// as its bound, wherever the value travels.
 ///
 /// Works on any `PhpType` structure — bare names, unions, intersections,
 /// nullable wrappers, generics, etc. — via `PhpType::substitute`.
@@ -1547,18 +1549,71 @@ pub(super) fn substitute_template_param_bounds(
         return ty;
     }
 
-    let mut subs = std::collections::HashMap::new();
-    for (name, bound) in bounds {
-        if let Some(bound_type) = bound {
-            subs.insert(name, bound_type);
-        }
-    }
-
+    let subs = bounded_template_markers(bounds);
     if subs.is_empty() {
         return ty;
     }
 
     ty.substitute(&subs)
+}
+
+/// The markers [`bounded_template_markers`] builds for the declaration
+/// starting at `decl_start`, or `None` when it declares no bounded template.
+pub(crate) fn declaration_template_markers(
+    content: &str,
+    decl_start: usize,
+) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
+    let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
+    if !docblock.contains("template") {
+        return None;
+    }
+    let markers = bounded_template_markers(docblock::extract_template_params_with_bounds(docblock));
+    (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
+}
+
+/// The [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) each
+/// bounded template in `bounds` stands for, keyed by its name.
+///
+/// A bound naming another of the declaration's templates (`@template U of
+/// T`) reads through to that template's own bound, so `U` still resolves
+/// to a class.
+fn bounded_template_markers(
+    bounds: Vec<(String, Option<PhpType>)>,
+) -> std::collections::HashMap<String, PhpType> {
+    let mut subs: std::collections::HashMap<String, PhpType> = bounds
+        .into_iter()
+        .filter_map(|(name, bound)| {
+            let bound = bound?;
+            let marker = PhpType::template_param(crate::atom::atom(&name), bound);
+            Some((name, marker))
+        })
+        .collect();
+    let chained: Vec<(String, PhpType)> = subs
+        .iter()
+        .filter_map(|(name, marker)| {
+            let (tpl, bound) = marker.as_template_param()?;
+            let substituted = bound.substitute(&subs);
+            (substituted != *bound)
+                .then(|| (name.clone(), PhpType::template_param(tpl, substituted)))
+        })
+        .collect();
+    subs.extend(chained);
+    subs
+}
+
+/// Whether `ty` names one of the `@template` parameters the declaration
+/// starting at `method_start_offset` introduces.
+pub(super) fn references_method_template(
+    ty: &PhpType,
+    content: &str,
+    method_start_offset: usize,
+) -> bool {
+    if !type_may_contain_template_param(ty) {
+        return false;
+    }
+    extract_preceding_docblock(&content[..method_start_offset]).is_some_and(|docblock| {
+        ty.references_any_template_param(&docblock::extract_template_params(docblock))
+    })
 }
 
 /// Check whether a `PhpType` tree may contain a bare template parameter
@@ -1583,8 +1638,8 @@ fn type_may_contain_template_param(ty: &PhpType) -> bool {
     }
 }
 
-/// Substitute method-level template parameters inside `class-string<T>`
-/// types with their upper bounds from `@template T of Bound` annotations.
+/// Mark method-level template parameters inside `class-string<T>` types
+/// with their upper bounds from `@template T of Bound` annotations.
 ///
 /// This enables `$class::` static member access resolution when the
 /// parameter is typed as `class-string<T>` and `T` is bounded by a
@@ -1620,15 +1675,31 @@ pub(super) fn substitute_class_string_template_bounds(
     };
 
     let bounds = docblock::extract_template_params_with_bounds(docblock);
-    for (name, bound) in bounds {
-        if name == tpl_name
-            && let Some(bound_type) = bound
-        {
-            return PhpType::class_string(Some(bound_type));
-        }
+    match bounded_template_markers(bounds).remove(tpl_name.as_str()) {
+        Some(marker) => PhpType::class_string(Some(marker)),
+        None => ty,
     }
+}
 
-    ty
+/// The `@param` type the declaration starting at `decl_start` gives
+/// `pname`.
+///
+/// The declaration's own docblock is read first, through the tag parser,
+/// so a vendor tag (`@phpstan-param`, `@psalm-param`) takes precedence
+/// over a plain `@param` for the same parameter the way it does in the
+/// signature.  The backward source scan is the fallback for the shapes
+/// that parser does not see, such as a docblock sharing its line with the
+/// code of a closure.
+pub(crate) fn declared_param_docblock_type(
+    content: &str,
+    decl_start: usize,
+    pname: &str,
+) -> Option<PhpType> {
+    content
+        .get(..decl_start)
+        .and_then(extract_preceding_docblock)
+        .and_then(|doc| docblock::extract_param_raw_type(doc, pname))
+        .or_else(|| docblock::find_iterable_raw_type_in_source(content, decl_start, pname))
 }
 
 /// Extract the docblock comment immediately preceding a given offset.
@@ -1669,6 +1740,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                 let fqn = crate::util::resolve_source_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))
@@ -1981,6 +2053,19 @@ pub(super) fn try_apply_pass_by_reference_type(
                 ctx.backend,
             )
         {
+            // A PHPStan conditional out type (`@param-out ($arg is null ?
+            // A&I : A) $arg`) is call-site-agnostic up to this point; only
+            // this call's own arguments say which branch it actually takes.
+            let var_resolver = build_var_resolver_from_ctx(ctx);
+            let out_hint = crate::type_engine::call_resolution::resolve_out_type_for_call(
+                out_hint,
+                &parameters,
+                &callee,
+                argument_list,
+                ctx.content,
+                &ctx.as_resolution_ctx(),
+                Some(&var_resolver),
+            );
             let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
                 &out_hint,
                 &ctx.current_class.name,
@@ -2054,8 +2139,12 @@ fn try_resolve_static_method_params<'a>(
         _ => return None,
     };
 
-    let class_name =
-        crate::class_lookup::class_expression_name(static_call.class, ctx.current_class)?;
+    let class_name = crate::class_lookup::class_expression_name(
+        static_call.class,
+        ctx.current_class,
+        ctx.all_classes,
+        ctx.class_loader,
+    )?;
 
     let cls = (ctx.class_loader)(&class_name)?;
     let method_info = cls.get_method(method_name)?;
@@ -2075,7 +2164,12 @@ fn try_resolve_constructor_params<'a>(
     &'a ArgumentList<'a>,
     OutParamCallee,
 )> {
-    let class_name = crate::class_lookup::class_expression_name(inst.class, ctx.current_class)?;
+    let class_name = crate::class_lookup::class_expression_name(
+        inst.class,
+        ctx.current_class,
+        ctx.all_classes,
+        ctx.class_loader,
+    )?;
 
     let args = inst.argument_list.as_ref()?;
     let cls = (ctx.class_loader)(&class_name)?;

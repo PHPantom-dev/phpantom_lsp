@@ -898,7 +898,7 @@ impl Backend {
     ) -> u32 {
         if *ssp_kind == crate::symbol_map::SelfStaticParentKind::Parent {
             // Try to resolve the parent class kind.
-            if let Some(class) = ctx.classes.first()
+            if let Some(class) = crate::class_lookup::find_class_at_offset(&ctx.classes, offset)
                 && let Some(ref parent_name) = class.parent_class
             {
                 let fqn = ctx.resolve_name_at(parent_name, offset);

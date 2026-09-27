@@ -1,0 +1,16 @@
+// test: a `null` default leaves a template parameter as the template
+// feature: hover
+// expect: $t = T
+// expect_absent: null
+---
+<?php
+
+/**
+ * @template T
+ * @param T $t
+ * @return T
+ */
+function same($t = null)
+{
+    return $<>t;
+}

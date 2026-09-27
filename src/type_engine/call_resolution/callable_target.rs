@@ -35,9 +35,35 @@ impl Backend {
         method_name: &str,
         args_text: Option<&str>,
         rctx: &ResolutionCtx<'_>,
-    ) -> (MethodInfo, crate::atom::AtomSet) {
+    ) -> (MethodInfo, crate::atom::AtomMap<Option<PhpType>>) {
         let mut bound = declared.clone();
-        let mut self_bound_params = crate::atom::AtomSet::default();
+        let mut self_bound_params = crate::atom::AtomMap::default();
+
+        // A parameter naming the base Eloquent collection of a concrete
+        // model is handed that model's own collection, the same rewrite
+        // every return type gets.
+        let rewrite = |param: &ParameterInfo| {
+            param.type_hint.as_ref().and_then(|hint| {
+                crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
+                    hint,
+                    rctx.class_loader,
+                )
+            })
+        };
+        if let Some((first, first_hint)) = bound
+            .parameters
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| rewrite(p).map(|hint| (i, hint)))
+        {
+            let params = bound.parameters.make_mut();
+            params[first].type_hint = Some(first_hint);
+            for param in params.iter_mut().skip(first + 1) {
+                if let Some(hint) = rewrite(param) {
+                    param.type_hint = Some(hint);
+                }
+            }
+        }
 
         let Some(at) = args_text else {
             return (bound, self_bound_params);
@@ -51,6 +77,13 @@ impl Backend {
                 &declared.template_bindings,
                 &declared.parameters,
                 &split_args,
+                &|tpl| {
+                    declared
+                        .template_param_bounds
+                        .get(tpl)
+                        .or_else(|| owner.template_param_bounds.get(tpl))
+                        .cloned()
+                },
             );
         }
 
@@ -65,6 +98,7 @@ impl Backend {
                 params: &bound.template_params,
                 bindings: &bound.template_bindings,
                 arg_type_resolver: Some(&arg_ty_resolver),
+                this_type: None,
             };
             let evaluated =
                 crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
@@ -285,15 +319,8 @@ impl Backend {
         // to declared defaults, upper bounds, or `mixed`.
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
-                // Look up the child's extends_generics for the parent class
-                rctx.current_class.and_then(|child| {
-                    let parent_short = crate::util::short_name(&owner.name);
-                    child
-                        .extends_generics
-                        .iter()
-                        .find(|(name, _)| crate::util::short_name(name) == parent_short)
-                        .map(|(_, args)| args.clone())
-                })
+                rctx.current_class
+                    .and_then(|child| crate::inheritance::extends_type_args(child, &owner))
             } else {
                 None
             };
@@ -379,6 +406,7 @@ impl Backend {
                         &func.template_bindings,
                         &func.parameters,
                         &split_args.iter().map(String::as_str).collect::<Vec<_>>(),
+                        &|tpl| func.template_param_bounds.get(tpl).cloned(),
                     ),
                     ..Default::default()
                 };
@@ -442,6 +470,12 @@ impl Backend {
                     &ctor.template_bindings,
                     &ctor.parameters,
                     &split_args,
+                    &|tpl| {
+                        ctor.template_param_bounds
+                            .get(tpl)
+                            .or_else(|| merged.template_param_bounds.get(tpl))
+                            .cloned()
+                    },
                 );
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
@@ -565,15 +599,13 @@ impl Backend {
         visited_vars: &mut Vec<String>,
     ) -> Option<ResolvedCallableTarget> {
         // A file may declare several `namespace` blocks, so the namespace
-        // every name here resolves against is the one covering this call
-        // site, not the file's first one.
+        // and imports every name here resolves against are those of the
+        // block covering this call site.
         let namespace = file_ctx.namespace_at(cursor_offset);
-        let class_loader = self.class_loader_with(&file_ctx.classes, &file_ctx.use_map, namespace);
-        let function_loader_cl = self.function_loader_with(
-            file_ctx.resolved_names.as_deref(),
-            &file_ctx.use_map,
-            namespace,
-        );
+        let use_map = file_ctx.use_map_at(cursor_offset);
+        let class_loader = self.class_loader_with(&file_ctx.classes, use_map, namespace);
+        let function_loader_cl =
+            self.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
@@ -615,7 +647,12 @@ impl Backend {
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
                     let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                    crate::util::resolve_source_class_name(class_name, ns, &class_loader)
+                    crate::util::resolve_source_class_name(
+                        class_name,
+                        ns,
+                        rctx.all_classes,
+                        &class_loader,
+                    )
                 } else {
                     resolved_class_name
                 };
@@ -640,7 +677,7 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
+                let func = self.resolve_function_name(name, use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -672,7 +709,7 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
+                let func = self.resolve_function_name(name, use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -808,6 +845,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     is_variadic: p.variadic,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {

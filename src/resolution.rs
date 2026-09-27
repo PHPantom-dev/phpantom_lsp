@@ -219,29 +219,7 @@ impl Backend {
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
-        // Report the lookup to whoever is recording what a resolution
-        // depends on, before the memo below can answer it without touching
-        // the class index.  A name that finds nothing is reported too: it
-        // gains a declaration as readily as an existing one changes.
-        if let Some(base) = ty.base_name() {
-            crate::resolution_deps::record(base);
-        }
-        // The name search is memoised per thread on the interned type
-        // handle: the diagnostic pass asks for the same types millions of
-        // times, and every miss costs two case-insensitive hash lookups
-        // behind locks the whole worker pool shares.  Read the generation
-        // first so that a change landing mid-search retires the answer.
-        let generation = self.symbols.class_lookup_generation();
-        let mut loaded = match class_loader_memo::probe(self.symbols.id(), generation, ty) {
-            Some(memoised) => memoised?,
-            None => {
-                let found = ty
-                    .base_name()
-                    .and_then(|base| self.find_or_load_class_inner(base));
-                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
-                found?
-            }
-        };
+        let mut loaded = self.link_imported_type_aliases(self.find_indexed_class(ty)?);
         // The refinements below stay outside the memo: each depends on an
         // index of its own (the configured auth model, registered macros,
         // many-to-many targets) that keeps changing as files are indexed.
@@ -277,6 +255,75 @@ impl Backend {
         // Add pivot accessors when this class is a many-to-many target.
         loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
+    }
+
+    /// The class `ty` names as indexed, before
+    /// [`find_or_load_class_typed`](Self::find_or_load_class_typed) links
+    /// its imported type aliases and refines it.
+    fn find_indexed_class(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
+        // Report the lookup to whoever is recording what a resolution
+        // depends on, before the memo below can answer it without touching
+        // the class index.  A name that finds nothing is reported too: it
+        // gains a declaration as readily as an existing one changes.
+        if let Some(base) = ty.base_name() {
+            crate::resolution_deps::record(base);
+        }
+        // The name search is memoised per thread on the interned type
+        // handle: the diagnostic pass asks for the same types millions of
+        // times, and every miss costs two case-insensitive hash lookups
+        // behind locks the whole worker pool shares.  Read the generation
+        // first so that a change landing mid-search retires the answer.
+        let generation = self.symbols.class_lookup_generation();
+        match class_loader_memo::probe(self.symbols.id(), generation, ty) {
+            Some(memoised) => memoised,
+            None => {
+                let found = ty
+                    .base_name()
+                    .and_then(|base| self.find_or_load_class_inner(base));
+                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
+                found
+            }
+        }
+    }
+
+    /// `class` with the type aliases it imports linked into its members.
+    ///
+    /// An imported alias names a class in another file, so it cannot be
+    /// expanded when the importer is parsed the way a local alias is.  The
+    /// linked copy is cached against this very `Arc` together with the
+    /// classes the imports were read from, so that editing either one
+    /// drops it (see `evict_fqn`).
+    fn link_imported_type_aliases(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        use crate::type_engine::types::aliases;
+        if !aliases::has_imported_type_aliases(&class) {
+            return class;
+        }
+        if let Some((linked, sources)) = self.resolved_class_cache.read().get_linked_aliases(&class)
+        {
+            // Whoever is recording what this lookup depends on depends on
+            // the source classes too, cached or not.
+            for source in sources {
+                crate::resolution_deps::record(source);
+            }
+            return linked;
+        }
+        let sources = std::cell::RefCell::new(Vec::new());
+        // The source classes are loaded unlinked: linking only reads their
+        // alias definitions, and two classes may import from each other.
+        let loader = |name: &str| {
+            sources.borrow_mut().push(name.to_string());
+            self.find_indexed_class(&PhpType::parse(name))
+        };
+        let (linked, complete) = aliases::link_imported_type_aliases(&class, &loader);
+        let result = linked.map_or_else(|| Arc::clone(&class), Arc::new);
+        if complete {
+            self.resolved_class_cache.write().insert_linked_aliases(
+                &class,
+                Arc::clone(&result),
+                sources.into_inner(),
+            );
+        }
+        result
     }
 
     /// Add Laravel macro methods registered on `class` (by FQN).
@@ -752,36 +799,28 @@ impl Backend {
         // Parse classes with per-class namespace tracking so that
         // multi-namespace files (e.g. PDO.php with both `namespace { }`
         // and `namespace Pdo { }`) resolve parent names correctly.
-        let classes_with_ns = Self::parse_php_versioned_with_namespaces(content, php_version);
+        let (mut classes_with_ns, blocks) = Self::parse_php_classes_by_block(content, php_version);
 
-        // Group classes by their enclosing namespace and resolve parent
-        // names once per group, mirroring the logic in `update_ast_inner`.
+        // Resolve parent names against each class's own namespace block
+        // (namespace and imports), mirroring the logic in `update_ast_inner`,
+        // so that classes in `namespace { }` are not polluted by a sibling
+        // `namespace Pdo { }` block.
+        Self::resolve_parent_class_names_by_block(
+            &mut classes_with_ns,
+            &blocks,
+            &file_use_map,
+            &file_namespace,
+        );
+        let single_namespace = {
+            let mut namespaces = classes_with_ns.iter().map(|(_, ns, _)| ns);
+            let first = namespaces.next();
+            namespaces.all(|ns| Some(ns) == first)
+        };
         let mut classes: Vec<ClassInfo> = Vec::with_capacity(classes_with_ns.len());
-        let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-        for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-            ns_groups.entry(ns.clone()).or_default().push(i);
-        }
-
-        // Flatten into a single Vec, preserving original order.
-        for (cls, _) in &classes_with_ns {
-            classes.push(cls.clone());
-        }
-
-        if ns_groups.len() <= 1 {
-            // Single namespace (common case): resolve with file namespace.
-            Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-        } else {
-            // Multi-namespace file: resolve each group with its own
-            // namespace context so that classes in `namespace { }` are
-            // not polluted by a sibling `namespace Pdo { }` block.
-            for (group_ns, indices) in &ns_groups {
-                let mut group: Vec<ClassInfo> =
-                    indices.iter().map(|&i| classes[i].clone()).collect();
-                Self::resolve_parent_class_names(&mut group, &file_use_map, group_ns);
-                for (j, &idx) in indices.iter().enumerate() {
-                    classes[idx] = group[j].clone();
-                }
-            }
+        let mut class_namespaces: Vec<Option<String>> = Vec::with_capacity(classes_with_ns.len());
+        for (cls, ns, _) in classes_with_ns {
+            classes.push(cls);
+            class_namespaces.push(ns);
         }
 
         // Set the per-class file_namespace so that classes loaded via
@@ -796,10 +835,9 @@ impl Backend {
         // the file-level namespace would label it `Pdo\PDO`.  The fallback is
         // only meaningful for single-namespace files, where a missing
         // per-class value means the namespace simply was not tracked.
-        let single_namespace = ns_groups.len() <= 1;
         for (i, cls) in classes.iter_mut().enumerate() {
             if cls.file_namespace.is_none() {
-                let class_ns = classes_with_ns[i].1.as_deref();
+                let class_ns = class_namespaces[i].as_deref();
                 cls.file_namespace = if single_namespace {
                     class_ns.or(file_namespace.as_deref())
                 } else {
@@ -1219,9 +1257,10 @@ impl Backend {
             if let Some(fqn) = file_use_map.get(name) {
                 return self.find_or_load_class(fqn);
             }
-            // Check local classes (same-file shortcut).
-            // In multi-namespace files, prefer the class whose
-            // file_namespace matches the current namespace context.
+            // Check local classes (same-file shortcut).  Only a class in
+            // the current namespace: in a file with several `namespace`
+            // blocks, a same-named class of another block is a different
+            // class.
             let lookup = short_name(name);
             let ns_matches = |c: &ClassInfo| match (&c.file_namespace, file_namespace) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -1230,12 +1269,7 @@ impl Backend {
             };
             let local_match = local_classes
                 .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c))
-                .or_else(|| {
-                    local_classes
-                        .iter()
-                        .find(|c| c.name.eq_ignore_ascii_case(lookup))
-                });
+                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c));
             if let Some(cls) = local_match {
                 return Some(Arc::clone(cls));
             }
@@ -1312,6 +1346,30 @@ impl Backend {
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
         self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
+    }
+
+    /// Whether discovery or full parsing has seen this exact function FQN.
+    ///
+    /// This is the allocation-free membership form used when a caller only
+    /// needs to know whether PHP's namespace-local function shadows a global
+    /// fallback. It deliberately does not trigger a lazy parse.
+    pub(crate) fn has_indexed_function(&self, fqn: &str) -> bool {
+        self.symbols.global_functions.read().get(fqn).is_some()
+            || self
+                .symbols
+                .autoload_function_index
+                .read()
+                .get(fqn)
+                .is_some()
+    }
+
+    /// Whether discovery or full parsing has seen this exact class FQN.
+    ///
+    /// Laravel's optional root facade aliases are used only when no real
+    /// global class owns the same name. This membership check does not lazy
+    /// load the class, keeping completion on that fallback allocation-free.
+    pub(crate) fn has_indexed_class(&self, fqn: &str) -> bool {
+        self.symbols.fqn_uri_index.read().get(fqn).is_some()
     }
 
     /// Resolve a function name, consulting mago-names' per-offset
@@ -1398,6 +1456,20 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one class-loader closure per `namespace` block of the file
+    /// behind `ctx`, for a consumer that resolves names across the whole
+    /// file rather than at one position.
+    ///
+    /// Each block's loader resolves source names against that block's own
+    /// imports and namespace; pick the one for a name with
+    /// [`PerBlock::at`](crate::types::PerBlock::at) at the name's offset.
+    pub(crate) fn class_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a> {
+        ctx.per_block(|use_map, namespace| self.class_loader_with(&ctx.classes, use_map, namespace))
     }
 
     /// Return a class-loader closure from individual file-context
@@ -1563,6 +1635,17 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one function-loader closure per `namespace` block of the
+    /// file behind `ctx`; see [`class_loaders`](Self::class_loaders).
+    pub(crate) fn function_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
+        ctx.per_block(|use_map, namespace| {
+            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace)
+        })
     }
 
     /// Return a function-loader closure from individual file-context

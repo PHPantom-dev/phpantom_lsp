@@ -67,7 +67,11 @@ fn resolve_call(
     member_targets: &mut MemberTargetMemo,
 ) -> (CallKind, Option<String>) {
     if let Some(class_name) = expression.strip_prefix("new ") {
-        let loader = backend.class_loader(context);
+        let loader = backend.class_loader_with(
+            &context.classes,
+            context.use_map_at(offset),
+            context.namespace_at(offset),
+        );
         return (
             CallKind::Constructor,
             loader(class_name).map(|class| class.fqn().to_string()),
@@ -97,7 +101,11 @@ fn resolve_call(
             .resolve(subject, true, offset, method, OccurrenceKind::Method),
         );
     }
-    let loader = backend.function_loader(context);
+    let loader = backend.function_loader_with(
+        context.resolved_names.as_deref(),
+        context.use_map_at(offset),
+        context.namespace_at(offset),
+    );
     (
         CallKind::Function,
         loader(expression, offset).as_ref().map(function_fqn),
@@ -165,12 +173,15 @@ fn resolve_member_owner(
     is_static: bool,
     offset: u32,
 ) -> Option<String> {
-    let class_loader = backend.class_loader(context);
-    let function_loader = backend.function_loader(context);
+    let use_map = context.use_map_at(offset);
+    let namespace = context.namespace_at(offset);
+    let class_loader = backend.class_loader_with(&context.classes, use_map, namespace);
+    let function_loader =
+        backend.function_loader_with(context.resolved_names.as_deref(), use_map, namespace);
     let resolution_context = crate::type_engine::subject_resolution::SubjectResolutionCtx {
         local_classes: &context.classes,
-        use_map: &context.use_map,
-        namespace: &context.namespace,
+        use_map,
+        namespace,
         content: source,
         class_loader: &class_loader,
         backend: Some(backend),

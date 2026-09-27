@@ -64,10 +64,12 @@ mod loop_control;
 mod loops;
 mod param_seeding;
 mod reachability;
+mod readonly_properties;
 mod receiver_mutation;
 mod scope_state;
 mod snapshot_narrowing;
 mod static_locals;
+mod throw_points;
 mod var_docblocks;
 mod walk_ctx;
 mod while_for;
@@ -91,6 +93,7 @@ pub(crate) use reachability::*;
 pub(crate) use receiver_mutation::*;
 pub(crate) use scope_state::*;
 pub(crate) use snapshot_narrowing::*;
+pub(crate) use throw_points::*;
 pub(crate) use var_docblocks::*;
 pub(crate) use walk_ctx::*;
 pub(crate) use while_for::*;
@@ -239,7 +242,7 @@ pub(crate) fn walk_body_forward<'b>(
         // block.
         if record_snapshots {
             let closure_scope = pre_stmt_scope.as_ref().unwrap_or(scope);
-            walk_closures_in_statement(stmt, closure_scope, ctx);
+            walk_closures_in_statement(stmt, closure_scope, scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }
@@ -260,13 +263,15 @@ pub(crate) fn resolve_in_method_body<'b>(
     is_static: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
+    let ctx = &ctx.for_declaration(method_span_start);
     let mut scope = ScopeState::new();
 
+    let method_name = method_ctx.map(|(n, _)| n);
     if !is_static {
         seed_this(&mut scope, ctx);
+        readonly_properties::seed_constructor_readonly_properties(&mut scope, method_name, ctx);
     }
 
-    let method_name = method_ctx.map(|(n, _)| n);
     let has_scope_attr = method_ctx.is_some_and(|(_, s)| s);
     seed_params(
         &mut scope,
@@ -355,6 +360,7 @@ pub(crate) fn resolve_in_function_body<'b>(
     func: &'b Function<'b>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
+    let ctx = &ctx.for_declaration(func.span().start.offset);
     let mut scope = ScopeState::new();
 
     seed_params(

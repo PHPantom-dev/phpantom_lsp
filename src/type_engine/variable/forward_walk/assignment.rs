@@ -10,6 +10,7 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use super::super::rhs_resolution::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
+    infer_modulo_result_type,
 };
 
 // ─── Statement processing ───────────────────────────────────────────────────
@@ -24,8 +25,9 @@ pub(crate) fn process_statement<'b>(
     // An expression statement runs its own `@var` handling, which has
     // extra rules (the LHS is left alone while the cursor sits in the
     // RHS, a scalar RHS blocks a class override).  Every other statement
-    // kind only ever sees standalone annotations.
-    if !matches!(stmt, Statement::Expression(_)) {
+    // kind only ever sees standalone annotations, and `global` restricts
+    // those to the variables it imports.
+    if !matches!(stmt, Statement::Expression(_) | Statement::Global(_)) {
         let stmt_offset = stmt.span().start.offset;
         if apply_standalone_var_docblocks(stmt_offset, scope, ctx) {
             // The diagnostic scope snapshot at this offset was recorded
@@ -113,6 +115,14 @@ pub(crate) fn process_statement<'b>(
                                     &base_type, &keys,
                                 );
                             scope.set(&base_name, vec![ResolvedType::from_type_string(updated)]);
+                            let removed_from = super::array_assignment::array_write_synthetic_key(
+                                &base_name,
+                                &key_chain[..key_chain.len() - 1],
+                            );
+                            scope.note_element_write(
+                                removed_from.as_deref().unwrap_or(&base_name),
+                                true,
+                            );
                         }
                     }
                     _ => {}
@@ -123,19 +133,25 @@ pub(crate) fn process_statement<'b>(
             walk_body_forward(ns.statements().iter(), scope, ctx);
         }
         Statement::Global(global) => {
+            let mut imported: Vec<&str> = Vec::with_capacity(global.variables.len());
             for var in global.variables.iter() {
                 if let Variable::Direct(dv) = var {
-                    let var_name = bytes_to_str(dv.name).to_string();
+                    let var_name = bytes_to_str(dv.name);
+                    imported.push(var_name);
                     if let Some(top_scope) = &ctx.top_level_scope {
-                        if let Some(types) = top_scope.get(&atom(&var_name)) {
-                            scope.set(&var_name, types.clone());
+                        if let Some(types) = top_scope.get(&atom(var_name)) {
+                            scope.set(var_name, types.clone());
                         } else {
-                            scope.set_empty(&var_name);
+                            scope.set_empty(var_name);
                         }
                     } else {
-                        scope.set_empty(&var_name);
+                        scope.set_empty(var_name);
                     }
                 }
+            }
+            let stmt_offset = stmt.span().start.offset;
+            if apply_global_var_docblocks(stmt_offset, &imported, scope, ctx) {
+                record_scope_snapshot(stmt_offset, scope);
             }
         }
         Statement::Return(ret) => {
@@ -520,9 +536,16 @@ pub(crate) fn resolve_type_to_resolved_types(
     php_type: &PhpType,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // The declaration's templates are marked before names are qualified,
+    // while `T` is still spelled the way the `@template` tag spells it.
+    let marked = ctx
+        .template_markers
+        .as_ref()
+        .map(|m| php_type.substitute(m));
     let php_type = crate::util::resolve_source_php_type_names(
-        php_type,
+        marked.as_ref().unwrap_or(php_type),
         ctx.current_class.file_namespace.as_deref(),
+        ctx.all_classes,
         ctx.class_loader,
     );
     ctx.resolved_types_for(php_type)
@@ -557,9 +580,13 @@ pub(crate) fn process_assignment_expr<'b>(
         }
 
         // Chain assignments: `$a = $b = expr` — the RHS is itself an
-        // assignment expression.  Process it first so that the inner
-        // variable (`$b`) gets its type before we resolve the outer one.
-        if matches!(assignment.rhs, Expression::Assignment(_)) {
+        // assignment expression, possibly parenthesized (`$a = ($b =
+        // expr)`).  Process it first so that the inner variable (`$b`)
+        // gets its type before we resolve the outer one.
+        if matches!(
+            crate::parser::unwrap_parens(assignment.rhs),
+            Expression::Assignment(_)
+        ) {
             process_assignment_expr(assignment.rhs, scope, ctx);
         }
 
@@ -624,7 +651,14 @@ pub(crate) fn process_assignment_expr<'b>(
                     scope.invalidate_dependent_keys(&key);
                     return;
                 }
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                let mut rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                adopt_declared_type_args(
+                    assignment.lhs,
+                    assignment.rhs,
+                    &mut rhs_types,
+                    scope,
+                    ctx,
+                );
                 if rhs_types.is_empty() {
                     // The right-hand side did not resolve. Unlike a plain
                     // variable (`set_unknown`), a property's correct
@@ -661,6 +695,10 @@ pub(crate) fn process_assignment_expr<'b>(
         }
 
         let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+        // `$show = $limit !== null && …` makes `$show` stand for what the
+        // expression proves, read off the scope the value was computed in.
+        let condition_proofs =
+            condition_implications(&lhs_name, assignment.rhs, &rhs_types, scope, ctx);
         // Reassigning the variable replaces its object identity, so any
         // property/array-access key rooted at it (seeded by an earlier
         // assignment or condition narrowing) is now stale.  Drop them
@@ -668,6 +706,15 @@ pub(crate) fn process_assignment_expr<'b>(
         // key while resolving.
         scope.invalidate_dependent_keys(&lhs_name);
         scope.invalidate_proofs(&lhs_name);
+        // `$cb = function () { $this->stop(); };` — work out now what
+        // invoking this closure does to its captures, so a later
+        // `call_user_func($cb)` can apply it without the closure's body in
+        // view.  `invalidate_proofs` above already dropped whatever was
+        // recorded for a closure `$cb` held before this assignment.
+        if let Expression::Closure(closure) = crate::parser::unwrap_parens(assignment.rhs) {
+            let effects = closure_literal_capture_effects(closure, scope, ctx);
+            scope.set_closure_capture_effects(&lhs_name, effects);
+        }
         if !rhs_types.is_empty() {
             scope.set(&lhs_name, rhs_types);
         } else if !scope.get(&lhs_name).is_empty()
@@ -696,6 +743,13 @@ pub(crate) fn process_assignment_expr<'b>(
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.
         record_assertion_variable(&lhs_name, assignment.rhs, scope);
+        if !condition_proofs.is_empty() {
+            scope
+                .implied_narrowings
+                .entry(atom(&lhs_name))
+                .or_default()
+                .extend(condition_proofs);
+        }
         // `$period = $agreement?->latestPeriod()` makes `$period`'s null
         // stand for `$agreement`'s, so ruling out one rules out the other.
         record_nullsafe_origin(&lhs_name, assignment.rhs, scope);
@@ -706,6 +760,90 @@ pub(crate) fn process_assignment_expr<'b>(
         // The expression assigns nothing at its root but may still assign
         // inside itself: `return ($x = $map[$key])->truthy();`.
         process_nested_assignments(expr, scope, ctx);
+    }
+}
+
+/// Give a `new X()` stored in a property the template arguments the
+/// property declares, when the call itself bound none of them.
+///
+/// Nothing in `new \SplObjectStorage()` says what the storage will hold, so
+/// its templates fall back to their bounds (`SplObjectStorage<object,
+/// mixed>`); stored in a property declared `SplObjectStorage<DateTime,
+/// null>` it is the object that declaration describes (PHPStan infers the
+/// same).  A call that did bind a template keeps what it bound, and so does
+/// an object of a class other than the declared one.
+fn adopt_declared_type_args(
+    lhs: &Expression<'_>,
+    rhs: &Expression<'_>,
+    rhs_types: &mut [ResolvedType],
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if !matches!(
+        crate::parser::unwrap_parens(rhs),
+        Expression::Instantiation(_)
+    ) {
+        return;
+    }
+    let [rt] = rhs_types else {
+        return;
+    };
+    let Some(cls) = rt.class_info.as_ref() else {
+        return;
+    };
+    let TypeKind::Generic(created) = rt.type_string.kind() else {
+        return;
+    };
+    let unbound = cls.template_params.len() == created.args.len()
+        && cls
+            .template_params
+            .iter()
+            .zip(created.args.iter())
+            .all(|(name, arg)| {
+                let fallback = cls
+                    .template_param_defaults
+                    .get(name)
+                    .or_else(|| cls.template_param_bounds.get(name))
+                    .cloned()
+                    .unwrap_or_else(PhpType::mixed);
+                *arg == fallback
+            });
+    if !unbound {
+        return;
+    }
+    let (object, prop_name) = match lhs {
+        Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+        Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+        _ => return,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = prop_name else {
+        return;
+    };
+    let prop_name = bytes_to_str(ident.value);
+    let declared = match object {
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
+            crate::inheritance::resolve_property_type_hint(
+                ctx.current_class,
+                prop_name,
+                ctx.class_loader,
+            )
+        }
+        _ => ResolvedType::into_arced_classes(resolve_rhs_with_scope(object, scope, ctx))
+            .iter()
+            .find_map(|owner| {
+                crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+            }),
+    };
+    let Some(declared) = declared else {
+        return;
+    };
+    let declared = declared.non_null_type().unwrap_or(declared);
+    if let TypeKind::Generic(g) = declared.kind()
+        && g.args.len() == created.args.len()
+        && crate::util::short_name(&g.name).eq_ignore_ascii_case(&cls.name)
+        && (ctx.class_loader)(&g.name).is_some_and(|c| c.fqn() == cls.fqn())
+    {
+        rt.type_string = declared;
     }
 }
 
@@ -850,6 +988,19 @@ pub(crate) fn process_compound_assignment<'b>(
 
     let var_name = match assignment.lhs {
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
+        // `$totals[(string) $item] ??= 0;` stores the element's non-null
+        // half or the fallback into the array, whatever the key is spelled
+        // as: it is the same write `=` makes with that value.
+        Expression::ArrayAccess(array_access)
+            if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) =>
+        {
+            let combined = coalesce_assign_value(
+                resolve_rhs_with_scope(assignment.lhs, scope, ctx),
+                resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+            );
+            super::array_assignment::process_array_key_write(array_access, combined, scope, ctx);
+            return;
+        }
         // `$this->regexp ??= $this->generate();` leaves the property
         // non-null just as surely as the same operator leaves a local
         // non-null, and the scope names a member path the same way it
@@ -861,6 +1012,23 @@ pub(crate) fn process_compound_assignment<'b>(
                 Some(key) => key,
                 None => return,
             }
+        }
+        // `$totals[$key]['count'] += $n;` writes the operator's result back
+        // into the element, the same as spelling it out with `=` would.
+        Expression::ArrayAccess(array_access) => {
+            if let Some(result_type) = compound_assignment_result(
+                &assignment.operator,
+                || resolve_rhs_with_scope(assignment.lhs, scope, ctx),
+                || resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+            ) {
+                super::array_assignment::process_array_key_write(
+                    array_access,
+                    vec![ResolvedType::from_type_string(result_type)],
+                    scope,
+                    ctx,
+                );
+            }
+            return;
         }
         _ => return,
     };
@@ -911,8 +1079,8 @@ fn compound_assignment_result(
 ) -> Option<PhpType> {
     match operator {
         AssignmentOperator::Concat(_) => Some(PhpType::string()),
-        AssignmentOperator::Modulo(_)
-        | AssignmentOperator::LeftShift(_)
+        AssignmentOperator::Modulo(_) => Some(infer_modulo_result_type(&lhs_types(), &rhs_types())),
+        AssignmentOperator::LeftShift(_)
         | AssignmentOperator::RightShift(_)
         | AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
@@ -925,9 +1093,11 @@ fn compound_assignment_result(
         | AssignmentOperator::Division(_)
         | AssignmentOperator::Exponentiation(_) => {
             let op_kind = match operator {
+                AssignmentOperator::Subtraction(_) => ArithmeticOpKind::Subtraction,
+                AssignmentOperator::Multiplication(_) => ArithmeticOpKind::Multiplication,
                 AssignmentOperator::Division(_) => ArithmeticOpKind::Division,
                 AssignmentOperator::Exponentiation(_) => ArithmeticOpKind::Exponentiation,
-                _ => ArithmeticOpKind::Other,
+                _ => unreachable!("outer match already narrowed to arithmetic operators"),
             };
             Some(infer_arithmetic_result_type(
                 &lhs_types(),
@@ -937,6 +1107,26 @@ fn compound_assignment_result(
         }
         AssignmentOperator::Coalesce(_) | AssignmentOperator::Assign(_) => None,
     }
+}
+
+/// Rewrite a `void` call result to `null` before it is stored as a
+/// variable's type.
+///
+/// PHP has no `void` value: a `void`-declared function implicitly returns
+/// `null`, so a variable assigned from such a call holds `null`, not
+/// `void`. This is scoped to the assignment funnel rather than the RHS
+/// pipeline itself, so a call's resolved type still reads as `void`
+/// wherever that distinction matters outside of a variable holding it
+/// (e.g. the argument-type-mismatch diagnostic reports a `void` argument
+/// as always wrong, even against a nullable parameter).
+fn normalize_void_assignment(mut resolved: Vec<ResolvedType>) -> Vec<ResolvedType> {
+    for rt in &mut resolved {
+        if rt.type_string.is_void() {
+            rt.type_string = PhpType::null();
+            rt.class_info = None;
+        }
+    }
+    resolved
 }
 
 /// Resolve the type of an RHS expression using the current scope.
@@ -958,8 +1148,9 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
 ) -> Vec<ResolvedType> {
     // Chain assignment: `$a = $b = expr` — the value of an assignment
     // expression is the value of its RHS.  Recurse into the inner RHS
-    // so that `$a` resolves to the same type as `$b`.
-    if let Expression::Assignment(assignment) = rhs
+    // so that `$a` resolves to the same type as `$b`.  The RHS may be
+    // parenthesized (`$a = ($b = expr)`), so unwrap before matching.
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
         && assignment.operator.is_assign()
     {
         return resolve_rhs_with_scope(assignment.rhs, scope, ctx);
@@ -968,7 +1159,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // Compound assignment as RHS: `$a = ($x /= 2)` — the value of the
     // compound assignment is the result after the operation.  Infer the
     // type from the operator kind.
-    if let Expression::Assignment(assignment) = rhs
+    if let Expression::Assignment(assignment) = crate::parser::unwrap_parens(rhs)
         && !assignment.operator.is_assign()
     {
         use mago_syntax::cst::assignment::AssignmentOperator;
@@ -1021,18 +1212,13 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         && let ClassLikeConstantSelector::Identifier(ident) = &cca.constant
         && ident.value == b"class"
     {
-        let class_name = match cca.class {
-            Expression::Identifier(id) => Some(bytes_to_str(id.value()).to_string()),
-            Expression::Self_(_) | Expression::Static(_) => {
-                if !ctx.current_class.name.is_empty() {
-                    Some(ctx.current_class.name.to_string())
-                } else {
-                    None
-                }
-            }
-            Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-            _ => None,
-        };
+        let class_name = crate::class_lookup::class_expression_name(
+            cca.class,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.class_loader,
+        )
+        .filter(|name| !name.is_empty());
         if let Some(name) = class_name {
             let resolved_name = name.strip_prefix('\\').unwrap_or(&name);
             // Resolve the class so we can store a proper ResolvedType
@@ -1069,10 +1255,11 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
     // unified resolver below, which preserves signed numeric literals and
     // falls back to `int|float` for non-literal operands.
     if let Expression::UnaryPrefix(prefix) = rhs
-        && let Some(ty) =
-            super::super::rhs_resolution::unary_prefix_result_type(&prefix.operator, || {
-                resolve_rhs_with_scope(prefix.operand, scope, ctx)
-            })
+        && let Some(ty) = super::super::rhs_resolution::unary_prefix_result_type(
+            &prefix.operator,
+            prefix.operand,
+            || resolve_rhs_with_scope(prefix.operand, scope, ctx),
+        )
     {
         return vec![ResolvedType::from_type_string(ty)];
     }
@@ -1094,12 +1281,15 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
             .cloned()
             .unwrap_or_default()
     };
-    let var_ctx =
-        ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()));
+    let scope_contains = |var_name: &str| -> bool { scope_locals.contains_key(&atom(var_name)) };
+    let var_ctx = crate::type_engine::resolver::VarResolutionCtx {
+        scope_contains_resolver: Some(&scope_contains),
+        ..ctx.var_ctx_for_with_scope(dummy_var, rhs_offset, &scope_resolver, Some(scope.proofs()))
+    };
 
     let result = super::super::rhs_resolution::resolve_rhs_expression(rhs, &var_ctx);
     if !result.is_empty() {
-        return result;
+        return normalize_void_assignment(result);
     }
 
     // ── Structural fallbacks ────────────────────────────────────
@@ -1526,14 +1716,20 @@ pub(crate) fn process_self_out_narrowing<'b>(
     let mut results: Vec<ResolvedType> = Vec::with_capacity(before.len());
     for rt in &before {
         let mutated = rt.class_info.as_ref().and_then(|owner| {
-            let self_out = owner.get_method_ci(&method_name)?.self_out.clone()?;
-            let template_subs = crate::type_engine::call_resolution::build_call_template_subs(
+            let method = owner.get_method_ci(&method_name)?;
+            let self_out = method.self_out.clone()?;
+            let mut template_subs = crate::type_engine::call_resolution::build_call_template_subs(
                 owner,
                 &method_name,
                 &arg_refs,
                 Some(&rt.type_string),
                 &rctx,
             );
+            for (name, ty) in template_subs.iter_mut() {
+                let bound = method.template_param_bounds.get(&crate::atom::atom(name));
+                *ty =
+                    crate::type_engine::call_resolution::generalize_object_template_arg(ty, bound);
+            }
             let substituted = self_out.substitute(&template_subs).simplified();
             let final_ty = if substituted.contains_self_ref() {
                 substituted.replace_self_with_type(&rt.type_string)

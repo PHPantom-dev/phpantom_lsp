@@ -13,6 +13,7 @@ use super::*;
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::atom::{Atom, AtomMap};
+use crate::references::eloquent::EloquentMagicMember;
 use crate::references::member_scope::MemberScope;
 use crate::references::push_location;
 use crate::references::receivers::ReceiverWalk;
@@ -438,6 +439,24 @@ impl Backend {
             self.scan_candidate_snapshot(snapshot, "Scanning for member references", scan_file)
         {
             locations[query_index].push(location);
+        }
+
+        // A model method used under a magic name (a scope, an accessor) is
+        // referenced under that name too.
+        let magic: Vec<(usize, EloquentMagicMember)> = queries
+            .iter()
+            .enumerate()
+            .filter_map(|(query_index, query)| {
+                self.eloquent_magic_member_at(&query.uri, query.offset, &query.member)
+                    .map(|magic| (query_index, magic))
+            })
+            .collect();
+        if !magic.is_empty() {
+            let members: Vec<&EloquentMagicMember> = magic.iter().map(|(_, m)| m).collect();
+            let found = self.eloquent_magic_references_batch(&members, restrict_to);
+            for ((query_index, _), magic_locations) in magic.iter().zip(found) {
+                locations[*query_index].extend(magic_locations);
+            }
         }
 
         for query_locations in &mut locations {

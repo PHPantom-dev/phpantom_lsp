@@ -1,11 +1,15 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows reference counts plus override/implement annotations.
+//! Shows reference and implementation counts plus override/implement
+//! annotations.
+
+use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
@@ -61,8 +65,10 @@ struct Prototype {
 impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
-    /// Returns reference lenses for PHP declarations and navigation lenses
-    /// for methods that override or implement an ancestor declaration.
+    /// Returns reference lenses for PHP declarations, implementation
+    /// lenses for interfaces and abstract classes and their methods, and
+    /// navigation lenses for methods that override or implement an
+    /// ancestor declaration.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -76,17 +82,32 @@ impl Backend {
         let index = LineIndex::new(content);
 
         let mut lenses = Vec::new();
+        let class_loader = |name: &str| self.find_or_load_class(name);
 
         for class in &classes {
             let class_fqn = class.fqn();
+            let name_offset = class_declaration_name_offset(symbol_map.as_deref(), class);
 
             if let Some(lens) = self.build_declaration_reference_lens(
                 uri,
                 &index,
-                class_declaration_name_offset(symbol_map.as_deref(), class),
+                name_offset,
                 &ReferenceIndexKey::class(&class_fqn),
             ) {
                 lenses.push(lens);
+            }
+
+            let descendants = self.implementation_lens_descendants(class, &class_loader);
+            if let Some(descendants) = &descendants {
+                let count = descendants.iter().filter(|d| !d.is_abstract).count();
+                lenses.extend(Self::build_implementation_lens(
+                    uri,
+                    &index,
+                    name_offset,
+                    count,
+                    class_fqn,
+                    None,
+                ));
             }
 
             if let Some(lens) = self.build_covers_lens(class, uri, &index) {
@@ -124,6 +145,26 @@ impl Backend {
                     )
                 {
                     lenses.push(lens);
+                }
+                if let Some(descendants) = &descendants {
+                    let count = member_implementation_providers(
+                        &class_fqn,
+                        &method.name,
+                        MemberKind::Method,
+                        descendants,
+                        &class_loader,
+                    )
+                    .len();
+                    if count > 0 {
+                        lenses.extend(Self::build_implementation_lens(
+                            uri,
+                            &index,
+                            method.name_offset,
+                            count,
+                            class_fqn,
+                            Some(method.name),
+                        ));
+                    }
                 }
                 if let Some(proto) = proto {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
@@ -268,7 +309,13 @@ impl Backend {
         if declaration_offset == 0 {
             return None;
         }
-        let candidate_count = self.indexed_member_reference_count(&member)?;
+        let mut candidate_count = self.indexed_member_reference_count(&member)?;
+        // A scope or an accessor is used under a name of its own, which
+        // the search counts too.
+        if let Some(magic) = self.eloquent_magic_member_at(origin_uri, declaration_offset, &member)
+        {
+            candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
+        }
         let origin_url = Url::parse(origin_uri).ok()?;
         let position = index.position(declaration_offset as usize);
         let range = Range::new(
@@ -356,16 +403,41 @@ impl Backend {
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
+        Self::locations_lens_command(
+            origin_uri,
+            origin_position,
+            locations,
+            "reference",
+            "references",
+        )
+    }
+
+    fn implementation_lens_command(
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+    ) -> Command {
+        Self::locations_lens_command(
+            origin_uri,
+            origin_position,
+            locations,
+            "implementation",
+            "implementations",
+        )
+    }
+
+    /// A lens command titled with the number of `locations`, which opens
+    /// them as a list when clicked.
+    fn locations_lens_command(
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+        singular: &str,
+        plural: &str,
+    ) -> Command {
         let count = locations.len();
         Command {
-            title: format!(
-                "{count} {}",
-                if count == 1 {
-                    "reference"
-                } else {
-                    "references"
-                }
-            ),
+            title: format!("{count} {}", if count == 1 { singular } else { plural }),
             command: "editor.action.showReferences".to_string(),
             arguments: Some(vec![
                 serde_json::json!(origin_uri),
@@ -373,6 +445,106 @@ impl Backend {
                 serde_json::json!(locations),
             ]),
         }
+    }
+
+    /// The classes the implementation lenses of `class` count, or `None`
+    /// when it gets none: only an interface or an abstract class does, and
+    /// only once the workspace index can answer.
+    fn implementation_lens_descendants(
+        &self,
+        class: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
+            || class.keyword_offset == 0
+            || !self
+                .workspace_indexed
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return None;
+        }
+        Some(self.implementation_descendants(class, &class.fqn(), class_loader, true))
+    }
+
+    /// Build the implementation lens for a class, or for one of its
+    /// methods when `member` is given.
+    ///
+    /// `count` is worked out from class metadata alone.  Locating each
+    /// implementation means reading the file that declares it, so a
+    /// non-zero lens leaves that to the resolve request, which only the
+    /// lenses the editor actually shows receive.
+    fn build_implementation_lens(
+        origin_uri: &str,
+        index: &LineIndex,
+        declaration_offset: u32,
+        count: usize,
+        class_fqn: Atom,
+        member: Option<Atom>,
+    ) -> Option<CodeLens> {
+        if declaration_offset == 0 {
+            return None;
+        }
+        let position = index.position(declaration_offset as usize);
+        let range = Range::new(
+            Position::new(position.line, 0),
+            Position::new(position.line, 0),
+        );
+        if count == 0 {
+            return Some(CodeLens {
+                range,
+                command: Some(Self::implementation_lens_command(
+                    Url::parse(origin_uri).ok()?,
+                    position,
+                    Vec::new(),
+                )),
+                data: None,
+            });
+        }
+
+        Some(CodeLens {
+            range,
+            command: None,
+            data: Some(serde_json::json!({
+                "kind": "phpImplementations",
+                "uri": origin_uri,
+                "position": position,
+                "classFqn": class_fqn.as_str(),
+                "member": member.as_ref().map(Atom::as_str),
+            })),
+        })
+    }
+
+    /// The locations an implementation lens lists, recomputed from the
+    /// class and member it was built for.
+    fn implementation_lens_locations(
+        &self,
+        uri: &str,
+        content: &str,
+        class_fqn: &str,
+        member: Option<&str>,
+    ) -> Option<Vec<Location>> {
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class = class_loader(class_fqn)?;
+        let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
+        Some(match member {
+            None => self.class_implementation_locations(uri, content, &class, &descendants),
+            Some(member) => {
+                let providers = member_implementation_providers(
+                    class_fqn,
+                    member,
+                    MemberKind::Method,
+                    &descendants,
+                    &class_loader,
+                );
+                self.member_implementation_locations(
+                    uri,
+                    content,
+                    member,
+                    MemberKind::Method,
+                    &providers,
+                )
+            }
+        })
     }
 
     pub fn resolve_code_lens_item(&self, mut lens: CodeLens) -> CodeLens {
@@ -395,10 +567,10 @@ impl Backend {
         else {
             return lens;
         };
-        // Both kinds resolve references, which needs the type engine, the
-        // chain cache and a parse of the file. Going through the shared
-        // request helper installs all of them (and the panic guard) once,
-        // and hands over the buffer without copying it.
+        // Resolving references needs the type engine, the chain cache and
+        // a parse of the file. Going through the shared request helper
+        // installs all of them (and the panic guard) once, and hands over
+        // the buffer without copying it.
         let locations =
             self.with_file_content("codeLens/resolve", uri, None, |content, _| match kind {
                 "phpReferences" => self.find_references(uri, content, position, false),
@@ -418,6 +590,11 @@ impl Backend {
                         is_static,
                     ))
                 }
+                "phpImplementations" => {
+                    let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
+                    let member = data.get("member").and_then(serde_json::Value::as_str);
+                    self.implementation_lens_locations(uri, content, class_fqn, member)
+                }
                 _ => None,
             });
         let Some(locations) = locations.flatten() else {
@@ -427,9 +604,11 @@ impl Backend {
             return lens;
         };
 
-        lens.command = Some(Self::reference_lens_command(
-            origin_uri, position, locations,
-        ));
+        lens.command = Some(if kind == "phpImplementations" {
+            Self::implementation_lens_command(origin_uri, position, locations)
+        } else {
+            Self::reference_lens_command(origin_uri, position, locations)
+        });
         lens
     }
 

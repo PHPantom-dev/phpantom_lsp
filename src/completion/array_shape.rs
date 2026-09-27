@@ -378,7 +378,7 @@ impl Backend {
             &class_loader,
         )
         .unwrap_or(effective_type);
-        let entries = match parsed.shape_entries() {
+        let entries = match parsed.known_shape_entries() {
             Some(e) => e,
             None => return vec![],
         };

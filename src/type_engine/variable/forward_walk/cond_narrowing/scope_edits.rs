@@ -1,14 +1,27 @@
 use super::*;
 
+/// Record that a check ruled out everything a variable could hold.
+///
+/// Inside the path the check guards the variable holds nothing at all,
+/// which is `never`, and the path itself cannot run.  Keeping the last
+/// type standing instead would describe a value the check just ruled
+/// out, and would let that dead path's end state widen the join below
+/// it.
+pub(crate) fn mark_exhausted(var_name: &str, scope: &mut ScopeState) {
+    scope.set(
+        var_name,
+        vec![ResolvedType::from_type_string(PhpType::never())],
+    );
+    scope.unreachable = true;
+}
+
 /// Rewrite every type a variable could hold with `refine`, dropping the
 /// members it rules out, and write the result back.
 ///
 /// Returns whether anything survived. A variable with no recorded type is
 /// left alone and reports `true`: nothing was ruled out, there was just
-/// nothing to rule out. A variable `refine` emptied keeps what it had,
-/// because the branch that asked is dead and saying so is the
-/// reachability question rather than this one; a caller that wants to
-/// answer it reads the return value.
+/// nothing to rule out. A variable `refine` emptied is
+/// [exhausted](mark_exhausted).
 fn refine_in_scope(
     var_name: &str,
     scope: &mut ScopeState,
@@ -21,6 +34,7 @@ fn refine_in_scope(
 
     let refined: Vec<ResolvedType> = types.into_iter().filter_map(refine).collect();
     if refined.is_empty() {
+        mark_exhausted(var_name, scope);
         return false;
     }
     scope.set(var_name, refined);
@@ -125,12 +139,48 @@ pub(crate) fn narrow_to_false_in_scope(var_name: &str, scope: &mut ScopeState) {
 /// if ($isI) { $a->go(); }   // needs the skipped path to say `false`
 /// ```
 ///
-/// A variable nothing falsy could have been is left as it was rather than
-/// emptied: the branch is dead, and saying so is the reachability
-/// question rather than this one.
+/// A variable nothing falsy could have been is exhausted: the branch is
+/// dead.
 pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
+    narrow_to_falsy_part_in_scope(var_name, scope, PhpType::falsy_type);
+}
+
+/// Keep only what a variable could hold and still compare `== null`.
+///
+/// PHP compares `null` against a string as `''`, so `'0'` is the one falsy
+/// value that is not loosely equal to `null`; everything else falsy is.
+pub(crate) fn narrow_to_loosely_null_in_scope(var_name: &str, scope: &mut ScopeState) {
+    narrow_to_falsy_part_in_scope(var_name, scope, |ty| {
+        let falsy = ty.falsy_type()?;
+        let is_zero_string = |m: &PhpType| {
+            m.as_literal()
+                .and_then(LiteralValue::string_content)
+                .is_some_and(|text| text == "0")
+        };
+        if !falsy.union_members().into_iter().any(is_zero_string) {
+            return Some(falsy);
+        }
+        let mut kept: Vec<PhpType> = falsy
+            .union_members()
+            .into_iter()
+            .filter(|m| !is_zero_string(m))
+            .cloned()
+            .collect();
+        match kept.len() {
+            0 => None,
+            1 => kept.pop(),
+            _ => Some(PhpType::union(kept)),
+        }
+    });
+}
+
+fn narrow_to_falsy_part_in_scope(
+    var_name: &str,
+    scope: &mut ScopeState,
+    falsy_part: impl Fn(&PhpType) -> Option<PhpType>,
+) {
     refine_in_scope(var_name, scope, |mut rt| {
-        let falsy = rt.type_string.falsy_type()?;
+        let falsy = falsy_part(&rt.type_string)?;
         // An object is truthy, so a falsy `?Customer` is a `null` that
         // no longer names a class.  Leaving the resolved class beside
         // it makes the entry read as a `Customer` to everything that
@@ -148,7 +198,12 @@ pub(crate) fn narrow_to_falsy_in_scope(var_name: &str, scope: &mut ScopeState) {
 }
 
 pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
-    let survived = refine_in_scope(var_name, scope, |mut rt| {
+    // Everything being `null` exhausts the variable, which keeps the dead
+    // path's end state out of the join instead of letting the impossible
+    // `null` receiver there erase what the live paths knew. That is what
+    // a first-iteration `if ($acc === null)` seed/merge accumulator
+    // depends on.
+    refine_in_scope(var_name, scope, |mut rt| {
         match rt.type_string.non_null_type() {
             Some(non_null) => {
                 rt.type_string = non_null;
@@ -158,15 +213,6 @@ pub(crate) fn strip_null_from_scope(var_name: &str, scope: &mut ScopeState) {
             None => Some(rt),
         }
     });
-    if !survived {
-        // Everything the variable could hold was `null`, so a path that
-        // proves it is not null cannot run.  Saying so keeps the dead
-        // path's end state out of the join instead of letting the
-        // impossible `null` receiver there erase what the live paths
-        // knew — which is what a first-iteration `if ($acc === null)`
-        // seed/merge accumulator depends on.
-        scope.unreachable = true;
-    }
 }
 
 /// Strip both `null` and `false` from a variable's type in the scope.
@@ -246,6 +292,9 @@ pub(super) fn strip_null_from_array_element(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    // A property holding the array has no entry until something reads
+    // it, and the refinement has to land on one or it is lost.
+    seed_synthetic_key_if_needed(base_var, scope, ctx);
     strip_null_from_array_shape_key(base_var, key_name, scope);
     seed_synthetic_key_if_needed(access_key, scope, ctx);
     strip_null_from_scope(access_key, scope);
@@ -279,7 +328,10 @@ pub(super) fn strip_null_from_subject_shape(
     ctx: &ForwardWalkCtx<'_>,
 ) {
     match split_array_access_key(var_name) {
-        Some((base, key)) => strip_null_from_array_shape_key(base, key, scope),
+        Some((base, key)) => {
+            seed_synthetic_key_if_needed(base, scope, ctx);
+            strip_null_from_array_shape_key(base, key, scope);
+        }
         None => {
             seed_synthetic_key_if_needed(var_name, scope, ctx);
             strip_null_from_scope(var_name, scope);
@@ -339,8 +391,25 @@ pub(crate) fn strip_null_from_shape_key(
             PhpType::nullable(strip_null_from_shape_key(inner, key))
         }
         TypeKind::Union(members) => {
+            // The key is set, so the members that never have that offset
+            // set drop out: a string's offsets are integers, and `isset()`
+            // on an offset of a scalar of any other kind is always false.
+            // A union with nothing left contradicts the check; it stays
+            // whole rather than becoming `never`.
+            let string_may_hold = crate::php_type::may_be_set_string_offset(key);
+            let can_hold_key = |m: &PhpType| {
+                !(m.is_null()
+                    || m.is_bool()
+                    || m.is_true()
+                    || m.is_false()
+                    || m.is_int_subtype()
+                    || m.is_float_subtype()
+                    || (!string_may_hold && m.is_string_subtype()))
+            };
+            let keep_all = !members.iter().any(can_hold_key);
             let new_members: Vec<PhpType> = members
                 .iter()
+                .filter(|m| keep_all || can_hold_key(m))
                 .map(|m| strip_null_from_shape_key(m, key))
                 .collect();
             PhpType::union(new_members)

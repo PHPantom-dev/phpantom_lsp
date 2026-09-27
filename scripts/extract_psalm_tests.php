@@ -24,6 +24,11 @@
  *   php scripts/extract_psalm_tests.php --all [--output-dir DIR]
  *
  * With --all, processes all 3.5A priority files from the test-porting plan.
+ *
+ * With --mark-widened, every assertion Psalm checks in its widened spelling
+ * (a key without `===`, where literal ints and strings print as `int` and
+ * `string`) gets a trailing `// psalm-widened` comment, so curation can tell
+ * a literal PHPantom keeps from a real mismatch.
  */
 
 declare(strict_types=1);
@@ -31,6 +36,7 @@ declare(strict_types=1);
 $outputDir = null;
 $files = [];
 $processAll = false;
+$markWidened = false;
 
 // Parse arguments
 $args = array_slice($argv, 1);
@@ -39,6 +45,8 @@ for ($i = 0; $i < count($args); $i++) {
         $outputDir = $args[++$i];
     } elseif ($args[$i] === '--all') {
         $processAll = true;
+    } elseif ($args[$i] === '--mark-widened') {
+        $markWidened = true;
     } else {
         $files[] = $args[$i];
     }
@@ -155,12 +163,25 @@ foreach ($files as $file) {
         $assertions = $testCase['assertions'];
         $phpVersion = $testCase['php_version'] ?? null;
 
-        if (empty($assertions)) {
+        // Psalm's own harness skips a case whose name starts with `SKIPPED-`.
+        if (empty($assertions) || str_starts_with($testName, 'SKIPPED-')) {
             continue;
         }
 
+        // A trailing `===` asks Psalm for its exact spelling (literal values
+        // kept), which is what PHPantom prints, so the key is the bare variable.
+        $normalized = [];
+        $widened = [];
+        foreach ($assertions as $key => $type) {
+            $var = preg_replace('/===$/', '', $key);
+            if (str_starts_with($var, '$') && !str_starts_with($var, '$this')) {
+                $normalized[$var] = $type;
+                $widened[$var] = $var === $key;
+            }
+        }
+
         // Filter out assertions with Psalm-specific types we don't support
-        $filteredAssertions = filterAssertions($assertions);
+        $filteredAssertions = filterAssertions($normalized);
         if (empty($filteredAssertions)) {
             $skipped++;
             continue;
@@ -173,7 +194,8 @@ foreach ($files as $file) {
         $assertCalls = [];
         foreach ($filteredAssertions as $var => $type) {
             $type = normalizeType($type);
-            $assertCalls[] = sprintf("assertType('%s', %s);", addcslashes($type, "'\\"), $var);
+            $assertCalls[] = sprintf("assertType('%s', %s);", addcslashes($type, "'\\"), $var)
+                . ($markWidened && $widened[$var] ? ' // psalm-widened' : '');
         }
 
         $outputParts[] = [
@@ -208,31 +230,9 @@ foreach ($files as $file) {
             $output .= sprintf("// Requires PHP %s\n", $part['php_version']);
         }
 
-        $code = $part['code'];
-
         // If the code starts with <?php, strip it since we already have one
-        $code = preg_replace('/^<\?php\s*/', '', $code);
-
-        // Wrap in namespace to isolate each test case
-        $output .= sprintf("namespace %s {\n", $namespaceName);
-
-        // Indent the code
-        $codeLines = explode("\n", rtrim($code));
-        foreach ($codeLines as $line) {
-            if (trim($line) === '') {
-                $output .= "\n";
-            } else {
-                $output .= "    " . $line . "\n";
-            }
-        }
-
-        // Add assertType calls
-        $output .= "\n";
-        foreach ($part['asserts'] as $assert) {
-            $output .= "    " . $assert . "\n";
-        }
-
-        $output .= "}\n\n";
+        $code = preg_replace('/^\s*<\?php\s*/', '', $part['code']);
+        $output .= wrapCase($code, $namespaceName, $part['asserts']);
     }
 
     $outPath = $outputDir . '/' . $outBasename . '.php';
@@ -251,6 +251,51 @@ fprintf(STDERR, "\nTotal: %d files processed, %d test cases extracted, %d skippe
 fprintf(STDERR, "Output directory: %s\n", realpath($outputDir) ?: $outputDir);
 
 
+// ─── Output ─────────────────────────────────────────────────────────────────
+
+/**
+ * Emit one test case as bracketed namespace blocks, so cases sharing a file
+ * cannot see each other's declarations. A case with no namespace of its own
+ * gets a unique one; a case that declares namespaces keeps them (unbracketed
+ * ones are rewritten into the bracketed form a multi-case file needs) and its
+ * assertions go in the last block, where Psalm reads them.
+ *
+ * @param list<string> $asserts
+ */
+function wrapCase(string $code, string $namespaceName, array $asserts): string
+{
+    $code = rtrim($code);
+    $assertLines = implode('', array_map(static fn($a) => "    $a\n", $asserts));
+
+    if (preg_match('/^\s*namespace\b[^;{]*\{/m', $code)) {
+        return $code . "\n\nnamespace {\n" . $assertLines . "}\n\n";
+    }
+
+    if (preg_match('/^\s*namespace\b[^;{]*;/m', $code)) {
+        $parts = preg_split('/^\s*(namespace\b[^;{]*);/m', $code, -1, PREG_SPLIT_DELIM_CAPTURE);
+        $out = trim($parts[0]) === '' ? '' : "namespace {\n" . indent($parts[0]) . "}\n";
+        for ($i = 1; $i < count($parts); $i += 2) {
+            $out .= $parts[$i] . " {\n" . indent($parts[$i + 1]);
+            if ($i + 2 >= count($parts)) {
+                $out .= "\n" . $assertLines;
+            }
+            $out .= "}\n";
+        }
+        return $out . "\n";
+    }
+
+    return sprintf("namespace %s {\n", $namespaceName) . indent($code) . "\n" . $assertLines . "}\n\n";
+}
+
+function indent(string $code): string
+{
+    $out = '';
+    foreach (explode("\n", trim($code, "\n")) as $line) {
+        $out .= trim($line) === '' ? "\n" : "    " . $line . "\n";
+    }
+    return $out;
+}
+
 // ─── Extraction functions ───────────────────────────────────────────────────
 
 /**
@@ -264,214 +309,209 @@ fprintf(STDERR, "Output directory: %s\n", realpath($outputDir) ?: $outputDir);
  */
 function extractTestCases(string $source): array
 {
-    $cases = [];
+    // The provider is read with PHP's tokenizer and a small literal parser
+    // rather than eval(), so nothing in the test file is ever executed.
+    $tokens = array_values(array_filter(
+        token_get_all($source),
+        static fn($t) => !is_array($t) || !in_array($t[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true),
+    ));
 
-    // We parse this with a state machine rather than eval() for safety.
-    // Strategy: find each test case block by matching the pattern:
-    //   'testName' => [
-    //       'code' => '...',
-    //       'assertions' => ['$var' => 'Type', ...],
-    //   ],
-
-    // Find all test case blocks using a regex-based approach.
-    // First, locate the providerValidCodeParse method.
-    $validStart = strpos($source, 'providerValidCodeParse');
-    if ($validStart === false) {
-        return $cases;
+    $body = providerBody($tokens, 'providerValidCodeParse');
+    if ($body === null) {
+        return [];
     }
+    [$pos, $end] = $body;
 
-    // Work from providerValidCodeParse to the end of its return array.
-    $workingSource = substr($source, $validStart);
-
-    // Find test case names: lines like "'testCaseName' => ["
-    preg_match_all("/^\\s*'([a-zA-Z0-9_]+)'\\s*=>\\s*\\[/m", $workingSource, $nameMatches, PREG_OFFSET_CAPTURE);
-
-    for ($i = 0; $i < count($nameMatches[0]); $i++) {
-        $testName = $nameMatches[1][$i][0];
-        $blockStart = $nameMatches[0][$i][1];
-
-        // Find the end of this test case block by matching brackets
-        $blockEnd = findMatchingBracket($workingSource, $blockStart);
-        if ($blockEnd === false) {
-            continue;
+    $cases = [];
+    // A test case is `'name' => [...]`, either an element of the returned
+    // array or the operand of `yield`. Any array value whose `code` entry is
+    // a string counts; everything else in the method body is skipped over.
+    while ($pos < $end) {
+        $t = $tokens[$pos];
+        if (is_array($t) && $t[0] === T_CONSTANT_ENCAPSED_STRING
+            && isOp($tokens[$pos + 1] ?? null, T_DOUBLE_ARROW)
+            && isArrayStart($tokens[$pos + 2] ?? null)
+        ) {
+            $next = $pos + 2;
+            $value = parseValue($tokens, $next);
+            if (is_array($value) && isset($value['code']) && is_string($value['code'])) {
+                $name = decodeString($t[1]);
+                $assertions = [];
+                foreach (is_array($value['assertions'] ?? null) ? $value['assertions'] : [] as $k => $v) {
+                    if (is_string($k) && is_string($v)) {
+                        $assertions[$k] = $v;
+                    }
+                }
+                $cases[$name] = [
+                    'code' => $value['code'],
+                    'assertions' => $assertions,
+                    'php_version' => is_string($value['php_version'] ?? null) ? $value['php_version'] : null,
+                ];
+                $pos = $next;
+                continue;
+            }
         }
-
-        $block = substr($workingSource, $blockStart, $blockEnd - $blockStart + 1);
-
-        // Extract 'code' value
-        $code = extractStringValue($block, 'code');
-        if ($code === null) {
-            continue;
-        }
-
-        // Extract 'assertions' array
-        $assertions = extractAssertions($block);
-
-        // Extract 'php_version' if present
-        $phpVersion = extractStringValue($block, 'php_version');
-
-        $cases[$testName] = [
-            'code' => $code,
-            'assertions' => $assertions,
-            'php_version' => $phpVersion,
-        ];
+        $pos++;
     }
 
     return $cases;
 }
 
 /**
- * Find the position of the closing bracket that matches the first '[' found
- * at or after $startPos in $source.
+ * Token range [start, end) of the named method's body.
+ *
+ * @return array{int, int}|null
  */
-function findMatchingBracket(string $source, int $startPos): int|false
+function providerBody(array $tokens, string $method): ?array
 {
-    $pos = strpos($source, '[', $startPos);
-    if ($pos === false) {
-        return false;
-    }
-
-    $depth = 0;
-    $inSingleQuote = false;
-    $inDoubleQuote = false;
-    $len = strlen($source);
-
-    for ($i = $pos; $i < $len; $i++) {
-        $ch = $source[$i];
-        $prev = $i > 0 ? $source[$i - 1] : '';
-
-        if ($inSingleQuote) {
-            if ($ch === "'" && $prev !== '\\') {
-                $inSingleQuote = false;
-            }
-            continue;
-        }
-
-        if ($inDoubleQuote) {
-            if ($ch === '"' && $prev !== '\\') {
-                $inDoubleQuote = false;
-            }
-            continue;
-        }
-
-        if ($ch === "'") {
-            $inSingleQuote = true;
-        } elseif ($ch === '"') {
-            $inDoubleQuote = true;
-        } elseif ($ch === '[') {
-            $depth++;
-        } elseif ($ch === ']') {
-            $depth--;
-            if ($depth === 0) {
-                return $i;
-            }
-        }
-    }
-
-    return false;
-}
-
-/**
- * Extract a string value for a given key from a test case block.
- * Handles single-quoted strings with concatenation across lines.
- */
-function extractStringValue(string $block, string $key): ?string
-{
-    // Match: 'key' => '...'
-    $pattern = "/'" . preg_quote($key, '/') . "'\\s*=>\\s*'/";
-    if (!preg_match($pattern, $block, $m, PREG_OFFSET_CAPTURE)) {
-        return null;
-    }
-
-    $valueStart = $m[0][1] + strlen($m[0][0]) - 1; // position of opening quote
-
-    // Collect the full string value, handling multi-line strings.
-    // Psalm uses single-quoted strings. We need to handle escaped single quotes.
-    $result = '';
-    $i = $valueStart + 1; // skip opening quote
-    $len = strlen($block);
-
-    while ($i < $len) {
-        $ch = $block[$i];
-
-        if ($ch === '\\' && $i + 1 < $len) {
-            $next = $block[$i + 1];
-            if ($next === "'") {
-                $result .= "'";
-                $i += 2;
-                continue;
-            } elseif ($next === '\\') {
-                $result .= '\\';
-                $i += 2;
-                continue;
-            }
-        }
-
-        if ($ch === "'") {
-            // End of this string segment. Check for concatenation.
-            $rest = ltrim(substr($block, $i + 1));
-            if (str_starts_with($rest, ". '") || str_starts_with($rest, ".'")) {
-                // String concatenation — find the next quote and continue
-                $nextQuote = strpos($block, "'", $i + 1);
-                if ($nextQuote !== false) {
-                    $nextQuote = strpos($block, "'", $nextQuote + 1);
-                }
-                // Actually, just skip to next single quote after the dot
-                $dotPos = strpos($block, '.', $i + 1);
-                if ($dotPos !== false) {
-                    $nextQuoteStart = strpos($block, "'", $dotPos + 1);
-                    if ($nextQuoteStart !== false) {
-                        $i = $nextQuoteStart + 1;
-                        continue;
+    $count = count($tokens);
+    for ($i = 0; $i < $count; $i++) {
+        if (isOp($tokens[$i], T_FUNCTION) && is_array($tokens[$i + 1] ?? null) && $tokens[$i + 1][1] === $method) {
+            for ($j = $i; $j < $count && $tokens[$j] !== '{'; $j++);
+            $depth = 0;
+            for ($k = $j; $k < $count; $k++) {
+                $tok = $tokens[$k];
+                if ($tok === '{' || isOp($tok, T_CURLY_OPEN) || isOp($tok, T_DOLLAR_OPEN_CURLY_BRACES)) {
+                    $depth++;
+                } elseif ($tok === '}') {
+                    if (--$depth === 0) {
+                        return [$j + 1, $k];
                     }
                 }
             }
-            break;
+            return null;
         }
-
-        $result .= $ch;
-        $i++;
     }
+    return null;
+}
 
-    return $result;
+function isOp(mixed $token, int $id): bool
+{
+    return is_array($token) && $token[0] === $id;
+}
+
+function isArrayStart(mixed $token): bool
+{
+    return $token === '[' || isOp($token, T_ARRAY);
 }
 
 /**
- * Extract assertions array from a test case block.
- * Format: 'assertions' => ['$var' => 'Type', '$var2' => 'Type2'],
- *
- * @return array<string, string>
+ * Parse one literal value starting at $pos, leaving $pos just past it.
+ * Strings (including concatenations, heredocs and nowdocs) and arrays are
+ * decoded; anything else (constants, class constants, numbers) is skipped
+ * and returned as null.
  */
-function extractAssertions(string $block): array
+function parseValue(array $tokens, int &$pos): mixed
 {
-    $assertions = [];
+    $value = parseAtom($tokens, $pos);
+    while (($tokens[$pos] ?? null) === '.') {
+        $pos++;
+        $rhs = parseAtom($tokens, $pos);
+        $value = is_string($value) && is_string($rhs) ? $value . $rhs : null;
+    }
+    return $value;
+}
 
-    // Find 'assertions' => [
-    $pos = strpos($block, "'assertions'");
-    if ($pos === false) {
-        return $assertions;
+function parseAtom(array $tokens, int &$pos): mixed
+{
+    $t = $tokens[$pos] ?? null;
+
+    if (isOp($t, T_CONSTANT_ENCAPSED_STRING)) {
+        $pos++;
+        return decodeString($t[1]);
     }
 
-    $bracketStart = strpos($block, '[', $pos);
-    if ($bracketStart === false) {
-        return $assertions;
+    if (isOp($t, T_START_HEREDOC)) {
+        return parseHeredoc($tokens, $pos);
     }
 
-    $bracketEnd = findMatchingBracket($block, $pos);
-    if ($bracketEnd === false) {
-        return $assertions;
+    if (isArrayStart($t)) {
+        $close = $t === '[' ? ']' : ')';
+        $pos += $t === '[' ? 1 : 2;
+        $result = [];
+        $index = 0;
+        while (($tokens[$pos] ?? $close) !== $close) {
+            $item = parseValue($tokens, $pos);
+            if (isOp($tokens[$pos] ?? null, T_DOUBLE_ARROW)) {
+                $pos++;
+                $val = parseValue($tokens, $pos);
+                if (is_string($item) || is_int($item)) {
+                    $result[$item] = $val;
+                }
+            } else {
+                $result[$index++] = $item;
+            }
+            if (($tokens[$pos] ?? null) === ',') {
+                $pos++;
+            }
+        }
+        $pos++;
+        return $result;
     }
 
-    $assertBlock = substr($block, $bracketStart, $bracketEnd - $bracketStart + 1);
+    // Unknown expression: skip to the next `,`, `=>`, `.` or closer at this depth.
+    $depth = 0;
+    while (isset($tokens[$pos])) {
+        $tok = $tokens[$pos];
+        if ($tok === '(' || $tok === '[') {
+            $depth++;
+        } elseif ($tok === ')' || $tok === ']') {
+            if ($depth === 0) {
+                break;
+            }
+            $depth--;
+        } elseif ($depth === 0 && ($tok === ',' || $tok === '.' || $tok === ';' || isOp($tok, T_DOUBLE_ARROW))) {
+            break;
+        }
+        $pos++;
+    }
+    return null;
+}
 
-    // Match each '$var' => 'Type' pair
-    preg_match_all("/'(\\$[a-zA-Z_][a-zA-Z0-9_]*)'\\s*=>\\s*'([^']*)'/", $assertBlock, $matches);
-
-    for ($i = 0; $i < count($matches[0]); $i++) {
-        $assertions[$matches[1][$i]] = $matches[2][$i];
+function parseHeredoc(array $tokens, int &$pos): ?string
+{
+    $isNowdoc = str_contains($tokens[$pos][1], "'");
+    $pos++;
+    $raw = '';
+    $plain = true;
+    while (isset($tokens[$pos]) && !isOp($tokens[$pos], T_END_HEREDOC)) {
+        if (isOp($tokens[$pos], T_ENCAPSED_AND_WHITESPACE)) {
+            $raw .= $tokens[$pos][1];
+        } else {
+            $plain = false;
+        }
+        $pos++;
+    }
+    $closing = $tokens[$pos][1] ?? '';
+    $pos++;
+    if (!$plain) {
+        return null;
     }
 
-    return $assertions;
+    // PHP 7.3 flexible heredoc: the closing marker's indentation is removed
+    // from every line, and the newline before the marker is not content.
+    $indent = strlen($closing) - strlen(ltrim($closing));
+    $lines = explode("\n", preg_replace('/\n$/', '', $raw));
+    $lines = array_map(static fn($l) => substr($l, min($indent, strlen($l) - strlen(ltrim($l)))), $lines);
+    $text = implode("\n", $lines);
+
+    return $isNowdoc ? $text : decodeDoubleQuoted($text);
+}
+
+function decodeString(string $literal): string
+{
+    $quote = $literal[0];
+    $inner = substr($literal, 1, -1);
+    if ($quote === "'") {
+        return preg_replace_callback("/\\\\([\\\\'])/", static fn($m) => $m[1], $inner);
+    }
+    return decodeDoubleQuoted($inner);
+}
+
+function decodeDoubleQuoted(string $inner): string
+{
+    $map = ['n' => "\n", 't' => "\t", 'r' => "\r", '\\' => '\\', '"' => '"', '$' => '$', 'e' => "\e", 'v' => "\v", 'f' => "\f", '0' => "\0"];
+    return preg_replace_callback('/\\\\(.)/s', static fn($m) => $map[$m[1]] ?? $m[0], $inner);
 }
 
 /**

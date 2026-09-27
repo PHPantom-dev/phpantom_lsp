@@ -1,0 +1,14 @@
+// test: a prefixed extract() of unknown keys widens only the prefixed locals
+// feature: hover
+// expect_hover: $rx => $rx = 1
+// expect_hover: $rpx => $rpx = mixed
+---
+<?php
+
+function test(array $data): void {
+    $x = 1;
+    $p_x = 2;
+    extract($data, EXTR_PREFIX_ALL, 'p');
+    $rx = $x;
+    $rpx = $p_x;<>
+}

@@ -11,11 +11,20 @@ generate a starter config file:
 phpantom_lsp init
 ```
 
-This creates a minimal `.phpantom.toml` with a JSON schema directive.
+On an interactive terminal, this walks through the settings projects
+customize most often (PHP version, indexing strategy, a few diagnostic
+toggles, semantic token mode) and writes only the answers that differ
+from PHPantom's defaults. Press Enter to accept a default and skip a
+question. Run `phpantom_lsp init --yes` (or pipe stdin, e.g. in a
+script) to skip the prompts and write a minimal `.phpantom.toml` with
+just a JSON schema directive instead.
+
 Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for every option
 via the schema. Only add settings you want to override -- when absent,
-all settings use their defaults.
+all settings use their defaults. Settings that need a list or a table
+(`indexing.exclude`, `[[diagnostics.ignore]]`, per-tool command
+overrides) aren't part of the wizard; add those by hand.
 
 ### Global config
 

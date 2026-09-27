@@ -1,4 +1,6 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    assert_assigned_types_on, create_psr4_workspace, create_test_backend, workspace_uri,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -962,6 +964,276 @@ async fn test_phpstan_import_type_cross_file() {
         }
         other => panic!("Expected CompletionResponse::Array, got: {:?}", other),
     }
+}
+
+/// An imported alias is written in its source class's scope, so an alias it
+/// names that the source class itself imported is that class's to expand.
+/// Expanded in the importer's scope instead, the inner name leaked through as
+/// a class nobody declares. An import cycle stops at `mixed` rather than
+/// unrolling.
+#[test]
+fn an_imported_alias_expands_the_aliases_its_source_class_imports() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Row.php",
+                "<?php\nnamespace App;\n/** @phpstan-type RowData array{v: int} */\nclass Row {}\n",
+            ),
+            (
+                "src/Page.php",
+                concat!(
+                    "<?php\nnamespace App;\n/**\n",
+                    " * @phpstan-import-type RowData from Row\n",
+                    " * @phpstan-import-type Back from Loop\n",
+                    " * @phpstan-type PageData array{id: int, row: RowData}\n",
+                    " * @phpstan-type Ahead array{back: Back}\n",
+                    " */\nclass Page {}\n",
+                ),
+            ),
+            (
+                "src/Loop.php",
+                concat!(
+                    "<?php\nnamespace App;\n/**\n",
+                    " * @phpstan-import-type Ahead from Page\n",
+                    " * @phpstan-type Back array{ahead: Ahead}\n",
+                    " */\nclass Loop {}\n",
+                ),
+            ),
+        ],
+    );
+    let content = r#"<?php
+namespace App;
+/**
+ * @phpstan-import-type PageData from Page
+ * @phpstan-import-type Ahead from Page
+ */
+class Consumer {
+    /**
+     * @param PageData $page
+     * @param Ahead $ahead
+     */
+    public function run(array $page, array $ahead): void {
+        $copy = $page;
+        $cycle = $ahead;
+    }
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[
+            ("$copy", "array{id: int, row: array{v: int}}"),
+            ("$cycle", "array{back: array{ahead: mixed}}"),
+        ],
+    );
+}
+
+/// A member typed by a local alias keeps its meaning in another file, where
+/// the declaring class's aliases are not in scope. The alias named inside
+/// another alias's body is expanded too.
+#[test]
+fn a_local_alias_on_a_member_is_expanded_in_another_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Repo.php",
+            concat!(
+                "<?php\nnamespace App;\n/**\n",
+                " * @phpstan-type Row array{id: int, name: string}\n",
+                " * @phpstan-type Rows list<Row>\n",
+                " */\nclass Repo {\n",
+                "    /** @return Rows */\n",
+                "    public function all(): array { return []; }\n",
+                "    /** @var Row */\n",
+                "    public array $current;\n",
+                "    /**\n",
+                "     * @template Row\n",
+                "     * @param Row $v\n",
+                "     * @return Row\n",
+                "     */\n",
+                "    public function same($v) { return $v; }\n",
+                "}\n",
+            ),
+        )],
+    );
+    let content = r#"<?php
+namespace App;
+function f(Repo $r) {
+    $all = $r->all();
+    $name = $r->current['name'];
+    foreach ($r->all() as $row) {
+        $each = $row;
+    }
+    $same = $r->same(1.5);
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[
+            ("$all", "list<array{id: int, name: string}>"),
+            ("$name", "string"),
+            ("$each", "array{id: int, name: string}"),
+            ("$same", "float"),
+        ],
+    );
+}
+
+/// An imported alias is linked into the members of the class that imports
+/// it, including members another class inherits or takes from a trait, and
+/// is read with the declaring class's imports rather than the child's.
+#[test]
+fn an_imported_alias_on_a_member_is_expanded_in_another_file() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Repo.php",
+                "<?php\nnamespace App;\n/** @phpstan-type Row array{id: int} */\nclass Repo {}\n",
+            ),
+            (
+                "src/Other.php",
+                "<?php\nnamespace App;\n/** @phpstan-type Row array{other: bool} */\nclass Other {}\n",
+            ),
+            (
+                "src/Base.php",
+                concat!(
+                    "<?php\nnamespace App;\n",
+                    "/** @phpstan-import-type Row from Repo */\n",
+                    "class Base {\n",
+                    "    /** @return list<Row> */\n",
+                    "    public function rows(): array { return []; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/HasRow.php",
+                concat!(
+                    "<?php\nnamespace App;\n",
+                    "/** @phpstan-import-type Row from Repo */\n",
+                    "trait HasRow {\n",
+                    "    /** @return Row */\n",
+                    "    public function row(): array { return []; }\n",
+                    "}\n",
+                ),
+            ),
+            (
+                "src/Child.php",
+                concat!(
+                    "<?php\nnamespace App;\n",
+                    "/** @phpstan-import-type Row from Other */\n",
+                    "class Child extends Base {\n",
+                    "    use HasRow;\n",
+                    "    /** @return Row */\n",
+                    "    public function own(): array { return []; }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+    let content = r#"<?php
+namespace App;
+function f(Child $c) {
+    $rows = $c->rows();
+    $row = $c->row();
+    $own = $c->own();
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[
+            ("$rows", "list<array{id: int}>"),
+            ("$row", "array{id: int}"),
+            ("$own", "array{other: bool}"),
+        ],
+    );
+}
+
+/// Editing the class an alias is imported from refreshes the members of the
+/// class that imports it, which was not itself re-parsed.
+#[test]
+fn editing_an_import_source_refreshes_the_importing_class() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[
+            (
+                "src/Repo.php",
+                "<?php\nnamespace App;\n/** @phpstan-type Row array{id: int} */\nclass Repo {}\n",
+            ),
+            (
+                "src/Base.php",
+                concat!(
+                    "<?php\nnamespace App;\n",
+                    "/** @phpstan-import-type Row from Repo */\n",
+                    "class Base {\n",
+                    "    /** @return Row */\n",
+                    "    public function row(): array { return []; }\n",
+                    "}\n",
+                ),
+            ),
+        ],
+    );
+    let content = r#"<?php
+namespace App;
+function f(Base $b) {
+    $row = $b->row();
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[("$row", "array{id: int}")],
+    );
+    let repo = workspace_uri(&backend, "src/Repo.php").to_string();
+    backend.update_ast(
+        &repo,
+        "<?php\nnamespace App;\n/** @phpstan-type Row array{id: string} */\nclass Repo {}\n",
+    );
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[("$row", "array{id: string}")],
+    );
+}
+
+/// Aliases that name each other are expanded as far as the cycle allows and
+/// stop where it recurs, rather than unrolling.
+#[test]
+fn a_cycle_of_local_aliases_is_left_unexpanded_where_it_recurs() {
+    let (backend, _dir) = create_psr4_workspace(
+        r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#,
+        &[(
+            "src/Tree.php",
+            concat!(
+                "<?php\nnamespace App;\n/**\n",
+                " * @phpstan-type Node array{children: Nodes}\n",
+                " * @phpstan-type Nodes list<Node>\n",
+                " */\nclass Tree {\n",
+                "    /** @return Nodes */\n",
+                "    public function roots(): array { return []; }\n",
+                "}\n",
+            ),
+        )],
+    );
+    let content = r#"<?php
+namespace App;
+function f(Tree $t) {
+    $roots = $t->roots();
+}
+"#;
+    assert_assigned_types_on(
+        &backend,
+        "file:///consumer.php",
+        content,
+        &[("$roots", "list<array{children: Nodes}>")],
+    );
 }
 
 // ─── @phpstan-type: object shape alias ──────────────────────────────────────

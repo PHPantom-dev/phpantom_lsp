@@ -1271,6 +1271,7 @@ pub(crate) fn extract_parameters(
                 is_variadic,
                 is_reference,
                 closure_this_type: None,
+                param_out_type: None,
             }
         })
         .collect()
@@ -1280,11 +1281,23 @@ pub(crate) fn extract_parameters(
 ///
 /// Used to detect the implicit-nullable form `Type $x = null`, which PHP
 /// treats as `?Type` (mandatory before 8.4, still permitted after).
-fn param_default_is_null(param: &function_like::parameter::FunctionLikeParameter<'_>) -> bool {
+pub(crate) fn param_default_is_null(
+    param: &function_like::parameter::FunctionLikeParameter<'_>,
+) -> bool {
     let Some(dv) = param.default_value.as_ref() else {
         return false;
     };
-    matches!(dv.value, Expression::Literal(Literal::Null(_)))
+    match dv.value {
+        Expression::Literal(Literal::Null(_)) => true,
+        // `Null`, `NULL` and `\null` are the same constant.
+        Expression::ConstantAccess(ca) => {
+            let name = bytes_to_str(ca.name.value());
+            name.strip_prefix('\\')
+                .unwrap_or(name)
+                .eq_ignore_ascii_case("null")
+        }
+        _ => false,
+    }
 }
 
 /// Resolve a class name from a parameter default (`Foo::class`) to its FQN
@@ -1428,10 +1441,60 @@ impl Backend {
         content: &str,
         php_version: Option<PhpVersion>,
     ) -> Vec<(ClassInfo, Option<String>)> {
+        Self::parse_php_classes_by_block(content, php_version)
+            .0
+            .into_iter()
+            .map(|(cls, ns, _)| (cls, ns))
+            .collect()
+    }
+
+    /// Like [`parse_php_versioned_with_namespaces`] but also returns the
+    /// file's `namespace` blocks, each with its own imports, and tags every
+    /// class with the index of the block that declared it (`None` outside
+    /// any block).
+    ///
+    /// The blocks are only returned for a file with more than one; a file
+    /// with a single block resolves everything against its file-wide
+    /// imports.
+    ///
+    /// [`parse_php_versioned_with_namespaces`]: Self::parse_php_versioned_with_namespaces
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn parse_php_classes_by_block(
+        content: &str,
+        php_version: Option<PhpVersion>,
+    ) -> (
+        Vec<(ClassInfo, Option<String>, Option<usize>)>,
+        Vec<NamespaceSpan>,
+    ) {
         with_parsed_program(content, "parse_php", |program, content| {
             let mut use_map = HashMap::new();
             Self::extract_use_statements_from_statements(program.statements.iter(), &mut use_map);
             let namespace = Self::extract_namespace_from_statements(program.statements.iter());
+
+            let mut blocks: Vec<NamespaceSpan> = Vec::new();
+            for statement in program.statements.iter() {
+                if let Statement::Namespace(ns) = statement {
+                    let mut block_use_map = HashMap::new();
+                    Self::extract_use_statements_from_statements(
+                        ns.statements().iter(),
+                        &mut block_use_map,
+                    );
+                    let span = ns.span();
+                    blocks.push(NamespaceSpan {
+                        namespace: ns
+                            .name
+                            .as_ref()
+                            .map(|ident| bytes_to_str(ident.value()).to_string())
+                            .filter(|n| !n.is_empty()),
+                        start: span.start.offset,
+                        end: span.end.offset,
+                        use_map: block_use_map,
+                    });
+                }
+            }
+            if blocks.len() <= 1 {
+                blocks.clear();
+            }
 
             let doc_ctx = DocblockCtx {
                 trivias: program.trivia.as_slice(),
@@ -1441,7 +1504,8 @@ impl Backend {
                 namespace,
             };
 
-            let mut result: Vec<(ClassInfo, Option<String>)> = Vec::new();
+            let mut result: Vec<(ClassInfo, Option<String>, Option<usize>)> = Vec::new();
+            let mut block_index = 0;
 
             for statement in program.statements.iter() {
                 match statement {
@@ -1452,14 +1516,24 @@ impl Backend {
                             .map(|ident| bytes_to_str(ident.value()).to_string())
                             .filter(|n| !n.is_empty());
 
+                        let block = blocks.get(block_index).map(|span| (block_index, span));
+                        block_index += 1;
+                        let block_doc_ctx = block.map(|(_, span)| DocblockCtx {
+                            trivias: doc_ctx.trivias,
+                            content: doc_ctx.content,
+                            php_version: doc_ctx.php_version,
+                            use_map: span.use_map.clone(),
+                            namespace: span.namespace.clone(),
+                        });
+
                         let mut block_classes = Vec::new();
                         Self::extract_classes_from_statements(
                             ns.statements().iter(),
                             &mut block_classes,
-                            Some(&doc_ctx),
+                            Some(block_doc_ctx.as_ref().unwrap_or(&doc_ctx)),
                         );
                         for cls in block_classes {
-                            result.push((cls, block_ns.clone()));
+                            result.push((cls, block_ns.clone(), block.map(|(i, _)| i)));
                         }
                     }
                     statement if Self::is_classlike_extraction_candidate(statement) => {
@@ -1470,7 +1544,7 @@ impl Backend {
                             Some(&doc_ctx),
                         );
                         for cls in top_classes {
-                            result.push((cls, None));
+                            result.push((cls, None, None));
                         }
                     }
                     _ => {}
@@ -1480,9 +1554,9 @@ impl Backend {
             // A class-like declared in two branches of a conditional yields
             // one entry per branch; keep the first so resolution is
             // deterministic (see `dedup_class_likes_first_wins`).
-            Self::dedup_class_likes_first_wins(&mut result);
+            Self::dedup_class_likes_first_wins(&mut result, |(cls, ns, _)| (cls, ns));
 
-            result
+            (result, blocks)
         })
     }
 

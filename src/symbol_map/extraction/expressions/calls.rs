@@ -373,6 +373,30 @@ fn extract_call<'a>(
                             &mut ctx.spans,
                         );
                     }
+                    if let Some(trigger) = crate::symbol_map::laravel_resources::auth_helper_trigger(
+                        ctx.content,
+                        name_clean,
+                        ident.span().start.offset,
+                        ctx.resolved_names,
+                        None,
+                    ) {
+                        let span_start = ctx.spans.len();
+                        try_emit_laravel_config_resource_span_for_parameter(
+                            trigger.kind,
+                            trigger.shape,
+                            trigger.access,
+                            &func_call.argument_list,
+                            trigger.argument,
+                            ctx.content,
+                            &mut ctx.spans,
+                        );
+                        if let Some(dependency) = ctx
+                            .resolved_name_at(ident.span().start.offset)
+                            .and_then(crate::symbol_map::LaravelStringDependency::namespaced_auth)
+                        {
+                            ctx.defer_laravel_spans_since(span_start, dependency);
+                        }
+                    }
                     // The Blade preprocessor lowers `@can`/`@cannot`/`@canany`
                     // to this call so the ability string is extracted here
                     // like any other authorization check.
@@ -704,6 +728,11 @@ fn extract_call<'a>(
                     },
                 });
                 let clean_subject = strip_fqn_prefix(&subject_text);
+                let semantic_subject = ctx
+                    .resolved_name_at(class_span.start.offset)
+                    .map(strip_fqn_prefix)
+                    .unwrap_or(clean_subject);
+                let laravel_span_start = ctx.spans.len();
                 if (clean_subject.eq_ignore_ascii_case("Config")
                     || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Config"))
                     && is_config_repository_method(&member_name)
@@ -715,14 +744,20 @@ fn extract_call<'a>(
                         &mut ctx.spans,
                     );
                 }
-                try_emit_laravel_storage_disk_spans(
-                    &subject_text,
+                if let Some(trigger) = crate::symbol_map::laravel_resources::static_method_trigger(
+                    semantic_subject,
                     &member_name,
-                    &static_call.argument_list,
-                    &mut ctx.laravel_storage_facade_names,
-                    ctx.content,
-                    &mut ctx.spans,
-                );
+                ) {
+                    try_emit_laravel_config_resource_span_for_parameter(
+                        trigger.kind,
+                        trigger.shape,
+                        trigger.access,
+                        &static_call.argument_list,
+                        trigger.argument,
+                        ctx.content,
+                        &mut ctx.spans,
+                    );
+                }
                 // The `View` facade proxies the view factory, so every
                 // factory method that names a template does so here too.
                 if clean_subject.eq_ignore_ascii_case("View")
@@ -849,11 +884,12 @@ fn extract_call<'a>(
                 // parameter of a route registration.
                 if is_gate_facade(clean_subject) {
                     emit_gate_facade_ability_spans(&member_name, &static_call.argument_list, ctx);
-                } else if clean_subject.eq_ignore_ascii_case("Route")
+                } else if matches_laravel_facade(semantic_subject, "Route")
                     && member_name.eq_ignore_ascii_case("middleware")
                 {
                     try_emit_can_middleware_spans(
                         &static_call.argument_list,
+                        true,
                         ctx.content,
                         &mut ctx.spans,
                     );
@@ -899,6 +935,11 @@ fn extract_call<'a>(
                         ctx.content,
                         &mut ctx.spans,
                     );
+                }
+                if let Some(dependency) = ctx.resolved_names.and_then(|_| {
+                    crate::symbol_map::LaravelStringDependency::root_facade(semantic_subject)
+                }) {
+                    ctx.defer_laravel_spans_since(laravel_span_start, dependency);
                 }
             }
             extract_from_arguments(&static_call.argument_list.arguments, ctx, scope_start);
@@ -1010,14 +1051,27 @@ fn emit_gate_ability_spans_for_method<'a>(
         return;
     }
 
-    if is_middleware && (receiver_is_this || chain_roots_at_route_facade(object)) {
-        try_emit_can_middleware_spans(argument_list, ctx.content, &mut ctx.spans);
+    let route_dependency = if is_middleware || is_can {
+        ctx.resolved_names
+            .and_then(|names| route_facade_root_dependency(object, names))
+    } else {
+        None
+    };
+    let route_receiver =
+        (is_middleware || is_can) && chain_roots_at_route_facade(object, ctx.resolved_names);
+    if is_middleware && (receiver_is_this || route_receiver) {
+        let span_start = ctx.spans.len();
+        try_emit_can_middleware_spans(argument_list, route_receiver, ctx.content, &mut ctx.spans);
+        if let Some(dependency) = route_dependency {
+            ctx.defer_laravel_spans_since(span_start, dependency);
+        }
         return;
     }
 
     // A route registration's `->can('update', 'post')` names a route
     // parameter, not a model, in its second argument.
-    if is_can && chain_roots_at_route_facade(object) {
+    if is_can && route_receiver {
+        let span_start = ctx.spans.len();
         try_emit_gate_ability_spans(
             argument_list,
             0,
@@ -1027,6 +1081,9 @@ fn emit_gate_ability_spans_for_method<'a>(
             &mut ctx.spans,
             &mut ctx.gate_subjects,
         );
+        if let Some(dependency) = route_dependency {
+            ctx.defer_laravel_spans_since(span_start, dependency);
+        }
         return;
     }
 
@@ -1130,5 +1187,29 @@ pub(super) fn extract_partial_application_expr<'a>(
                 });
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::names::OwnedResolvedNames;
+    use crate::symbol_map::LaravelStringDependency;
+
+    #[test]
+    fn route_can_span_waits_for_the_root_alias_shadow_check() {
+        let php = "<?php\nRoute::get('/posts/{post}', $action)->can('update', 'post');\n";
+        let arena = mago_allocator::LocalArena::new();
+        let file_id = mago_database::file::FileId::new(b"test.php");
+        let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+        let resolver = mago_names::resolver::NameResolver::new(&arena);
+        let names = OwnedResolvedNames::from_resolved(&resolver.resolve(program));
+
+        let map = crate::symbol_map::extraction::extract_symbol_map_for_index(program, php, &names);
+
+        assert_eq!(map.conditional_laravel_spans.len(), 1);
+        assert_eq!(
+            Some(map.conditional_laravel_spans[0].dependency),
+            LaravelStringDependency::root_facade("Route")
+        );
     }
 }

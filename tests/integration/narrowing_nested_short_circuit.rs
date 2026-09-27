@@ -133,3 +133,39 @@ function probe(?string $c): void {
          sits in, so the later call must still be reported, got: {errors:?}"
     );
 }
+
+/// A `?->` call short-circuits too: its arguments only run when the
+/// receiver is not null.
+#[test]
+fn the_arguments_of_a_nullsafe_call_see_the_receiver_as_not_null() {
+    let php = r#"<?php
+class Box { public function take(int $n): int { return $n; } }
+function needBox(Box $b): int { return 1; }
+function probe(?Box $box): void {
+    $box?->take(needBox($box));
+}
+"#;
+    let errors = type_errors(php);
+    assert!(
+        errors.is_empty(),
+        "the arguments of `$box?->take()` only run when `$box` is not null, \
+         got: {errors:?}"
+    );
+}
+
+/// What the arguments see ends with the call.
+#[test]
+fn a_nullsafe_call_does_not_narrow_its_receiver_past_itself() {
+    let php = r#"<?php
+class Box { public function take(int $n): int { return $n; } }
+function needBox(Box $b): int { return 1; }
+function probe(?Box $box): void {
+    $box?->take(needBox($box)) + needBox($box);
+}
+"#;
+    let errors = type_errors(php);
+    assert!(
+        errors.len() == 1 && errors[0].contains("expects Box"),
+        "`$box` is still nullable after the call, got: {errors:?}"
+    );
+}

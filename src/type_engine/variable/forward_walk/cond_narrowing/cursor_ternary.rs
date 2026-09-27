@@ -109,6 +109,11 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                 }
                 Call::NullSafeMethod(mc) => {
                     apply_cursor_ternary_narrowing(mc.object, scope, ctx);
+                    // The arguments only run when the receiver is not null.
+                    let args_span = mc.argument_list.span();
+                    if cursor > args_span.start.offset && cursor < args_span.end.offset {
+                        narrow_nullsafe_call_receiver(mc.object, scope, ctx);
+                    }
                     &mc.argument_list
                 }
                 Call::StaticMethod(_) => return,

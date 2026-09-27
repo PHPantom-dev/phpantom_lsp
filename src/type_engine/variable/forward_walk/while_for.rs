@@ -51,11 +51,13 @@ pub(crate) fn process_while<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // Record a snapshot after condition processing (same reasoning as
     // the corresponding snapshot in `process_if`).
@@ -83,7 +85,7 @@ pub(crate) fn process_while<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| {
@@ -106,10 +108,17 @@ pub(crate) fn process_while<'b>(
     }
 
     // The loop body might not execute at all (condition false on
-    // first check), so merge with the pre-loop scope.
-    let post_loop = scope.clone();
-    *scope = pre_loop_scope;
-    scope.merge_branch(&post_loop);
+    // first check), so merge with the pre-loop scope.  A loop that started
+    // out unreachable has no live "might not run" alternative to protect:
+    // `pre_loop_scope` is exactly as dead as what the body produced, so
+    // merging the two would only let `merge_branch`'s "an unreachable side
+    // contributes nothing" rule discard whatever the body actually
+    // assigned.  See the matching comment in `process_foreach`.
+    if !pre_loop_scope.unreachable {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+    }
 
     // After the loop, the condition evaluated to false (that's why the
     // loop exited).  Apply the inverse of the condition to narrow types.
@@ -178,6 +187,7 @@ pub(crate) fn process_for<'b>(
     }
 
     let pre_loop_scope = scope.clone();
+    let always_enters = for_condition_holds_on_entry(for_stmt, scope, ctx);
 
     // The body executes when the conditions are truthy, so apply condition
     // narrowing (instanceof, isset, phpstan-assert-if-true, etc.) the same
@@ -199,11 +209,13 @@ pub(crate) fn process_for<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // ── Assignment-depth-bounded loop iteration ─────────────────
     let body_stmts: Vec<&Statement<'b>> = match &for_stmt.body {
@@ -227,7 +239,7 @@ pub(crate) fn process_for<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| match point {
@@ -276,11 +288,15 @@ pub(crate) fn process_for<'b>(
     // clause makes are part of the post-loop state.
     process_for_updates(for_stmt, scope, ctx);
 
-    // The loop body might not execute at all (condition false on
-    // first check), so merge with the pre-loop scope.
-    let post_loop = scope.clone();
-    *scope = pre_loop_scope;
-    scope.merge_branch(&post_loop);
+    // Unless the conditions hold on entry, the loop body might not execute
+    // at all, so merge with the pre-loop scope.  As in `process_while` and
+    // `process_foreach`, a loop that started out unreachable has nothing
+    // live to protect by reverting to `pre_loop_scope` first.
+    if !always_enters && !pre_loop_scope.unreachable {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+    }
 
     // After the loop, only the last condition clause decided the exit (the
     // earlier clauses were evaluated for their side effects but don't gate
@@ -299,6 +315,28 @@ pub(crate) fn process_for<'b>(
     // narrowing; they only hold inside the loop body where the conditions
     // were true.
     strip_synthetic_property_keys(scope);
+}
+
+/// Whether a `for` loop's body is certain to run at least once: its last
+/// condition clause (the one that decides entry) resolves to `true` in the
+/// scope the initialisers leave behind, or there is no condition at all.
+fn for_condition_holds_on_entry<'b>(
+    for_stmt: &'b For<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some(last_cond) = for_stmt.conditions.iter().last() else {
+        return true;
+    };
+    // Only a comparison or a literal can come out as `true`; anything else
+    // is not worth resolving here.
+    match crate::parser::unwrap_parens(last_cond) {
+        Expression::Binary(binary) if binary.operator.is_comparison() => {}
+        Expression::Literal(Literal::True(_)) => return true,
+        _ => return false,
+    }
+    let resolved = resolve_rhs_with_scope(last_cond, scope, ctx);
+    !resolved.is_empty() && resolved.iter().all(|rt| rt.type_string.is_true())
 }
 
 /// Apply a `for` loop's update clause to `scope`.  The clause is usually
@@ -350,6 +388,8 @@ pub(crate) fn process_do_while<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    let loop_body_ctx = ctx.with_in_loop(true);
+
     let exit_frame = ExitFrameGuard::push();
     walk_loop_body_to_fixed_point(
         &body_stmts,
@@ -358,8 +398,8 @@ pub(crate) fn process_do_while<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
-            discovery_ctx: ctx,
+            ctx: &loop_body_ctx,
+            discovery_ctx: &loop_body_ctx,
         },
         |next_scope, point| match point {
             // The condition is tested after the body and the loop only

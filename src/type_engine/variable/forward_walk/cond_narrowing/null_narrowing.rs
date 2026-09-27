@@ -41,10 +41,15 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         narrow_to_null_in_scope(&var_name, scope);
     }
-    // Check for `$x === null` or `$x == null` — narrow to null only.
+    // `$x === null` narrows to null only; `$x == null` to everything that
+    // compares equal to it.
     if let Some(var_name) = extract_null_equality_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        if is_loose_comparison(condition) {
+            narrow_to_loosely_null_in_scope(&var_name, scope);
+        } else {
+            narrow_to_null_in_scope(&var_name, scope);
+        }
     }
     // `$x !== ''` / `$x !== []` — refine to the non-empty counterpart, and
     // `$x === ''` to the empty one.
@@ -58,19 +63,26 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     }
     // `count($x) > 0` — the counted subject has entries, which is what a
     // `foreach` guarded this way reads to know its body runs.  `count($x)
-    // === 0` says the subject is the empty array.
-    if let Some((var_name, non_empty, _)) = extract_count_emptiness_check(condition) {
+    // === 0` says the subject is the empty array, and `strlen($s) === 0`
+    // that it is the empty string.
+    if let Some((var_name, empty, non_empty, _)) = extract_count_emptiness_check(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         if non_empty {
-            refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+            refine_non_empty_in_scope(&var_name, empty, scope);
         } else {
-            refine_empty_in_scope(&var_name, EmptyValue::Array, scope);
+            refine_empty_in_scope(&var_name, empty, scope);
         }
     }
     // `$x === 0` / `$x !== []` and the rest of the strict comparisons
     // against a written-out value: the equal branch holds that value, the
     // unequal one holds everything else the subject could be.
     apply_literal_identity_narrowing(condition, scope, ctx, true);
+    // `$x == 'one'` — the same, where `==` means `===` for the value.
+    apply_loose_literal_narrowing(condition, scope, ctx, true);
+    // `$x > 0` — the number literals the subject may hold that pass.
+    apply_literal_order_narrowing(condition, scope, ctx, true);
+    // `count($xs) === 3` — a list of that many entries.
+    apply_count_size_narrowing(condition, scope, ctx, true);
     // `$x === Land::Be` — the subject holds whatever the constant holds,
     // so a constant that cannot be null leaves no null in the subject.
     if let Some((var_name, constant)) = extract_class_constant_identity(condition, true) {
@@ -79,6 +91,9 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // `$x === $y` — the same reasoning for any comparand whose own type
     // rules out null.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, true);
+    // `$x === $y` where `$y` has already been narrowed to a single
+    // literal — `$x` holds that same literal.
+    apply_identity_comparison_literal_narrowing(condition, scope, ctx, true);
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
@@ -90,6 +105,13 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         }
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         strip_falsy_from_scope(&var_name, scope);
+    }
+    // `!$x` / `empty($x)` — the body holds the falsy part of the subject,
+    // the same set the else of `if ($x)` narrows to: `Foo|false` is
+    // `false` there.
+    if let Some(var_name) = extract_falsy_check_var(condition) {
+        seed_synthetic_key_if_needed(&var_name, scope, ctx);
+        narrow_to_falsy_in_scope(&var_name, scope);
     }
     // Bare truthy check: `if ($x) { ... }` — $x is truthy in the
     // then-body, so strip null and false from its type.
@@ -128,10 +150,15 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         strip_null_from_subject(&var_name, scope, ctx);
     }
     // When the condition is `$x !== null`, the inverse (else/guard)
-    // means $x IS null — narrow to null only.
+    // means $x IS null — narrow to null only.  Failing `$x != null`
+    // leaves whatever compares equal to null.
     if let Some(var_name) = extract_non_null_check_var(condition) {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
-        narrow_to_null_in_scope(&var_name, scope);
+        if is_loose_comparison(condition) {
+            narrow_to_loosely_null_in_scope(&var_name, scope);
+        } else {
+            narrow_to_null_in_scope(&var_name, scope);
+        }
     }
     // When the condition is `!$x` or `empty($x)`, the inverse means
     // $x is truthy — remove every falsy member, not just `null`.  This
@@ -159,6 +186,9 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // The else branch of a strict comparison against a written-out value
     // establishes the opposite of what the body did.
     apply_literal_identity_narrowing(condition, scope, ctx, false);
+    apply_loose_literal_narrowing(condition, scope, ctx, false);
+    apply_literal_order_narrowing(condition, scope, ctx, false);
+    apply_count_size_narrowing(condition, scope, ctx, false);
     // When the condition is `$x !== Land::Be`, the inverse (else/guard)
     // means the subject is that constant, so it holds whatever the
     // constant holds.
@@ -169,6 +199,9 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // the two were identical, so a comparand that cannot be null leaves
     // no null in the subject.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, false);
+    // Same reasoning as the truthy branch, for a comparand already
+    // narrowed to a single literal.
+    apply_identity_comparison_literal_narrowing(condition, scope, ctx, false);
     // When the condition is `$x === ''` / `$x === []`, the inverse
     // (else/guard) means $x is non-empty; when it is `$x !== ''`, the
     // inverse means $x is exactly the empty value.
@@ -184,14 +217,15 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // fall-through of a guard that threw) means the subject has entries;
     // when it is `count($x) > 0`, the inverse means it has none.  A bound
     // further out (`count($x) > 1`) proves neither on the way past.
-    if let Some((var_name, non_empty, complement_exact)) = extract_count_emptiness_check(condition)
+    if let Some((var_name, empty, non_empty, complement_exact)) =
+        extract_count_emptiness_check(condition)
         && complement_exact
     {
         seed_synthetic_key_if_needed(&var_name, scope, ctx);
         if non_empty {
-            refine_empty_in_scope(&var_name, EmptyValue::Array, scope);
+            refine_empty_in_scope(&var_name, empty, scope);
         } else {
-            refine_non_empty_in_scope(&var_name, EmptyValue::Array, scope);
+            refine_non_empty_in_scope(&var_name, empty, scope);
         }
     }
     // When the condition is a bare `$x` (truthy check), the inverse means
@@ -271,6 +305,26 @@ pub(crate) fn apply_nullsafe_receiver_narrowing<'b>(
         keys.extend(chain_keys);
     }
 
+    for key in keys {
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        strip_null_from_scope(&key, scope);
+    }
+}
+
+/// Narrow the receiver of a `?->` call to what its arguments see.
+///
+/// The arguments are only evaluated when the receiver is not null: had it
+/// been, the call would have short-circuited before reaching them.  The
+/// same holds for every `?->` receiver further down the chain.
+pub(crate) fn narrow_nullsafe_call_receiver(
+    object: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut keys = nullsafe_receiver_keys(object);
+    if let Some(key) = narrowing::expr_to_subject_key(object) {
+        keys.insert(0, key);
+    }
     for key in keys {
         seed_synthetic_key_if_needed(&key, scope, ctx);
         strip_null_from_scope(&key, scope);
@@ -384,4 +438,8 @@ pub(crate) fn apply_guard_clause_null_narrowing<'b>(
     // `if ($x !== null)` with return doesn't narrow after — the
     // remaining code is the null path.  This is handled by the
     // inverse narrowing in the guard clause logic.
+
+    // The inverse pass already forgot an impure call's result; the
+    // stripping above has just proved it again.
+    super::super::receiver_mutation::forget_impure_call_results(if_stmt.condition, scope, ctx);
 }

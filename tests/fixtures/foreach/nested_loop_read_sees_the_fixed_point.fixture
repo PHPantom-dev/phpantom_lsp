@@ -1,0 +1,22 @@
+// test: a read inside nested loops sees the fixed point, not an earlier pass
+// feature: hover
+// The outer loop's first pass saw `$results` still empty, so `$x` held
+// `null` then. The inner loop is entered again on every pass, and what it
+// reads at the cursor is what the loop has settled on.
+// expect: $x = array{count: mixed, item: mixed}
+// expect_absent: null
+---
+<?php
+
+function f(array $items, array $changes): void {
+    $results = [];
+    foreach ($items as $item) {
+        foreach ($changes as $change) {
+            $key = $item->key();
+            if (!array_key_exists($key, $results)) {
+                $<>x = $results[$key];
+                $results[$key] = ['count' => $change, 'item' => $item];
+            }
+        }
+    }
+}

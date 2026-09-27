@@ -801,3 +801,187 @@ namespace PsalmTest_template_class_template_25 {
     assertType('Foo<object>', $f);
 }
 
+// Test: templateDefaultSimpleString
+namespace PsalmTest_template_class_template_26 {
+    /**
+     * @template T as string
+     */
+    class C {
+        /** @var T */
+        public $t;
+
+        /**
+         * @param T $t
+         */
+        function __construct(string $t = "hello") {
+            $this->t = $t;
+        }
+    }
+
+    $c = new C();
+
+    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
+    assertType('C<string>', $c);
+}
+
+// Test: templateDefaultClassConstant
+namespace PsalmTest_template_class_template_27 {
+    class D {}
+
+    /**
+     * @template T as object
+     */
+    class E {
+        /** @var class-string<T> */
+        public $t;
+
+        /**
+         * @param class-string<T> $t
+         */
+        function __construct(string $t = D::class) {
+            $this->t = $t;
+        }
+    }
+
+    $e = new E();
+
+    assertType('E<D>', $e);
+}
+
+// Test: combineTwoTemplatedArrays
+namespace PsalmTest_template_class_template_28 {
+    /** @template T */
+    class Option
+    {
+        /** @param T $v */
+        public function __construct(private $v) {}
+
+        /**
+         * @template E
+         * @param E $else
+         * @return T|E
+         */
+        public function getOrElse($else)
+        {
+           return rand(0, 1) === 1 ? $this->v : $else;
+        }
+    }
+
+    $opt = new Option([1, 3]);
+
+    $b = $opt->getOrElse([2, 4])[0];
+
+    assertType('1|2', $b);
+}
+
+// Test: complexTypes
+namespace PsalmTest_template_class_template_29 {
+    /**
+     * @template T
+     */
+    class Future {
+        /**
+         * @param T $v
+         */
+        public function __construct(private $v) {}
+        /** @return T */
+        public function get() { return $this->v; }
+    }
+
+
+    /**
+     * @template TTObject
+     *
+     * @extends Future<ArrayObject<int, TTObject>>
+     */
+    class FutureB extends Future {
+        /** @param TTObject $data */
+        public function __construct($data) { parent::__construct(new ArrayObject([$data])); }
+    }
+
+    $a = new FutureB(123);
+
+    $r = $a->get();
+
+    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
+    assertType('FutureB<int>', $a);
+    assertType('ArrayObject<int, int>', $r);
+}
+
+// Test: promoted property with template
+// Requires PHP 8.0
+namespace PsalmTest_template_class_template_30 {
+    /**
+     * @template T
+     */
+    class A {
+        public function __construct(
+            /** @var T */
+            public mixed $t
+        ) {}
+    }
+
+    $a = new A(5);
+    $t = $a->t;
+
+    assertType('A<int>', $a);
+    assertType('int', $t);
+}
+
+// Test: template of simple type with additional comment without dot
+namespace PsalmTest_template_class_template_31 {
+    /**
+     * @psalm-template T of string
+     *
+     * lorem ipsum
+     */
+    class Foo {
+        /** @psalm-var T */
+        public string $t;
+
+        /** @psalm-param T $t */
+        public function __construct(string $t) {
+            $this->t = $t;
+        }
+
+        /**
+         * @psalm-return T
+         */
+        public function t(): string {
+            return $this->t;
+        }
+    }
+    $t = (new Foo(''))->t();
+
+    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
+    assertType('string', $t);
+}
+
+// Test: template of simple type with additional comment with dot
+namespace PsalmTest_template_class_template_32 {
+    /**
+     * @psalm-template T of string
+     *
+     * lorem ipsum.
+     */
+    class Foo {
+        /** @psalm-var T */
+        public string $t;
+
+        /** @psalm-param T $t */
+        public function __construct(string $t) {
+            $this->t = $t;
+        }
+
+        /**
+         * @psalm-return T
+         */
+        public function t(): string {
+            return $this->t;
+        }
+    }
+    $t = (new Foo(''))->t();
+
+    // PHPantom, like PHPStan, widens a literal argument when inferring a class template.
+    assertType('string', $t);
+}

@@ -4492,7 +4492,6 @@ fn consumer_site(needle: &str) -> (String, u32, u32) {
 }
 
 #[tokio::test]
-#[ignore = "known gap: references on Eloquent magic members"]
 async fn references_on_a_scope_find_its_calls_under_the_scope_name() {
     let (line, _) =
         crate::common::line_char_of(MAGIC_CONSUMER_PHP, "BlogAuthor::query()->active()");
@@ -4506,7 +4505,6 @@ async fn references_on_a_scope_find_its_calls_under_the_scope_name() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: references on Eloquent magic members"]
 async fn references_on_a_legacy_accessor_find_its_property_reads() {
     let (file, line, character) = consumer_site("display_name");
     assert_eq!(
@@ -4516,7 +4514,6 @@ async fn references_on_a_legacy_accessor_find_its_property_reads() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: references on Eloquent magic members"]
 async fn references_on_an_attribute_accessor_find_its_property_reads() {
     assert_eq!(
         magic_member_reference_sites("avatarUrl").await,
@@ -4525,10 +4522,138 @@ async fn references_on_an_attribute_accessor_find_its_property_reads() {
 }
 
 #[tokio::test]
-#[ignore = "known gap: references on Eloquent magic members"]
 async fn references_on_a_mutator_find_its_property_writes() {
     assert_eq!(
         magic_member_reference_sites("setLogoAttribute").await,
         vec![consumer_site("logo =")]
+    );
+}
+
+const MAGIC_POST_PHP: &str = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Builder;
+class BlogPost extends Model {
+    public function scopeActive(Builder $query): void {}
+    public function getDisplayNameAttribute(): string { return ''; }
+}
+";
+
+const HAS_MANY_PHP: &str = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Relations;
+abstract class Relation {}
+/**
+ * @template TRelatedModel
+ * @template TDeclaringModel
+ */
+class HasMany extends Relation {}
+";
+
+#[tokio::test]
+async fn references_on_a_scope_skip_another_models_scope_of_the_same_name() {
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(BlogPost $post): void {
+        BlogPost::active();
+        BlogPost::query()->active();
+        $post->display_name;
+        BlogAuthor::query()->where('a', 1)->active();
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("src/Models/BlogAuthor.php", MAGIC_AUTHOR_PHP),
+        ("src/Models/BlogPost.php", MAGIC_POST_PHP),
+        ("src/Models/Consumer.php", consumer),
+    ]);
+    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    open_php(&backend, &consumer_uri, consumer).await;
+
+    let lines = |member: &str| {
+        let (line, character) = crate::common::line_char_of(MAGIC_AUTHOR_PHP, member);
+        let backend = &backend;
+        let dir = &dir;
+        async move {
+            let found = find_references_at(
+                backend,
+                dir,
+                "src/Models/BlogAuthor.php",
+                MAGIC_AUTHOR_PHP,
+                line,
+                character + 2,
+                false,
+            )
+            .await
+            .unwrap_or_default();
+            let mut lines: Vec<u32> = found.iter().map(|l| l.range.start.line).collect();
+            lines.sort();
+            lines
+        }
+    };
+    let (chained_line, _) = crate::common::line_char_of(consumer, "->where('a', 1)->active()");
+    assert_eq!(lines("scopeActive").await, vec![chained_line]);
+    assert!(lines("getDisplayNameAttribute").await.is_empty());
+}
+
+#[tokio::test]
+async fn references_on_a_relationship_find_its_property_reads() {
+    let author = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\HasMany;
+class BlogAuthor extends Model {
+    /** @return HasMany<BlogPost, $this> */
+    public function posts(): HasMany { return new HasMany(); }
+}
+";
+    let consumer = "\
+<?php
+namespace App\\Models;
+class Consumer {
+    public function run(BlogAuthor $author): void {
+        $author->posts;
+        $author->posts();
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        (
+            "vendor/illuminate/Eloquent/Relations/HasMany.php",
+            HAS_MANY_PHP,
+        ),
+        ("src/Models/BlogAuthor.php", author),
+        ("src/Models/BlogPost.php", MAGIC_POST_PHP),
+        ("src/Models/Consumer.php", consumer),
+    ]);
+    let consumer_uri = Url::from_file_path(dir.path().join("src/Models/Consumer.php")).unwrap();
+    open_php(&backend, &consumer_uri, consumer).await;
+    let (line, character) = crate::common::line_char_of(author, "posts()");
+    let found = find_references_at(
+        &backend,
+        &dir,
+        "src/Models/BlogAuthor.php",
+        author,
+        line,
+        character + 1,
+        false,
+    )
+    .await
+    .unwrap_or_default();
+    let mut sites: Vec<(u32, u32)> = found
+        .iter()
+        .map(|l| (l.range.start.line, l.range.start.character))
+        .collect();
+    sites.sort();
+    assert_eq!(
+        sites,
+        vec![
+            crate::common::line_char_of(consumer, "posts;"),
+            crate::common::line_char_of(consumer, "posts()"),
+        ]
     );
 }

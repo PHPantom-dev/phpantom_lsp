@@ -571,6 +571,53 @@ fn completed_workspace_index_is_reused_without_waiting() {
     waiter.join().expect("waiter thread");
 }
 
+/// A Find References request still discovers a file created after the
+/// index finished, without a watcher event. Files already indexed are not
+/// parsed again.
+#[test]
+fn request_refresh_discovers_a_file_added_after_indexing() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let src = dir.path().join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(
+        src.join("Known.php"),
+        "<?php\nnamespace App;\nclass Known {}\n",
+    )
+    .expect("known file");
+
+    let backend = Backend::new_test_with_workspace(dir.path().to_path_buf(), Vec::new());
+    backend.ensure_workspace_indexed_for_request();
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Known")
+    );
+
+    std::fs::write(
+        src.join("Created.php"),
+        "<?php\nnamespace App;\nclass Created {}\n",
+    )
+    .expect("created file");
+    backend.ensure_workspace_indexed_for_request();
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Created"),
+        "a request refresh must parse a file the watcher never reported"
+    );
+    assert!(
+        backend
+            .symbols
+            .fqn_class_index
+            .read()
+            .contains_key("App\\Known")
+    );
+}
+
 #[test]
 fn request_progress_maps_indexing_into_lower_window() {
     let dir = tempfile::tempdir().expect("temp dir");

@@ -1,0 +1,16 @@
+// test: callable(static) passed through $this keeps late static binding
+// feature: hover
+// expect: static(Widget)
+---
+<?php
+
+class Widget {
+    /** @param callable(static): void $fn */
+    public function each(callable $fn): void {}
+
+    public function run(): void {
+        $this->each(function ($w) {
+            $<>w;
+        });
+    }
+}

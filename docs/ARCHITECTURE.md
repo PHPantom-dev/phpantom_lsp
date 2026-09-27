@@ -129,7 +129,7 @@ tests/
 ├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
 ├── unit/                   # Unit tests (composer, docblock, named args, …)
 ├── fixtures/               # Fixtures driven by fixture_runner.rs
-├── psalm_assertions/, phpstan_nsrt/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 
@@ -238,6 +238,7 @@ The symbol map also stores:
 - **Scope boundaries** (`scopes`): function, method, closure, and arrow function body ranges. Used by `find_enclosing_scope` to determine which scope the cursor is in.
 - **Template parameter definitions** (`template_defs`): `@template` tag locations so that template parameter names (e.g. `TKey`, `TModel`) that appear in docblock types can be resolved to their declaration site.
 - **Candidate render sites** (`view_receiver_sites`): the view names a method call spells when only the receiver's *type* decides whether it renders — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local. Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of view keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references) read the confirmed spans alongside the map's own `LaravelStringKey` spans. The reference candidate index takes the *unconfirmed* candidates, since a file has to be findable before it can be asked.
+- **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose Laravel string kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
 
@@ -855,7 +856,7 @@ Phases 3–5 avoid expensive parsing by first reading the raw file content and c
 
 ### Member-Level Implementation
 
-When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the nearest ancestor that declares it, since a class that inherits a method unchanged still implements it. A method that is only re-declared `abstract` is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the *class* is abstract says nothing about the method that was asked for.
+When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the trait or ancestor it inherits the method from, searched in PHP's member precedence order, since a class that inherits a method unchanged still implements it. The implementation CodeLens counts through the same helpers, so its count and go-to-implementation's list agree. A method that is only re-declared `abstract` is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the *class* is abstract says nothing about the method that was asked for.
 
 ### Reverse Jump: Concrete Method → Prototype Declaration
 

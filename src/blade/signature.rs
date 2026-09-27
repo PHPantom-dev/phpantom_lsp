@@ -481,7 +481,7 @@ pub(crate) fn declaration_span(content: &str, name: &str) -> Option<std::ops::Ra
     let (block, _) = signature_docblock(content)?;
     let mut offset = block.start;
     for line in content[block.clone()].split_inclusive('\n') {
-        let Some(tag) = line.find("@var") else {
+        let Some((tag, _)) = crate::docblock::find_var_tag(line) else {
             offset += line.len();
             continue;
         };

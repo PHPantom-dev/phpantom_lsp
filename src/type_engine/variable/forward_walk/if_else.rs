@@ -653,6 +653,7 @@ pub(crate) fn branch_exits_stmts<'s>(
     let receiver_resolver = |expr: &Expression<'_>| resolved_receiver_class_names(expr, scope, ctx);
     let exit_ctx = narrowing::ExitCtx {
         current_class: ctx.current_class,
+        all_classes: ctx.all_classes,
         class_loader: ctx.class_loader,
         function_loader: ctx.loaders.function_loader,
         resolved_class_cache: ctx.resolved_class_cache,

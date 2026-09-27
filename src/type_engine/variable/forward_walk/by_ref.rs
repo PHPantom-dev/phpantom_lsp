@@ -11,8 +11,10 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::call_resolution::{OutParamCallee, effective_out_type};
+use crate::php_type::{PhpType, ShapeEntry, TypeKind};
+use crate::type_engine::call_resolution::{
+    OutParamCallee, effective_out_type, resolve_out_type_for_call,
+};
 use crate::types::ResolvedType;
 
 pub(crate) fn process_by_ref_closure_captures<'b>(
@@ -36,7 +38,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             if let Call::Function(fc) = call
                 && let Expression::Closure(closure) = crate::parser::unwrap_parens(fc.function)
             {
-                process_by_ref_closure_capture(closure, scope, ctx, true);
+                process_by_ref_closure_capture(closure, scope, ctx, true, true);
             }
 
             let args = match call {
@@ -50,7 +52,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
                 let (arg_expr, selector) = arg_expr_and_selector(arg, &mut next_positional);
                 if let Expression::Closure(closure) = arg_expr {
                     let certain = call_invokes_arg_immediately(call, &selector, scope, ctx);
-                    process_by_ref_closure_capture(closure, scope, ctx, certain);
+                    process_by_ref_closure_capture(closure, scope, ctx, certain, false);
                 } else {
                     process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
@@ -60,7 +62,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
         // variable, passed somewhere opaque) may still run any time later,
         // so the types it assigns are unioned into the captured variables.
         Expression::Closure(closure) => {
-            process_by_ref_closure_capture(closure, scope, ctx, false);
+            process_by_ref_closure_capture(closure, scope, ctx, false, false);
         }
         // `new Wrapper(function () use (&$x) { … })` hands the closure to an
         // object that invokes it later (or never), which is the
@@ -103,7 +105,7 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
 /// `@param-immediately-invoked-callable`.  An unresolvable callee or
 /// receiver is not proof either way, so it answers `false` and the
 /// caller falls back to widening.
-fn call_invokes_arg_immediately(
+pub(crate) fn call_invokes_arg_immediately(
     call: &Call<'_>,
     selector: &ArgSelector,
     scope: &ScopeState,
@@ -194,34 +196,73 @@ pub(crate) fn select_param<'p>(
     }
 }
 
+/// Builtin functions PHPStan's own stubs tag `@param-later-invoked-callable`
+/// (`stubs/core.stub` upstream): the callback is stashed away to run later,
+/// rather than run before the call returns.
+///
+/// Every other builtin that takes a callable — `call_user_func`,
+/// `call_user_func_array`, `array_map`, `usort`, and the rest — runs it
+/// immediately, which is the function-parameter default
+/// [`function_invokes_callable_arg_immediately`] falls back to below for a
+/// callee the function loader can still resolve even though it is not
+/// declared in the current file.
+const LATER_INVOKED_CALLABLE_FUNCTIONS: &[&str] = &[
+    "pcntl_signal",
+    "set_error_handler",
+    "set_exception_handler",
+    "spl_autoload_register",
+    "register_shutdown_function",
+    "header_register_callback",
+    "register_tick_function",
+];
+
 pub(crate) fn function_invokes_callable_arg_immediately(
     func_name: &str,
     selector: &ArgSelector,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
+    let func_name = crate::util::strip_fqn_prefix(func_name);
     with_parsed_program(
         ctx.content,
         "function_invokes_callable_arg",
         |program, _| {
             let mut stmts = Vec::new();
             flatten_namespaced_statements(program.statements.iter(), &mut stmts);
-            stmts.into_iter().any(|stmt| {
+            let declared = stmts.into_iter().find_map(|stmt| {
                 if let Statement::Function(func) = stmt
                     && bytes_to_str(func.name.value).eq_ignore_ascii_case(func_name)
                 {
-                    let Some(param) = select_param(func.parameter_list.parameters.iter(), selector)
-                    else {
-                        return false;
-                    };
-                    return !node_param_has_invocation_tag(
-                        func.name.span.start.offset as usize,
-                        ctx.content,
-                        bytes_to_str(param.variable.name),
-                        "param-later-invoked-callable",
-                    );
+                    Some(func)
+                } else {
+                    None
                 }
-                false
-            })
+            });
+            let Some(func) = declared else {
+                // Not declared in this file: a builtin still has a
+                // signature the function loader can find (backed by the
+                // embedded stubs), and only a callee that genuinely
+                // resolves is one whose immediacy has a documented
+                // default to fall back to. A name that resolves to
+                // nothing gives no signal either way, the same as an
+                // unresolvable receiver — `outer(inner(fn () use (&$x)
+                // {...}))` for undefined `outer`/`inner` stays uncertain.
+                return ctx
+                    .loaders
+                    .function_loader
+                    .is_some_and(|loader| loader(func_name, 0).is_some())
+                    && !LATER_INVOKED_CALLABLE_FUNCTIONS
+                        .iter()
+                        .any(|later_invoked| later_invoked.eq_ignore_ascii_case(func_name));
+            };
+            let Some(param) = select_param(func.parameter_list.parameters.iter(), selector) else {
+                return false;
+            };
+            !node_param_has_invocation_tag(
+                func.name.span.start.offset as usize,
+                ctx.content,
+                bytes_to_str(param.variable.name),
+                "param-later-invoked-callable",
+            )
         },
     )
 }
@@ -294,22 +335,10 @@ pub(crate) fn node_param_has_invocation_tag(
     })
 }
 
-/// Walk a closure body and propagate the types it assigns to `use (&$x)`
-/// captures back into the outer scope.
-///
-/// `invoked_immediately` decides how: when the closure provably runs
-/// before the call returns, the closure's final state *replaces* the
-/// outer variable; otherwise the closure may run zero or more times at
-/// any later point, so the assigned types are *unioned* with the outer
-/// types (mirroring PHPStan, which widens by-ref captures even for
-/// closures that are merely defined).
-pub(crate) fn process_by_ref_closure_capture<'b>(
-    closure: &'b Closure<'b>,
-    scope: &mut ScopeState,
-    ctx: &ForwardWalkCtx<'_>,
-    invoked_immediately: bool,
-) {
-    let captured: Vec<String> = closure
+/// The `use (&$x)` variables a closure captures by reference, in
+/// declaration order.
+pub(crate) fn by_ref_captured_names(closure: &Closure<'_>) -> Vec<String> {
+    closure
         .use_clause
         .as_ref()
         .map(|use_clause| {
@@ -320,12 +349,108 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
                 .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
+
+/// Refine a closure's `use (&$x)` entry types to account for the body
+/// reassigning them.
+///
+/// The closure may run any number of times relative to whatever point is
+/// being resolved (before, after, or several times around it), so a read
+/// anywhere in the body — including its very first statement — must see
+/// not just what the capture held before the closure literal, but also
+/// whatever a previous run of the body could have left it holding:
+///
+/// ```php
+/// $a = 0;
+/// $cb = function () use (&$a): void {
+///     $a; // 0|'s' — a previous run may already have assigned 's'
+///     $a = 's';
+/// };
+/// ```
+///
+/// This is exactly the loop fixed-point problem
+/// (`walk_loop_body_to_fixed_point`) with the closure body standing in
+/// for a loop body of unknown trip count: re-walk a cursor-suppressed
+/// copy of the body, union each capture's exit types back into its entry,
+/// and repeat until nothing new appears. Capped by the body's own
+/// assignment-dependency depth, exactly as a loop body is.
+pub(crate) fn seed_by_ref_capture_fixed_point<'b>(
+    closure: &'b Closure<'b>,
+    closure_scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    captured: &[String],
+) {
+    if captured.is_empty() {
+        return;
+    }
+    let body_stmts: Vec<&Statement<'_>> = closure.body.statements.iter().collect();
+    let depth = assignment_map_depth(&body_stmts);
+    if depth <= 1 {
+        return;
+    }
+
+    let discovery_ctx = ctx.with_cursor_offset(u32::MAX);
+    let seed_scope = closure_scope.clone();
+    let mut entry_scope = seed_scope.clone();
+
+    for _ in 0..depth.saturating_sub(1) {
+        let mut probe = entry_scope.clone();
+        let return_frame = push_return_frame();
+        walk_body_forward(body_stmts.iter().copied(), &mut probe, &discovery_ctx);
+        if let Some(returned) = return_frame.finish() {
+            probe.merge_branch(&returned);
+        }
+
+        let mut next_entry = seed_scope.clone();
+        let mut changed = false;
+        for var_name in captured {
+            let mut combined = seed_scope.get(var_name).to_vec();
+            ResolvedType::extend_unique(&mut combined, probe.get(var_name).to_vec());
+            if resolved_types_differ(&combined, entry_scope.get(var_name)) {
+                changed = true;
+            }
+            next_entry.set(var_name, combined);
+        }
+        entry_scope = next_entry;
+        if !changed {
+            break;
+        }
+    }
+
+    *closure_scope = entry_scope;
+}
+
+/// Walk a closure body and propagate the types it assigns to `use (&$x)`
+/// captures back into the outer scope.
+///
+/// `invoked_immediately` decides how: when the closure provably runs
+/// before the call returns, the closure's final state *replaces* the
+/// outer variable; otherwise the closure may run zero or more times at
+/// any later point, so the assigned types are *unioned* with the outer
+/// types (mirroring PHPStan, which widens by-ref captures even for
+/// closures that are merely defined).
+///
+/// `runs_once` is narrower: only a closure called where it is written
+/// runs exactly once.  One handed to a call that invokes it immediately
+/// (`array_map`, `array_walk`) may still run once per element, so its body
+/// is walked the way a loop body is and an append inside it builds the
+/// collection instead of a one-entry shape.
+pub(crate) fn process_by_ref_closure_capture<'b>(
+    closure: &'b Closure<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    invoked_immediately: bool,
+    runs_once: bool,
+) {
+    let captured = by_ref_captured_names(closure);
     if captured.is_empty() {
         return;
     }
 
-    let full_ctx = ctx.with_cursor_offset(u32::MAX);
+    let full_ctx = ctx
+        .with_cursor_offset(u32::MAX)
+        .with_in_loop(ctx.in_loop || !runs_once);
     let mut closure_scope = ScopeState::new();
 
     seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
@@ -337,6 +462,8 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         &[],
         &full_ctx,
     );
+
+    seed_by_ref_capture_fixed_point(closure, &mut closure_scope, &full_ctx, &captured);
 
     let return_frame = push_return_frame();
     walk_body_forward(
@@ -392,6 +519,282 @@ pub(crate) fn process_pass_by_ref<'b>(
         .map(|name| (*name, scope.locals.get(&atom(name)).cloned()))
         .collect();
 
+    if !super::array_assignment::process_array_push_call(expr, scope, ctx)
+        && !super::array_assignment::process_array_cursor_call(expr, scope, ctx)
+        && !super::array_assignment::process_array_sort_call(expr, scope)
+        && !process_extract_call(expr, scope, ctx)
+    {
+        apply_by_ref_parameter_types(expr, scope, ctx);
+    }
+
+    for (name, before) in assigned_before {
+        let key = atom(name);
+        match before {
+            Some(types) => scope.locals.insert(key, types),
+            None => scope.locals.remove(&key),
+        };
+    }
+}
+
+/// How `extract()` treats a key, from its `flags` argument (with the
+/// `EXTR_REFS` bit, which changes no types, masked off).
+#[derive(Clone, Copy, PartialEq)]
+enum ExtractMode {
+    Overwrite,
+    Skip,
+    PrefixSame,
+    PrefixAll,
+    PrefixInvalid,
+    PrefixIfExists,
+    IfExists,
+}
+
+impl ExtractMode {
+    fn from_flags(flags: i64) -> Option<Self> {
+        Some(match flags & !256 {
+            0 => Self::Overwrite,
+            1 => Self::Skip,
+            2 => Self::PrefixSame,
+            3 => Self::PrefixAll,
+            4 => Self::PrefixInvalid,
+            5 => Self::PrefixIfExists,
+            6 => Self::IfExists,
+            _ => return None,
+        })
+    }
+
+    fn is_prefixed(self) -> bool {
+        matches!(
+            self,
+            Self::PrefixSame | Self::PrefixAll | Self::PrefixInvalid | Self::PrefixIfExists
+        )
+    }
+
+    /// The local a key is written to, if any.  `exists` says whether a
+    /// local of that name is in scope, which is what the conditional
+    /// modes test.
+    fn target(self, key: &str, prefix: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
+        let prefixed = || format!("{prefix}_{key}");
+        let name = match self {
+            Self::Overwrite => key.to_string(),
+            Self::Skip if exists(key) => return None,
+            Self::Skip => key.to_string(),
+            Self::PrefixSame if is_extractable_variable_name(key) && exists(key) => prefixed(),
+            Self::PrefixSame => key.to_string(),
+            Self::PrefixAll => prefixed(),
+            Self::PrefixInvalid if is_extractable_variable_name(key) => key.to_string(),
+            Self::PrefixInvalid => prefixed(),
+            Self::PrefixIfExists if exists(key) => prefixed(),
+            Self::IfExists if exists(key) => key.to_string(),
+            Self::PrefixIfExists | Self::IfExists => return None,
+        };
+        is_extractable_variable_name(&name).then_some(name)
+    }
+
+    /// Whether a call whose keys are not known may write the local `name`.
+    fn may_write_any(self, name: &str, prefix: &str) -> bool {
+        match self {
+            Self::Skip => false,
+            // A key that collides is written under the prefix, and one that
+            // does not names a variable that is not there yet.
+            Self::PrefixSame | Self::PrefixAll | Self::PrefixIfExists => name
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('_')),
+            Self::Overwrite | Self::PrefixInvalid | Self::IfExists => true,
+        }
+    }
+}
+
+/// The value of an `extract()` flags argument: `EXTR_*` constants and
+/// integer literals, combined with `|`.
+fn extract_flags_value(expr: &Expression<'_>) -> Option<i64> {
+    match expr {
+        Expression::Parenthesized(inner) => extract_flags_value(inner.expression),
+        Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::BitwiseOr(_)) => {
+            Some(extract_flags_value(binary.lhs)? | extract_flags_value(binary.rhs)?)
+        }
+        Expression::Literal(Literal::Integer(int)) => int.value.map(|v| v as i64),
+        Expression::ConstantAccess(access) => {
+            let name = bytes_to_str(access.name.value());
+            Some(match name.rsplit('\\').next().unwrap_or(name) {
+                "EXTR_OVERWRITE" => 0,
+                "EXTR_SKIP" => 1,
+                "EXTR_PREFIX_SAME" => 2,
+                "EXTR_PREFIX_ALL" => 3,
+                "EXTR_PREFIX_INVALID" => 4,
+                "EXTR_PREFIX_IF_EXISTS" => 5,
+                "EXTR_IF_EXISTS" => 6,
+                "EXTR_REFS" => 256,
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Define the locals an `extract()` call writes.
+///
+/// An array shape writes one local per key, under the name and on the
+/// condition its flags say, so a required key replaces whatever the
+/// variable held and an optional one may.  An array whose keys are not
+/// known may write any local the flags allow with anything, so each of
+/// those widens to `mixed`.  Returns whether the call was an `extract()`.
+fn process_extract_call<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Expression::Call(Call::Function(call)) = expr else {
+        return false;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    if !bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("extract")
+    {
+        return false;
+    }
+    let mut array_arg = None;
+    let mut flags_arg = None;
+    let mut prefix_arg = None;
+    let mut unpacked = false;
+    let mut next_positional = 0;
+    for arg in call.argument_list.arguments.iter() {
+        if let Argument::Positional(pos) = arg
+            && pos.ellipsis.is_some()
+        {
+            unpacked = true;
+        }
+        let (value, selector) = arg_expr_and_selector(arg, &mut next_positional);
+        let slot = match selector {
+            ArgSelector::Position(0) => &mut array_arg,
+            ArgSelector::Position(1) => &mut flags_arg,
+            ArgSelector::Position(2) => &mut prefix_arg,
+            ArgSelector::Name(name) if name == "array" => &mut array_arg,
+            ArgSelector::Name(name) if name == "flags" => &mut flags_arg,
+            ArgSelector::Name(name) if name == "prefix" => &mut prefix_arg,
+            _ => continue,
+        };
+        *slot = Some(value);
+    }
+    let Some(array_arg) = array_arg else {
+        return true;
+    };
+    let mode = match flags_arg {
+        None => Some(ExtractMode::Overwrite),
+        Some(flags) => extract_flags_value(flags).and_then(ExtractMode::from_flags),
+    };
+    let prefix = prefix_arg.and_then(crate::type_engine::types::narrowing::string_literal_value);
+    let mode = match mode {
+        Some(mode) if !unpacked && (prefix.is_some() || !mode.is_prefixed()) => mode,
+        _ => {
+            widen_extractable_locals(scope, |_| true);
+            return true;
+        }
+    };
+    let prefix = prefix.as_deref().unwrap_or("");
+
+    let types = super::assignment::resolve_rhs_with_scope(array_arg, scope, ctx);
+    let array = ResolvedType::types_joined(&types);
+    // Each alternative of a union of shapes writes its own keys, so a key
+    // the others lack is only possibly written.
+    let shapes: Option<Vec<&[ShapeEntry]>> = match array.kind() {
+        _ if types.is_empty() => None,
+        TypeKind::ArrayShape(entries) => Some(vec![&entries[..]]),
+        TypeKind::Union(members) => members
+            .iter()
+            .map(|m| match m.kind() {
+                TypeKind::ArrayShape(entries) => Some(&entries[..]),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    };
+    let Some(shapes) = shapes else {
+        widen_extractable_locals(scope, |name| mode.may_write_any(name, prefix));
+        return true;
+    };
+    let exists = |name: &str| scope.contains(&format!("${name}"));
+    // (name, value, optional, alternatives writing it), in key order.
+    let mut written: Vec<(String, Vec<PhpType>, bool, usize)> = Vec::new();
+    for entries in &shapes {
+        for (position, entry) in entries.iter().enumerate() {
+            let key = match entry.key.as_deref() {
+                Some(key) => key.trim_matches(|c| c == '\'' || c == '"').to_string(),
+                None => position.to_string(),
+            };
+            let Some(name) = mode.target(&key, prefix, exists) else {
+                continue;
+            };
+            match written.iter_mut().find(|(n, ..)| *n == name) {
+                Some((_, values, optional, count)) => {
+                    values.push(entry.value_type.clone());
+                    *optional |= entry.optional;
+                    *count += 1;
+                }
+                None => written.push((name, vec![entry.value_type.clone()], entry.optional, 1)),
+            }
+        }
+    }
+    for (name, mut values, optional, count) in written {
+        let var_name = format!("${name}");
+        if optional || count < shapes.len() {
+            let existing = scope.get(&var_name);
+            if !existing.is_empty() {
+                values.insert(0, ResolvedType::types_joined(existing));
+            }
+        }
+        scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_proofs(&var_name);
+        scope.set(
+            &var_name,
+            vec![ResolvedType::from_type_string(PhpType::union(values))],
+        );
+    }
+    true
+}
+
+/// Widen to `mixed` every local an `extract()` of unknown keys may have
+/// written, as `may_write` (given the name without its `$`) allows.
+fn widen_extractable_locals(scope: &mut ScopeState, may_write: impl Fn(&str) -> bool) {
+    let names: Vec<String> = scope
+        .locals
+        .keys()
+        .filter_map(|key| key.strip_prefix('$'))
+        .filter(|name| is_extractable_variable_name(name) && may_write(name))
+        .map(|name| format!("${name}"))
+        .collect();
+    for var_name in names {
+        scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_proofs(&var_name);
+        scope.set(
+            &var_name,
+            vec![ResolvedType::from_type_string(PhpType::mixed())],
+        );
+    }
+}
+
+/// Whether `extract()` turns an array key into a local: a valid PHP
+/// variable name other than `this`, which it refuses to overwrite.
+fn is_extractable_variable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first == b'_' || first.is_ascii_alphabetic() || first >= 0x80)
+        && bytes.all(|b| b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80)
+        && name != "this"
+}
+
+/// Give the variables a call passes by reference the types its parameters
+/// declare for them.
+fn apply_by_ref_parameter_types<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     // When a function call passes a variable to a parameter declared
     // as `Type &$param`, the variable acquires that type after the call.
     //
@@ -404,16 +807,19 @@ pub(crate) fn process_pass_by_ref<'b>(
     // types like `Type &$param`).
     let scope_resolver = scope.snapshot_resolver();
 
-    // Collect all variable names that appear as arguments in this
-    // expression, including ones not yet in scope.
-    let mut all_var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
+    // Only a variable passed directly as an argument of this call can be
+    // written through a by-reference parameter, so those are the only
+    // candidates, whether or not they are in scope yet.  Visiting every
+    // local instead would redo the callee lookup once per variable and
+    // make a long body cost statements × locals.
+    let mut arg_var_names: Vec<String> = Vec::new();
     for arg_var in extract_call_arg_variables(expr) {
-        if !all_var_names.contains(&arg_var) {
-            all_var_names.push(arg_var);
+        if !arg_var_names.contains(&arg_var) {
+            arg_var_names.push(arg_var);
         }
     }
 
-    for var_name in all_var_names {
+    for var_name in arg_var_names {
         let var_ctx = ctx.var_ctx_for_with_scope(
             &var_name,
             ctx.cursor_offset,
@@ -441,14 +847,6 @@ pub(crate) fn process_pass_by_ref<'b>(
     // `array`, `int`, `string` return empty from
     // `type_hint_to_classes_typed` and are missed.
     seed_pass_by_ref_primitives(expr, scope, ctx);
-
-    for (name, before) in assigned_before {
-        let key = atom(name);
-        match before {
-            Some(types) => scope.locals.insert(key, types),
-            None => scope.locals.remove(&key),
-        };
-    }
 }
 
 /// The call an expression statement makes, and the variables it assigns the
@@ -587,6 +985,14 @@ fn resolved_method_callee(
     ))
 }
 
+/// Whether `value_expr` is passed to the call via `...value_expr` (argument
+/// unpacking), rather than as a direct positional or named argument.
+fn arg_is_unpacked<'b>(arg_list: &ArgumentList<'b>, value_expr: &Expression<'b>) -> bool {
+    arg_list.arguments.iter().any(|arg| {
+        matches!(arg, Argument::Positional(pos) if pos.ellipsis.is_some() && std::ptr::eq(pos.value, value_expr))
+    })
+}
+
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
@@ -601,6 +1007,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     // `preg_match`'s `$matches` has no other by-reference parameter beside
     // it, so nothing below is left to do once the pattern has typed it.
     if seed_preg_matches(expr, scope, ctx) {
+        return;
+    }
+    // Moving the internal pointer leaves the array's value as it was, so
+    // the `array|object` hint describes nothing the call wrote.
+    if super::array_assignment::is_array_pointer_call(expr) {
         return;
     }
 
@@ -648,9 +1059,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
                 _ => return,
             };
-            let Some(class_name) =
-                crate::class_lookup::class_expression_name(sc.class, ctx.current_class)
-            else {
+            let Some(class_name) = crate::class_lookup::class_expression_name(
+                sc.class,
+                ctx.current_class,
+                ctx.all_classes,
+                ctx.class_loader,
+            ) else {
                 return;
             };
             let Some((parameters, callee)) = resolved_method_callee(&class_name, &method_name, ctx)
@@ -692,6 +1106,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             continue;
         }
 
+        // `example(...$z)` unpacks each element of `$z` into a separate
+        // by-ref argument; the callee writes through the *elements*, not
+        // through `$z` itself, so `$z` stays an array whose values take
+        // the parameter's type rather than becoming that type directly.
+        let is_spread = param.is_variadic && arg_is_unpacked(arg_list, arg_expr);
+
         let already_in_scope = !scope.get(&var_name).is_empty();
         let mut seeded = false;
         if let Some(out_hint) = effective_out_type(param, param_index, &template_owner, ctx.backend)
@@ -699,6 +1119,33 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             if out_hint.references_any_name(callee_templates) {
                 continue;
             }
+            // A PHPStan conditional out type (`@param-out ($arg is null ?
+            // A&I : A) $arg`) is call-site-agnostic up to this point; only
+            // this call's own arguments say which branch it actually takes.
+            // Snapshotting clones the scope, so it is only paid for a
+            // hint that actually has a condition to decide.
+            let out_hint = if !matches!(out_hint.kind(), TypeKind::Conditional(_)) {
+                out_hint
+            } else {
+                let scope_resolver = scope.snapshot_resolver();
+                let var_ctx = ctx.var_ctx_for_with_scope(
+                    "",
+                    ctx.cursor_offset,
+                    &scope_resolver,
+                    Some(scope.proofs()),
+                );
+                let call_var_resolver =
+                    super::super::resolution::build_var_resolver_from_ctx(&var_ctx);
+                resolve_out_type_for_call(
+                    out_hint,
+                    &parameters,
+                    &template_owner,
+                    arg_list,
+                    ctx.content,
+                    &var_ctx.as_resolution_ctx(),
+                    Some(&call_var_resolver),
+                )
+            };
             // A variadic parameter's stored PHPDoc type may describe the
             // collected argument array (`string[] &$values`), while each
             // call-site variable is one element of that collection. Native
@@ -717,7 +1164,34 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 }
                 _ => effective_hint.is_scalar(),
             };
-            if primitive_hint {
+            if primitive_hint && is_spread {
+                // The existing array's own element type plays the same role
+                // here that the whole variable's type plays below: kept
+                // when it already agrees with the hint (minus literal
+                // precision), replaced by the hint when it disagrees or is
+                // unknown. The array's keys are untouched either way.
+                let existing = scope.get(&var_name);
+                let existing_joined =
+                    (!existing.is_empty()).then(|| ResolvedType::types_joined(existing));
+                let key_type = existing_joined
+                    .as_ref()
+                    .and_then(PhpType::iterable_key_type)
+                    .unwrap_or_else(PhpType::int);
+                let value_type = existing_joined
+                    .as_ref()
+                    .and_then(PhpType::iterable_element_type)
+                    .filter(|value| !value.is_null())
+                    .filter(|value| value.is_subtype_of(&effective_hint))
+                    .map(|value| value.widen_scalar_literals())
+                    .unwrap_or(effective_hint);
+                scope.set(
+                    &var_name,
+                    vec![ResolvedType::from_type_string(PhpType::generic_array(
+                        key_type, value_type,
+                    ))],
+                );
+                seeded = true;
+            } else if primitive_hint {
                 // The callee may assign any value the parameter type allows,
                 // so an exact value observed before the call is stale. What
                 // the call cannot invalidate is precision the hint does not

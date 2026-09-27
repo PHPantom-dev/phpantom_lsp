@@ -356,10 +356,12 @@ async fn test_user_function_takes_precedence_over_stub() {
         template_params: vec![],
         template_param_bounds: Default::default(),
         template_bindings: vec![],
+        template_param_defaults: Default::default(),
         throws: vec![],
         is_polyfill: false,
         overloads: vec![],
         is_pure: false,
+        is_impure: false,
     };
 
     {

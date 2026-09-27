@@ -72,7 +72,18 @@ pub(crate) fn apply_type_guard_on_operands(
                 // of a negated guard means the variable is NOT the
                 // guarded type, and vice versa.
                 let effective_truthy = if negated { !truthy } else { truthy };
-                let mut results = scope.get(var_name).to_vec();
+                let splits_iterable = matches!(
+                    kind,
+                    narrowing::TypeGuardKind::Array | narrowing::TypeGuardKind::Object
+                );
+                let mut results = splits_iterable
+                    .then(|| {
+                        split_iterable_alternatives(scope.get(var_name), |hint| {
+                            ctx.resolved_types_for(hint)
+                        })
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| scope.get(var_name).to_vec());
                 if results.is_empty() {
                     // Nothing known about the subject.  A guard that
                     // holds still proves its type outright; one that
@@ -101,7 +112,9 @@ pub(crate) fn apply_type_guard_on_operands(
                         Some(ctx.class_loader),
                     );
                 }
-                if !results.is_empty() {
+                if results.is_empty() {
+                    mark_exhausted(var_name, scope);
+                } else {
                     scope.set(var_name, results);
                 }
             }
@@ -205,7 +218,11 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
                     // its type argument rather than be downgraded (a bare
                     // `class-string` is a supertype, so `new $var` could no
                     // longer recover the concrete class).
-                    if rt.type_string.is_subtype_of(&class_string_type) {
+                    if rt.type_string.is_subtype_of(&class_string_type)
+                        || resolved_fqn
+                            .as_deref()
+                            .is_some_and(|fqn| names_only_subclasses_of(&rt.type_string, fqn, ctx))
+                    {
                         continue;
                     }
                     if rt.type_string.is_subtype_of(&PhpType::string()) || rt.type_string.is_mixed()
@@ -220,4 +237,26 @@ pub(crate) fn apply_class_string_guard_narrowing<'b>(
             }
         }
     }
+}
+
+/// Whether every alternative of `ty` is a class name already known to be
+/// `fqn` or below it: a `class-string<Bar>`, or a literal naming `Bar`,
+/// when `Bar extends Foo` and the check is against `Foo`.
+///
+/// The structural subtype test cannot see a class hierarchy, so without
+/// this the guard replaced `class-string<Bar>` with the wider
+/// `class-string<Foo>` it had just proved.
+fn names_only_subclasses_of(ty: &PhpType, fqn: &str, ctx: &ForwardWalkCtx<'_>) -> bool {
+    ty.union_members().iter().all(|member| {
+        let named = match member.kind() {
+            TypeKind::ClassString(Some(inner)) => inner.class_name().map(str::to_string),
+            _ => member
+                .as_literal()
+                .and_then(LiteralValue::string_content)
+                .map(|name| name.into_owned()),
+        };
+        named.is_some_and(|name| {
+            crate::class_lookup::is_subtype_of_names(&name, fqn, ctx.class_loader)
+        })
+    })
 }

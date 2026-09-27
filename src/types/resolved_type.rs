@@ -218,7 +218,29 @@ impl ResolvedType {
     ) -> Vec<ResolvedType> {
         if classes.len() == 1 {
             let class = classes.into_iter().next().unwrap();
+            // A bare `self` (or `?self`) names exactly the class it resolved
+            // to, so spell that class out: `self` read later in another
+            // class's context would name that class instead.  Only the bare
+            // form qualifies; in `Collection<self>` the resolved class is the
+            // collection, not the one `self` names.
+            let type_hint = match type_hint.non_null_type() {
+                Some(inner) if is_bare_self(&inner) => type_hint.replace_bare_self(&class.fqn()),
+                None if is_bare_self(&type_hint) => PhpType::named(class.fqn()),
+                _ => type_hint,
+            };
             vec![ResolvedType::from_both_arc(type_hint, class)]
+        } else if let Some((name, bound)) = type_hint.as_template_param()
+            && !matches!(bound.kind(), TypeKind::Intersection(_))
+        {
+            // A template bounded by a union is one of the alternatives, so
+            // each entry is that template bounded by its own alternative:
+            // narrowing can still drop entries one class at a time, and the
+            // join reads the survivors back as the template.
+            let mut results = Self::from_classes_with_hint(classes, bound.clone());
+            for rt in &mut results {
+                rt.type_string = PhpType::template_param(name, rt.type_string.clone());
+            }
+            results
         } else if matches!(&type_hint.kind(), TypeKind::Intersection(_)) {
             // Intersection types: all classes contribute members to a
             // single value.  Emit one ResolvedType per class (so
@@ -259,6 +281,45 @@ impl ResolvedType {
                         entry.type_string = member.clone();
                         attached.push(member.clone());
                     }
+                }
+
+                // An intersection union member (`(A&I)|B`) resolved each of
+                // its classes into its own flat `results` entry above, which
+                // would otherwise read as `A|I|B` — the intersection's
+                // members listed as independent alternatives. Tag every one
+                // of them with the whole intersection instead, the way a
+                // top-level intersection is tagged: the entries stay apart
+                // so each class still contributes its members, and the join
+                // reads them back as the one intersection they are.
+                for member in members {
+                    let TypeKind::Intersection(inner) = member.kind() else {
+                        continue;
+                    };
+                    let inner_fqns: Option<Vec<String>> = inner
+                        .iter()
+                        .map(|part| part.base_name().map(str::to_string))
+                        .collect();
+                    let Some(inner_fqns) = inner_fqns else {
+                        continue;
+                    };
+                    let matches = |rt: &ResolvedType, name: &str| {
+                        rt.class_info.as_ref().is_some_and(|c| {
+                            let fqn = c.fqn().to_string();
+                            fqn == name || crate::util::short_name(&fqn) == name
+                        })
+                    };
+                    let all_present = inner_fqns
+                        .iter()
+                        .all(|name| results.iter().any(|rt| matches(rt, name)));
+                    if !all_present {
+                        continue;
+                    }
+                    for rt in results.iter_mut() {
+                        if inner_fqns.iter().any(|name| matches(rt, name)) {
+                            rt.type_string = member.clone();
+                        }
+                    }
+                    attached.push(member.clone());
                 }
             }
 
@@ -421,6 +482,10 @@ impl ResolvedType {
             for rt in results.iter_mut() {
                 rt.restrict_type_string_to_classes(&survives);
             }
+            // The same proof about a `null` that sits in an entry of its
+            // own: `A|B|null` resolves to one entry per class and one for
+            // the `null`, which no class-level narrowing ever sees.
+            results.retain(|rt| rt.class_info.is_some() || !rt.type_string.is_null());
         }
 
         // Add entries that narrowing introduced (e.g. instanceof
@@ -654,9 +719,42 @@ impl ResolvedType {
                 {
                     members.retain(|m| !m.is_empty_array_shape());
                 }
+                merge_template_alternatives(&mut members);
                 PhpType::union(members)
             }
         }
+    }
+}
+
+/// Fold the members that are the same template, each bounded by one
+/// alternative (what [`ResolvedType::from_classes_with_hint`] splits a
+/// union-bounded template into), back into that template bounded by
+/// their union, in the place the first of them held.
+fn merge_template_alternatives(members: &mut Vec<PhpType>) {
+    let mut i = 0;
+    while i < members.len() {
+        let Some((name, _)) = members[i].as_template_param() else {
+            i += 1;
+            continue;
+        };
+        let same = |m: &PhpType| m.as_template_param().is_some_and(|(n, _)| n == name);
+        if members[i + 1..].iter().any(same) {
+            let bounds: Vec<PhpType> = members[i..]
+                .iter()
+                .filter_map(|m| m.as_template_param().filter(|(n, _)| *n == name))
+                .map(|(_, bound)| bound.clone())
+                .collect();
+            members[i] = PhpType::template_param(name, PhpType::union(bounds));
+            let mut j = i + 1;
+            while j < members.len() {
+                if same(&members[j]) {
+                    members.remove(j);
+                } else {
+                    j += 1;
+                }
+            }
+        }
+        i += 1;
     }
 }
 
@@ -764,12 +862,21 @@ fn union_member_names_class(member: &PhpType, survives: &impl Fn(&str) -> bool) 
 /// element information, so collapsing onto it would trade the only useful
 /// snapshot for the least useful one.  Two arrays that describe genuinely
 /// different values (`array<int, int>` and `array<int, string>` from
-/// separate assignments) cover neither way and both survive.
+/// separate assignments) cover neither way and both survive.  A snapshot
+/// that carries no element information either (`array{mixed, mixed}`, from
+/// a `count()` check on a bare `list`) has nothing to lose, so a bare
+/// sibling does cover it.
 fn array_snapshot_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
     covered.is_array_like()
         && cover.is_array_like()
-        && !matches!(cover.kind(), TypeKind::Named(_))
+        && (!matches!(cover.kind(), TypeKind::Named(_)) || holds_only_mixed(covered))
         && covered.is_subtype_of(cover)
+}
+
+/// Whether `ty` is a shape whose every entry is `mixed`.
+fn holds_only_mixed(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::ArrayShape(entries)
+        if !entries.is_empty() && entries.iter().all(|entry| entry.value_type.is_mixed()))
 }
 
 /// Whether an intersection produced by one branch is already covered by
@@ -795,4 +902,9 @@ fn intersection_covered_by(covered: &PhpType, cover: &PhpType) -> bool {
         return false;
     };
     parts.iter().any(|part| part.is_subset_of(cover))
+}
+
+/// Whether `ty` is the bare `self` keyword.
+fn is_bare_self(ty: &PhpType) -> bool {
+    matches!(ty.kind(), TypeKind::Named(name) if name.eq_ignore_ascii_case("self"))
 }

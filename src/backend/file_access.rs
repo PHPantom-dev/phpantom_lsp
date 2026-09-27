@@ -213,19 +213,19 @@ impl Backend {
     }
 
     /// Like [`file_context`](Self::file_context) but resolves the namespace
-    /// for the namespace block that contains `byte_offset`.
+    /// and imports of the namespace block that contains `byte_offset`.
     ///
     /// In single-namespace files this returns the same result as
     /// `file_context`.  In multi-namespace files it picks the correct
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
-        let mut ctx = self.file_context(uri);
+        let ctx = self.file_context(uri);
         // A file with only one namespace has nothing to pick between, so
-        // the namespace `file_context` already found stands.
-        if ctx.namespace_spans.is_some() {
-            ctx.namespace = self.namespace_at_offset(uri, byte_offset);
+        // the namespace and imports `file_context` already found stand.
+        if ctx.namespace_spans.is_none() {
+            return ctx;
         }
-        ctx
+        ctx.at(byte_offset)
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers
@@ -256,6 +256,15 @@ impl Backend {
         uri: &str,
         byte_offset: u32,
     ) -> (HashMap<String, String>, Option<String>) {
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+                && let Some(span) = NamespaceSpan::containing(spans, byte_offset)
+            {
+                return (span.use_map.clone(), span.namespace.clone());
+            }
+        }
         let use_map = self
             .file_imports
             .read()
@@ -467,10 +476,5 @@ impl std::ops::Deref for AnalysableContent<'_> {
 /// An offset past every block (code after the last closing brace) belongs
 /// to the last one.
 pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> Option<&str> {
-    for span in spans {
-        if byte_offset >= span.start && byte_offset <= span.end {
-            return span.namespace.as_deref();
-        }
-    }
-    spans.last().and_then(|s| s.namespace.as_deref())
+    NamespaceSpan::containing(spans, byte_offset).and_then(|s| s.namespace.as_deref())
 }

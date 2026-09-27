@@ -86,6 +86,57 @@ struct ClassDocblockInfo {
     doc_members: Option<Arc<DocblockMembers>>,
 }
 
+/// Carry a promoted constructor parameter's inline `@var` over to the
+/// parameter itself, and record the class template params it names as
+/// constructor template bindings.
+///
+/// Only called for a parameter the constructor's docblock has no `@param`
+/// for; a `@param` already did both. Left alone when the constructor
+/// declares templates of its own, whose bindings the class ones would mix
+/// with.
+fn bind_promoted_var_type(
+    var_type: &PhpType,
+    effective: Option<&PhpType>,
+    param_name: &str,
+    class_template_params: &[Atom],
+    parameters: &mut [ParameterInfo],
+    method_template_params: &mut Vec<Atom>,
+    method_template_bindings: &mut Vec<(Atom, Atom)>,
+) {
+    if let Some(param) = parameters.iter_mut().find(|p| p.name == param_name) {
+        param.type_hint = effective.cloned();
+    }
+    if class_template_params.is_empty()
+        || !(method_template_params.is_empty()
+            || method_template_params.as_slice() == class_template_params)
+    {
+        return;
+    }
+    let class_tpl_str: Vec<String> = class_template_params
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
+    let mut bindings = Vec::new();
+    docblock::templates::collect_template_bindings(
+        var_type,
+        &class_tpl_str,
+        param_name,
+        &mut bindings,
+    );
+    if bindings.is_empty() {
+        return;
+    }
+    if method_template_params.is_empty() {
+        *method_template_params = class_template_params.to_vec();
+    }
+    for (tpl, param) in bindings {
+        let binding = (atom(&tpl), atom(&param));
+        if !method_template_bindings.contains(&binding) {
+            method_template_bindings.push(binding);
+        }
+    }
+}
+
 /// Extract all docblock-derived metadata from a class-like AST node.
 ///
 /// Returns [`ClassDocblockInfo::default()`] when no docblock context is
@@ -173,10 +224,16 @@ impl Backend {
     /// as PHPStan/Psalm. This must run before the classes reach
     /// `fqn_class_index`, whose insert is last-wins and would otherwise pick
     /// the wrong (later) branch.
-    pub(crate) fn dedup_class_likes_first_wins(items: &mut Vec<(ClassInfo, Option<String>)>) {
+    pub(crate) fn dedup_class_likes_first_wins<T>(
+        items: &mut Vec<T>,
+        class_and_namespace: impl Fn(&T) -> (&ClassInfo, &Option<String>),
+    ) {
         let mut seen: std::collections::HashSet<(Atom, Option<String>)> =
             std::collections::HashSet::new();
-        items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
+        items.retain(|item| {
+            let (cls, ns) = class_and_namespace(item);
+            seen.insert((cls.name, ns.clone()))
+        });
     }
 
     /// Whether `stmt` may itself declare a class-like, or contain one
@@ -911,9 +968,10 @@ impl Backend {
                         conditional_return,
                         deprecation_message,
                         method_deprecated_replacement,
-                        method_template_params,
+                        mut method_template_params,
                         method_template_param_bounds,
-                        method_template_bindings,
+                        method_template_param_defaults,
+                        mut method_template_bindings,
                     ) = if let Some(ref info) = method_docblock_info {
                         let parsed_doc_type = docblock::extract_return_type_from_info(info);
                         let effective = if return_from_lang_level {
@@ -938,15 +996,17 @@ impl Backend {
 
                         // Extract method-level @template params, their bounds,
                         // and @param bindings for generic type substitution.
-                        let tpl_params_with_bounds =
-                            docblock::extract_template_params_with_bounds_from_info(info);
-                        let tpl_params: Vec<Atom> = tpl_params_with_bounds
+                        let tpl_params_full =
+                            docblock::extract_template_params_full_from_info(info);
+                        let tpl_params: Vec<Atom> =
+                            tpl_params_full.iter().map(|(n, ..)| atom(n)).collect();
+                        let tpl_param_defaults: Box<[(Atom, PhpType)]> = tpl_params_full
                             .iter()
-                            .map(|(n, _)| atom(n))
+                            .filter_map(|(n, _, _, d)| d.clone().map(|d| (atom(n), d)))
                             .collect();
-                        let tpl_param_bounds: AtomMap<PhpType> = tpl_params_with_bounds
+                        let tpl_param_bounds: AtomMap<PhpType> = tpl_params_full
                             .into_iter()
-                            .filter_map(|(n, b)| b.map(|b| (atom(&n), b)))
+                            .filter_map(|(n, b, ..)| b.map(|b| (atom(&n), b)))
                             .collect();
                         let tpl_bindings: Vec<(Atom, Atom)> = if !tpl_params.is_empty() {
                             let tpl_strs: Vec<String> =
@@ -1032,6 +1092,7 @@ impl Backend {
                             depr_info.replacement,
                             tpl_params,
                             tpl_param_bounds,
+                            tpl_param_defaults,
                             tpl_bindings,
                         )
                     } else {
@@ -1056,6 +1117,7 @@ impl Backend {
                             depr_info.replacement,
                             Vec::<Atom>::new(),
                             AtomMap::<PhpType>::default(),
+                            Box::<[(Atom, PhpType)]>::default(),
                             Vec::<(Atom, Atom)>::new(),
                         )
                     };
@@ -1095,10 +1157,34 @@ impl Backend {
                                 });
 
                                 let type_hint = if let Some(ref var_type) = inline_var_type {
-                                    docblock::resolve_effective_type_typed(
+                                    let effective = docblock::resolve_effective_type_typed(
                                         saved_native_hint.as_ref(),
                                         Some(var_type),
-                                    )
+                                    );
+                                    // Without a `@param` of its own, the
+                                    // `@var` is the parameter's documented
+                                    // type too, so it binds class templates
+                                    // from the argument the way `@param T $t`
+                                    // would.
+                                    let has_param_tag =
+                                        method_docblock_info.as_ref().is_some_and(|info| {
+                                            docblock::extract_param_raw_type_from_info(
+                                                info, &raw_name,
+                                            )
+                                            .is_some()
+                                        });
+                                    if !has_param_tag {
+                                        bind_promoted_var_type(
+                                            var_type,
+                                            effective.as_ref(),
+                                            &raw_name,
+                                            class_template_params,
+                                            &mut parameters,
+                                            &mut method_template_params,
+                                            &mut method_template_bindings,
+                                        );
+                                    }
+                                    effective
                                 } else if let Some(ref info) = method_docblock_info {
                                     let parsed =
                                         docblock::extract_param_raw_type_from_info(info, &raw_name);
@@ -1157,14 +1243,23 @@ impl Backend {
                     // the promoted-property logic already used for
                     // constructor parameters.
                     if let Some(ref info) = method_docblock_info {
-                        docblock::merge_param_docblock_into_parameters(info, &mut parameters);
+                        docblock::merge_param_docblock_into_parameters(
+                            info,
+                            &mut parameters,
+                            &method_template_param_bounds,
+                        );
                     }
 
                     // A docblock `@param` merge above may have overwritten
                     // `type_hint` with a non-nullable docblock type. Re-fold
                     // null for parameters whose default value is `null`.
                     for param in &mut parameters {
-                        param.apply_null_default();
+                        param.apply_null_default(|name| {
+                            method_template_params
+                                .iter()
+                                .chain(class_template_params)
+                                .any(|t| t == name)
+                        });
                     }
 
                     let has_scope_attr = has_scope_attribute(method);
@@ -1251,6 +1346,7 @@ impl Backend {
                         template_params: method_template_params,
                         template_param_bounds: method_template_param_bounds,
                         template_bindings: method_template_bindings,
+                        template_param_defaults: method_template_param_defaults,
                         has_scope_attribute: has_scope_attr,
                         is_abstract: method.is_abstract(),
                         is_final,
@@ -1637,6 +1733,18 @@ impl Backend {
                                     .and_then(|p| p.type_hint.clone())
                             }
                         }
+                        // The `[]` a collection starts out as is kept as the
+                        // empty shape until every assignment is in: see below.
+                        Expression::Array(array) => Some(if array.elements.is_empty() {
+                            PhpType::array_shape(Vec::new())
+                        } else {
+                            PhpType::array()
+                        }),
+                        Expression::LegacyArray(array) => Some(if array.elements.is_empty() {
+                            PhpType::array_shape(Vec::new())
+                        } else {
+                            PhpType::array()
+                        }),
                         _ => None,
                     };
 
@@ -1653,6 +1761,18 @@ impl Backend {
                 }
             }
             for (prop_name, mut types) in inferred {
+                // An empty array is a value of every array type, so a typed
+                // array assigned elsewhere already covers the `[]` the
+                // property starts out as.  On its own it stands for any
+                // array, since the property is filled in later.
+                let empty = PhpType::array_shape(Vec::new());
+                if types.contains(&empty) {
+                    let covered = types.iter().any(|t| *t != empty && t.is_array_like());
+                    types.retain(|t| *t != empty);
+                    if !covered {
+                        types.push(PhpType::array());
+                    }
+                }
                 if let Some(prop) = properties.iter_mut().find(|p| {
                     p.name == prop_name && p.type_hint.is_none() && p.native_type_hint.is_none()
                 }) {
@@ -1845,6 +1965,32 @@ class Holder {
         assert_eq!(property_type(&classes, "Holder", "typed"), "User");
         assert_eq!(property_type(&classes, "Holder", "doc"), "Widget");
         assert_eq!(property_type(&classes, "Holder", "joined"), "<none>");
+    }
+
+    /// An array literal makes an untyped property an `array`, and the `[]`
+    /// it starts out as gives way to a typed array assigned elsewhere.
+    #[test]
+    fn untyped_property_infers_array_from_array_literal() {
+        let src = r#"<?php
+class Holder {
+    private $plain;
+    private $filled;
+    private $legacy;
+    public function __construct() {
+        $this->plain = [];
+        $this->filled = [];
+        $this->legacy = array(1, 2);
+    }
+    /** @param list<User> $users */
+    public function setFilled(array $users) {
+        $this->filled = $users;
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        assert_eq!(property_type(&classes, "Holder", "plain"), "array");
+        assert_eq!(property_type(&classes, "Holder", "filled"), "list<User>");
+        assert_eq!(property_type(&classes, "Holder", "legacy"), "array");
     }
 
     /// `$this->prop = new ClassName()` infers in any method, not just the

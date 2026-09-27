@@ -5,7 +5,6 @@
 //! resolution pipeline (the same one hover, completion, and
 //! diagnostics use).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_syntax::cst::expression::Expression;
@@ -79,8 +78,8 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let func_offset = line_start_byte_offset(content, func_line) as u32;
+        let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, func_offset);
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(None, &file_use_map, &file_namespace);
 

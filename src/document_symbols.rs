@@ -717,6 +717,7 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -750,6 +751,7 @@ mod tests {
                     is_variadic: false,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
                 ParameterInfo {
                     name: crate::atom::atom("$items"),
@@ -761,6 +763,7 @@ mod tests {
                     is_variadic: true,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 },
             ]
             .into(),
@@ -778,6 +781,7 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -916,10 +920,12 @@ mod tests {
             template_params: vec![],
             template_param_bounds: Default::default(),
             template_bindings: vec![],
+            template_param_defaults: Default::default(),
             throws: Vec::new(),
             is_polyfill: false,
             overloads: vec![],
             is_pure: false,
+            is_impure: false,
         };
         let detail = build_function_detail(&func);
         assert_eq!(detail, Some("()".to_string()));

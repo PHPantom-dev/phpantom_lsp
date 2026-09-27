@@ -309,6 +309,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
@@ -325,6 +326,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         template_params: Vec::new(),
         template_param_bounds: Default::default(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         has_scope_attribute: false,
         is_abstract: false,
         is_final: false,
@@ -392,6 +394,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             template_params: Vec::new(),
             template_param_bounds: Default::default(),
             template_bindings: Vec::new(),
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,

@@ -1,0 +1,18 @@
+// test: isset() on a non-numeric offset rules out string
+// feature: hover
+// A string's offsets are integers, so `isset($e['message'])` can only
+// succeed on the array half of the union.
+// expect: $e = array{message: string, count?: int}
+// expect_absent: string|
+---
+<?php
+
+/** @param list<string|array{message?: string, count?: int}> $list */
+function f(array $list): void {
+    foreach ($list as $e) {
+        if (!isset($e['message'])) {
+            continue;
+        }
+        echo $<>e;
+    }
+}

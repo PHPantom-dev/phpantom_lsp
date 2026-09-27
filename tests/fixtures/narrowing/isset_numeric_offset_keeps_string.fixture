@@ -1,0 +1,13 @@
+// test: isset() on an integer offset keeps string
+// feature: hover
+// A string has an offset 0 whenever it is not empty.
+// expect: string|
+---
+<?php
+
+/** @param string|array{0?: string} $e */
+function f($e): void {
+    if (isset($e[0])) {
+        echo $<>e;
+    }
+}

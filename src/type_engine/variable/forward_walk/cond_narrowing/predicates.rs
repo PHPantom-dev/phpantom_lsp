@@ -102,6 +102,16 @@ pub(crate) fn extract_null_equality_check_var(expr: &Expression<'_>) -> Option<S
     extract_sentinel_check(expr, Sentinel::Is, is_null_expr)
 }
 
+/// Whether `expr` (under any `!` and parentheses) is a loose `==` / `!=`
+/// comparison rather than a strict one.
+pub(crate) fn is_loose_comparison(expr: &Expression<'_>) -> bool {
+    matches!(
+        narrowing::unwrap_condition_negation(expr).0,
+        Expression::Binary(bin)
+            if matches!(bin.operator, BinaryOperator::Equal(_) | BinaryOperator::NotEqual(_))
+    )
+}
+
 /// Extract the subject of an identity comparison against a class
 /// constant, paired with the constant expression itself.
 ///
@@ -273,7 +283,7 @@ pub(crate) fn extract_literal_identity_check(
 /// A `-1` is a unary minus over a literal rather than a literal of its
 /// own, so the sign is folded back in; anything else that is not written
 /// out as a value in the source has no literal type.
-fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
+pub(super) fn literal_comparand_type(expr: &Expression<'_>) -> Option<PhpType> {
     match expr {
         Expression::Parenthesized(paren) => literal_comparand_type(paren.expression),
         Expression::UnaryPrefix(prefix) => {

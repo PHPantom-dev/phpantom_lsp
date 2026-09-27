@@ -3172,6 +3172,39 @@ async fn test_namespaced_class_references() {
     );
 }
 
+#[tokio::test]
+async fn test_braced_namespace_resolves_receiver_against_its_own_block() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///multi_ns.php").unwrap();
+
+    let text = concat!(
+        "<?php\n",                                    // L0
+        "namespace Other {\n",                        // L1
+        "    class Author {}\n",                      // L2
+        "}\n",                                        // L3
+        "namespace App {\n",                          // L4
+        "    class Author {\n",                       // L5
+        "        public static function make() {}\n", // L6
+        "    }\n",                                    // L7
+        "    function show() {\n",                    // L8
+        "        Author::make();\n",                  // L9
+        "    }\n",                                    // L10
+        "}\n",                                        // L11
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    // `make` at L6 is declared on `App\Author`; the call at L9 sits in the
+    // same `App` block, so it must be found even though `Other\Author` is
+    // declared first in the file.
+    let locs = references_at(&backend, &uri, 6, 31, false).await;
+    assert!(
+        locs.iter().any(|l| l.range.start.line == 9),
+        "Expected a reference at L9 (Author::make() in the `App` namespace), got {:?}",
+        locs
+    );
+}
+
 // ─── Edge Cases ─────────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -4932,5 +4965,107 @@ class Consumer
             .iter()
             .any(|loc| loc.uri == consumer_uri && loc.range.start.line == 10),
         "expected the call on the package implementor, got {results:?}"
+    );
+}
+
+// ─── Find References from an enum case's own declaration ────────────────────
+
+#[test]
+fn enum_case_references_from_the_declaration() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_enum_case_decl.php";
+    let content = r#"<?php
+enum Suit {
+    case Hearts;
+    case Spades;
+}
+function f(Suit $s): int {
+    $a = Suit::Hearts;
+    return match ($s) {
+        Suit::Hearts => 1,
+        Suit::Spades => 2,
+    };
+}
+"#;
+    open_file(&backend, uri, content);
+
+    // Cursor on `Hearts` in `case Hearts;`.
+    let results = backend
+        .find_references(uri, content, Position::new(2, 10), false)
+        .expect("should find references");
+    let mut lines: Vec<u32> = results.iter().map(|l| l.range.start.line).collect();
+    lines.sort_unstable();
+    assert_eq!(
+        lines,
+        vec![6, 8],
+        "both uses of Suit::Hearts, got: {results:#?}"
+    );
+}
+
+// ─── `parent::CONST` resolves to the parent class ───────────────────────────
+
+/// `parent::LIMIT` is matched against the class `parent` resolves to, so it
+/// is found from `Base::LIMIT`, while an unrelated class's `LIMIT` is not.
+/// (A redeclaring child is part of the same member family, as an override
+/// is for a method, so its `self::LIMIT` is found too.)
+#[test]
+fn parent_constant_reference_resolves_to_the_parent_class() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_parent_const.php";
+    let content = r#"<?php
+class Base {
+    const LIMIT = 1;
+}
+class Other {
+    const LIMIT = 3;
+}
+class Child extends Base {
+    public function f(): int {
+        return parent::LIMIT + Other::LIMIT;
+    }
+}
+"#;
+    open_file(&backend, uri, content);
+
+    let base = backend
+        .find_references(uri, content, Position::new(2, 11), false)
+        .expect("should find references");
+    assert_eq!(
+        base.iter()
+            .map(|l| (l.range.start.line, l.range.start.character))
+            .collect::<Vec<_>>(),
+        vec![(9, 23)],
+        "Base::LIMIT is used via parent:: and not via Other::, got: {base:#?}"
+    );
+}
+
+// ─── CRLF line endings and multi-byte characters keep UTF-16 columns ────────
+
+#[test]
+fn references_on_crlf_file_with_multibyte_prefix_use_utf16_columns() {
+    let backend = create_test_backend();
+    let uri = "file:///tmp/test_refs_crlf_utf16.php";
+    let usage_prefix = "$s = '😀é'; $f->";
+    let content = format!(
+        "<?php\r\nclass Foo {{\r\n    public function bar(): void {{}}\r\n}}\r\n$f = new Foo();\r\n{usage_prefix}bar();\r\n"
+    );
+    open_file(&backend, uri, &content);
+
+    let expected_column = usage_prefix.encode_utf16().count() as u32;
+    // Cursor on `bar` in the declaration.
+    let results = backend
+        .find_references(uri, &content, Position::new(2, 21), false)
+        .expect("should find references");
+    assert_eq!(
+        results
+            .iter()
+            .map(|l| (
+                l.range.start.line,
+                l.range.start.character,
+                l.range.end.character
+            ))
+            .collect::<Vec<_>>(),
+        vec![(5, expected_column, expected_column + 3)],
+        "the usage range must be in UTF-16 units on its own line, got: {results:#?}"
     );
 }

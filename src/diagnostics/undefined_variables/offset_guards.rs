@@ -43,12 +43,9 @@ pub(super) fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
         let this_line_start = line_start;
         line_start += line.len() + 1; // +1 for the stripped '\n'
 
-        if !line.contains("@var") {
-            continue;
-        }
-        // Find `@var` and extract the variable name after the type.
-        if let Some(var_pos) = line.find("@var") {
-            let after_var_off = var_pos + 4;
+        // Find the `@var` tag and extract the variable name after the type.
+        if let Some((var_pos, tag_len)) = crate::docblock::find_var_tag(line) {
+            let after_var_off = var_pos + tag_len;
             let after_var = &line[after_var_off..];
             let ws = after_var.len() - after_var.trim_start().len();
             let after_var = after_var.trim_start();

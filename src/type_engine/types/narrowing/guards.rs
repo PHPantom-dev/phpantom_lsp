@@ -6,9 +6,9 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::atom::{atom, bytes_to_str};
+use crate::atom::{Atom, atom, bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::{AssertionKind, ClassInfo, ResolvedType};
+use crate::types::{AssertionKind, ClassInfo, ClassLikeKind, ResolvedType};
 
 use mago_span::{HasSpan, Span};
 use mago_syntax::cst::*;
@@ -27,12 +27,13 @@ use super::*;
 ///   - `class_exists($var)`, `interface_exists($var)`, `enum_exists($var)`,
 ///     `trait_exists($var)` — confirms `$var` names *some* declared
 ///     class-like, narrowing a string to the generic `class-string`
-///     (the target class is not known statically).
+///     (the target class is not known statically), or to
+///     `class-string<UnitEnum>` for `enum_exists()`.
 ///
 /// Returns `Some((target, negated))` where `target` is `Some(name)` for
-/// `is_a()` with a resolvable second argument, or `None` for the generic
-/// `*_exists()` forms.  `negated` is `true` when the guard is wrapped in
-/// `!`.
+/// `is_a()` with a resolvable second argument and for `enum_exists()`, or
+/// `None` for the other `*_exists()` forms.  `negated` is `true` when the
+/// guard is wrapped in `!`.
 pub(in crate::type_engine) fn try_extract_class_string_guard(
     expr: &Expression<'_>,
     var_name: &str,
@@ -74,7 +75,10 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                     if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
                         return None;
                     }
-                    Some((None, false))
+                    // Every enum implements `UnitEnum`, so `enum_exists()`
+                    // knows more than that the name is declared.
+                    let target = (func_name == "enum_exists").then(|| "UnitEnum".to_string());
+                    Some((target, false))
                 }
                 _ => None,
             }
@@ -276,6 +280,9 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// Enclosing class, used for `$this->…`, `self::`, `static::` and
     /// `parent::` receivers and for namespace-relative name resolution.
     pub current_class: &'a ClassInfo,
+    /// The file's classes, so a name resolves to the one its own
+    /// namespace block declares.
+    pub all_classes: &'a [Arc<ClassInfo>],
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
@@ -301,6 +308,7 @@ impl<'a> ExitCtx<'a> {
     ) -> Self {
         Self {
             current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
             class_loader: ctx.class_loader,
             function_loader: ctx.loaders.function_loader,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -410,6 +418,7 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                 Expression::Identifier(ident) => crate::util::resolve_source_class_name(
                     bytes_to_str(ident.value()),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 ),
                 // `never` is the bottom type, so a child override can
@@ -812,6 +821,28 @@ pub(crate) fn narrow_type_by_guard_name(
     (!narrowed.is_empty_sentinel()).then_some(narrowed)
 }
 
+/// Split `ty` by the type-check function `name` (`is_int`, `is_string`, …)
+/// into the values it accepts and whether it can reject any.
+///
+/// A type check decides by type alone, so unlike an arbitrary callback
+/// both halves are known: the accepted part is `None` when no value of
+/// `ty` passes, and the flag is `false` when every value does.  Returns
+/// `None` for a name that is not a type check.
+pub(crate) fn split_type_by_guard_name(
+    name: &str,
+    ty: &PhpType,
+    class_loader: GuardClassLoader<'_>,
+) -> Option<(Option<PhpType>, bool)> {
+    let kind = type_guard_kind_from_name(name)?;
+    let accepted = match filter_type_by_guard(ty, kind, true, class_loader) {
+        None => Some(ty.clone()),
+        Some(filtered) if filtered.is_empty_sentinel() => None,
+        Some(filtered) => Some(filtered),
+    };
+    let may_reject = guard_outcome_possible(ty, kind, false, class_loader);
+    Some((accepted, may_reject))
+}
+
 /// Narrow `ty` to the values of `var_name` that can make `condition`
 /// truthy.
 ///
@@ -1046,12 +1077,34 @@ fn type_matches_guard(
                 || ty.is_subtype_of(&PhpType::float())
                 || ty.is_subtype_of(&PhpType::bool())
         }
-        // `is_resource()` returns false for a closed resource, but a value
-        // declared `closed-resource` is still in the resource domain, so the
-        // subtype check covers both refinements.
         TypeGuardKind::Resource => ty.is_subtype_of(&PhpType::named(atom("resource"))),
         TypeGuardKind::Iterable => type_is_iterable(ty, class_loader),
     }
+}
+
+/// Whether a value of the non-union type `ty` can land in the branch of
+/// a type guard selected by `keep_matching`.
+///
+/// For most guards the answer follows from the type alone, but
+/// `is_resource()` returns false for a closed resource, so a plain
+/// `resource` reaches both branches: only `open-resource` is sure to pass
+/// and only `closed-resource` is sure to fail.
+fn guard_member_survives(
+    ty: &PhpType,
+    kind: TypeGuardKind,
+    keep_matching: bool,
+    class_loader: GuardClassLoader<'_>,
+) -> bool {
+    if kind == TypeGuardKind::Resource && type_matches_guard(ty, kind, class_loader) {
+        return if ty.is_named("open-resource") {
+            keep_matching
+        } else if ty.is_named("closed-resource") {
+            !keep_matching
+        } else {
+            true
+        };
+    }
+    type_matches_guard(ty, kind, class_loader) == keep_matching
 }
 
 /// Whether `foreach` can walk a value of `ty`: an array (in any of its
@@ -1184,6 +1237,13 @@ fn filter_type_by_guard(
     if let Some(expanded) = expand_pseudo_type_for_guard(ty) {
         return filter_type_by_guard(&expanded, kind, keep_matching, class_loader);
     }
+    // `is_array()` and `is_object()` each keep one half of an `iterable`,
+    // so it has to be split before they can drop the other.
+    if matches!(kind, TypeGuardKind::Array | TypeGuardKind::Object)
+        && let Some(split) = ty.split_iterable()
+    {
+        return filter_type_by_guard(&split, kind, keep_matching, class_loader);
+    }
 
     // `is_numeric()` also returns true for numeric strings, not just
     // `int`/`float`.  Narrow string-like members to `numeric-string`
@@ -1194,11 +1254,19 @@ fn filter_type_by_guard(
         return (narrowed != ty.clone()).then_some(narrowed);
     }
 
+    if kind == TypeGuardKind::Callable
+        && keep_matching
+        && let Some(loader) = class_loader
+        && let Some(narrowed) = narrow_classes_to_callable(ty, loader)
+    {
+        return Some(narrowed);
+    }
+
     match ty.kind() {
         TypeKind::Union(members) => {
             let filtered: Vec<PhpType> = members
                 .iter()
-                .filter(|m| type_matches_guard(m, kind, class_loader) == keep_matching)
+                .filter(|m| guard_member_survives(m, kind, keep_matching, class_loader))
                 .cloned()
                 .collect();
             if filtered.len() == members.len() {
@@ -1216,11 +1284,9 @@ fn filter_type_by_guard(
             // `?T` is `T|null`.  For `is_array`, null doesn't match,
             // so we keep only the inner type (if it matches) or only
             // null (if it doesn't).
-            let inner_matches = type_matches_guard(inner, kind, class_loader);
-            let null_matches = type_matches_guard(&PhpType::null(), kind, class_loader);
             match (
-                inner_matches == keep_matching,
-                null_matches == keep_matching,
+                guard_member_survives(inner, kind, keep_matching, class_loader),
+                guard_member_survives(&PhpType::null(), kind, keep_matching, class_loader),
             ) {
                 (true, true) => None, // keep both → no change
                 (true, false) => Some(inner.clone()),
@@ -1243,13 +1309,97 @@ fn filter_type_by_guard(
                 };
             }
             // Non-union type: if it matches the predicate, keep it.
-            if type_matches_guard(ty, kind, class_loader) == keep_matching {
+            if guard_member_survives(ty, kind, keep_matching, class_loader) {
                 None // no change needed
             } else {
                 Some(PhpType::empty_sentinel())
             }
         }
     }
+}
+
+/// What `is_callable()` passing leaves of `ty` when some alternative names
+/// a class, or `None` when none does and the type alone decides.
+///
+/// An instance is callable when its class declares `__invoke`, so such a
+/// class stays as it is.  A class that cannot be extended (final, or an
+/// enum) and declares none drops out.  Any other class or interface may
+/// have a callable subclass, so it survives as that subclass would:
+/// `Route&callable`.
+fn narrow_classes_to_callable(
+    ty: &PhpType,
+    loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    let members: Vec<PhpType> = match ty.kind() {
+        TypeKind::Nullable(inner) => inner.union_members().into_iter().cloned().collect(),
+        _ => ty.union_members().into_iter().cloned().collect(),
+    };
+    let mut names_class = false;
+    let mut kept: Vec<PhpType> = Vec::with_capacity(members.len());
+    for member in members {
+        let class = match member.kind() {
+            TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => loader(name),
+            TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => loader(&g.name),
+            _ => None,
+        };
+        let Some(class) = class else {
+            if member.is_callable() || member.is_mixed() {
+                kept.push(if member.is_mixed() {
+                    PhpType::callable()
+                } else {
+                    member
+                });
+            }
+            continue;
+        };
+        names_class = true;
+        if declares_invoke(&class, loader) {
+            kept.push(member);
+        } else if !class.is_final && class.kind != ClassLikeKind::Enum {
+            kept.push(PhpType::intersection(vec![member, PhpType::callable()]));
+        }
+    }
+    if !names_class {
+        return None;
+    }
+    Some(match kept.len() {
+        0 => PhpType::empty_sentinel(),
+        1 => kept.swap_remove(0),
+        _ => PhpType::union(kept),
+    })
+}
+
+/// Whether `class`, a trait it uses, or an ancestor declares `__invoke`.
+fn declares_invoke(class: &ClassInfo, loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>) -> bool {
+    if class.get_method_ci("__invoke").is_some() {
+        return true;
+    }
+    let mut seen: Vec<Atom> = Vec::new();
+    let mut pending: Vec<Atom> = class
+        .parent_class
+        .iter()
+        .chain(class.used_traits.iter())
+        .copied()
+        .collect();
+    while let Some(name) = pending.pop() {
+        if seen.contains(&name) {
+            continue;
+        }
+        seen.push(name);
+        let Some(cls) = loader(&name) else {
+            continue;
+        };
+        if cls.get_method_ci("__invoke").is_some() {
+            return true;
+        }
+        pending.extend(
+            cls.parent_class
+                .iter()
+                .chain(cls.used_traits.iter())
+                .copied(),
+        );
+    }
+    false
 }
 
 /// Expand compound pseudo-types into unions of their constituent scalar

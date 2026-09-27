@@ -11,8 +11,6 @@
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
 
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
@@ -28,9 +26,8 @@ use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::ClassInfo;
 
-use super::helpers::{collect_type_check, find_innermost_enclosing_class};
+use super::helpers::{TypeCheckCtx, collect_type_check, find_innermost_enclosing_class};
 use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
@@ -60,9 +57,7 @@ struct ResolvedPropertyAssignment {
 struct PropertyCheckCtx<'a> {
     content: &'a str,
     file_ctx: &'a crate::types::FileContext,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
+    type_ctx: &'a TypeCheckCtx<'a>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
 }
@@ -317,6 +312,9 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         _ => return,
     };
 
+    let site = assign.rhs.span().start.offset;
+    let class_loader = ctx.type_ctx.class_loader_at(site);
+
     // Resolve `self`/`static`/`parent`/`$this` in the declared property
     // type, then expand any remaining short class names to their
     // fully-qualified form.
@@ -329,7 +327,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = (ctx.class_loader)(name) {
+            if let Some(cls) = class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -341,9 +339,10 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
-    let owned_loaders = ctx
-        .backend
-        .diagnostic_loaders_over(ctx.function_loader, ctx.constant_loader);
+    let owned_loaders = ctx.backend.diagnostic_loaders_over(
+        ctx.type_ctx.function_loader_at(site),
+        ctx.type_ctx.constant_loader_at(site),
+    );
     let loaders = owned_loaders.loaders();
 
     let var_ctx = VarResolutionCtx {
@@ -356,7 +355,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             &ctx.file_ctx.classes,
             ctx.content,
             rhs_start as u32,
-            ctx.class_loader,
+            class_loader,
         )
     };
 
@@ -375,7 +374,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = (ctx.class_loader)(name) {
+        if let Some(cls) = class_loader(name) {
             cls.fqn().to_string()
         } else {
             name.to_string()
@@ -417,9 +416,7 @@ impl Backend {
                     let mut walk_ctx = PropertyCheckCtx {
                         content,
                         file_ctx: ctx.file_ctx,
-                        class_loader: ctx.class_loader,
-                        function_loader: ctx.function_loader,
-                        constant_loader: ctx.constant_loader,
+                        type_ctx: ctx,
                         backend: self,
                         out: &mut resolved,
                     };
@@ -435,7 +432,7 @@ impl Backend {
                 if is_type_compatible(
                     &assignment.rhs_type,
                     &assignment.declared_type,
-                    &ctx.class_loader,
+                    ctx.class_loader_at(assignment.start as u32),
                     ctx.strict_types,
                 ) {
                     return None;

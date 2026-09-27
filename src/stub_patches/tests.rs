@@ -30,9 +30,11 @@ fn empty_function(name: &str) -> FunctionInfo {
         template_params: Vec::new(),
         template_param_bounds: Default::default(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         is_polyfill: false,
         overloads: Vec::new(),
         is_pure: false,
+        is_impure: false,
     }
 }
 
@@ -98,6 +100,7 @@ fn param(name: &str, type_hint: &str) -> crate::types::ParameterInfo {
         is_variadic: false,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }
 }
 
@@ -137,18 +140,23 @@ fn array_filter_links_callback_to_array_element() {
 
     apply_function_stub_patches(&mut func);
 
-    assert_eq!(func.template_params, vec![atom("TValue")]);
+    assert_eq!(func.template_params, vec![atom("TKey"), atom("TValue")]);
     assert_eq!(
         func.template_bindings,
-        vec![(atom("TValue"), atom("$array"))]
+        vec![
+            (atom("TKey"), atom("$array")),
+            (atom("TValue"), atom("$array"))
+        ]
     );
     assert_eq!(
         func.parameters[0].type_hint,
-        Some(PhpType::parse("array<TValue>"))
+        Some(PhpType::parse("array<TKey, TValue>"))
     );
     assert_eq!(
         func.parameters[1].type_hint,
-        Some(PhpType::parse("callable(TValue): mixed"))
+        Some(PhpType::parse(
+            "(callable(TValue): mixed)|(callable(TKey): mixed)|(callable(TValue, TKey): mixed)"
+        ))
     );
 }
 

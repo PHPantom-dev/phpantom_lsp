@@ -12,12 +12,15 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::{infer_type_from_constant_value, resolve_rhs_expression, resolved_type_with_lookup};
+use super::{
+    ReceiverNullability, apply_nullsafe_short_circuit, resolve_rhs_expression,
+    resolved_type_with_lookup,
+};
 
 /// Resolve property access: `$this->prop`, `$obj->prop`, `$obj?->prop`.
 pub(super) fn resolve_rhs_property_access(
@@ -93,117 +96,141 @@ pub(super) fn resolve_rhs_property_access(
     // ── Class constant / enum case access: `Foo::BAR` ──
     // When the RHS is a class constant access, resolve the class and
     // check whether the constant is an enum case (→ type is the enum
-    // itself) or a typed constant (→ use its type_hint).
+    // itself) or a class constant (→ the type it holds).
     if let Access::ClassConstant(cca) = access {
-        let class_name = crate::class_lookup::class_expression_name(cca.class, ctx.current_class);
-        if let Some(class_name) = class_name {
-            let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::named(atom(resolved_name));
-            let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &resolved_typed,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
+        let const_name = match &cca.constant {
+            ClassLikeConstantSelector::Identifier(ident) => {
+                Some(bytes_to_str(ident.value).to_string())
+            }
+            _ => None,
+        };
+        let is_class_fetch = const_name.as_deref() == Some("class");
 
-            let const_name = match &cca.constant {
-                ClassLikeConstantSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
+        let target_classes = match crate::class_lookup::class_expression_name(
+            cca.class,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.class_loader,
+        ) {
+            Some(class_name) => {
+                let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
+                let resolved_typed = PhpType::named(atom(resolved_name));
+                let target_classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &resolved_typed,
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    );
+
+                // The magic `::class` constant yields the fully-qualified name
+                // of the class as a `class-string<T>`. Resolving it to a plain
+                // `string` would discard the class identity, so downstream
+                // consumers (array element inference, `??` fallbacks, and
+                // `class-string<object>` parameters) keep the concrete class.
+                if is_class_fetch {
+                    // The identifier is spelled as the source writes it, which
+                    // for a name reached through a namespace import
+                    // (`Support\Pen` behind `use App\Support;`) is neither the
+                    // FQCN nor resolvable on its own once the class-string
+                    // leaves this file's context.  Prefer the resolved class.
+                    let name = match target_classes.first() {
+                        Some(cls) => cls.fqn(),
+                        None => atom(resolved_name),
+                    };
+                    // A written name, `self` and `parent` each name one class,
+                    // so the constant is exactly that class's name. `static`
+                    // is whichever subclass the call was made on, and a
+                    // trait's `self` whichever class uses the trait.
+                    let names_one_class = match cca.class {
+                        Expression::Static(_) => false,
+                        Expression::Self_(_) | Expression::Parent(_) => {
+                            ctx.current_class.kind != crate::types::ClassLikeKind::Trait
+                        }
+                        _ => true,
+                    };
+                    let ty = if names_one_class {
+                        PhpType::class_name_literal(name)
+                    } else {
+                        PhpType::class_string(Some(PhpType::named(name)))
+                    };
+                    return vec![ResolvedType::from_type_string(ty)];
                 }
-                _ => None,
+                target_classes
+            }
+            // `$value::class` / `$value::CONST` (PHP 8.0+): the class is
+            // whatever the expression holds.
+            None => {
+                let held = resolve_rhs_expression(cca.class, ctx);
+                if is_class_fetch {
+                    return class_fetch_on_value(&held);
+                }
+                let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+                for rt in &held {
+                    if let Some(cls) = &rt.class_info
+                        && !classes.iter().any(|c| c.fqn() == cls.fqn())
+                    {
+                        classes.push(Arc::clone(cls));
+                    }
+                }
+                if classes.is_empty()
+                    && let Some(name) = super::instantiation::extract_class_string_inner(&held)
+                    && let Some(cls) = class_loader(&name)
+                {
+                    classes.push(cls);
+                }
+                classes
+            }
+        };
+
+        if let Some(const_name) = const_name {
+            // Search local classes first.  If the constant is not
+            // found, resolve via full inheritance merging so that
+            // constants from parent classes are visible (e.g.
+            // `self::PARENT_CONST` in a subclass).
+            let merged_classes: Vec<Arc<ClassInfo>>;
+            let all_candidates: &[Arc<ClassInfo>] = if target_classes
+                .iter()
+                .any(|cls| cls.constants.iter().any(|c| c.name == const_name))
+            {
+                &target_classes
+            } else {
+                merged_classes = target_classes
+                    .iter()
+                    .map(|cls| {
+                        crate::virtual_members::resolve_class_fully_maybe_cached(
+                            cls,
+                            class_loader,
+                            ctx.resolved_class_cache,
+                        )
+                    })
+                    .collect();
+                &merged_classes
             };
 
-            // The magic `::class` constant yields the fully-qualified name
-            // of the class as a `class-string<T>`. Resolving it to a plain
-            // `string` would discard the class identity, so downstream
-            // consumers (array element inference, `??` fallbacks, and
-            // `class-string<object>` parameters) keep the concrete class.
-            if const_name.as_deref() == Some("class") {
-                // The identifier is spelled as the source writes it, which
-                // for a name reached through a namespace import
-                // (`Support\Pen` behind `use App\Support;`) is neither the
-                // FQCN nor resolvable on its own once the class-string
-                // leaves this file's context.  Prefer the resolved class.
-                let named = match target_classes.first() {
-                    Some(cls) => PhpType::named(cls.fqn()),
-                    None => PhpType::named(atom(resolved_name)),
-                };
-                return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
-                    named,
-                )))];
-            }
-
-            if let Some(const_name) = const_name {
-                // Search local classes first.  If the constant is not
-                // found, resolve via full inheritance merging so that
-                // constants from parent classes are visible (e.g.
-                // `self::PARENT_CONST` in a subclass).
-                let merged_classes: Vec<Arc<ClassInfo>>;
-                let all_candidates: &[Arc<ClassInfo>] = if target_classes
-                    .iter()
-                    .any(|cls| cls.constants.iter().any(|c| c.name == const_name))
-                {
-                    &target_classes
-                } else {
-                    merged_classes = target_classes
-                        .iter()
-                        .map(|cls| {
-                            crate::virtual_members::resolve_class_fully_maybe_cached(
-                                cls,
+            for cls in all_candidates {
+                // Check if the constant is an enum case — the
+                // result type is the enum class itself.
+                if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {
+                    if c.is_enum_case {
+                        return ResolvedType::from_classes(target_classes);
+                    }
+                    if let Some(ts) = crate::type_engine::call_resolution::class_constant_type(
+                        cls,
+                        &const_name,
+                        &ctx.as_resolution_ctx(),
+                    ) {
+                        let resolved =
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                &ts,
+                                current_class_name,
+                                all_classes,
                                 class_loader,
-                                ctx.resolved_class_cache,
-                            )
-                        })
-                        .collect();
-                    &merged_classes
-                };
-
-                for cls in all_candidates {
-                    // Check if the constant is an enum case — the
-                    // result type is the enum class itself.
-                    if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {
-                        if c.is_enum_case {
-                            return ResolvedType::from_classes(target_classes);
+                            );
+                        if !resolved.is_empty() {
+                            return ResolvedType::from_classes_with_hint(resolved, ts);
                         }
-                        // Typed class constant — resolve via type_hint.
-                        if let Some(ref th) = c.type_hint {
-                            let resolved =
-                                crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                    th,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                            if !resolved.is_empty() {
-                                return ResolvedType::from_classes_with_hint(resolved, th.clone());
-                            }
-                        }
-                        // No type_hint — infer from the initializer value,
-                        // folding an initialiser that names other constants
-                        // (`const FLAGS = JSON_THROW_ON_ERROR;`) to the value
-                        // it holds.
-                        if let Some(ref val) = c.value
-                            && let Some(ts) = infer_type_from_constant_value(val).or_else(|| {
-                                crate::type_engine::call_resolution::folded_class_constant_type(
-                                    cls,
-                                    &const_name,
-                                    val,
-                                    &ctx.as_resolution_ctx(),
-                                )
-                            })
-                        {
-                            let resolved =
-                                crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                    &ts,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                            if !resolved.is_empty() {
-                                return ResolvedType::from_classes_with_hint(resolved, ts);
-                            }
-                            return vec![ResolvedType::from_type_string(ts)];
-                        }
+                        return vec![ResolvedType::from_type_string(ts)];
                     }
                 }
             }
@@ -213,7 +240,12 @@ pub(super) fn resolve_rhs_property_access(
 
     // ── Static property access: `self::$prop`, `static::$prop`, `Foo::$prop` ──
     if let Access::StaticProperty(spa) = access {
-        let class_name = crate::class_lookup::class_expression_name(spa.class, ctx.current_class);
+        let class_name = crate::class_lookup::class_expression_name(
+            spa.class,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
         let prop_name = match &spa.property {
             Variable::Direct(dv) => {
                 let raw = bytes_to_str(dv.name).to_string();
@@ -232,6 +264,14 @@ pub(super) fn resolve_rhs_property_access(
                 all_classes,
                 class_loader,
             );
+            // `self::`, `static::`, and `parent::` all forward late static
+            // binding, so a property typed `static` stays open; an explicit
+            // `ClassName::` pins the class, collapsing it just like a fixed
+            // method call (see `lsb_class_for_call`).
+            let forwards_lsb = matches!(
+                spa.class,
+                Expression::Self_(_) | Expression::Static(_) | Expression::Parent(_)
+            );
             for cls in &target_classes {
                 let resolved = resolve_property_with_hint(
                     &prop_name,
@@ -241,7 +281,18 @@ pub(super) fn resolve_rhs_property_access(
                     class_loader,
                 );
                 if !resolved.is_empty() {
-                    return resolved;
+                    return if forwards_lsb {
+                        resolved
+                    } else {
+                        resolved
+                            .into_iter()
+                            .map(|mut rt| {
+                                rt.type_string =
+                                    rt.type_string.replace_self_bound(&cls.fqn(), None);
+                                rt
+                            })
+                            .collect()
+                    };
                 }
             }
         }
@@ -263,6 +314,26 @@ pub(super) fn resolve_rhs_property_access(
             _ => None,
         };
         if let Some(prop_name) = prop_name {
+            // ── `Enum::CASE->value` / `Enum::CASE->name` ────────
+            if let Expression::Access(Access::ClassConstant(cca)) = obj
+                && let ClassLikeConstantSelector::Identifier(case) = &cca.constant
+                && let Some(enum_name) = crate::class_lookup::class_expression_name(
+                    cca.class,
+                    ctx.current_class,
+                    ctx.all_classes,
+                    class_loader,
+                )
+                && let Some(enum_cls) = class_loader(&enum_name)
+                && let Some(literal) =
+                    crate::type_engine::call_resolution::enum_case_property_literal(
+                        &enum_cls,
+                        bytes_to_str(case.value),
+                        &prop_name,
+                    )
+            {
+                return vec![ResolvedType::from_type_string(literal)];
+            }
+
             // ── $this->prop assignment narrowing ────────────────
             // When the object is `$this`, check if there is an
             // assignment to `$this->propName` before the cursor in
@@ -363,56 +434,111 @@ pub(super) fn resolve_rhs_property_access(
                 }
             }
 
-            let owner_classes: Vec<Arc<ClassInfo>> =
-                if let Expression::Variable(Variable::Direct(dv)) = obj
-                    && dv.name == b"$this"
-                {
-                    all_classes
-                        .iter()
-                        .find(|c| c.name == current_class_name)
-                        .map(Arc::clone)
+            // Whether late static binding is still open on the receiver, as
+            // for a method call (see `lsb_class_for_call`): `$this`, or a
+            // receiver that is itself a bound `static(X)`, keeps a property
+            // typed `static` open; any other receiver fixes it to the class
+            // it names.
+            let receiver_is_this = matches!(
+                obj,
+                Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
+            );
+            let mut receiver_open = receiver_is_this;
+            let mut nullability = ReceiverNullability::Never;
+            let mut owner_classes_of = |resolved: Vec<ResolvedType>| {
+                if !resolved.is_empty() {
+                    nullability = ReceiverNullability::of(&resolved);
+                }
+                receiver_open |= resolved.iter().any(|rt| {
+                    matches!(
+                        rt.type_string.kind(),
+                        TypeKind::StaticType(_) | TypeKind::ThisType(_)
+                    )
+                });
+                ResolvedType::into_arced_classes(resolved)
+            };
+            let owner_classes: Vec<Arc<ClassInfo>> = if receiver_is_this {
+                let mut owners: Vec<Arc<ClassInfo>> = all_classes
+                    .iter()
+                    .find(|c| c.name == current_class_name)
+                    .map(Arc::clone)
+                    .into_iter()
+                    .collect();
+                // Inside a trait `$this` is also whatever the trait's users
+                // are guaranteed to be, whose properties the trait's code
+                // reads like its own.  A private one stays out of reach:
+                // the trait runs as part of a class that only inherits it.
+                // The walker seeds `$this` with those bounds once per body,
+                // so read them from its scope rather than searching the
+                // trait's users again for every property read.
+                let bounds = if ctx.current_class.kind != crate::types::ClassLikeKind::Trait {
+                    Vec::new()
+                } else if let Some(resolver) = ctx.scope_var_resolver {
+                    let trait_fqn = ctx.current_class.fqn();
+                    ResolvedType::into_arced_classes(resolver("$this"))
                         .into_iter()
+                        .filter(|cls| cls.fqn() != trait_fqn)
                         .collect()
-                } else if let Expression::Variable(Variable::Direct(dv)) = obj {
-                    let var = bytes_to_str(dv.name).to_string();
-                    // Check match-arm narrowing override first.
-                    if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
-                        ResolvedType::into_arced_classes(overridden)
-                    } else {
-                        // When a scope_var_resolver is available (forward-walker
-                        // RHS resolution), try it first so we read from the
-                        // in-progress ScopeState instead of the diagnostic
-                        // scope cache or backward scanner.
-                        let from_scope = if let Some(resolver) = ctx.scope_var_resolver {
-                            let prefixed = if var.starts_with('$') {
-                                var.clone()
-                            } else {
-                                format!("${}", var)
-                            };
-                            resolver(&prefixed)
-                        } else {
-                            vec![]
-                        };
-                        let classes = ResolvedType::into_arced_classes(from_scope);
-                        if !classes.is_empty() {
-                            classes
-                        } else {
-                            ResolvedType::into_arced_classes(
-                                crate::type_engine::resolver::resolve_target_classes(
-                                    &var,
-                                    crate::types::AccessKind::Arrow,
-                                    &ctx.as_resolution_ctx(),
-                                ),
-                            )
-                        }
-                    }
                 } else {
-                    // Handle non-variable object expressions like
-                    // `(new Canvas())->easel`, `getService()->prop`,
-                    // or `SomeClass::make()->prop` by recursively
-                    // resolving the expression type.
-                    ResolvedType::into_arced_classes(resolve_rhs_expression(obj, ctx))
+                    crate::type_engine::trait_context::trait_this_bounds(
+                        ctx.current_class,
+                        all_classes,
+                        class_loader,
+                        ctx.backend,
+                    )
                 };
+                for bound in bounds {
+                    let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                        &bound,
+                        class_loader,
+                        ctx.resolved_class_cache,
+                    );
+                    if merged
+                        .get_property(&prop_name)
+                        .is_some_and(|p| p.visibility != crate::types::Visibility::Private)
+                    {
+                        owners.push(bound);
+                    }
+                }
+                owners
+            } else if let Expression::Variable(Variable::Direct(dv)) = obj {
+                let var = bytes_to_str(dv.name).to_string();
+                // Check match-arm narrowing override first.
+                if let Some(overridden) = ctx.match_arm_narrowing.get(&var).cloned() {
+                    owner_classes_of(overridden)
+                } else {
+                    // When a scope_var_resolver is available (forward-walker
+                    // RHS resolution), try it first so we read from the
+                    // in-progress ScopeState instead of the diagnostic
+                    // scope cache or backward scanner.
+                    let from_scope = if let Some(resolver) = ctx.scope_var_resolver {
+                        let prefixed = if var.starts_with('$') {
+                            var.clone()
+                        } else {
+                            format!("${}", var)
+                        };
+                        resolver(&prefixed)
+                    } else {
+                        vec![]
+                    };
+                    let classes = owner_classes_of(from_scope);
+                    if !classes.is_empty() {
+                        classes
+                    } else {
+                        owner_classes_of(crate::type_engine::resolver::resolve_target_classes(
+                            &var,
+                            crate::types::AccessKind::Arrow,
+                            &ctx.as_resolution_ctx(),
+                        ))
+                    }
+                }
+            } else {
+                // Handle non-variable object expressions like
+                // `(new Canvas())->easel`, `getService()->prop`,
+                // or `SomeClass::make()->prop` by recursively
+                // resolving the expression type.
+                owner_classes_of(resolve_rhs_expression(obj, ctx))
+            };
 
             let mut all_resolved: Vec<ResolvedType> = Vec::new();
             for owner in &owner_classes {
@@ -423,7 +549,24 @@ pub(super) fn resolve_rhs_property_access(
                     all_classes,
                     class_loader,
                 );
-                for rt in resolved {
+                for mut rt in resolved {
+                    // A synthetic owner (`__object_shape`) leaves `self` to
+                    // the caller's context, as `replace_self_in_property_type`
+                    // does.
+                    if !receiver_open && !owner.name.starts_with("__") {
+                        rt.type_string = rt.type_string.replace_self_bound(&owner.fqn(), None);
+                    }
+                    // The receiver's generic arguments may be what finally
+                    // lets an operator in the declaration be read
+                    // (`Data[value-of<T>]` with `T` bound to an enum case).
+                    if let Some(evaluated) =
+                        crate::type_engine::call_resolution::evaluate_constant_operands(
+                            &rt.type_string,
+                            &ctx.as_resolution_ctx(),
+                        )
+                    {
+                        rt.type_string = evaluated;
+                    }
                     if !all_resolved
                         .iter()
                         .any(|existing| existing.type_string == rt.type_string)
@@ -432,12 +575,48 @@ pub(super) fn resolve_rhs_property_access(
                     }
                 }
             }
+            apply_nullsafe_short_circuit(
+                &mut all_resolved,
+                nullability,
+                matches!(access, Access::NullSafeProperty(_)),
+                obj,
+            );
             if !all_resolved.is_empty() {
                 return all_resolved;
             }
         }
     }
     vec![]
+}
+
+/// The type of `$value::class` given the types `$value` holds:
+/// `class-string<T>` for each object type `T`, and a bare `class-string`
+/// for `object` or an object shape, whose class is unknown.
+///
+/// A non-object member (`null`, a scalar) throws at runtime rather than
+/// producing a class name, so it contributes nothing.
+fn class_fetch_on_value(held: &[ResolvedType]) -> Vec<ResolvedType> {
+    let mut members: Vec<PhpType> = Vec::new();
+    for rt in held {
+        for member in rt.type_string.union_members() {
+            let member = member.non_null_type().unwrap_or_else(|| member.clone());
+            if !member.is_object_like() {
+                continue;
+            }
+            let fetched = if member.is_object() || member.is_object_shape() {
+                PhpType::class_string(None)
+            } else {
+                PhpType::class_string(Some(member))
+            };
+            if !members.contains(&fetched) {
+                members.push(fetched);
+            }
+        }
+    }
+    if members.is_empty() {
+        return vec![];
+    }
+    vec![ResolvedType::from_type_string(PhpType::union(members))]
 }
 
 /// Try to resolve `$this->propName` from a prior assignment in the

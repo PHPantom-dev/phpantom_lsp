@@ -15,7 +15,7 @@
 //! Markdown builders.
 
 mod class;
-mod constants;
+pub(crate) mod constants;
 mod formatting;
 mod laravel_trans;
 mod member;
@@ -703,6 +703,20 @@ impl Backend {
                 };
                 ("Config", detail)
             }
+            LaravelStringKind::ConfigResource(resource) => {
+                let descriptor = crate::symbol_map::laravel_resources::descriptor(*resource);
+                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
+                    self, kind, key, uri,
+                );
+                let detail = locations
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || format!("Laravel {}", descriptor.label),
+                        |path| format!("Defined in `{path}`"),
+                    );
+                (descriptor.hover_label, detail)
+            }
             LaravelStringKind::View => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
@@ -971,7 +985,7 @@ impl Backend {
             return None;
         }
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, cursor_offset as u32);
         let call_expr = match &sc.subject {
             Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
             Some(subj) => format!("{}->{}", subj, sc.method_name),

@@ -321,9 +321,8 @@ impl Backend {
         content: &str,
     ) {
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
         for reg in regs.iter_mut() {
             if reg.method.return_type.is_some() || reg.method.native_return_type.is_some() {
                 continue;
@@ -340,15 +339,14 @@ impl Backend {
                 self.infer_mixin_macro_return_type(reg, &def_uri);
                 continue;
             }
+            let class_loader = class_loaders.at(reg.name_offset);
+            let function_loader = function_loaders.at(reg.name_offset);
+            let laravel_macro_this_resolver = self.laravel_macro_this_resolver(class_loader);
             self.infer_macro_return_type(
                 reg,
                 content,
                 &file_ctx,
-                CtxLoaders::new(
-                    &class_loader,
-                    &function_loader,
-                    &laravel_macro_this_resolver,
-                ),
+                CtxLoaders::new(class_loader, function_loader, &laravel_macro_this_resolver),
             );
         }
     }
@@ -368,7 +366,7 @@ impl Backend {
         let Some(content) = self.get_file_content(def_uri) else {
             return;
         };
-        let file_ctx = self.file_context(def_uri);
+        let file_ctx = self.file_context_at(def_uri, reg.name_offset);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);

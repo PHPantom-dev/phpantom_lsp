@@ -52,7 +52,7 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let class_loader = self.class_loader(&ctx.file);
+        let class_loaders = self.class_loaders(&ctx.file);
 
         for span in &symbol_map.spans {
             let class_name = match &span.kind {
@@ -61,10 +61,11 @@ impl Backend {
             };
 
             // Find the matching ClassInfo in the uri_classes_index.
-            let class_info = match ctx.declared_class(class_name) {
+            let class_info = match ctx.declared_class(class_name, span.start) {
                 Some(c) => Arc::clone(c),
                 None => continue,
             };
+            let class_loader = class_loaders.at(span.start);
 
             // Only concrete classes and enums can have implementation errors.
             // Abstract classes, interfaces, and traits are skipped.
@@ -82,7 +83,7 @@ impl Backend {
                 continue;
             }
 
-            let missing = collect_missing_methods(&class_info, &class_loader);
+            let missing = collect_missing_methods(&class_info, class_loader);
 
             if missing.is_empty() {
                 continue;
@@ -107,7 +108,7 @@ impl Backend {
 
             let message = if missing.len() == 1 {
                 let m = &missing[0];
-                let source = method_source_description(&class_info, &m.name, &class_loader);
+                let source = method_source_description(&class_info, &m.name, class_loader);
                 format!(
                     "{} '{}' must implement method '{}()' from {}",
                     kind_label, class_info.name, m.name, source
@@ -116,7 +117,7 @@ impl Backend {
                 let method_list: Vec<String> = missing
                     .iter()
                     .map(|m| {
-                        let source = method_source_description(&class_info, &m.name, &class_loader);
+                        let source = method_source_description(&class_info, &m.name, class_loader);
                         format!("'{}()' from {}", m.name, source)
                     })
                     .collect();

@@ -49,3 +49,28 @@ $codeLensSecondLabel = codeLensFormatLabel('second');
 // A function nothing calls shows "0 references", which is the quickest way
 // to spot dead code in a procedural file.
 function codeLensUnusedHelper(): void {}
+
+
+// ── Code Lens: implementation counts ────────────────────────────────────────
+// Above an interface or abstract class, and above each method it declares,
+// PHPantom shows how many classes implement it. Click the count to list them.
+
+// "2 implementations": CodeLensJsonExporter and CodeLensCsvExporter.
+interface CodeLensExporter
+{
+    // "2 implementations": the method in CodeLensJsonExporter, and the one
+    // CodeLensCsvExporter inherits unchanged from CodeLensTextExporter.
+    public function export(array $rows): string;
+}
+
+final class CodeLensJsonExporter implements CodeLensExporter
+{
+    public function export(array $rows): string { return '[' . implode(',', $rows) . ']'; }
+}
+
+class CodeLensTextExporter
+{
+    public function export(array $rows): string { return implode("\n", $rows); }
+}
+
+final class CodeLensCsvExporter extends CodeLensTextExporter implements CodeLensExporter {}

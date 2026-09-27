@@ -15,10 +15,11 @@ use super::*;
 /// }
 /// ```
 ///
-/// `inverted` selects the polarity the caller establishes, so an
+/// The key may be written as a literal or held in a variable whose type is
+/// one.  `inverted` selects the polarity the caller establishes, so an
 /// `if (!array_key_exists('a', $shape)) { return; }` guard refines its
-/// fall-through.  Only the direction that proves the key *present* adds
-/// information: an absent key is not something the shape can record.
+/// fall-through.  In the direction that proves the key absent, an
+/// optional entry is dropped from the shape.
 pub(crate) fn apply_array_key_exists_narrowing<'b>(
     condition: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -26,16 +27,27 @@ pub(crate) fn apply_array_key_exists_narrowing<'b>(
     inverted: bool,
 ) {
     for operand in collect_and_chain_operands(condition) {
-        let Some((base_key, key_name, negated)) = array_key_exists_target(operand) else {
+        let Some((base_key, key_expr, negated)) = array_key_exists_target(operand) else {
             continue;
         };
-        if negated != inverted {
+        let present = negated == inverted;
+        // A property or static-property subject (`$this->excludePaths`)
+        // is not a tracked local, so its type has to be brought into the
+        // scope before it can be refined.
+        seed_synthetic_key_if_needed(&base_key, scope, ctx);
+        let Some(key_name) = constant_array_key(key_expr, scope) else {
+            // Whatever the key is, an array holding it is not empty: the
+            // `[]` a loop's first pass carries cannot reach this branch,
+            // so a read of the key does not see the `null` it would give.
+            if present {
+                refine_non_empty_in_scope(&base_key, EmptyValue::Array, scope);
+            }
+            continue;
+        };
+        if !present {
+            mark_array_shape_key_absent(&base_key, &key_name, scope);
             continue;
         }
-        // A property or static-property subject (`$this->excludePaths`)
-        // is not a tracked local, so its shape has to be brought into
-        // the scope before it can be refined.
-        seed_synthetic_key_if_needed(&base_key, scope, ctx);
         mark_array_shape_key_present(&base_key, &key_name, scope);
         // Seed the element key after the shape is refined, so an offset
         // read consulting it sees the present-key type rather than the

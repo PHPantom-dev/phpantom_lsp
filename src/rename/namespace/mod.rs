@@ -5,6 +5,7 @@
 //! across every workspace file.  The PSR-4 directory move that goes with
 //! it is planned in [`layout`].
 
+use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 
@@ -349,7 +350,8 @@ impl Backend {
         // The file's own imports and namespace, plus what they will read
         // once the two scans above have rewritten them.  Built on the
         // first class reference so files without one pay nothing.
-        let mut resolution: Option<(FileContext, HashMap<String, String>)> = None;
+        let file_ctx: OnceCell<FileContext> = OnceCell::new();
+        let moved_use_maps = OnceCell::new();
 
         for span in &symbol_map.spans {
             let SymbolKind::ClassReference {
@@ -361,10 +363,9 @@ impl Backend {
                 continue;
             };
 
-            let (ctx, moved_imports) = resolution.get_or_insert_with(|| {
-                let ctx = self.file_context(file_uri);
-                let moved = moved_use_map(&ctx.use_map, old_prefix, new_prefix);
-                (ctx, moved)
+            let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
+            let moved_imports = moved_use_maps.get_or_init(|| {
+                ctx.per_block(|use_map, _| moved_use_map(use_map, old_prefix, new_prefix))
             });
 
             // Which class the reference names, which the recorded name
@@ -418,7 +419,8 @@ impl Backend {
                     .namespace_at(span.start)
                     .as_ref()
                     .map(|ns| moved_name(ns, old_prefix, new_prefix).unwrap_or_else(|| ns.clone()));
-                unrooted_spelling(&new_fqn, moved_imports, &namespace).unwrap_or(rooted)
+                unrooted_spelling(&new_fqn, moved_imports.at(span.start), &namespace)
+                    .unwrap_or(rooted)
             };
 
             // Only emit an edit if the text actually changes.

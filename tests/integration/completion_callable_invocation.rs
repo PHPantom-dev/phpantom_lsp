@@ -311,7 +311,7 @@ async fn test_closure_nullable_return_type() {
         "}\n",
         "class App {\n",
         "    public function run(): void {\n",
-        "        $getter = function(): ?Session { return null; };\n",
+        "        $getter = function(): ?Session { return rand(0, 1) ? new Session() : null; };\n",
         "        $getter()->\n",
         "    }\n",
         "}\n",

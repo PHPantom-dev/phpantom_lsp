@@ -27,9 +27,88 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "SimpleXMLElement" => patch_simple_xml_element(class),
         "ReflectionClass" => patch_reflection_class(class),
         "ReflectionObject" => patch_reflection_object(class),
+        "DOMNamedNodeMap" => patch_dom_named_node_map(class),
+        "DOMNode" => patch_dom_node(class),
+        "DOMElement" => patch_dom_element(class),
         _ => {}
     }
     mark_benevolent_methods(class);
+    mark_impure_methods(class);
+}
+
+/// Built-in methods that change their object's state while returning a
+/// value, so nothing but a tag can say so.  The list is PHPStan's
+/// (`functionMetadata.php`, every class method with `hasSideEffects`).
+///
+/// `SplFileObject::fgets()` returns the line it read, and moves the cursor
+/// that `eof()` reports on; without the tag, a checked `eof()` would stay
+/// proven across the read.
+const IMPURE_BUILTIN_METHODS: &[(&str, &[&str])] = &[
+    (
+        "DateTime",
+        &[
+            "add",
+            "modify",
+            "setDate",
+            "setISODate",
+            "setTime",
+            "setTimestamp",
+            "setTimezone",
+            "sub",
+        ],
+    ),
+    ("SplDoublyLinkedList", &["pop", "shift"]),
+    (
+        "SplFileObject",
+        &[
+            "fflush",
+            "fgetc",
+            "fgetcsv",
+            "fgets",
+            "fgetss",
+            "fpassthru",
+            "fputcsv",
+            "fread",
+            "fscanf",
+            "fseek",
+            "ftruncate",
+            "fwrite",
+        ],
+    ),
+    ("SplFixedArray", &["extract"]),
+    ("SplHeap", &["extract", "insert", "recoverFromCorruption"]),
+    (
+        "SplObjectStorage",
+        &["addAll", "attach", "detach", "removeAll", "removeAllExcept"],
+    ),
+    (
+        "SplPriorityQueue",
+        &["extract", "insert", "recoverFromCorruption"],
+    ),
+    ("SplQueue", &["dequeue"]),
+    ("XMLReader", &["next", "read"]),
+];
+
+/// Tag the class's [`IMPURE_BUILTIN_METHODS`] `@impure`.
+fn mark_impure_methods(class: &mut ClassInfo) {
+    let Some((_, methods)) = IMPURE_BUILTIN_METHODS
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(&class.name))
+    else {
+        return;
+    };
+    for idx in 0..class.methods.len() {
+        let method = &class.methods[idx];
+        if method.is_impure
+            || method.is_pure
+            || !methods.iter().any(|m| m.eq_ignore_ascii_case(&method.name))
+        {
+            continue;
+        }
+        let mut method = (**method).clone();
+        method.is_impure = true;
+        class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+    }
 }
 
 /// A `@phpstan-assert-if-true` promise a third-party class makes in its
@@ -356,6 +435,71 @@ fn patch_array_iterator(class: &mut ClassInfo) {
     }
 }
 
+/// Type `DOMNamedNodeMap::item()` by the map's node type.
+///
+/// The class is `@template-covariant TNode of DOMNode` and its siblings
+/// (`getNamedItem()`, `getNamedItemNS()`, `getIterator()`) hand back
+/// `TNode`, but `item()` is declared `DOMNode|null`, so an element's
+/// `attributes->item(0)` loses the `DOMAttr` every other accessor keeps.
+fn patch_dom_named_node_map(class: &mut ClassInfo) {
+    let Some(idx) = class.methods.iter().position(|m| m.name.as_str() == "item") else {
+        return;
+    };
+    let mut method = (*class.methods[idx]).clone();
+    method.return_type = Some(PhpType::union(vec![
+        PhpType::named(atom("TNode")),
+        PhpType::null(),
+    ]));
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Let `DOMNode::hasAttributes()` prove `$attributes` is not null.
+///
+/// Only an element has an attribute map, so a node that has attributes is
+/// one.  The tag is the equality form (`!=null`) because the promise is
+/// one-way: an element without attributes answers false and still has an
+/// (empty) map, so the false branch must not narrow to `null`.
+fn patch_dom_node(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.eq_ignore_ascii_case("hasAttributes"))
+    else {
+        return;
+    };
+    let mut method = (*class.methods[idx]).clone();
+    method.type_assertions.push(crate::types::TypeAssertion {
+        kind: crate::types::AssertionKind::IfTrue,
+        param_name: "$this->attributes".to_string(),
+        asserted_type: PhpType::null(),
+        negated: true,
+        is_equality: true,
+    });
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Drop the `null` from `DOMElement::$attributes`.
+///
+/// The property is inherited from `DOMNode`, where it is null for every
+/// node that is not an element, and the stub keeps the native
+/// `DOMNamedNodeMap|null` on the element's redeclaration too, so its
+/// `@var DOMNamedNodeMap<DOMAttr>` only refines the non-null half.  An
+/// element always has an attribute map (empty when it has no attributes).
+fn patch_dom_element(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .properties
+        .iter()
+        .position(|p| p.name.as_str() == "attributes")
+    else {
+        return;
+    };
+    let mut property = (*class.properties[idx]).clone();
+    let map = PhpType::generic("DOMNamedNodeMap", vec![PhpType::named(atom("DOMAttr"))]);
+    property.native_type_hint = Some(PhpType::named(atom("DOMNamedNodeMap")));
+    property.type_hint = Some(map);
+    class.properties.make_mut()[idx] = std::sync::Arc::new(property);
+}
+
 /// Give `SimpleXMLElement::asXML()` / `saveXML()` a conditional return type
 /// keyed on `$filename`.
 ///
@@ -382,6 +526,47 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
     }
 }
 
+/// Let `ReflectionClass::isSubclassOf()` narrow the class it reflects.
+///
+/// `$r->isSubclassOf(Picture::class)` holding means `$r` reflects a
+/// `Picture`, so `$r` is a `ReflectionClass<Picture>` in that branch.
+/// PHPStan says so with a type-specifying extension; spelling the same
+/// promise as a method template and an `-if-true` tag lets the ordinary
+/// assertion narrowing carry it.
+fn patch_reflection_is_subclass_of(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.eq_ignore_ascii_case("isSubclassOf"))
+    else {
+        return;
+    };
+    let Some(param) = class.methods[idx].parameters.first().map(|p| p.name) else {
+        return;
+    };
+    if !class.methods[idx].type_assertions.is_empty() {
+        return;
+    }
+    let template = atom("TIsSubclassOf");
+    let mut method = (*class.methods[idx]).clone();
+    method.template_params.push(template);
+    method
+        .template_param_bounds
+        .insert(template, PhpType::object());
+    method.template_bindings.push((template, param));
+    method.type_assertions.push(crate::types::TypeAssertion {
+        kind: crate::types::AssertionKind::IfTrue,
+        param_name: "$this".to_string(),
+        asserted_type: PhpType::generic_atom(
+            atom("ReflectionClass"),
+            vec![PhpType::named(template)],
+        ),
+        negated: false,
+        is_equality: false,
+    });
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
 /// Fix two `ReflectionClass` return types phpstorm-stubs understate.
 ///
 /// `newInstanceArgs()` is declared `@return T|null` (mirroring php-src's
@@ -397,6 +582,8 @@ fn patch_simple_xml_element(class: &mut ClassInfo) {
 /// anything that asks for a `class-string`. PHPStan's stub says
 /// `list<class-string>`.
 fn patch_reflection_class(class: &mut ClassInfo) {
+    patch_reflection_is_subclass_of(class);
+
     if let Some(idx) = class
         .methods
         .iter()

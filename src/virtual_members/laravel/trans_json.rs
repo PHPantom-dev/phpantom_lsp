@@ -90,7 +90,7 @@ pub(crate) fn find_json_trans_references(
     let kind = LaravelStringKind::Trans;
     let snapshot = backend.user_file_symbol_maps_for_reference_keys(&[
         crate::reference_index::ReferenceIndexKey::LaravelString {
-            kind: kind.clone(),
+            kind,
             key: declaration.key.clone(),
         },
     ]);

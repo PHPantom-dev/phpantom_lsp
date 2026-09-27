@@ -40,7 +40,7 @@ impl Backend {
                 ctx,
             )
         {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
                 ctx.all_classes,
@@ -86,7 +86,7 @@ impl Backend {
         if let Some(ty) =
             resolve_request_accessor_at_call(method_name, text_args, &lhs_resolved, ctx)
         {
-            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                 &ty,
                 "",
                 ctx.all_classes,
@@ -191,7 +191,7 @@ impl Backend {
                         Some(&var_resolver),
                         &template_subs,
                         ctx.current_class.map(|c| c.name.as_str()),
-                        merged.fqn().as_str(),
+                        &merged,
                         ctx.class_loader,
                     )
                     .or_else(|| {
@@ -220,6 +220,7 @@ impl Backend {
                                 params: &m.template_params,
                                 bindings: &m.template_bindings,
                                 arg_type_resolver: Some(&arg_ty_resolver),
+                                this_type: None,
                             };
                             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                                 &substituted,
@@ -501,7 +502,7 @@ impl Backend {
             // …): the call's type *is* the element type.
             if let Some(element_type) = array_func_element_type(func_name, &fn_args) {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         &element_type,
                         owner_name,
                         ctx.all_classes,
@@ -530,7 +531,7 @@ impl Backend {
                 let classes: Vec<Arc<ClassInfo>> = raw_type
                     .extract_value_type(true)
                     .map(|element_type| {
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             element_type,
                             owner_name,
                             ctx.all_classes,
@@ -569,6 +570,7 @@ impl Backend {
                             params: &func_info.template_params,
                             bindings: &func_info.template_bindings,
                             arg_type_resolver: Some(&arg_ty_resolver),
+                            this_type: None,
                         };
                         resolve_conditional_with_text_args(
                             cond,
@@ -609,7 +611,7 @@ impl Backend {
                             ctx,
                         );
                     let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &parsed_ty,
                             "",
                             ctx.all_classes,
@@ -665,7 +667,7 @@ impl Backend {
                 {
                     let substituted = ret.substitute(&subs);
                     let classes: Vec<Arc<ClassInfo>> =
-                        crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                             &substituted,
                             "",
                             ctx.all_classes,
@@ -700,7 +702,7 @@ impl Backend {
                 if let Some(ref mut hint_out) = return_type_hint_out {
                     **hint_out = Some(ret.clone());
                 }
-                return crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret,
                     "",
                     ctx.all_classes,
@@ -716,6 +718,7 @@ impl Backend {
     pub(super) fn return_types_of_variable_invocation(
         var_name: &str,
         ctx: &ResolutionCtx<'_>,
+        mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         let content = ctx.content;
         let cursor_offset = ctx.cursor_offset;
@@ -730,7 +733,7 @@ impl Backend {
             && let Some(ret_type) = raw_type.callable_return_type()
         {
             let classes: Vec<Arc<ClassInfo>> =
-                crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                     ret_type,
                     "",
                     ctx.all_classes,
@@ -752,37 +755,39 @@ impl Backend {
             crate::type_engine::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
         for rt in &resolved_var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        ret_type,
-                        "",
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                if !classes.is_empty() {
-                    return classes;
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ret_type.clone());
                 }
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                    ret_type,
+                    "",
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
             }
         }
 
         // 3. Check for __invoke().  When $f holds an object with
         //    an __invoke() method, $f() should return
-        //    __invoke()'s return type.
+        //    __invoke()'s return type.  Set the raw hint even when
+        //    the return type is scalar (e.g. `__invoke(): int`), so
+        //    a caller reading `return_type_hint_out` still sees it —
+        //    `type_hint_to_classes_typed_returned` only has classes
+        //    to hand back.
         let var_classes = ResolvedType::into_arced_classes(resolved_var_types);
         for owner in &var_classes {
             if let Some(invoke) = owner.get_method("__invoke")
                 && let Some(ref ret) = invoke.return_type
             {
-                let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                        ret,
-                        "",
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                if !classes.is_empty() {
-                    return classes;
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ret.clone());
                 }
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                    ret,
+                    "",
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
             }
         }
 
@@ -805,8 +810,13 @@ impl Backend {
         // scope, so a same-namespace class wins over a global stub
         // of the same short name.
         let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-        let fqn = crate::util::resolve_source_class_name(class_name, ns, ctx.class_loader);
-        let cls_arc = find_class_by_name(ctx.all_classes, class_name)
+        let fqn = crate::util::resolve_source_class_name(
+            class_name,
+            ns,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
+        let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &fqn)
             .map(Arc::clone)
             .or_else(|| (ctx.class_loader)(&fqn));
         let cls_arc = match cls_arc {
@@ -827,99 +837,17 @@ impl Backend {
             return vec![cls_arc];
         }
 
-        // Fast path: no template params, no inference needed.
-        if cls_arc.template_params.is_empty() || text_args.is_empty() {
+        if cls_arc.template_params.is_empty() {
             return vec![cls_arc];
         }
 
-        // Find the constructor (on this class or an ancestor).
-        let ancestor_arc;
-        let ctor_inherited;
-        let ctor_ref = if let Some(c) = cls_arc.get_method("__construct") {
-            ctor_inherited = false;
-            Some(c)
-        } else {
-            let found = crate::inheritance::ancestors(&cls_arc, ctx.class_loader)
-                .find(|(_, parent)| parent.get_method("__construct").is_some());
-            match found {
-                Some((_, arc)) => {
-                    ancestor_arc = arc;
-                    ctor_inherited = true;
-                    ancestor_arc.get_method("__construct")
-                }
-                None => {
-                    ctor_inherited = false;
-                    None
-                }
-            }
-        };
-
-        if let Some(ctor) = ctor_ref
-            && !ctor.template_bindings.is_empty()
-        {
-            let arg_texts = crate::type_engine::conditional_resolution::split_text_args(text_args);
-            if !arg_texts.is_empty() {
-                // The finishing half of `build_method_template_subs`
-                // (filling a param nothing bound) is skipped here: it
-                // would fall back to the *constructor's* own
-                // `@template … of …` bound, which a constructor
-                // essentially never repeats — the bound lives on the
-                // class. `cls_arc.template_param_bounds` is used for
-                // that below instead.
-                let subs = Backend::bind_method_template_args(ctor, &arg_texts, ctx);
-
-                // Remap inherited constructor subs to the child's
-                // template param names via the @extends chain.
-                let effective_subs = if ctor_inherited && !subs.is_empty() {
-                    crate::type_engine::variable::rhs_resolution::remap_inherited_ctor_subs(
-                        &cls_arc,
-                        &subs,
-                        ctx.class_loader,
-                    )
-                } else {
-                    subs
-                };
-
-                if !effective_subs.is_empty() {
-                    let type_args: Vec<PhpType> = cls_arc
-                        .template_params
-                        .iter()
-                        .map(|p| {
-                            let p_str: &str = p.as_ref();
-                            effective_subs.get(p_str).cloned().unwrap_or_else(|| {
-                                cls_arc
-                                    .template_param_bounds
-                                    .get(p)
-                                    .cloned()
-                                    .unwrap_or_else(PhpType::mixed)
-                            })
-                        })
-                        .collect();
-                    let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-                        &cls_arc,
-                        ctx.class_loader,
-                        ctx.resolved_class_cache,
-                        &type_args,
-                    );
-                    if let Some(ref mut hint_out) = return_type_hint_out {
-                        **hint_out = Some(PhpType::generic_atom(substituted.fqn(), type_args));
-                    }
-                    return vec![substituted];
-                }
-            }
-        }
-
-        // Fallback: resolve omitted template params to their defaults
-        // and otherwise erase them to their bounds.
-        let type_args = crate::inheritance::default_type_args(&cls_arc);
-        let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-            &cls_arc,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-            &type_args,
-        );
+        // An omitted argument still binds through its parameter's default,
+        // so `new E` and `new E()` go through here too.
+        let arg_texts = split_text_args(text_args);
+        let (generic_type, substituted) =
+            crate::type_engine::call_resolution::instantiate_class(&cls_arc, &arg_texts, ctx);
         if let Some(ref mut hint_out) = return_type_hint_out {
-            **hint_out = Some(PhpType::generic_atom(substituted.fqn(), type_args));
+            **hint_out = Some(generic_type);
         }
         vec![substituted]
     }
@@ -972,7 +900,7 @@ impl Backend {
         for ty in &callable_types {
             if let Some(ret_type) = ty.callable_return_type() {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret_type,
                         "",
                         ctx.all_classes,
@@ -997,7 +925,7 @@ impl Backend {
                 && let Some(ref ret) = invoke.return_type
             {
                 let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
                         ret,
                         "",
                         ctx.all_classes,

@@ -141,12 +141,32 @@ pub(crate) fn resolve_name_via_loader(
 ///
 /// An explicit `use` import still wins: it resolves to a namespaced or
 /// aliased class whose FQN differs from the bare name, which this helper
-/// leaves untouched.
+/// leaves untouched.  The one exception is a class the file itself
+/// declares in `namespace` (`local_classes` is the file's class list):
+/// PHP refuses to compile an import that collides with a class declared
+/// in the same namespace block, so an unqualified name that matches one
+/// always means it.  This is what keeps a file with several `namespace`
+/// blocks from resolving a short name in a later block to the
+/// same-named class of the first, which is the namespace the file-wide
+/// class loader was built for.
 pub(crate) fn resolve_source_class_name(
     name: &str,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
+    if !name.contains('\\')
+        && let Some(local) = local_classes.iter().find(|c| {
+            c.name.eq_ignore_ascii_case(name)
+                && match (c.file_namespace.as_deref(), namespace) {
+                    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+    {
+        return local.fqn().to_string();
+    }
     let resolved = class_loader(name);
     // Only a relative name inside a namespace can be shadowed by a global
     // class of the same path; a leading `\` is an explicit global reference.
@@ -188,7 +208,74 @@ pub(crate) fn resolve_php_type_names(
     ty: &crate::php_type::PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader))
+    let resolved = ty.resolve_names(&|name| resolve_name_via_loader(name, class_loader));
+    fill_generic_type_defaults(&resolved, class_loader)
+}
+
+/// Spell out generic type arguments a declared type left to their
+/// `@template` default.
+///
+/// `@param Test<false> $one` on a class declaring
+/// `@template T1 = true  @template T2 = true` binds only `T1`; member
+/// lookups already see `T2`'s default because [`build_generic_subs`] fills
+/// omitted trailing parameters in, but the annotation's own `PhpType` still
+/// carries just the one argument written. Left alone, hover shows
+/// `Test<false>` and a comparison against the fully spelled `Test<false,
+/// true>` sees two different arities for what should be the same type.
+///
+/// This walks the type and rebuilds every `Generic` node whose argument
+/// count falls short of its class's template parameters, spelling out each
+/// omitted parameter the way [`build_generic_subs`] binds it for member
+/// substitution.
+///
+/// Only a parameter that is actually left to something is filled: one with
+/// a declared default, or a leading key parameter a short list skips
+/// (`Collection<User>` is `Collection<array-key, User>`, `Iterator<Foo>` is
+/// `Iterator<mixed, Foo>`). A trailing parameter with neither is left out,
+/// as PHPStan leaves it, rather than spelled `mixed`: writing
+/// `Iterator<Foo>` out as `Iterator<Foo, mixed>` would move `Foo` into the
+/// key slot for every consumer that reads the arguments positionally.
+///
+/// [`build_generic_subs`]: crate::inheritance::build_generic_subs
+fn fill_generic_type_defaults(
+    ty: &crate::php_type::PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
+) -> crate::php_type::PhpType {
+    use crate::php_type::{PhpType, TypeKind};
+
+    match ty.raw_kind() {
+        TypeKind::Generic(g) => {
+            let args: Vec<PhpType> = g
+                .args
+                .iter()
+                .map(|a| fill_generic_type_defaults(a, class_loader))
+                .collect();
+            let filled_args = class_loader(g.name.as_str()).and_then(|cls| {
+                let written = args.len();
+                let offset = crate::inheritance::generic_arg_offset(&cls, written);
+                let every_omitted_is_left_to_something = cls
+                    .template_params
+                    .iter()
+                    .skip(offset + written)
+                    .all(|param| cls.template_param_defaults.contains_key(param));
+                (cls.template_params.len() > written && every_omitted_is_left_to_something).then(
+                    || {
+                        let subs = crate::inheritance::build_generic_subs(&cls, &args);
+                        cls.template_params
+                            .iter()
+                            .map(|param| {
+                                subs.get(param.as_str())
+                                    .cloned()
+                                    .unwrap_or_else(PhpType::mixed)
+                            })
+                            .collect::<Vec<_>>()
+                    },
+                )
+            });
+            PhpType::generic_atom(g.name, filled_args.unwrap_or(args))
+        }
+        _ => ty.map_children(&|t| fill_generic_type_defaults(t, class_loader)),
+    }
 }
 
 /// [`resolve_php_type_names`] for a type written as source the reader
@@ -212,15 +299,17 @@ pub(crate) fn resolve_php_type_names(
 pub(crate) fn resolve_source_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
-    ty.resolve_names(&|name| {
-        let resolved = resolve_source_class_name(name, namespace, class_loader);
+    let resolved = ty.resolve_names(&|name| {
+        let resolved = resolve_source_class_name(name, namespace, local_classes, class_loader);
         if resolved == name.trim_start_matches('\\') {
             return name.to_string();
         }
         resolved
-    })
+    });
+    fill_generic_type_defaults(&resolved, class_loader)
 }
 
 /// Run `f` inside [`panic::catch_unwind`], logging and swallowing any

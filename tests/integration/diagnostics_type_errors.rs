@@ -1976,6 +1976,23 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_object_literal_satisfying_object_shape_intersected_with_stdclass() {
+    let php = r#"<?php
+/** @param object{foo: int}&\stdClass $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape((object) ['foo' => 1]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A non-empty array cast to object is a stdClass with those keys, so it should satisfy object{{foo: int}}&stdClass, got: {diags:?}"
+    );
+}
+
+#[test]
 fn diagnostic_for_class_with_mistyped_property_against_object_shape() {
     let php = r#"<?php
 final class Mistyped {
@@ -5429,12 +5446,16 @@ function takesNamedBox(NamedBox $box): void {}
 takesNamedBox(new NamedBox(new User()));
 takesNamedBox(new NamedBox(new AnonymousUser()));
 "#;
+    // The constructor call that binds `T` to `AnonymousUser` is reported
+    // too, since the bound is what its argument has to satisfy.
     let diags = collect(php);
     let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
-        msgs.len(),
-        1,
-        "Expected exactly one type error for NamedBox<AnonymousUser>, got: {msgs:?}"
+        msgs,
+        [
+            "Argument 1 ($box) expects NamedBox<User>, got NamedBox<AnonymousUser>",
+            "Argument 1 ($value) expects HasName, got AnonymousUser",
+        ],
     );
 }
 
@@ -9926,6 +9947,173 @@ class Shelter
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+/// A closure parameter that cannot take the value the `callable(...)`
+/// spelling promises to pass fails on the first call.
+#[test]
+fn callable_spec_rejects_a_closure_whose_parameter_cannot_take_the_passed_value() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int): string $callback */
+function takesIntCallback(callable $callback): void {}
+
+takesIntCallback(static fn (string $value): string => $value);
+takesIntCallback(static function (int $key, string $value): string { return $value; });
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 1 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// Parameters are contravariant: a wider, untyped or surplus-ignoring
+/// closure parameter list takes everything the specification passes.
+#[test]
+fn callable_spec_accepts_a_closure_with_wider_or_untyped_parameters() {
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Cat extends Animal {}
+
+/** @param callable(Cat, int): void $callback */
+function takesCatCallback(callable $callback): void {}
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesCatCallback(static fn (Animal $a, int|string $i): null => null);
+takesCatCallback(static fn ($a, $i) => null);
+takesCatCallback(static fn (Cat $c) => null);
+takesCatCallback(static fn (Animal $a, int ...$rest) => null);
+takesCatCallback(strlen(...));
+takesInts(static fn (int ...$is) => null);
+takesInts(static fn (int $a, ?int $b = null) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A variadic specification parameter fills every closure parameter from
+/// its position on, so each of them has to take it.
+#[test]
+fn callable_spec_checks_every_parameter_a_variadic_fills() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesInts(static fn (int $a, string $b) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 2 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// A template in the specification binds from the closure itself, so the
+/// closure's parameter type is the binding rather than a mismatch.
+#[test]
+fn callable_spec_with_a_template_parameter_accepts_any_closure_parameter() {
+    let php = r#"<?php
+namespace App;
+
+/**
+ * @template T
+ * @param callable(T): void $callback
+ * @param T $value
+ */
+function apply(callable $callback, mixed $value): void {}
+
+apply(static fn (string $s) => null, 'a');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A closure parameter's class hint is read against the file's namespace
+/// first, as PHP reads it, so it names the same class the specification
+/// does rather than a global class of the same short name.
+#[test]
+fn callable_spec_resolves_a_closure_parameter_hint_in_the_file_namespace() {
+    let php = r#"<?php
+namespace App;
+
+class Error {}
+
+/**
+ * @param list<Error> $errors
+ * @param callable(Error, Error): int $compare
+ */
+function sortErrors(array $errors, callable $compare): void {}
+
+sortErrors([], static fn (Error $a, Error $b): int => 0);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A call proxied through `@mixin` runs on the mixin object, so a
+/// `Closure(static)` parameter of the mixin's method hands the closure the
+/// mixin class, not the class the call was written on.
+#[test]
+fn callable_spec_binds_static_in_a_mixin_parameter_to_the_mixin() {
+    let php = r#"<?php
+namespace App;
+
+class Builder
+{
+    /**
+     * @param \Closure(static): mixed $column
+     * @return $this
+     */
+    public function where(\Closure $column): static { return $this; }
+}
+
+/** @mixin Builder */
+class Relation
+{
+    public function __call(string $method, array $args): mixed { return null; }
+}
+
+function f(Relation $relation): void {
+    $relation->where(function (Builder $query): void {});
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `array_filter` hands its callback the value, the key, or both depending
+/// on the mode, so a callback that fits any of those forms is accepted and
+/// one that fits none is not.
+#[test]
+fn array_filter_accepts_a_callback_for_whichever_mode_it_takes() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param array<int, string> $lines */
+function f(array $lines): void {
+    array_filter($lines, static fn (string $line): bool => $line !== '');
+    array_filter($lines, static fn (int $number): bool => $number > 3, ARRAY_FILTER_USE_KEY);
+    array_filter($lines, static fn (string $line, int $number): bool => $number > 3, ARRAY_FILTER_USE_BOTH);
+    array_filter($lines, static fn (array $nope): bool => true);
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Closure(array)"), "{messages:?}");
+}
+
 // ─── Required array-shape keys ──────────────────────────────────────────────
 
 /// An array written out at the call site lists every key it has, so a
@@ -12225,4 +12413,485 @@ function g() {
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── Array shapes against typed arrays and other shapes ──────────────
+
+#[test]
+fn a_shape_key_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 'one']);
+f(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn a_list_shape_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list{string} $b */
+function f(array $b): void {}
+f([null]);
+f(['x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_empty_array_is_not_a_non_empty_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param non-empty-list<int> $c */
+function f(array $c): void {}
+/** @param non-empty-array<string, int> $c */
+function g(array $c): void {}
+f([]);
+g([]);
+f([1]);
+g(['a' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_a_string_key_is_not_a_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list<string> $d */
+function f(array $d): void {}
+/** @param array<int, string> $d */
+function g(array $d): void {}
+/** @param array<string, string> $d */
+function h(array $d): void {}
+f(['x', 'k' => 'y']);
+g(['x', 'k' => 'y']);
+h(['x', 'k' => 'y']);
+f(['x', 'y']);
+g([3 => 'x', 'y']);
+h(['k' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_extra_keys_still_satisfies_a_narrower_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 1, 'buz' => 'x']);
+"#;
+    assert!(!has_type_error(&collect(php)));
+}
+
+// ── A subclass binding its parent's template ────────────────────────
+
+#[test]
+fn a_subclass_that_binds_its_parents_template_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ class Box {}
+/** @extends Box<int> */ final class IntBox extends Box {}
+/** @extends Box<string> */ final class StringBox extends Box {}
+/** @param Box<string> $box */ function f(Box $box): void {}
+f(new IntBox());
+f(new StringBox());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_interface_binding_through_implements_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ interface Source {}
+/**
+ * @template T
+ * @extends Source<T>
+ */
+interface Named extends Source {}
+/** @implements Named<int> */ final class IntSource implements Named {}
+/** @param Source<string> $s */ function f(Source $s): void {}
+/** @param Source<int> $s */ function g(Source $s): void {}
+f(new IntSource());
+g(new IntSource());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── A template's bound at the call that binds it ────────────────────
+
+#[test]
+fn an_argument_outside_a_function_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/**
+ * @template T of array
+ * @param T $a
+ */
+function g($a): void {}
+g(1);
+g([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_argument_outside_a_class_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T of array */
+final class Collection {
+    /** @param T $items */
+    public function __construct(public $items) {}
+}
+new Collection(1);
+new Collection([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_enclosing_templates_class_string_satisfies_a_bounded_template() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?Node {
+        return $this->first($type);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn a_bound_check_ignores_templates_another_argument_binds() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {}
+/**
+ * @template TNode of Node
+ * @template TValue
+ */
+interface Collector {}
+final class Emitted {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function __construct(string $type, mixed $data) {}
+}
+final class Scope {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function emit(string $type, mixed $data): void {
+        new Emitted($type, $data);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// The Eloquent builder's `chunk()` hands its callback the collection its
+/// `get()` builds, which is the model's own (custom) collection, even though
+/// the shared `BuildsQueries` trait spells the parameter as the base
+/// `Support\Collection`. A callback typed with the collection it really
+/// receives is fine; one typed with something unrelated is not. A
+/// parameter declared as the base collection still accepts one, since that
+/// is a demand on the caller rather than something Eloquent builds.
+#[test]
+fn eloquent_chunk_callback_receives_the_models_collection() {
+    let php = r#"<?php
+namespace Illuminate\Support {
+    /** @template TKey of array-key @template TValue */
+    class Collection {}
+}
+namespace Illuminate\Database\Concerns {
+    /** @template TValue */
+    trait BuildsQueries {
+        /**
+         * @param  int  $count
+         * @param  callable(\Illuminate\Support\Collection<int, TValue>, int): mixed  $callback
+         * @return bool
+         */
+        public function chunk($count, callable $callback) { return true; }
+    }
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @use \Illuminate\Database\Concerns\BuildsQueries<TModel> */
+        use \Illuminate\Database\Concerns\BuildsQueries;
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
+        public function get() {}
+    }
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends \Illuminate\Support\Collection<TKey, TModel>
+     */
+    class Collection extends \Illuminate\Support\Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+    use Illuminate\Database\Eloquent\Model;
+
+    class Order extends Model {}
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    class Product extends Model {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    function takesProducts(ProductCollection $p): void {}
+
+    class Keeper {
+        /** @param Collection<int, Product> $products */
+        public function keep(Collection $products): void {}
+    }
+
+    /** @param Collection<int, Product> $plain */
+    function f(Collection $plain): void {
+        (new Keeper())->keep($plain);
+        Order::query()->chunk(100, function (Collection $orders): void {});
+        Product::query()->chunk(100, function (ProductCollection $products): void {});
+        Product::query()->chunk(100, function (\Illuminate\Support\Collection $products): void {});
+        Order::query()->chunk(100, function (ProductCollection $wrong): void {});
+        Product::query()->chunk(100, function (Collection $products): void {
+            if (!$products instanceof ProductCollection) {
+                $products = new ProductCollection();
+            }
+            takesProducts($products);
+        });
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("ProductCollection"), "{messages:?}");
+}
+
+/// A parameter merely *declared* as the base `Collection<int, Product>`
+/// might be a plain collection the caller built itself, so it does not
+/// get the custom-collection treatment the way a `get()`/`chunk()` value
+/// Eloquent actually produced does (see
+/// `eloquent_chunk_callback_receives_the_models_collection` above). Once
+/// an `instanceof ProductCollection` check proves it really is the custom
+/// collection, though, narrowing must update the tracked type string
+/// along with the class, or a later argument check still compares
+/// against the pre-narrowing `Collection<int, Product>` and reports a
+/// spurious mismatch.
+#[test]
+fn instanceof_on_a_declared_base_collection_narrows_to_the_custom_collection() {
+    let php = r#"<?php
+namespace Illuminate\Database\Eloquent {
+    /** @template TKey of array-key @template TModel */
+    class Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+
+    class Product {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    function takesProducts(ProductCollection $p): void {}
+
+    /** @param Collection<int, Product> $c */
+    function f(Collection $c): void {
+        if ($c instanceof ProductCollection) {
+            takesProducts($c);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `Event::class` inside `Acme\Model\Events` names the `Event` declared in
+/// that namespace, even when a global class of the same short name is
+/// loaded (the `event` extension's `Event`, say).
+#[test]
+fn class_constant_names_the_same_namespace_class_over_a_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nfinal class Event {}\n");
+    backend.update_ast(
+        "file:///Model.php",
+        "<?php\nnamespace Acme\\Model;\nabstract class Model {}\n",
+    );
+    backend.update_ast(
+        "file:///Event.php",
+        "<?php\nnamespace Acme\\Model\\Events;\nuse Acme\\Model\\Model;\nclass Event extends Model {}\n",
+    );
+    let php = r#"<?php
+namespace Acme\Model\Events;
+
+use Acme\Model\Model;
+
+final class EventSubcategory extends Model
+{
+    /** @param class-string<Model> $related */
+    public function belongsTo(string $related): void {}
+
+    public function takesModel(Model $model): void {}
+
+    public function event(): void
+    {
+        $this->belongsTo(Event::class);
+        $class = Event::class;
+        $this->belongsTo($class);
+        $this->takesModel(new $class());
+    }
+}
+"#;
+    let messages = messages_with_code(
+        &collect_diagnostics_with(&backend, php, Backend::collect_argument_type_diagnostics),
+        "type_mismatch_argument",
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A branch that `!== null` makes impossible, after an `instanceof` chain
+/// has ruled out every class the value could be, holds `never` there, so
+/// nothing used inside it is checked against the `null` already excluded.
+#[test]
+fn no_argument_error_in_branch_a_null_check_makes_impossible() {
+    let php = r#"<?php
+class A {}
+class B {}
+class Item {
+    /** @var A|B|null */
+    public $key;
+}
+function describe(object $o): string { return ''; }
+function f(Item $item, ?A $p): void {
+    if ($item->key instanceof A) {
+        return;
+    } elseif ($item->key instanceof B) {
+        return;
+    } elseif ($item->key !== null) {
+        describe($item->key);
+    }
+    if ($p instanceof A) {
+        return;
+    } elseif ($p !== null) {
+        describe($p);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A loop over an array known to be empty never binds its value variable,
+/// so the body must not see what a same-named variable held before it.
+#[test]
+fn a_loop_over_an_empty_array_does_not_bind_the_outer_value() {
+    let php = r#"<?php
+final class GeneratedConfig { public const EXTENSIONS = []; }
+function maybe(): ?string { return null; }
+function probe(array $lookup): bool {
+    $package = maybe();
+    foreach (array_keys(GeneratedConfig::EXTENSIONS) as $package) {
+        if (array_key_exists($package, $lookup)) {
+            return true;
+        }
+    }
+    return false;
+}
+"#;
+    let slow = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    assert!(!has_type_error(&slow), "slow: {slow:#?}");
+    let diags = collect_with_full_stubs(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+}
+
+/// An override's narrower native return type wins over an interface method
+/// declared `: ?self` that reaches the class through an ancestor: binding
+/// that `self` to the interface must not make the inherited `?Node` look
+/// like a docblock type richer than the override's own `?Owner`.
+#[test]
+fn override_return_type_beats_an_inherited_interface_self() {
+    let php = r#"<?php
+interface Node { public function getParent(): ?self; }
+interface Artifact extends Node {}
+abstract class AbstractArtifact implements Artifact {
+    public function getParent(): ?Node { return null; }
+}
+abstract class AbstractCallable extends AbstractArtifact {}
+class Owner extends AbstractArtifact {}
+class Method extends AbstractCallable {
+    public function getParent(): ?Owner { return null; }
+}
+function takes_owner(Owner $o): void {}
+function probe(Method $m): void {
+    $parent = $m->getParent();
+    if ($parent) {
+        takes_owner($parent);
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
 }

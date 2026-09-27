@@ -152,12 +152,27 @@ pub(super) fn build_builder_forwarded_methods(
             }
 
             // Rewrite the base Eloquent Collection to whichever collection
-            // the model in the (now substituted) return type builds.
+            // the model in the (now substituted) signature builds.  A
+            // `chunk()` callback is handed that collection just as `get()`
+            // returns it.
             if let Some(ref mut ret) = forwarded.return_type
                 && let Some(rewritten) =
                     super::replace_eloquent_collections_in_type(ret, class_loader)
             {
                 *ret = rewritten;
+            }
+            if forwarded.parameters.iter().any(|p| {
+                p.type_hint
+                    .as_ref()
+                    .is_some_and(super::mentions_eloquent_collection)
+            }) {
+                for param in forwarded.parameters.make_mut() {
+                    if let Some(rewritten) = param.type_hint.as_ref().and_then(|hint| {
+                        super::replace_eloquent_collections_in_param_type(hint, class_loader)
+                    }) {
+                        param.type_hint = Some(rewritten);
+                    }
+                }
             }
 
             forwarded

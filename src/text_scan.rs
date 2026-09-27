@@ -313,12 +313,46 @@ fn is_namespace_statement(bytes: &[u8], pos: usize, len: usize) -> bool {
     // statement boundary or the opening tag.  A comment marker (`//`, `#`,
     // `*`) or a quote before the keyword means the match is inside prose or
     // a literal, which this check rejects.
-    let before = &bytes[..pos];
-    let Some(prev) = before.iter().rposition(|b| !b.is_ascii_whitespace()) else {
-        return true;
-    };
-    matches!(before[prev], b';' | b'{' | b'}' | b'>')
-        || (prev >= 4 && before[prev - 4..=prev].eq_ignore_ascii_case(b"<?php"))
+    //
+    // Comments may sit between that boundary and the keyword (a `// Test:`
+    // line above each block, a `/** … */` file header), so when the text
+    // right before the keyword is not a boundary, peel off a trailing
+    // comment and look again.
+    let mut before = &bytes[..pos];
+    loop {
+        let Some(prev) = before.iter().rposition(|b| !b.is_ascii_whitespace()) else {
+            return true;
+        };
+        if matches!(before[prev], b';' | b'{' | b'}' | b'>')
+            || (prev >= 4 && before[prev - 4..=prev].eq_ignore_ascii_case(b"<?php"))
+        {
+            return true;
+        }
+        let code = &before[..=prev];
+        if code.ends_with(b"*/") {
+            match memchr::memmem::rfind(&code[..code.len() - 2], b"/*") {
+                Some(open) => before = &code[..open],
+                None => return false,
+            }
+            continue;
+        }
+        // A line comment runs to the end of the line, so its marker is on
+        // the line the last non-blank byte is on.  Only a newline between
+        // it and the keyword puts the keyword outside the comment.
+        let line_start = code.iter().rposition(|&b| b == b'\n').map_or(0, |n| n + 1);
+        if !bytes[code.len()..pos].contains(&b'\n') {
+            return false;
+        }
+        let line = &code[line_start..];
+        let marker = line
+            .windows(2)
+            .rposition(|w| w == b"//" || (w[0] == b'#' && w[1] != b'['))
+            .or_else(|| (line.last() == Some(&b'#')).then(|| line.len() - 1));
+        match marker {
+            Some(m) => before = &code[..line_start + m],
+            None => return false,
+        }
+    }
 }
 
 /// Read the namespace name that follows the `namespace` keyword ending at
@@ -766,95 +800,6 @@ fn same_line_continuation_prefix(trimmed: &str) -> Option<&str> {
         }
     }
     None
-}
-
-// ─── `use` statement scanning ───────────────────────────────────────────────
-
-/// Call `visit` with the fully-qualified name and local name of every class
-/// `use` item in the file, including the members of a group import.
-pub(crate) fn for_each_class_import(content: &str, visit: &mut dyn FnMut(&str, &str)) {
-    for statement in content.split(';') {
-        let Some(clause) = use_clause(statement) else {
-            continue;
-        };
-        // `use function …` / `use const …` import other symbol tables.
-        let mut words = clause.split_ascii_whitespace();
-        if words.next().is_some_and(|word| {
-            word.eq_ignore_ascii_case("function") || word.eq_ignore_ascii_case("const")
-        }) {
-            continue;
-        }
-
-        match clause.split_once('{') {
-            Some((prefix, items)) => {
-                let Some(items) = items.rsplit_once('}').map(|(items, _)| items) else {
-                    continue;
-                };
-                let prefix = prefix
-                    .trim()
-                    .trim_start_matches('\\')
-                    .trim_end_matches('\\');
-                for item in items.split(',') {
-                    if let Some((name, local)) = use_item(item) {
-                        visit(&format!("{prefix}\\{name}"), local);
-                    }
-                }
-            }
-            None => {
-                for item in clause.split(',') {
-                    if let Some((name, local)) = use_item(item) {
-                        visit(name, local);
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Whether the file imports `fqn` under the local name `local`.
-pub(crate) fn imports_class_as(content: &str, fqn: &str, local: &str) -> bool {
-    let mut imported = false;
-    for_each_class_import(content, &mut |imported_fqn, imported_local| {
-        imported |=
-            imported_local.eq_ignore_ascii_case(local) && imported_fqn.eq_ignore_ascii_case(fqn);
-    });
-    imported
-}
-
-/// The text after the `use` keyword of a statement that opens with one.
-///
-/// Only the line the keyword sits on is examined, so an expression that
-/// happens to precede the statement does not turn into an import.
-fn use_clause(statement: &str) -> Option<&str> {
-    let mut offset = 0usize;
-    for line in statement.split_inclusive('\n') {
-        let trimmed = line.trim_start();
-        if trimmed
-            .get(..4)
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("use "))
-        {
-            let leading = line.len() - trimmed.len();
-            return Some(statement[offset + leading + 4..].trim());
-        }
-        offset += line.len();
-    }
-    None
-}
-
-/// Split one `use` item into its imported name and the local name it binds.
-fn use_item(item: &str) -> Option<(&str, &str)> {
-    let mut words = item.split_whitespace();
-    let name = words.next()?.trim_start_matches('\\');
-    let local = match words.next() {
-        Some(keyword) if keyword.eq_ignore_ascii_case("as") => words.next()?,
-        // Anything else is not an import PHP would accept.
-        Some(_) => return None,
-        None => name.rsplit('\\').next().unwrap_or(name),
-    };
-    if words.next().is_some() || name.is_empty() || local.is_empty() {
-        return None;
-    }
-    Some((name, local))
 }
 
 /// The first line a statement may be inserted on, after the file's

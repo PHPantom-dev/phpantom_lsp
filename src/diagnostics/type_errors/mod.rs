@@ -12,8 +12,11 @@
 pub(super) mod compatibility;
 
 pub(super) use compatibility::is_type_compatible;
-use compatibility::{missing_required_shape_keys, shape_breaks_list_order};
+use compatibility::{
+    first_rejected_callable_param, missing_required_shape_keys, shape_breaks_list_order,
+};
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 
 use mago_span::HasSpan;
@@ -323,9 +326,11 @@ impl Backend {
             return;
         }
 
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader(&file_ctx);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
+        let constant_loaders = file_ctx.per_block(|use_map, namespace| {
+            self.constant_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace)
+        });
         // Read once for the whole file: `config()` clones the config
         // behind a lock, and the flag cannot change mid-pass.
         let downgrade_nullable_mismatch = self
@@ -367,8 +372,11 @@ impl Backend {
                             }
                         };
 
-                    let owned_loaders =
-                        self.diagnostic_loaders_over(&function_loader_cl, &constant_loader_cl);
+                    let class_loader = class_loaders.at(*args_start);
+                    let owned_loaders = self.diagnostic_loaders_over(
+                        function_loaders.at(*args_start),
+                        constant_loaders.at(*args_start),
+                    );
                     let loaders = owned_loaders.loaders();
 
                     let var_ctx = VarResolutionCtx {
@@ -381,7 +389,7 @@ impl Backend {
                             &file_ctx.classes,
                             content,
                             *args_start,
-                            &class_loader,
+                            class_loader,
                         )
                     };
 
@@ -427,7 +435,7 @@ impl Backend {
                             &ty,
                             &current_class_info.fqn(),
                             &file_ctx.classes,
-                            &class_loader,
+                            class_loader,
                         )
                         .unwrap_or(ty);
                         let array_string_literals = extract_array_string_literals(arg_expr);
@@ -463,7 +471,11 @@ impl Backend {
         // the enclosing class at the call site.  Calls through a
         // literal class name (`Foo::bar`) and plain function calls
         // (`array_map`) are safe to cache.
-        let mut call_cache: HashMap<String, Option<ResolvedCallableTarget>> = HashMap::new();
+        // One per `namespace` block: the same text can name a different
+        // target under another block's imports.
+        let call_caches = file_ctx.per_block(|_, _| {
+            RefCell::new(HashMap::<String, Option<ResolvedCallableTarget>>::new())
+        });
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -474,6 +486,7 @@ impl Backend {
             }
 
             let expr = &call_site.call_expression;
+            let class_loader = class_loaders.at(call_site.args_start);
 
             // Look up or populate the call expression cache.
             // Variable-based and `self::`/`static::`/`parent::` calls
@@ -521,7 +534,9 @@ impl Backend {
                     call_args_text,
                 )
             } else {
-                call_cache
+                call_caches
+                    .at(call_site.args_start)
+                    .borrow_mut()
                     .entry(expr.clone())
                     .or_insert_with(|| {
                         self.resolve_callable_target_at_offset(
@@ -604,9 +619,13 @@ impl Backend {
                 // where `ExpectedType` is bound only by `$expected`).
                 // Comparing the argument to its own substitution is
                 // circular and can only produce false positives.
-                if resolved.self_bound_params.contains(&param.name) {
-                    continue;
-                }
+                // Its template's `of` bound is still a constraint, so that is
+                // what the argument is checked against instead.
+                let self_bound_type = match resolved.self_bound_params.get(&param.name) {
+                    Some(None) => continue,
+                    Some(Some(bound)) => Some(bound),
+                    None => None,
+                };
 
                 // An out-parameter's declared type describes what the
                 // callee *writes* through the reference, not what the
@@ -625,7 +644,7 @@ impl Backend {
                 }
 
                 // Skip if parameter has no type hint.
-                let param_type = match &param.type_hint {
+                let param_type = match self_bound_type.or(param.type_hint.as_ref()) {
                     Some(t) if !t.is_untyped() && !t.is_mixed() => t,
                     _ => continue,
                 };
@@ -658,6 +677,35 @@ impl Backend {
                     param_type
                 };
 
+                // A `view-string` parameter demands a name some Blade
+                // template answers to, which the compatibility layer
+                // cannot judge: the project's templates settle it, not
+                // the type. Report the name rather than the type, the
+                // same way a `view('…')` call naming nothing is reported,
+                // and let anything that is not a literal through — a
+                // variable may well hold a real view name.
+                if effective_param_type.is_view_string()
+                    && let TypeKind::Literal(lit) = arg_type.kind()
+                    && let Some(view) = lit.string_content()
+                {
+                    if self.view_string_literal_is_unknown(&view)
+                        && let Some(range) = self.offset_range_to_lsp_range(
+                            uri,
+                            content,
+                            resolved_arg.start,
+                            resolved_arg.end,
+                        )
+                    {
+                        out.push(make_diagnostic(
+                            range,
+                            DiagnosticSeverity::WARNING,
+                            "invalid_laravel_view",
+                            format!("Unknown view: '{view}'"),
+                        ));
+                    }
+                    continue;
+                }
+
                 // The compatibility layer treats an array shape as an open
                 // description — a key it does not mention may still be
                 // there at runtime — which is right for a shape inferred
@@ -683,7 +731,7 @@ impl Backend {
                     && is_type_compatible(
                         arg_type,
                         effective_param_type,
-                        &class_loader,
+                        class_loader,
                         strict_types,
                     )
                 {
@@ -697,7 +745,7 @@ impl Backend {
                     {
                         let resolved = crate::virtual_members::resolve_class_fully_cached(
                             &cls,
-                            &class_loader,
+                            class_loader,
                             &self.resolved_class_cache,
                         );
                         let columns: Vec<String> = resolved
@@ -755,7 +803,7 @@ impl Backend {
                                 return is_type_compatible(
                                     arg_type,
                                     effective_alt,
-                                    &class_loader,
+                                    class_loader,
                                     strict_types,
                                 );
                             }
@@ -797,19 +845,29 @@ impl Backend {
                     effective_param_type.conditionals_as_branch_unions(),
                     arg_type,
                 );
-                // Two callables only ever disagree here on their return
-                // type, and the parameter list printed for the argument is
-                // empty whether or not the closure declares parameters —
-                // say which halves were actually compared so the empty
-                // parentheses don't read as the complaint.
+                // Two signatures printed side by side leave the reader to
+                // diff them by eye, so name the half that disagrees.
                 if let (TypeKind::Callable(arg_sig), TypeKind::Callable(param_sig)) =
                     (arg_type.kind(), effective_param_type.kind())
-                    && let (Some(arg_return), Some(param_return)) =
-                        (&arg_sig.return_type, &param_sig.return_type)
                 {
-                    message.push_str(&format!(
-                        " (return type {arg_return} does not satisfy {param_return})"
-                    ));
+                    if let (Some(arg_return), Some(param_return)) =
+                        (&arg_sig.return_type, &param_sig.return_type)
+                        && !is_type_compatible(arg_return, param_return, class_loader, strict_types)
+                    {
+                        message.push_str(&format!(
+                            " (return type {arg_return} does not satisfy {param_return})"
+                        ));
+                    } else if let Some((pos, passed, accepts)) = first_rejected_callable_param(
+                        arg_sig,
+                        param_sig,
+                        class_loader,
+                        strict_types,
+                    ) {
+                        message.push_str(&format!(
+                            " (parameter {} accepts {accepts}, but is passed {passed})",
+                            pos + 1
+                        ));
+                    }
                 }
                 // "got void" reads as a type the value happens to have
                 // rather than as the absence of one, so say what the call
@@ -849,7 +907,7 @@ impl Backend {
                                 !is_type_compatible(
                                     m,
                                     effective_param_type,
-                                    &class_loader,
+                                    class_loader,
                                     strict_types,
                                 )
                             })
@@ -875,7 +933,7 @@ impl Backend {
                         only_null_unsatisfied = is_type_compatible(
                             inner,
                             effective_param_type,
-                            &class_loader,
+                            class_loader,
                             strict_types,
                         );
                     }

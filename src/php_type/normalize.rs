@@ -33,6 +33,14 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.simplified());
         }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.simplified());
+        }
+        // Rebuilding either marker through `kind()` would keep only the
+        // wider type it reads as.
+        if self.as_unsealed_shape().is_some() || self.as_class_name_literal().is_some() {
+            return self.clone();
+        }
         match self.kind() {
             TypeKind::Union(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
@@ -55,6 +63,8 @@ impl PhpType {
 
                 simplify_bool_union(&mut simplified);
                 absorb_scalar_refinements(&mut simplified);
+                absorb_subsumed_intersections(&mut simplified);
+                absorb_subsumed_shapes(&mut simplified);
 
                 if simplified.len() == 1 {
                     return simplified.into_iter().next().unwrap();
@@ -139,6 +149,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.widen_scalar_literals());
         }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.widen_scalar_literals());
+        }
         match self.kind() {
             TypeKind::Literal(value) => match &**value {
                 LiteralValue::Int(_) => PhpType::int(),
@@ -182,6 +195,9 @@ impl PhpType {
     pub(crate) fn widen_boolean_literals(&self) -> PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.widen_boolean_literals());
+        }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.widen_boolean_literals());
         }
         match self.kind() {
             TypeKind::Named(name)
@@ -380,6 +396,12 @@ impl PhpType {
 ///
 /// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
 pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
+    // `kind()` reads an unsealed shape as the array it widens to, and an
+    // exact class name as the `class-string<T>` it is one of, so either
+    // would take in the wider type it is read as and drop it from a join.
+    if supertype.as_unsealed_shape().is_some() || supertype.as_class_name_literal().is_some() {
+        return subtype == supertype;
+    }
     // `array{}` is the empty array, and every array type that does not
     // demand an entry has it as a member value.  That is real value
     // containment rather than the variance/coercion kind
@@ -403,6 +425,13 @@ pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -
         return members.iter().any(|m| is_runtime_value_subtype(subtype, m));
     }
 
+    if let TypeKind::ArrayShape(entries) = subtype.kind() {
+        return shape_values_contained_in(entries, subtype.is_list_shape(), supertype);
+    }
+    if let (Some(sub), Some(sup)) = (generic_array_parts(subtype), generic_array_parts(supertype)) {
+        return generic_array_contained_in(&sub, &sup);
+    }
+
     if !is_runtime_scalar_value_domain(subtype) || !is_runtime_scalar_value_domain(supertype) {
         return false;
     }
@@ -424,6 +453,154 @@ pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -
         return false;
     }
     subtype.is_subtype_of(supertype)
+}
+
+/// An array type spelled by its key and value types rather than entry by
+/// entry: `array<K, V>`, `list<V>`, `non-empty-array<K, V>`, `V[]`.
+struct GenericArrayParts {
+    list: bool,
+    non_empty: bool,
+    /// `None` when the spelling names no key type (`array<V>`, `V[]`).
+    key: Option<PhpType>,
+    value: PhpType,
+}
+
+fn generic_array_parts(ty: &PhpType) -> Option<GenericArrayParts> {
+    let (name, key, value) = match ty.kind() {
+        TypeKind::Array(value) => ("array", None, value.clone()),
+        TypeKind::Generic(generic) => match generic.args.as_slice() {
+            [value] => (generic.name.as_str(), None, value.clone()),
+            [key, value] => (generic.name.as_str(), Some(key.clone()), value.clone()),
+            _ => return None,
+        },
+        _ => return None,
+    };
+    let (list, non_empty) = match keyword_lowercase(name).as_str() {
+        "array" => (false, false),
+        "non-empty-array" => (false, true),
+        "list" => (true, false),
+        "non-empty-list" => (true, true),
+        _ => return None,
+    };
+    Some(GenericArrayParts {
+        list,
+        non_empty,
+        key,
+        value,
+    })
+}
+
+/// Whether every array `sub` describes is also one `sup` describes: its
+/// keys and values fit, and it promises at least what `sup` promises about
+/// being a list or non-empty.
+fn generic_array_contained_in(sub: &GenericArrayParts, sup: &GenericArrayParts) -> bool {
+    if (sup.list && !sub.list) || (sup.non_empty && !sub.non_empty) {
+        return false;
+    }
+    let keys_fit = match (&sub.key, &sup.key) {
+        (_, None) => true,
+        (_, Some(sup_key)) if sup_key.is_mixed() || sup_key.is_array_key() => true,
+        (None, Some(_)) => false,
+        (Some(sub_key), Some(sup_key)) => {
+            equivalent_for_dedup(sub_key, sup_key) || is_runtime_value_subtype(sub_key, sup_key)
+        }
+    };
+    keys_fit
+        && (sup.value.is_mixed()
+            || equivalent_for_dedup(&sub.value, &sup.value)
+            || is_runtime_value_subtype(&sub.value, &sup.value))
+}
+
+/// Whether every array an `array{…}` shape with `entries` describes is also
+/// one `supertype` describes: a wider shape holding the same keys, or an
+/// array whose key and value types take in every entry.
+///
+/// Entry values are compared with [`is_runtime_value_subtype`] itself, so
+/// the same produced-value rules apply one level down: a shape holding an
+/// `int` is covered by one holding `int|float`, but not by one holding only
+/// `float`.
+fn shape_values_contained_in(entries: &[ShapeEntry], is_list: bool, supertype: &PhpType) -> bool {
+    let value_fits = |value: &PhpType, wider: &PhpType| {
+        wider.is_mixed()
+            || equivalent_for_dedup(value, wider)
+            || is_runtime_value_subtype(value, wider)
+    };
+    let Some(keys) = runtime_shape_keys(entries) else {
+        return false;
+    };
+    if keys.iter().any(|key| key.contains("::")) {
+        return false;
+    }
+
+    if let TypeKind::ArrayShape(wider) = supertype.kind() {
+        if supertype.is_list_shape() && !is_list {
+            return false;
+        }
+        let Some(wider_keys) = runtime_shape_keys(wider) else {
+            return false;
+        };
+        // Every key the shape may hold is one the wider shape allows, with a
+        // value it allows there, and the wider shape demands nothing the
+        // shape may lack.
+        let covered = entries.iter().zip(&keys).all(|(entry, key)| {
+            wider_keys
+                .iter()
+                .position(|wider_key| wider_key == key)
+                .is_some_and(|index| {
+                    (!entry.optional || wider[index].optional)
+                        && value_fits(&entry.value_type, &wider[index].value_type)
+                })
+        });
+        return covered
+            && wider
+                .iter()
+                .zip(&wider_keys)
+                .all(|(entry, key)| entry.optional || keys.contains(key));
+    }
+
+    let parts = match supertype.kind() {
+        TypeKind::Named(name) if matches!(keyword_lowercase(name).as_str(), "array" | "list") => {
+            GenericArrayParts {
+                list: keyword_lowercase(name) == "list",
+                non_empty: false,
+                key: None,
+                value: PhpType::mixed(),
+            }
+        }
+        _ => match generic_array_parts(supertype) {
+            Some(parts) => parts,
+            None => return false,
+        },
+    };
+    let GenericArrayParts {
+        list,
+        non_empty,
+        key: key_type,
+        value: value_type,
+    } = parts;
+    if list && !is_list {
+        return false;
+    }
+    if non_empty && !entries.iter().any(|entry| !entry.optional) {
+        return false;
+    }
+    let key_fits = |key: &str| {
+        match &key_type {
+        None => true,
+        Some(key_type) if key_type.is_mixed() || key_type.is_array_key() => true,
+        Some(key_type) => key_type.union_members().iter().any(|member| {
+            if is_decimal_int_array_key(key) {
+                matches!(member.kind(), TypeKind::Named(n) if matches!(keyword_lowercase(n).as_str(), "int" | "integer"))
+            } else {
+                matches!(member.kind(), TypeKind::Named(n) if keyword_lowercase(n) == "string")
+            }
+        }),
+    }
+    };
+    entries
+        .iter()
+        .zip(&keys)
+        .all(|(entry, key)| key_fits(key) && value_fits(&entry.value_type, &value_type))
 }
 
 /// Whether a type is a scalar runtime value domain whose subtype edges describe
@@ -574,6 +751,26 @@ fn named_value_domain(name: &str) -> Option<ValueDomain> {
 /// overwhelmingly common case of a union that is already distinct. Unions
 /// are small (two or three members in almost every real type), so a
 /// pairwise scan answers the question without touching the allocator.
+/// Drop each `Foo::class` that sits beside the `class-string<Foo>` it is
+/// one of, which already says everything it does.
+///
+/// The two read the same through `kind()`, so without this they would show
+/// as `class-string<Foo>|class-string<Foo>`, and dedup keeping whichever
+/// came first could leave the narrower one standing for both.
+pub(crate) fn absorb_exact_class_names(types: &mut Vec<PhpType>) {
+    if !types.iter().any(|ty| ty.as_class_name_literal().is_some()) {
+        return;
+    }
+    let wider: Vec<*const TypeKind> = types
+        .iter()
+        .filter(|ty| ty.as_class_name_literal().is_none())
+        .map(|ty| std::ptr::from_ref(ty.kind()))
+        .collect();
+    types.retain(|ty| {
+        ty.as_class_name_literal().is_none() || !wider.contains(&std::ptr::from_ref(ty.kind()))
+    });
+}
+
 pub(crate) fn has_duplicate_members(types: &[PhpType]) -> bool {
     types.iter().enumerate().skip(1).any(|(index, ty)| {
         types[..index]
@@ -785,6 +982,12 @@ fn equivalent_for_dedup(left: &PhpType, right: &PhpType) -> bool {
     if left == right {
         return true;
     }
+    if left.as_unsealed_shape().is_some() || right.as_unsealed_shape().is_some() {
+        return false;
+    }
+    if left.as_class_name_literal().is_some() != right.as_class_name_literal().is_some() {
+        return false;
+    }
 
     match (left.kind(), right.kind()) {
         (TypeKind::Named(a), TypeKind::Named(b)) => named_identifiers_equivalent(a, b),
@@ -965,6 +1168,129 @@ fn unrefined_base(ty: &PhpType) -> Option<PhpType> {
             .map(|base| PhpType::generic_atom(atom(base), generic.args.clone())),
         _ => None,
     }
+}
+
+/// Drop a union member that is an intersection wholly subsumed by another
+/// member: `(A&I)|A` → `A`.
+///
+/// An intersection's runtime value is a subset of any single one of its
+/// conjuncts' (`A&I` is-a `A`), so once another member of the union already
+/// names that conjunct, the intersection is a strict narrowing of it and
+/// adds nothing. `PhpType::is_subtype_of` already resolves an intersection
+/// self-type this way (any member suffices), so this only has to route
+/// intersection members through it against their union siblings.
+pub(crate) fn absorb_subsumed_intersections(types: &mut Vec<PhpType>) {
+    if types.len() < 2
+        || !types
+            .iter()
+            .any(|t| matches!(t.kind(), TypeKind::Intersection(_)))
+    {
+        return;
+    }
+
+    let keep: Vec<bool> = types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            if !matches!(ty.kind(), TypeKind::Intersection(_)) {
+                return true;
+            }
+            !types
+                .iter()
+                .enumerate()
+                .any(|(other_index, other)| other_index != index && ty.is_subtype_of(other))
+        })
+        .collect();
+
+    crate::util::retain_by_mask(types, &keep);
+}
+
+/// Drop a union member array shape wholly covered by another shape member:
+/// `array{mixed}|array{0: mixed, 1?: string|null}` → the latter alone,
+/// since every array `array{mixed}` describes (a single entry at key `0`)
+/// is one the wider shape also describes (key `0` required, key `1`
+/// optional).
+///
+/// Unlike [`is_runtime_value_subtype`], which a branch join uses to drop a
+/// value a sibling branch's type already covers, this requires an *exact*
+/// value match at each shared key rather than mere containment. A plain
+/// union is not a branch join: `list{'a', bool}|array{string, bool}` names
+/// two alternatives on purpose (a literal-tuple form and a widened one),
+/// and folding on containment alone would drop the more precise
+/// alternative just because its values happen to be subtypes of the
+/// other's.
+pub(crate) fn absorb_subsumed_shapes(types: &mut Vec<PhpType>) {
+    if types.len() < 2
+        || !types
+            .iter()
+            .any(|t| matches!(t.kind(), TypeKind::ArrayShape(_)))
+    {
+        return;
+    }
+
+    let keep: Vec<bool> = types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            let TypeKind::ArrayShape(entries) = ty.kind() else {
+                return true;
+            };
+            !types.iter().enumerate().any(|(other_index, other)| {
+                other_index != index
+                    && matches!(other.kind(), TypeKind::ArrayShape(_))
+                    && shape_exactly_contained_in(entries, ty.is_list_shape(), other)
+                    && (!shape_exactly_contained_in_reverse(other, ty) || other_index < index)
+            })
+        })
+        .collect();
+
+    crate::util::retain_by_mask(types, &keep);
+}
+
+/// [`shape_exactly_contained_in`] with the arguments the other way round,
+/// for the mutual-containment tie-break in [`absorb_subsumed_shapes`].
+fn shape_exactly_contained_in_reverse(narrower: &PhpType, wider: &PhpType) -> bool {
+    let TypeKind::ArrayShape(entries) = narrower.kind() else {
+        return false;
+    };
+    shape_exactly_contained_in(entries, narrower.is_list_shape(), wider)
+}
+
+/// Whether every array an `array{…}` shape with `entries` describes is also
+/// one `supertype` describes, the same structural check
+/// [`shape_values_contained_in`] makes, but requiring each shared key's
+/// value type to match exactly rather than merely fit by subtype
+/// containment. See [`absorb_subsumed_shapes`] for why the weaker
+/// containment check is wrong for a plain union.
+fn shape_exactly_contained_in(entries: &[ShapeEntry], is_list: bool, supertype: &PhpType) -> bool {
+    let TypeKind::ArrayShape(wider) = supertype.kind() else {
+        return false;
+    };
+    if supertype.is_list_shape() && !is_list {
+        return false;
+    }
+    let Some(keys) = runtime_shape_keys(entries) else {
+        return false;
+    };
+    let Some(wider_keys) = runtime_shape_keys(wider) else {
+        return false;
+    };
+    let value_fits =
+        |value: &PhpType, wider: &PhpType| wider.is_mixed() || equivalent_for_dedup(value, wider);
+    let covered = entries.iter().zip(&keys).all(|(entry, key)| {
+        wider_keys
+            .iter()
+            .position(|wider_key| wider_key == key)
+            .is_some_and(|index| {
+                (!entry.optional || wider[index].optional)
+                    && value_fits(&entry.value_type, &wider[index].value_type)
+            })
+    });
+    covered
+        && wider
+            .iter()
+            .zip(&wider_keys)
+            .all(|(entry, key)| entry.optional || keys.contains(key))
 }
 
 /// Absorb scalar refinements into their parent types.

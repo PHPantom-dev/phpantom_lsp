@@ -54,6 +54,82 @@ pub(super) fn expr_accepts_null(
         .is_none_or(|ty| ty.accepts_null())
 }
 
+/// Narrow a subject compared identical to a comparand whose own resolved
+/// type is a single literal value, the way `$x === 2` written inline
+/// already narrows `$x` via [`apply_literal_identity_narrowing`] — except
+/// here the literal is not written in the condition itself, it is what
+/// the comparand's own type has already been narrowed to:
+///
+/// ```php
+/// $a = 2;
+/// $b = getPositiveInt(); // positive-int
+/// assert($a === $b);
+/// $b; // 2, not just positive-int
+/// ```
+///
+/// A comparand written as a literal is left to
+/// [`apply_literal_identity_narrowing`], which already handles it and
+/// does not need a full type resolution to do so.
+pub(super) fn apply_identity_comparison_literal_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    truthy: bool,
+) {
+    let mut compared: Vec<(&Expression<'_>, &Expression<'_>)> = Vec::new();
+    collect_identity_comparisons(condition, truthy, &mut compared);
+
+    for (subject, comparand) in compared {
+        if literal_comparand_type(comparand).is_some() {
+            continue;
+        }
+        let Some(key) = expr_to_subject(subject) else {
+            continue;
+        };
+        let Some(literal) = single_literal_type(comparand, scope, ctx) else {
+            continue;
+        };
+        seed_synthetic_key_if_needed(&key, scope, ctx);
+        let types = scope.get(&key).to_vec();
+        if types.is_empty() {
+            continue;
+        }
+        let admits = types.iter().any(|rt| {
+            rt.type_string
+                .union_members()
+                .iter()
+                .any(|member| literal.is_subtype_of(member))
+        });
+        if admits {
+            scope.set(&key, vec![ResolvedType::from_type_string(literal)]);
+            write_offset_key_into_shapes(&key, scope);
+        }
+    }
+}
+
+/// The single literal value `expr` resolves to, if its type admits only
+/// one exact value: a literal int/float/string, or `true`/`false`.
+///
+/// A refined type like `positive-int` does not qualify on its own — only
+/// a value narrowed down to one exact literal does, whether that
+/// narrowing came from a literal assignment or from an earlier identity
+/// check.
+fn single_literal_type(
+    expr: &Expression<'_>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let resolved = resolve_rhs_with_scope(expr, scope, ctx);
+    let [rt] = resolved.as_slice() else {
+        return None;
+    };
+    let members = rt.type_string.union_members();
+    let [ty] = members.as_slice() else {
+        return None;
+    };
+    (ty.as_literal().is_some() || ty.is_true() || ty.is_false()).then(|| (*ty).clone())
+}
+
 /// Collect the `(subject, comparand)` pairs of every identity comparison
 /// the condition proves held, in both operand orders.
 ///
@@ -272,6 +348,14 @@ pub(super) fn collect_proven_non_null_exprs<'b>(
             if decomposes {
                 collect_proven_non_null_exprs(bin.lhs, truthy, out);
                 collect_proven_non_null_exprs(bin.rhs, truthy, out);
+                return;
+            }
+
+            // Only an object is an instance of anything.
+            if matches!(bin.operator, BinaryOperator::Instanceof(_)) {
+                if truthy {
+                    out.push(bin.lhs);
+                }
                 return;
             }
 

@@ -475,3 +475,51 @@ async fn test_trait_template_no_bound_no_crash() {
     // Just verify it didn't panic — items may be empty or contain mixed members.
     let _ = items;
 }
+
+// ─── Bounded method template carried by the value ───────────────────────────
+
+/// A value typed by a bounded method template keeps its bound wherever it
+/// travels, so a foreach variable over `iterable<T>` and an element read out
+/// of an inline `@var array<T>` both offer the bound's members.
+#[tokio::test]
+async fn test_bounded_method_template_members_through_iteration_and_var() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///tpl_bound_method_travel.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface Positioned { public function getPosition(): int; }\n",
+        "interface Tagged { public function getTag(): string; }\n",
+        "class Sorter {\n",
+        "    /**\n",
+        "     * @template T of Positioned&Tagged\n",
+        "     * @param iterable<T> $items\n",
+        "     * @return array<T>\n",
+        "     */\n",
+        "    public function sort($items) {\n",
+        "        /** @var array<T> $res */\n",
+        "        $res = [];\n",
+        "        foreach ($items as $item) {\n",
+        "            $item->\n",
+        "            $res[0]->\n",
+        "        }\n",
+        "        return $res;\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Cursor after `$item->` on line 13
+    let names = complete_labels_at(&backend, &uri, text, 13, 19).await;
+    assert!(
+        names.iter().any(|n| n.starts_with("getPosition("))
+            && names.iter().any(|n| n.starts_with("getTag(")),
+        "Should offer both halves of the bound on the foreach variable, got: {names:?}"
+    );
+
+    // Cursor after `$res[0]->` on line 14
+    let names = complete_labels_at(&backend, &uri, text, 14, 21).await;
+    assert!(
+        names.iter().any(|n| n.starts_with("getPosition("))
+            && names.iter().any(|n| n.starts_with("getTag(")),
+        "Should offer both halves of the bound on an `@var array<T>` element, got: {names:?}"
+    );
+}

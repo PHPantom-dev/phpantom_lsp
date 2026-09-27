@@ -32,6 +32,7 @@
 mod classes;
 mod covers;
 mod dispatch;
+mod eloquent;
 mod functions;
 mod member_scope;
 mod members;
@@ -234,9 +235,9 @@ impl Backend {
 pub(super) struct SpanFqnResolver<'a> {
     backend: &'a Backend,
     file_uri: &'a str,
-    /// The file's first namespace, which a name the resolver does not
+    /// The file's namespace blocks, which a name the resolver does not
     /// track is resolved against.
-    pub(super) namespace: Option<String>,
+    spans: Vec<crate::types::NamespaceSpan>,
     resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
     use_map: std::cell::OnceCell<std::collections::HashMap<String, String>>,
 }
@@ -246,10 +247,17 @@ impl<'a> SpanFqnResolver<'a> {
         Self {
             backend,
             file_uri,
-            namespace: backend.first_file_namespace(file_uri),
+            spans: backend.namespace_spans_for_uri(file_uri),
             resolved_names: backend.resolved_names.read().get(file_uri).cloned(),
             use_map: std::cell::OnceCell::new(),
         }
+    }
+
+    /// The namespace in effect at `offset`.
+    pub(super) fn namespace_at(&self, offset: u32) -> &Option<String> {
+        const GLOBAL: &Option<String> = &None;
+        crate::types::NamespaceSpan::containing(&self.spans, offset)
+            .map_or(GLOBAL, |span| &span.namespace)
     }
 
     /// The fully-qualified name the span at `span_start` refers to.
@@ -269,6 +277,12 @@ impl<'a> SpanFqnResolver<'a> {
         {
             return fqn.to_string();
         }
+        // A file with several blocks keeps each block's imports on its span.
+        if self.spans.len() > 1
+            && let Some(span) = crate::types::NamespaceSpan::containing(&self.spans, span_start)
+        {
+            return Backend::resolve_to_fqn(name, &span.use_map, &span.namespace);
+        }
         let use_map = self.use_map.get_or_init(|| {
             self.backend
                 .file_imports
@@ -277,7 +291,7 @@ impl<'a> SpanFqnResolver<'a> {
                 .cloned()
                 .unwrap_or_default()
         });
-        Backend::resolve_to_fqn(name, use_map, &self.namespace)
+        Backend::resolve_to_fqn(name, use_map, self.namespace_at(span_start))
     }
 }
 

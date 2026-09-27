@@ -140,7 +140,7 @@ impl Backend {
         let access_hint = mctx.access_hint;
         // 2. Gather context needed for class resolution.
         let cursor_offset = position_to_offset(content, position);
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, cursor_offset);
 
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset).cloned();
 

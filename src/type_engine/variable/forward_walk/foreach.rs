@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 use crate::type_engine::variable::foreach_resolution::{
     is_unsubstituted_template_param, resolve_iterable_element_via_class,
@@ -229,10 +229,13 @@ pub(crate) fn iterable_ctx<'a>(
 /// Clearing the entry first also drops the synthetic `$step['fo']` keys
 /// and the proofs recorded against them, which the rebinding invalidates
 /// whether or not a type replaces them.
+///
+/// Without a `pre_loop_scope` the target is left unbound, which is what a
+/// loop over an array known to be empty gives it: no entry ever reaches it.
 pub(crate) fn reset_foreach_target(
     expr: &Expression<'_>,
     scope: &mut ScopeState,
-    pre_loop_scope: &ScopeState,
+    pre_loop_scope: Option<&ScopeState>,
 ) {
     let inner = if let Expression::UnaryPrefix(up) = expr
         && matches!(up.operator, UnaryPrefixOperator::Reference(_))
@@ -246,7 +249,9 @@ pub(crate) fn reset_foreach_target(
             let var_name = bytes_to_str(dv.name);
             scope.remove(var_name);
             scope.invalidate_dependent_keys(var_name);
-            if pre_loop_scope.contains(var_name) {
+            if let Some(pre_loop_scope) = pre_loop_scope
+                && pre_loop_scope.contains(var_name)
+            {
                 let before = pre_loop_scope.get(var_name);
                 if before.is_empty() {
                     scope.set_empty(var_name);
@@ -274,7 +279,7 @@ pub(crate) fn reset_foreach_target(
 fn reset_foreach_destructured_element(
     elem: &ArrayElement<'_>,
     scope: &mut ScopeState,
-    pre_loop_scope: &ScopeState,
+    pre_loop_scope: Option<&ScopeState>,
 ) {
     match elem {
         ArrayElement::KeyValue(kv) => reset_foreach_target(kv.value, scope, pre_loop_scope),
@@ -393,11 +398,13 @@ pub(crate) fn process_foreach<'b>(
     };
     let cursor_in_body =
         ctx.cursor_offset >= body_span.start.offset && ctx.cursor_offset <= body_span.end.offset;
-    let discovery_ctx = if cursor_in_body && !is_diagnostic_scope_active() {
+    let discovery_ctx = (if cursor_in_body && !is_diagnostic_scope_active() {
         ctx.with_cursor_offset(u32::MAX)
     } else {
         ctx.with_cursor_offset(ctx.cursor_offset)
-    };
+    })
+    .with_in_loop(true);
+    let loop_body_ctx = ctx.with_in_loop(true);
 
     // Bind the value variable (and optionally the key variable).
     match &foreach.target {
@@ -462,6 +469,10 @@ pub(crate) fn process_foreach<'b>(
     {
         scope.set(kn, resolved.clone());
     }
+    if value_docblock_override.is_none() {
+        record_key_value_pairing(foreach, iter_type.as_ref(), scope, ctx);
+    }
+    record_existing_keys(foreach, scope);
     // When the iterable is a bare `array` (no generic parameters)
     // and no @var docblock provided a concrete type, the element
     // type is `mixed`.  Seed it so that assignments from the loop
@@ -494,6 +505,38 @@ pub(crate) fn process_foreach<'b>(
     let assignment_depth =
         clamp_iterations_for_depth(assignment_map_depth(&body_stmts), loop_depth);
 
+    // A loop that walks an array's own keys and unconditionally writes the
+    // entry at each key it visits (`foreach ($pairs as $cn => $_)` /
+    // `foreach (array_keys($pairs) as $cn)` with `$pairs[$cn][...] = …` in
+    // the body) rewrites every entry the array has, whether it has one or
+    // a thousand.  An empty array has no entries to leave behind, so the
+    // claim holds vacuously when the loop does not run at all — see
+    // `own_key_write_element` below for where this is applied.
+    let own_key_write_target = foreach_own_keys(foreach)
+        .filter(|(array_var, key_var)| body_writes_own_key(&body_stmts, array_var, key_var));
+
+    // A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike
+    // `own_key_write_target`'s self-mutating `$pairs[$cn] = …`) that runs on
+    // every path through the body describes that array's element at
+    // whatever key the loop is currently visiting — a fact that stays true
+    // regardless of which concrete key that is, and so survives the key
+    // variable's rebind between fixed-point passes. Without this, the
+    // rebind's blanket invalidation of synthetic keys reading the old key
+    // (`reset_foreach_target`) drops it, and the next pass falls back to
+    // the array's own general element type, which a loop write always
+    // widens scalar literals in (see `array_shape_writes::merge_nested_array_write_inner`).
+    let carried_key_writes: Vec<String> = if let ForeachTarget::KeyValue(kv) = &foreach.target
+        && let Expression::Variable(Variable::Direct(dv)) = kv.key
+    {
+        let key_var = bytes_to_str(dv.name);
+        always_written_array_vars(&body_stmts, key_var)
+            .into_iter()
+            .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // A `foreach` over an array the engine watched being built and knows
     // is still empty runs zero times, so it cannot change any type.  The
     // body is still walked so that a cursor or diagnostic inside it is
@@ -504,14 +547,28 @@ pub(crate) fn process_foreach<'b>(
     // accumulator before anything has been written to it, and the
     // unresolved element types that walk produces would be unioned into
     // the accumulator for good, so the element type never converges.
+    //
+    // No entry is ever bound to the targets either, so the body does not
+    // see whatever an outer variable of the same name held before the loop.
     if iter_type
         .as_ref()
         .is_some_and(|it| it.is_empty_array_shape())
     {
+        match &foreach.target {
+            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, None),
+            ForeachTarget::KeyValue(kv) => {
+                reset_foreach_target(kv.key, scope, None);
+                reset_foreach_target(kv.value, scope, None);
+            }
+        }
         let exit_frame = ExitFrameGuard::push();
-        walk_body_forward(body_stmts.iter().copied(), scope, ctx);
+        walk_body_forward(body_stmts.iter().copied(), scope, &loop_body_ctx);
         exit_frame.pop();
-        *scope = pre_loop_scope;
+        // A cursor inside the body is answered by the walk that stopped at
+        // it, as for any other loop below.
+        if !(cursor_in_body && !is_diagnostic_scope_active()) {
+            *scope = pre_loop_scope;
+        }
         return;
     }
 
@@ -523,23 +580,30 @@ pub(crate) fn process_foreach<'b>(
             pre_loop_scope: &pre_loop_scope,
             assignment_depth,
             fold_exit_edges: !cursor_in_body,
-            ctx,
+            ctx: &loop_body_ctx,
             discovery_ctx: &discovery_ctx,
         },
         |next_scope, point| {
             if point != LoopSeedPoint::Entry {
                 return;
             }
+            let carried: Vec<(&str, Vec<ResolvedType>)> = carried_key_writes
+                .iter()
+                .filter_map(|key| {
+                    let types = next_scope.get(key);
+                    (!types.is_empty()).then(|| (key.as_str(), types.to_vec()))
+                })
+                .collect();
             // Re-bind the foreach variables for the next iteration,
             // discarding what the previous one wrote to them.
             match &foreach.target {
                 ForeachTarget::Value(val) => {
-                    reset_foreach_target(val.value, next_scope, &pre_loop_scope);
+                    reset_foreach_target(val.value, next_scope, Some(&pre_loop_scope));
                     bind_foreach_value(val.value, &iter_type, next_scope, ctx);
                 }
                 ForeachTarget::KeyValue(kv) => {
-                    reset_foreach_target(kv.key, next_scope, &pre_loop_scope);
-                    reset_foreach_target(kv.value, next_scope, &pre_loop_scope);
+                    reset_foreach_target(kv.key, next_scope, Some(&pre_loop_scope));
+                    reset_foreach_target(kv.value, next_scope, Some(&pre_loop_scope));
                     bind_foreach_key(kv.key, &iter_type, next_scope, ctx);
                     bind_foreach_value(kv.value, &iter_type, next_scope, ctx);
                 }
@@ -555,10 +619,56 @@ pub(crate) fn process_foreach<'b>(
             {
                 next_scope.set(kn, resolved.clone());
             }
+            if value_docblock_override.is_none() {
+                record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
+            }
+            record_existing_keys(foreach, next_scope);
+            for (key, types) in carried {
+                if !next_scope.contains(key) {
+                    next_scope.set(key, types);
+                }
+            }
         },
     );
 
     let exits = exit_frame.pop();
+
+    // A cursor inside the body is answered by the walk that stopped at it.
+    // Everything below describes the state after the loop, and merging in
+    // the pre-loop scope (the loop might not run) would bring back what an
+    // enclosing loop's earlier pass left in a variable the body has since
+    // reassigned above the cursor.
+    if cursor_in_body && !is_diagnostic_scope_active() {
+        return;
+    }
+
+    // Snapshot the array's freshly-written type here, while `scope` still
+    // holds the raw post-body state: it is what every entry looks like
+    // after the write the loop applies to the key it is visiting. A
+    // `break` leaves some entries unvisited (and so unwritten), so the
+    // rewrite-every-entry claim only holds when the loop always runs to
+    // its own end, and while the key the body wrote through is still the
+    // one the loop bound: a body that reassigned it wrote somewhere else.
+    let own_key_write_element = own_key_write_target
+        .as_ref()
+        .filter(|(array_var, key_var)| {
+            exits.breaks.is_empty()
+                && !scope.unreachable
+                && scope.is_existing_key(array_var, key_var)
+        })
+        .and_then(|(array_var, _)| {
+            let written = scope.get(array_var);
+            (!written.is_empty()).then(|| (array_var.clone(), written.to_vec()))
+        });
+
+    let written_element = if cursor_in_body {
+        None
+    } else {
+        by_ref_written_element(foreach, entry_value_types.as_deref(), scope, &exits.breaks)
+    };
+    let iterated_before = written_element
+        .as_ref()
+        .map(|(name, _)| pre_loop_scope.get(name).to_vec());
 
     // An iterable that proves it has entries — a non-empty array literal,
     // or a type refined to `non-empty-array`/`non-empty-list`/a required
@@ -574,7 +684,16 @@ pub(crate) fn process_foreach<'b>(
                 .as_ref()
                 .is_some_and(PhpType::is_provably_non_empty));
 
-    if !body_always_runs {
+    // A loop that started out unreachable (the branch it lives in was
+    // already proven impossible) has no live "might not run" alternative
+    // to protect: `pre_loop_scope` is exactly as dead as what the body
+    // produced, so merging the two is not a real join, just
+    // `merge_branch`'s "an unreachable side contributes nothing" rule
+    // discarding whatever the body actually assigned.  Keeping the walked
+    // state instead matches how a plain assignment in the same dead
+    // branch already behaves — it is not reverted just because it went
+    // through a loop.
+    if !body_always_runs && !pre_loop_scope.unreachable {
         // The iterable might be empty, so the loop body might not execute
         // at all.  Merge with the pre-loop scope.
         let post_loop = scope.clone();
@@ -586,6 +705,15 @@ pub(crate) fn process_foreach<'b>(
     // fall-through alone does not describe it.
     if !cursor_in_body {
         merge_exit_edges(scope, &exits.breaks);
+        if let (Some((name, element)), Some(before)) = (written_element, iterated_before) {
+            write_back_by_ref_element(&name, element, &before, scope);
+        }
+        if let Some((array_var, types)) = own_key_write_element {
+            scope.set(&array_var, types);
+        }
+        if body_always_runs && exits.breaks.is_empty() {
+            mark_visited_keys_written(foreach, &body_stmts, iter_type.as_ref(), scope);
+        }
         let _ = narrow_iterated_collection(
             foreach,
             &body_stmts,
@@ -595,6 +723,518 @@ pub(crate) fn process_foreach<'b>(
             ctx,
         );
     }
+}
+
+/// Make the entries a loop wrote at every key it visited required.
+///
+/// ```php
+/// $result = [];
+/// foreach (['a', 'b'] as $k) {
+///     $result[$k] = true;
+/// }
+/// // array{a: true, b: true}
+/// ```
+///
+/// Each write lands on one of the keys the loop variable can hold, which
+/// only makes each of them a possible entry (`array{a?: true, b?: true}`).
+/// A loop over a shape whose entries are all there, with a literal key or
+/// value per entry, visits every one of those literals, though. So when the
+/// body writes through the loop variable on every path, never skips ahead
+/// with `continue`, and never reassigns the variable, every entry the
+/// literals name was written by the time the loop ends. The caller has
+/// already checked that the body runs and that nothing broke out of it.
+fn mark_visited_keys_written(
+    foreach: &Foreach<'_>,
+    body_stmts: &[&Statement<'_>],
+    iter_type: Option<&PhpType>,
+    scope: &mut ScopeState,
+) {
+    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+        return;
+    };
+    let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
+        return;
+    };
+    let keys_visited: Option<Vec<String>> = entries
+        .iter()
+        .zip(runtime_keys)
+        .map(|(entry, key)| (!entry.optional && !key.contains("::")).then_some(key))
+        .collect();
+    let values_visited: Option<Vec<String>> = entries
+        .iter()
+        .map(|entry| {
+            if entry.optional {
+                return None;
+            }
+            if let Some(class) = entry.value_type.as_class_name_literal() {
+                return Some(crate::php_type::class_name_shape_key(class));
+            }
+            let literal = entry.value_type.as_literal()?;
+            match literal {
+                LiteralValue::Int(raw) => Some(raw.to_string()),
+                LiteralValue::String(_) => {
+                    literal.string_content().map(std::borrow::Cow::into_owned)
+                }
+                LiteralValue::Float(_) => None,
+            }
+        })
+        .collect();
+    let candidates: Vec<(&Expression<'_>, Option<Vec<String>>)> = match &foreach.target {
+        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
+        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
+    };
+    if body_stmts.iter().any(|stmt| statement_may_continue(stmt)) {
+        return;
+    }
+    let mut assigned = HashMap::new();
+    for stmt in body_stmts {
+        collect_assignment_deps(stmt, &mut assigned);
+    }
+    for (loop_var, visited) in candidates {
+        let (Expression::Variable(Variable::Direct(dv)), Some(visited)) = (loop_var, visited)
+        else {
+            continue;
+        };
+        let loop_var = bytes_to_str(dv.name);
+        if !assigned.contains_key(loop_var) {
+            mark_keys_written(body_stmts, loop_var, &visited, scope);
+        }
+    }
+}
+
+/// Make the entries under `visited` required in every array the body
+/// writes through `loop_var` on every path.
+fn mark_keys_written(
+    body_stmts: &[&Statement<'_>],
+    loop_var: &str,
+    visited: &[String],
+    scope: &mut ScopeState,
+) {
+    for array_var in always_written_array_vars(body_stmts, loop_var) {
+        let Some(current) = scope.get(&array_var).last().map(|rt| &rt.type_string) else {
+            continue;
+        };
+        let Some(written) = current.shape_entries() else {
+            continue;
+        };
+        let Some(written_keys) = crate::php_type::runtime_shape_keys(written) else {
+            continue;
+        };
+        if !visited.iter().all(|key| written_keys.contains(key)) {
+            continue;
+        }
+        let promoted: Vec<crate::php_type::ShapeEntry> = written
+            .iter()
+            .zip(&written_keys)
+            .map(|(entry, key)| crate::php_type::ShapeEntry {
+                optional: entry.optional && !visited.contains(key),
+                ..entry.clone()
+            })
+            .collect();
+        scope.set(
+            &array_var,
+            vec![ResolvedType::from_type_string(PhpType::array_shape(
+                promoted,
+            ))],
+        );
+    }
+}
+
+/// Whether a statement in a loop body may skip ahead to the next iteration,
+/// or a `continue` inside a nested structure may do so on its behalf.
+fn statement_may_continue(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::Continue(_) => true,
+        Statement::Block(block) => block.statements.iter().any(statement_may_continue),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                statement_may_continue(body.statement)
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|clause| statement_may_continue(clause.statement))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|clause| statement_may_continue(clause.statement))
+            }
+            IfBody::ColonDelimited(_) => true,
+        },
+        Statement::Expression(_) | Statement::Echo(_) | Statement::Return(_) => false,
+        // Anything else (a nested loop, `switch`, `try`) is taken to possibly
+        // hold one, rather than walking every shape it comes in.
+        _ => true,
+    }
+}
+
+/// Record what each key of an iterated shape pairs with, so narrowing the
+/// key variable narrows the value it was read with.
+///
+/// ```php
+/// /** @var array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+/// foreach ($data as $key => $value) {
+///     if ($key === 'classmap') {
+///         $value;        // list<string>
+///         $data[$key];   // list<string>
+///     }
+/// }
+/// ```
+///
+/// Each shape entry becomes a proof held by the key variable: once the key
+/// is shown to be that entry's key, the value variable and the offset read
+/// `$data[$key]` hold that entry's value type.  The entry cannot be missing
+/// there, since the loop is visiting it.  Reassigning the key drops every
+/// proof, and reassigning the value or the array drops the one about it
+/// (see [`ScopeState::invalidate_proofs`]), so the pairing only lasts as
+/// long as they still describe the same iteration.
+fn record_key_value_pairing(
+    foreach: &Foreach<'_>,
+    iter_type: Option<&PhpType>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let ForeachTarget::KeyValue(kv) = &foreach.target else {
+        return;
+    };
+    let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
+        return;
+    };
+    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+        return;
+    };
+    if entries.len() < 2 {
+        return;
+    }
+    let key_var = bytes_to_str(key_dv.name);
+    let value_var = extract_foreach_var_name(kv.value);
+    let element_key =
+        narrowing::expr_to_subject_key(foreach.expression).map(|base| format!("{base}[{key_var}]"));
+    let targets: Vec<crate::atom::Atom> = value_var
+        .iter()
+        .map(|v| atom(v))
+        .chain(element_key.iter().map(|k| atom(k)))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+
+    let mut proofs = Vec::with_capacity(entries.len() * targets.len());
+    let mut position = 0usize;
+    for entry in entries.iter() {
+        let key = match entry.key.as_deref() {
+            None => {
+                position += 1;
+                PhpType::literal_int((position - 1).to_string())
+            }
+            // Only known by its spelling, so no key comparison can match it.
+            Some(key) if key.contains("::") => continue,
+            Some(key) if crate::php_type::is_canonical_int_key(key) => PhpType::literal_int(key),
+            Some(key) => PhpType::literal_string_value(key),
+        };
+        let trigger = vec![ResolvedType::from_type_string(key)];
+        let types = ctx.resolved_types_for(entry.value_type.clone());
+        for target in &targets {
+            proofs.push(super::scope_state::ImpliedNarrowing {
+                trigger: super::scope_state::ProofTrigger::Within(trigger.clone()),
+                key: *target,
+                types: types.clone(),
+            });
+        }
+    }
+    // The key variable was just rebound, so whatever it stood for on the
+    // previous iteration is gone.
+    scope.implied_narrowings.insert(atom(key_var), proofs);
+}
+
+/// Record that the key a `foreach` binds is one the iterated array has, so a
+/// write through it inside the body lands on an entry that already exists.
+fn record_existing_keys(foreach: &Foreach<'_>, scope: &mut ScopeState) {
+    match &foreach.target {
+        ForeachTarget::KeyValue(kv) => {
+            let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
+                return;
+            };
+            let Some(subject) = narrowing::expr_to_subject_key(foreach.expression) else {
+                return;
+            };
+            let value_var = match kv.value {
+                Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+                _ => None,
+            };
+            scope.record_foreach_keys(&subject, bytes_to_str(key_dv.name), value_var);
+        }
+        ForeachTarget::Value(_) => {
+            if let Some((array_var, key_var)) = foreach_own_keys(foreach) {
+                scope.record_foreach_keys(&array_var, &key_var, None);
+            }
+        }
+    }
+}
+
+/// The (array variable, key variable) a `foreach` binds when it walks an
+/// array's own keys: `foreach ($arr as $key => $_)` or
+/// `foreach (array_keys($arr) as $key)`.
+///
+/// Returns `None` for any other shape of iterable or target, including a
+/// keyed loop over a *different* array than the one the key came from.
+fn foreach_own_keys<'b>(foreach: &'b Foreach<'b>) -> Option<(String, String)> {
+    if let ForeachTarget::KeyValue(kv) = &foreach.target
+        && let Expression::Variable(Variable::Direct(arr_var)) = foreach.expression
+        && let Expression::Variable(Variable::Direct(key_var)) = kv.key
+    {
+        return Some((
+            bytes_to_str(arr_var.name).to_string(),
+            bytes_to_str(key_var.name).to_string(),
+        ));
+    }
+
+    let ForeachTarget::Value(val) = &foreach.target else {
+        return None;
+    };
+    let Expression::Variable(Variable::Direct(key_var)) = val.value else {
+        return None;
+    };
+    let Expression::Call(Call::Function(call)) = foreach.expression else {
+        return None;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return None;
+    };
+    if !crate::util::strip_fqn_prefix(bytes_to_str(ident.value()))
+        .eq_ignore_ascii_case("array_keys")
+    {
+        return None;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let arg = args.next()?;
+    if args.next().is_some() {
+        return None;
+    }
+    let Expression::Variable(Variable::Direct(arr_var)) = narrowing::argument_value(arg) else {
+        return None;
+    };
+    Some((
+        bytes_to_str(arr_var.name).to_string(),
+        bytes_to_str(key_var.name).to_string(),
+    ))
+}
+
+/// Whether the loop body unconditionally writes into `array_var[key_var]`
+/// (optionally nested deeper, `array_var[key_var][...] = …`), the pattern
+/// [`foreach_own_keys`] needs to guarantee every entry gets rewritten.
+///
+/// Only walks statements that always run when the body does (`Block`,
+/// plain expression statements): a write nested inside an `if`/`switch`/
+/// `try` may not touch every key, so it does not qualify.
+fn body_writes_own_key(stmts: &[&Statement<'_>], array_var: &str, key_var: &str) -> bool {
+    stmts.iter().any(|stmt| match stmt {
+        Statement::Block(block) => {
+            let inner: Vec<&Statement<'_>> = block.statements.iter().collect();
+            body_writes_own_key(&inner, array_var, key_var)
+        }
+        Statement::Expression(expr_stmt) => {
+            assignment_targets_own_key(expr_stmt.expression, array_var, key_var)
+        }
+        _ => false,
+    })
+}
+
+/// Whether `expr` is an assignment whose target is `array_var[key_var]`
+/// (or a deeper access through it), as opposed to some unrelated key.
+fn assignment_targets_own_key(expr: &Expression<'_>, array_var: &str, key_var: &str) -> bool {
+    let Expression::Assignment(assign) = expr else {
+        return false;
+    };
+    let outer_access = match assign.lhs {
+        Expression::ArrayAccess(aa) => Some(aa),
+        Expression::ArrayAppend(aa) => match aa.array {
+            Expression::ArrayAccess(inner) => Some(inner),
+            _ => None,
+        },
+        _ => None,
+    };
+    let Some(outer_access) = outer_access else {
+        return false;
+    };
+    let Some((base_name, key_chain)) =
+        super::super::array_shape_writes::extract_nested_array_access_chain(outer_access)
+    else {
+        return false;
+    };
+    if base_name != array_var {
+        return false;
+    }
+    matches!(
+        key_chain.first(),
+        Some(Expression::Variable(Variable::Direct(dv))) if bytes_to_str(dv.name) == key_var
+    )
+}
+
+/// Every array variable that a write through `key_var` (`array_var[key_var]
+/// = …`, at any depth) targets on *every* path through `stmts`, following
+/// an `if`/`elseif`/`else` chain whose arms all write it as long as an
+/// `else` makes the chain exhaustive.
+///
+/// Unlike [`body_writes_own_key`] (which only trusts a write outside any
+/// branch, because it doesn't need to know which array), this only needs
+/// to know whether *some* array is unconditionally rewritten at the
+/// current key — so a write split across an if/else, like
+/// `if (…) { $out[$k] = []; } else { $out[$k] = 'toto'; }`, still counts.
+fn always_written_array_vars(stmts: &[&Statement<'_>], key_var: &str) -> HashSet<String> {
+    let mut result = HashSet::new();
+    for stmt in stmts {
+        result.extend(statement_always_written_array_vars(stmt, key_var));
+    }
+    result
+}
+
+fn statement_always_written_array_vars(stmt: &Statement<'_>, key_var: &str) -> HashSet<String> {
+    match stmt {
+        Statement::Block(block) => {
+            let inner: Vec<&Statement<'_>> = block.statements.iter().collect();
+            always_written_array_vars(&inner, key_var)
+        }
+        Statement::Expression(expr_stmt) => own_key_write_array_var(expr_stmt.expression, key_var)
+            .into_iter()
+            .collect(),
+        Statement::If(if_stmt) => if_always_written_array_vars(if_stmt, key_var),
+        _ => HashSet::new(),
+    }
+}
+
+/// The arrays an `if`/`elseif`/`else` chain unconditionally writes
+/// through `key_var`: the intersection of what every arm guarantees,
+/// since exactly one of them runs. A chain without a trailing `else`
+/// guarantees nothing, since it may run none of its arms.
+fn if_always_written_array_vars(if_stmt: &If<'_>, key_var: &str) -> HashSet<String> {
+    let IfBody::Statement(body) = &if_stmt.body else {
+        return HashSet::new();
+    };
+    let Some(else_clause) = &body.else_clause else {
+        return HashSet::new();
+    };
+    let mut arms = vec![statement_always_written_array_vars(body.statement, key_var)];
+    arms.extend(
+        body.else_if_clauses
+            .iter()
+            .map(|clause| statement_always_written_array_vars(clause.statement, key_var)),
+    );
+    arms.push(statement_always_written_array_vars(
+        else_clause.statement,
+        key_var,
+    ));
+    let mut arms = arms.into_iter();
+    let first = arms.next().unwrap_or_default();
+    arms.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect())
+}
+
+/// Whether `expr` is an assignment through `key_var` (`array_var[key_var]
+/// = …`, or a deeper access through it), returning the array it targets.
+fn own_key_write_array_var(expr: &Expression<'_>, key_var: &str) -> Option<String> {
+    let Expression::Assignment(assign) = expr else {
+        return None;
+    };
+    let outer_access = match assign.lhs {
+        Expression::ArrayAccess(aa) => Some(aa),
+        Expression::ArrayAppend(aa) => match aa.array {
+            Expression::ArrayAccess(inner) => Some(inner),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (base_name, key_chain) =
+        super::super::array_shape_writes::extract_nested_array_access_chain(outer_access?)?;
+    matches!(
+        key_chain.first(),
+        Some(Expression::Variable(Variable::Direct(dv))) if bytes_to_str(dv.name) == key_var
+    )
+    .then_some(base_name)
+}
+
+/// The element type a by-reference `foreach` leaves in the array it
+/// iterated, paired with that array's variable name.
+///
+/// `foreach ($list as &$value)` writes through `$value` into the entry it
+/// is visiting, so every entry the loop finished with holds whatever
+/// `$value` held at the end of the body (the fall-through and every
+/// `continue`, which the walk has already joined into `scope`). A `break`
+/// leaves the entry it stopped on with the value at that point and every
+/// later entry untouched, so those alternatives join in too.
+///
+/// Returns `None` when the loop does not iterate a plain variable by
+/// reference, or when the body leaves the entries as they were.
+fn by_ref_written_element(
+    foreach: &Foreach<'_>,
+    entry_value_types: Option<&[ResolvedType]>,
+    scope: &ScopeState,
+    breaks: &[ScopeState],
+) -> Option<(String, PhpType)> {
+    let value_expr = match &foreach.target {
+        ForeachTarget::Value(val) => val.value,
+        ForeachTarget::KeyValue(kv) => kv.value,
+    };
+    let Expression::UnaryPrefix(up) = value_expr else {
+        return None;
+    };
+    let (UnaryPrefixOperator::Reference(_), Expression::Variable(Variable::Direct(value_var))) =
+        (&up.operator, up.operand)
+    else {
+        return None;
+    };
+    let Expression::Variable(Variable::Direct(iterated)) = foreach.expression else {
+        return None;
+    };
+    let value_name = bytes_to_str(value_var.name);
+    let entry = entry_value_types.filter(|types| !types.is_empty())?;
+
+    let mut alternatives: Vec<ResolvedType> = Vec::new();
+    if !scope.unreachable {
+        alternatives.extend_from_slice(scope.get(value_name));
+    }
+    if !breaks.is_empty() {
+        for edge in breaks {
+            alternatives.extend_from_slice(edge.get(value_name));
+        }
+        alternatives.extend_from_slice(entry);
+    }
+    if alternatives.is_empty() {
+        return None;
+    }
+    let element = ResolvedType::types_joined(&alternatives);
+    if element.equivalent(&ResolvedType::types_joined(entry)) {
+        return None;
+    }
+    Some((bytes_to_str(iterated.name).to_string(), element))
+}
+
+/// Give the array a by-reference `foreach` iterated the element type its
+/// body wrote through the reference.
+///
+/// Only an array the body did not otherwise reassign is rewritten: once
+/// the variable holds something other than what the loop started from,
+/// the entries the reference wrote are no longer the ones it holds.
+fn write_back_by_ref_element(
+    name: &str,
+    element: PhpType,
+    before: &[ResolvedType],
+    scope: &mut ScopeState,
+) {
+    let current = scope.get(name);
+    if current.is_empty() || before.is_empty() {
+        return;
+    }
+    let array_type = ResolvedType::types_joined(current);
+    if !array_type.is_array_like() || array_type != ResolvedType::types_joined(before) {
+        return;
+    }
+    let Some(rewritten) =
+        crate::type_engine::variable::array_func_rules::with_element_type(&array_type, element)
+    else {
+        return;
+    };
+    let mut entry = current[0].clone();
+    entry.type_string = rewritten;
+    scope.set(name, vec![entry]);
 }
 
 /// Resolve the iterable expression's type for a foreach.
@@ -722,8 +1362,14 @@ pub(crate) fn bind_foreach_value<'b>(
         let var_name = bytes_to_str(dv.name).to_string();
         if let Some(it) = iter_type {
             // Strategy 1: extract from the type's own generic parameters
-            // (or, for tuple-style shapes, the union of positional values).
-            let value_php_type = it.iterable_element_type();
+            // (or, for tuple-style shapes, the union of positional values),
+            // read through the class's traversal binding when it has one.
+            let value_php_type =
+                crate::type_engine::variable::foreach_resolution::generic_traversal_value_type(
+                    it,
+                    ctx.class_loader,
+                )
+                .or_else(|| it.iterable_element_type());
             if let Some(vt) = value_php_type {
                 scope.set(&var_name, ctx.resolved_types_for(vt.clone()));
                 return;

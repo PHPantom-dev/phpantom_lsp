@@ -66,12 +66,17 @@ impl Backend {
     ///
     /// Returns `false` as soon as one location fails, which drops the
     /// whole rename.
+    ///
+    /// `magic_use` is the second name a model scope or accessor is used by
+    /// (`active` for `scopeActive`), which its references may spell too.
     pub(super) fn rename_locations_verified(
         &self,
         kind: &SymbolKind,
+        magic_use: Option<&str>,
         locations: &[Location],
     ) -> bool {
         let expected = expected_text(kind);
+        let magic_expected = magic_use.map(Expected::Exact);
 
         // Reference results are grouped by file only after this point, so
         // cache the content per URI rather than re-reading it (and, for a
@@ -89,7 +94,11 @@ impl Backend {
             if !self.rename_map_matches(uri, content) {
                 return false;
             }
-            if !range_matches(content, location.range, &expected) {
+            if !range_matches(content, location.range, &expected)
+                && !magic_expected
+                    .as_ref()
+                    .is_some_and(|magic| range_matches(content, location.range, magic))
+            {
                 return false;
             }
         }
@@ -209,6 +218,13 @@ fn range_matches(content: &str, range: Range, expected: &Expected) -> bool {
                 || key.split(['.', '/']).any(|segment| segment == text)
         }
     }
+}
+
+/// The source text `range` covers in `content`.
+pub(super) fn range_text(content: &str, range: Range) -> Option<&str> {
+    let start = position_to_byte_offset(content, range.start);
+    let end = position_to_byte_offset(content, range.end);
+    content.get(start..end)
 }
 
 /// Whether `new_name` is something a symbol of `kind` can be renamed to.

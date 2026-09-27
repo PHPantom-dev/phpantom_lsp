@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::resolve_class_keyword;
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind};
@@ -123,6 +122,14 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
                     )?;
                 (self.ctx.function_loader?)(name, 0)?.return_type
             })
+            .or_else(|| {
+                // A first-class callable (`Row::fromCache(...)`) returns
+                // what the method it names returns.
+                text.trim_end().ends_with("(...)").then_some(())?;
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text, self.ctx,
+                )
+            })
     }
 
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
@@ -153,6 +160,14 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
         crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+    }
+
+    fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
+        crate::type_engine::types::narrowing::split_type_by_guard_name(
+            guard,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
     }
 }
 
@@ -326,9 +341,14 @@ impl Backend {
                     {
                         class_loader(&resolved).map(Arc::unwrap_or_clone)
                     } else {
-                        find_class_by_name(all_classes, class)
-                            .map(|arc| ClassInfo::clone(arc))
-                            .or_else(|| class_loader(class).map(Arc::unwrap_or_clone))
+                        let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                        let fqn = crate::util::resolve_source_class_name(
+                            class,
+                            ns,
+                            all_classes,
+                            class_loader,
+                        );
+                        class_loader(&fqn).map(Arc::unwrap_or_clone)
                     };
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(

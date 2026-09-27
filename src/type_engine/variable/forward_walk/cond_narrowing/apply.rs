@@ -7,6 +7,8 @@
 
 use super::*;
 
+use mago_syntax::cst::unary::UnaryPrefixOperator;
+
 /// Narrow a `match ($x::class)` subject to the classes one arm names.
 ///
 /// `match ($node::class) { ASTClass::class, ASTEnum::class => … }` proves
@@ -80,6 +82,22 @@ impl Conjuncts {
     }
 }
 
+/// The operand of a `(bool)` cast, which a condition tests exactly as it
+/// would test the operand itself.
+fn bool_cast_operand<'b>(condition: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
+    match unwrap_parens(condition) {
+        Expression::UnaryPrefix(prefix)
+            if matches!(
+                prefix.operator,
+                UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+            ) =>
+        {
+            Some(prefix.operand)
+        }
+        _ => None,
+    }
+}
+
 /// Apply condition-based narrowing (instanceof, null check, type guard)
 /// to the scope.  This narrows types for the "truthy" branch.
 pub(crate) fn apply_condition_narrowing<'b>(
@@ -91,6 +109,10 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // extractor looks at it.  The chain collectors fold each operand of an
     // `&&` / `||` the same way.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing(operand, scope, ctx);
+        return;
+    }
 
     // A `!` over a logical chain proves what the *inverse* pass proves
     // about the chain itself.
@@ -117,6 +139,11 @@ pub(crate) fn apply_condition_narrowing<'b>(
     let (disjunctions, operands): (Vec<_>, Vec<_>) = collect_and_chain_operands(condition)
         .into_iter()
         .partition(|operand| collect_or_chain_operands(unwrap_parens(operand)).len() > 1);
+
+    // `check() === true` proves what `check()` does.
+    for operand in &operands {
+        apply_bool_comparison_narrowing(operand, true, scope, ctx);
+    }
 
     let mut var_names: Vec<String> = scope.locals.keys().map(|k| k.to_string()).collect();
     // Include variables from instanceof conditions that may not be in
@@ -208,12 +235,17 @@ pub(crate) fn apply_condition_narrowing<'b>(
 
     // in_array($var, $haystack, true) narrowing.
     apply_in_array_narrowing(condition, scope, ctx, false);
+    apply_loose_in_array_narrowing(condition, scope, ctx, false);
 
     // property_exists($var, 'name') / method_exists($var, 'name') narrowing.
     apply_member_exists_narrowing(condition, scope, false);
 
     // array_key_exists('k', $arr) narrowing on an optional shape key.
     apply_array_key_exists_narrowing(condition, scope, ctx, false);
+
+    // `isset($arr[$k])` / `array_key_exists($k, $arr)` narrowing of `$k`
+    // to the keys the array holds.
+    apply_key_domain_narrowing(condition, scope, ctx);
 
     // `if (preg_match(…, $matches))` — the body runs on a successful match,
     // so `$matches` has the keys the pattern describes.
@@ -224,6 +256,13 @@ pub(crate) fn apply_condition_narrowing<'b>(
     // up carrying both the union of what the legs prove and the record of
     // which leg proved what.
     apply_disjunct_operand_narrowing(&disjunctions, &pinned, scope, ctx);
+
+    // A proof about `$x['k']` is a proof about the entry `$x` holds there.
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    // An impure call's result is not a fact past the evaluation that
+    // produced it.
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
 
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it
@@ -280,9 +319,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             .find(|a| a.subject == *var_name && !a.alternatives.is_empty());
         if let Some(alias) = alias_or.filter(|a| !a.extraction.negated) {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            if exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope) {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &alias_classes(alias), &var_ctx, scope);
             continue;
         }
         // The inverse of `!$isNode`: the chain did hold, so the subject
@@ -307,9 +344,7 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
             && !classes.is_empty()
         {
             let var_ctx = build_var_ctx(var_name, ctx, &scope_resolver);
-            if exclude_classes_in_scope(var_name, &classes, &var_ctx, scope) {
-                scope.unreachable = true;
-            }
+            exclude_classes_in_scope(var_name, &classes, &var_ctx, scope);
             continue;
         }
 
@@ -342,9 +377,9 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                             &scope_resolver,
                         );
                     }
-                } else if exclude_classes_in_scope(var_name, &targets, &var_ctx, scope) {
-                    scope.unreachable = true;
                 }
+                // The value may name a subclass of the class its type
+                // spells, so the check failing rules nothing out.
                 continue;
             }
         }
@@ -366,14 +401,21 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // existing union is *filtered* down to them rather than
                 // extended with them.
                 let mut narrowed = Vec::new();
-                ResolvedType::apply_narrowing(&mut narrowed, |classes| {
-                    narrowing::apply_instanceof_inclusion(
+                narrowing::include_instance_of(
+                    &extraction.class_type,
+                    extraction.exact,
+                    &var_ctx,
+                    &mut narrowed,
+                );
+                if narrowed_to_unloadable_class(&narrowed) {
+                    include_unloadable_class_in_scope(
+                        var_name,
                         &extraction.class_type,
-                        extraction.exact,
                         &var_ctx,
-                        classes,
-                    )
-                });
+                        scope,
+                    );
+                    continue;
+                }
                 commit_instanceof_narrowing(
                     var_name,
                     narrowed,
@@ -390,18 +432,12 @@ pub(crate) fn apply_condition_narrowing_inverse_single<'b>(
                 // Inverse of positive instanceof → exclusion.
                 // Exclusion does NOT strip null (`!instanceof` is
                 // true for null values).
-                if exclude_classes_in_scope(
+                exclude_classes_in_scope(
                     var_name,
                     std::slice::from_ref(&extraction.class_type),
                     &var_ctx,
                     scope,
-                ) {
-                    // Every alternative the variable had was excluded, so
-                    // nothing can reach this path: `$v` was already an
-                    // `AbstractNode` and this is the else of
-                    // `if ($v instanceof AbstractNode)`.
-                    scope.unreachable = true;
-                }
+                );
             }
         }
     }
@@ -430,6 +466,10 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
 ) {
     // As in the truthy pass: `!(!$x)` is `$x`, so cancel the pair first.
     let condition = narrowing::fold_negation_pairs(condition);
+    if let Some(operand) = bool_cast_operand(condition) {
+        apply_condition_narrowing_inverse(operand, scope, ctx);
+        return;
+    }
 
     // The mirror of the truthy pass: the fall-through of
     // `if (!($t instanceof CallableType || $t instanceof ClosureType)) { return; }`
@@ -591,6 +631,9 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 ) {
     apply_condition_narrowing_inverse_single(condition, scope, ctx);
 
+    // `check() === true` failing proves what `!check()` does.
+    apply_bool_comparison_narrowing(condition, false, scope, ctx);
+
     // Inverse type guard narrowing: `if (is_object($x))` in else → exclude object.
     apply_type_guard_narrowing_inverse(condition, scope, ctx);
 
@@ -609,11 +652,16 @@ fn apply_condition_narrowing_inverse_operand<'b>(
 
     // Inverse in_array narrowing: exclude the element type in the else branch.
     apply_in_array_narrowing(condition, scope, ctx, true);
+    apply_loose_in_array_narrowing(condition, scope, ctx, true);
 
     // Inverse `preg_match` narrowing: the else branch (and the fall-through of
     // an `if (!preg_match(…, $matches)) { return; }` guard) knows the opposite
     // outcome of the one the condition tests for.
     apply_preg_match_narrowing(condition, scope, ctx, false);
+
+    write_offset_narrowing_into_shapes(condition, scope);
+
+    super::super::receiver_mutation::forget_impure_call_results(condition, scope, ctx);
 
     // Whatever the passes above proved about one value's null, they
     // proved about every value whose null it stands for.  Last, so it

@@ -246,7 +246,7 @@ function probe(array $names, array $weights, int $count, mixed $anything): void 
         &[
             ("$letter", "string"),
             ("$widest", "string"),
-            ("$mixedNumbers", "int|float"),
+            ("$mixedNumbers", "1"),
             ("$lightest", "float"),
             ("$bounded", "int"),
             ("$unknown", "mixed"),
@@ -306,10 +306,7 @@ final class Excerpt {
             .lines()
             .find_map(|l| l.split_once(" = ").map(|(_, ty)| ty.trim().to_string()))
             .unwrap_or_else(|| panic!("no assignment in hover on line {line}: {}", markup.value));
-        assert_eq!(
-            &got, "non-empty-array<int, string>",
-            "$result on line {line}"
-        );
+        assert_eq!(&got, "non-empty-array<int, 'x'>", "$result on line {line}");
         checked += 1;
     }
     assert_eq!(
@@ -552,6 +549,240 @@ function probe(Widget $widget, object $anything, \ReflectionClass $reflection): 
             ("$exact", "class-string<Widget>"),
             ("$any", "class-string<object>"),
             ("$interfaces", "list<class-string>"),
+        ],
+    );
+}
+
+/// `func_get_args()` always returns the arguments as a list.
+#[test]
+fn func_get_args_returns_a_list() {
+    let content = r#"<?php
+function probe($x = null): void {
+    $args = func_get_args();
+}
+"#;
+    assert_assigned_types(content, &[("$args", "list<mixed>")]);
+}
+
+/// `array_shift()` and `array_pop()` take the entry at their end of a shape
+/// and leave the rest behind, renumbering the integer keys only for a
+/// shift. An optional entry at that end may be the one taken, or may be
+/// missing, in which case the call reaches past it.
+#[test]
+fn removers_take_the_entry_at_their_end_of_a_shape() {
+    let content = r#"<?php
+/** @param array{a?: int, b: string} $maybe */
+function probe(array $maybe): void {
+    $list = [1, 2, 3];
+    $first = array_shift($list);
+    $shifted = $list;
+    $last = array_pop($list);
+    $popped = $list;
+    $keyed = ['a' => 'x', 5 => true, 9 => 1.5];
+    array_shift($keyed);
+    $renumbered = $keyed;
+    $either = array_shift($maybe);
+    $none = [];
+    $nothing = array_pop($none);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "1"),
+            ("$shifted", "array{2, 3}"),
+            ("$last", "3"),
+            ("$popped", "array{2}"),
+            ("$renumbered", "array{true, 1.5}"),
+            ("$either", "int|string"),
+            ("$nothing", "null"),
+        ],
+    );
+}
+
+/// Sorting reorders an array without changing which values it holds. The
+/// sorts that renumber turn it into a list of the same values, the ones
+/// that keep keys leave it as it was, and an empty array stays empty.
+#[test]
+fn sorts_keep_the_values_they_reorder() {
+    let content = r#"<?php
+/** @param array<string, int> $scores */
+function probe(array $scores): void {
+    $keyed = ['b' => 5, 'a' => 8];
+    sort($keyed);
+    $sorted = $keyed;
+    rsort($scores);
+    $ranked = $scores;
+    $empty = [];
+    sort($empty);
+    $stillEmpty = $empty;
+    $none = [];
+    ksort($none);
+    $stillNone = $none;
+    $byKey = ['b' => 5, 'a' => 8];
+    ksort($byKey);
+    $kept = $byKey;
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$sorted", "non-empty-list<5|8>"),
+            ("$ranked", "list<int>"),
+            ("$stillEmpty", "array{}"),
+            ("$stillNone", "array{}"),
+            ("$kept", "array{b: 5, a: 8}"),
+        ],
+    );
+}
+
+/// With a single array, `array_map` keeps every key and replaces each value
+/// with what the callback returns for it, so a shape stays a shape. A
+/// `void` callback's result is stored as `null`.
+#[test]
+fn array_map_over_a_shape_keeps_its_keys() {
+    let content = r#"<?php
+function probe(): void {
+    $ints = array_map(fn (int $i): int => $i, [1, 2, 3]);
+    $keyed = array_map(fn (string $x) => new RuntimeException($x), ['c' => '']);
+    $mixed = array_map(fn ($v) => $v, ['a' => 1, 'b' => 'x']);
+    $nulls = array_map((new SplQueue())->enqueue(...), [1, 2]);
+    /** @var list<int> $list */
+    $list = [];
+    $voids = array_map((new SplQueue())->enqueue(...), $list);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$ints", "array{int, int, int}"),
+            ("$keyed", "array{c: RuntimeException}"),
+            ("$mixed", "array{a: int, b: string}"),
+            ("$nulls", "array{null, null}"),
+            ("$voids", "list<null>"),
+        ],
+    );
+}
+
+/// A callback whose own type is a `callable(…): T` maps each element to
+/// `T`, including Psalm's `callable(...mixed): T` spelling and a
+/// first-class callable made from a closure variable.
+#[test]
+fn array_map_with_a_callable_typed_callback() {
+    let content = r#"<?php
+/**
+ * @template T
+ * @param class-string<T> $className
+ * @return callable(...mixed): T
+ */
+function maker(string $className) { return fn () => new $className(); }
+
+function probe(): void {
+    $maker = maker(stdClass::class);
+    $made = array_map($maker, ['abc']);
+    $inline = array_map(maker(stdClass::class), ['abc']);
+    $square = fn (int $value): int => $value * $value;
+    $squares = array_map($square(...), [1, 2, 3]);
+    $wrapped = $square(...);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$maker", "callable(mixed...): stdClass"),
+            ("$made", "array{stdClass}"),
+            ("$inline", "array{stdClass}"),
+            ("$squares", "array{int, int, int}"),
+            ("$wrapped", "Closure(int): int"),
+        ],
+    );
+}
+
+/// A loop body is walked until the variables settle, which a shape that
+/// loses an entry on every pass never does, so a removal inside one leaves
+/// the container the shape describes.
+#[test]
+fn a_removal_in_a_loop_leaves_the_container() {
+    let content = r#"<?php
+function probe(): void {
+    $queue = [1, 2, 3];
+    while (rand(0, 1)) {
+        array_shift($queue);
+        $inLoop = $queue;
+    }
+}
+"#;
+    assert_assigned_types(content, &[("$inLoop", "list<1|2|3>")]);
+}
+
+/// The pointer functions take their array by reference only to move its
+/// internal pointer, so the variable keeps the value it had.
+#[test]
+fn pointer_functions_leave_the_array_alone() {
+    let content = r#"<?php
+function probe(): void {
+    $empty = [];
+    reset($empty);
+    next($empty);
+    $stillEmpty = $empty;
+    $pair = ['a' => 1, 'b' => 2];
+    if (end($pair)) {
+        $unchanged = $pair;
+    }
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$stillEmpty", "array{}"),
+            ("$unchanged", "array{a: 1, b: 2}"),
+        ],
+    );
+}
+
+/// The first and last key of a shape are known from its literal keys, down
+/// to the optional entries that may or may not stand in front of them.
+#[test]
+fn end_keys_of_a_shape_are_its_literal_keys() {
+    let content = r#"<?php
+/**
+ * @param array{a?: int, b: int, c?: int} $partial
+ * @param array{x?: int} $sparse
+ */
+function probe(array $partial, array $sparse): void {
+    $first = array_key_first($partial);
+    $last = array_key_last($partial);
+    $maybe = array_key_first($sparse);
+    $keys = array_keys($partial);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "'a'|'b'"),
+            ("$last", "'c'|'b'"),
+            ("$maybe", "'x'|null"),
+            ("$keys", "list<'a'|'b'|'c'>"),
+        ],
+    );
+}
+
+/// The length of a literal string is a literal too.
+#[test]
+fn strlen_of_a_literal_is_folded() {
+    let content = r#"<?php
+function probe(bool $flag): void {
+    $three = strlen('abc');
+    $either = mb_strlen($flag ? 'ab' : 'abcd');
+    $withEncoding = mb_strlen('abc', 'UTF-8');
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$three", "3"),
+            ("$either", "2|4"),
+            ("$withEncoding", "int"),
         ],
     );
 }

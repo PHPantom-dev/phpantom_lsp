@@ -922,3 +922,227 @@ async fn find_references_on_a_view_name_reaches_blade_includes() {
         expected
     );
 }
+
+// ─── view-string ────────────────────────────────────────────────────────────
+
+/// A class whose `render()` takes a `view-string`, plus callers passing it
+/// a name the project ships, one it does not, and a runtime value.
+const VIEW_STRING_RENDERER: &str = r#"<?php
+namespace App;
+
+class Renderer
+{
+    /**
+     * @param view-string $view
+     */
+    public function render(string $view): mixed
+    {
+        return view($view);
+    }
+
+    public function callers(string $dynamic): void
+    {
+        $this->render('users.profile');
+        $this->render('users.nope');
+        $this->render($dynamic);
+        $this->render('users' . '.profile');
+    }
+}
+"#;
+
+/// A `view-string` parameter is checked against the templates the project
+/// actually ships, the same set `view('…')` is checked against, and reports
+/// the name rather than the type. Anything but a literal is left alone: a
+/// variable may well hold a real view name at runtime.
+#[tokio::test]
+async fn a_view_string_parameter_reports_a_name_no_template_answers() {
+    let (backend, _dir) = create_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("app/Renderer.php", VIEW_STRING_RENDERER),
+            (
+                "resources/views/users/profile.blade.php",
+                "<p>profile</p>\n",
+            ),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/Renderer.php").await;
+
+    assert_eq!(
+        view_diagnostics(&backend, &uri, VIEW_STRING_RENDERER),
+        vec!["Unknown view: 'users.nope'".to_string()],
+    );
+}
+
+/// The parameter is still a `string`, so nothing about passing one is a
+/// type error — neither the misspelled literal, which is reported as an
+/// unknown view instead, nor a plain `string` variable.
+#[tokio::test]
+async fn a_view_string_parameter_is_still_a_string() {
+    let (backend, _dir) = create_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("app/Renderer.php", VIEW_STRING_RENDERER),
+            (
+                "resources/views/users/profile.blade.php",
+                "<p>profile</p>\n",
+            ),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/Renderer.php").await;
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri.as_str(), VIEW_STRING_RENDERER, &mut diags);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_argument").is_empty(),
+        "a view-string parameter accepts every string: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument"),
+    );
+    // `view($view)` inside `render()` passes the parameter straight on, so
+    // the docblock type has to read as a string there too.
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "{:?}",
+        messages_with_code(&diags, "type_mismatch_return"),
+    );
+}
+
+/// A name in a package namespace no provider registered is unjudgeable —
+/// the package's own templates are not enumerable — while one in a
+/// namespace that *is* registered is checked like any other.
+#[tokio::test]
+async fn a_view_string_naming_an_unregistered_package_is_left_alone() {
+    let caller = r#"<?php
+namespace App;
+
+class PackageRenderer
+{
+    /** @param view-string $view */
+    public function render(string $view): void {}
+
+    public function callers(): void
+    {
+        $this->render('widgets::card');
+        $this->render('widgets::missing');
+        $this->render('unregistered::anything');
+    }
+}
+"#;
+    let (backend, _dir) = create_psr4_workspace(
+        PACKAGE_COMPOSER,
+        &[
+            ("bootstrap/providers.php", PACKAGE_PROVIDER_LIST),
+            (
+                "packages/widgets/src/WidgetsServiceProvider.php",
+                PACKAGE_VIEW_PROVIDER,
+            ),
+            (
+                "packages/widgets/resources/views/card.blade.php",
+                "<div class=\"card\"></div>\n",
+            ),
+            ("app/PackageRenderer.php", caller),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/PackageRenderer.php").await;
+
+    assert_eq!(
+        view_diagnostics(&backend, &uri, caller),
+        vec!["Unknown view: 'widgets::missing'".to_string()],
+    );
+}
+
+/// A project the view scan found no templates in says nothing about any
+/// name, so a `view-string` argument there is left alone rather than
+/// reported wholesale.
+#[tokio::test]
+async fn a_view_string_is_left_alone_when_the_project_ships_no_views() {
+    let caller = r#"<?php
+namespace App;
+
+class Renderer
+{
+    /** @param view-string $view */
+    public function render(string $view): void {}
+
+    public function callers(): void
+    {
+        $this->render('anything.at.all');
+    }
+}
+"#;
+    let (backend, _dir) =
+        create_psr4_workspace(LARAVEL_APP_COMPOSER, &[("app/Renderer.php", caller)]);
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/Renderer.php").await;
+
+    assert!(view_diagnostics(&backend, &uri, caller).is_empty());
+}
+
+/// Typing inside a `view-string` argument offers the project's templates,
+/// filtered by what is typed so far, and each item replaces the whole
+/// literal so a dotted name survives the editor's word-based filtering.
+#[tokio::test]
+async fn a_view_string_argument_completes_the_projects_templates() {
+    let caller = r#"<?php
+namespace App;
+
+class Renderer
+{
+    /** @param view-string $view */
+    public function render(string $view): void {}
+
+    /** Not a template name, so no templates are offered for it. */
+    public function label(string $text): void {}
+
+    public function callers(): void
+    {
+        $this->render('users.');
+        $this->label('');
+    }
+}
+"#;
+    let (backend, _dir) = create_psr4_workspace(
+        LARAVEL_APP_COMPOSER,
+        &[
+            ("app/Renderer.php", caller),
+            ("resources/views/users/profile.blade.php", "<p>p</p>\n"),
+            ("resources/views/users/settings.blade.php", "<p>s</p>\n"),
+            ("resources/views/dashboard.blade.php", "<p>d</p>\n"),
+        ],
+    );
+    backend.initialized(InitializedParams {}).await;
+    let uri = open_php_file(&backend, "app/Renderer.php").await;
+
+    let cursor = position_of(caller, "users.");
+    let inside = Position {
+        line: cursor.line,
+        character: cursor.character + "users.".len() as u32,
+    };
+    let items =
+        crate::common::complete_at(&backend, &uri, caller, inside.line, inside.character).await;
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert_eq!(labels, vec!["users.profile", "users.settings"]);
+    // The edit replaces the typed prefix rather than appending to it.
+    let Some(CompletionTextEdit::Edit(edit)) = &items[0].text_edit else {
+        panic!("expected a text edit, got {:?}", items[0].text_edit);
+    };
+    assert_eq!(edit.new_text, "users.profile");
+    assert_eq!(edit.range.end, inside);
+
+    // A plain `string` parameter is not a template name.
+    let label_cursor = position_of(caller, "$this->label('");
+    let empty = Position {
+        line: label_cursor.line,
+        character: label_cursor.character + "$this->label('".len() as u32,
+    };
+    let offered =
+        crate::common::complete_labels_at(&backend, &uri, caller, empty.line, empty.character)
+            .await;
+    assert!(
+        !offered.iter().any(|label| label == "dashboard"),
+        "a plain string parameter should not offer templates, got {offered:?}"
+    );
+}

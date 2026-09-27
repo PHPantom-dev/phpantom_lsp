@@ -1,5 +1,16 @@
 use super::*;
 
+/// What a member path's declaration promises, ignoring anything the walk
+/// has recorded about the path itself: the type a property goes back to
+/// once a call may have written it.
+pub(crate) fn declared_key_type(
+    key: &str,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Vec<ResolvedType> {
+    resolve_synthetic_key_type(key, scope, ctx)
+}
+
 /// Resolve what a synthetic scope key promises, reading the scope but not
 /// writing to it.
 ///
@@ -134,27 +145,19 @@ fn resolve_array_key_type(
     if base_types.is_empty() {
         return Vec::new();
     }
-    // Look up the array key's type.  Prefer a precise shape entry
-    // (`array{class: Foo}`); fall back to the generic element type
-    // (`array<string, Foo>` → `Foo`); and finally to `mixed` for an
-    // untyped array (plain `array`).  Seeding the untyped case is
-    // what lets assertion / class-string narrowing apply to an
-    // array-index subject whose element type is otherwise unknown
-    // (e.g. `assertInstanceOf(X::class, $arr['k'])`).
+    // The key starts out as whatever reading it gives, so a narrowing
+    // check on `$a['k']` refines the same type `$a['k']` resolves to.
+    // Each alternative of a union answers for itself: the `'a'` entry of
+    // `array{a: array{}}|array<string, list<Foo>>` is `list<Foo>`, not just
+    // the shape's `array{}`.
+    let resolution_ctx = ctx.as_resolution_ctx();
     let mut key_results: Vec<ResolvedType> = Vec::new();
     for rt in base_types {
-        let element_type = key_name
-            .and_then(|name| rt.type_string.extract_shape_key_type(name))
-            .or_else(|| rt.type_string.extract_value_type(false).cloned())
-            // An empty shape has no entry any key could address, so the
-            // read is a guaranteed miss and yields `null` — the same
-            // answer the offset-read path gives.  Widening to `mixed`
-            // here would leave an `isset($a['k'])` branch claiming the
-            // key could be anything, because `mixed` survives the null
-            // strip that the check's whole purpose is to license.
-            .or_else(|| rt.type_string.is_empty_array_shape().then(PhpType::null))
-            .or_else(|| rt.type_string.is_array_like().then(PhpType::mixed));
-        let Some(element_type) = element_type else {
+        let Some(element_type) = crate::type_engine::variable::rhs_resolution::offset_read_type(
+            &rt.type_string,
+            key_name,
+            &resolution_ctx,
+        ) else {
             continue;
         };
         ResolvedType::extend_unique(&mut key_results, ctx.resolved_types_for(element_type));

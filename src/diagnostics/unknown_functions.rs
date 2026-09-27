@@ -85,7 +85,6 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let file_use_map = &ctx.file.use_map;
 
         // ── Compute byte ranges of `use` statement lines ────────────────
         let use_line_ranges = compute_use_line_ranges(content);
@@ -163,7 +162,7 @@ impl Backend {
                     name,
                     ctx.file.resolved_names.as_deref(),
                     span.start,
-                    file_use_map,
+                    ctx.file.use_map_at(span.start),
                     ctx.file.namespace_at(span.start),
                 )
                 .is_some()

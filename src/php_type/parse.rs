@@ -17,8 +17,14 @@ impl PhpType {
     /// types like `BelongsTo<Category, covariant $this>` become
     /// `Generic("BelongsTo", [Named("Category"), Named("$this")])`.
     pub fn parse(input: &str) -> PhpType {
+        Self::try_parse(input).unwrap_or_else(|| PhpType::raw(input))
+    }
+
+    /// Like [`PhpType::parse`], but returns `None` when `input` is not a
+    /// valid type instead of keeping it as raw text.
+    pub fn try_parse(input: &str) -> Option<PhpType> {
         if input.is_empty() {
-            return PhpType::untyped();
+            return Some(PhpType::untyped());
         }
 
         // `static(Foo)` / `$this(Foo)` is how a bounded late-static type is
@@ -27,18 +33,19 @@ impl PhpType {
         if input.contains('(')
             && let Some((cleaned, bounds)) = replace_late_static_bounds(input)
         {
-            return parse_type_text(&cleaned).substitute(&bounds);
+            return Some(parse_type_text(&cleaned)?.substitute(&bounds));
         }
 
         parse_type_text(input)
     }
 }
 
-fn parse_type_text(input: &str) -> PhpType {
+fn parse_type_text(input: &str) -> Option<PhpType> {
     // Replace known hyphenated pseudo-types (e.g. `model-property`)
     // with underscore placeholders so Mago can parse the surrounding
     // type structure.  The placeholders are restored in the result.
-    let cleaned = replace_hyphenated_keywords(input);
+    let postfixed = postfix_prefix_variadics(input);
+    let cleaned = replace_hyphenated_keywords(&postfixed);
     let effective: &str = &cleaned;
 
     let span = Span::new(
@@ -49,8 +56,8 @@ fn parse_type_text(input: &str) -> PhpType {
 
     let arena = LocalArena::new();
     match mago_phpdoc_syntax::parse_type(&arena, effective.as_bytes(), span) {
-        Ok(ty) => restore_hyphenated_keywords(convert(effective, &ty)),
-        Err(_) => try_parse_hyphenated_generic(input).unwrap_or_else(|| PhpType::raw(input)),
+        Ok(ty) => Some(restore_hyphenated_keywords(convert(effective, &ty))),
+        Err(_) => try_parse_hyphenated_generic(input),
     }
 }
 
@@ -189,16 +196,14 @@ pub(crate) fn parse_php_int_literal(raw: &str) -> Option<i64> {
         (10, clean.as_str())
     };
 
-    if digits.is_empty() {
+    if !digits.starts_with(|c: char| c.is_ascii_alphanumeric()) {
         return None;
     }
 
-    let unsigned = i64::from_str_radix(digits, radix).ok()?;
-    if negative {
-        unsigned.checked_neg()
-    } else {
-        Some(unsigned)
-    }
+    // The magnitude is read unsigned so `-9223372036854775808`, whose
+    // magnitude is one past `i64::MAX`, still reads as `i64::MIN`.
+    let magnitude = i128::from(u64::from_str_radix(digits, radix).ok()?);
+    i64::try_from(if negative { -magnitude } else { magnitude }).ok()
 }
 
 pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
@@ -212,11 +217,90 @@ pub(crate) fn parse_php_float_literal(raw: &str) -> Option<f64> {
 /// Hyphenated PHPDoc pseudo-type names that `mago_phpdoc_syntax` cannot
 /// parse because hyphens are not valid PHP identifier characters.
 /// Each pair is `(hyphenated, placeholder)`.
-const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[("model-property", "__model_property__")];
+const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[
+    ("model-property", "__model_property__"),
+    ("builder-of", "__builder_of__"),
+    ("collection-of", "__collection_of__"),
+    ("factory-of", "__factory_of__"),
+    ("relation-of", "__relation_of__"),
+];
 
 /// Replace known hyphenated pseudo-type names with underscore
 /// placeholders so that `mago_phpdoc_syntax` can parse the surrounding
 /// type structure (e.g. `array<model-property<T>, mixed>`).
+/// Rewrite Psalm's prefix variadic callable parameter (`callable(...mixed):
+/// T`) as the postfix form the PHPDoc grammar accepts (`callable(mixed...):
+/// T`).
+///
+/// Only an ellipsis that opens a parameter directly inside `(…)` is moved,
+/// so an unsealed shape's `array{a: int, ...}` is left alone. A parameter
+/// name after the type (`...mixed $args`) is dropped, as the parsed type
+/// does not keep it anyway.
+fn postfix_prefix_variadics(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains("...") {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    let mut copied = 0;
+    let mut openers: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'(' | b'<' | b'{' | b'[' => openers.push(b),
+            b')' | b'>' | b'}' | b']' => {
+                openers.pop();
+            }
+            _ => {}
+        }
+        let opens_param = matches!(b, b'(' | b',') && openers.last() == Some(&b'(');
+        if opens_param {
+            let after = &s[i + 1..];
+            let rest = after.trim_start();
+            if let Some(ty_start) = rest.strip_prefix("...")
+                && let ty_start = ty_start.trim_start()
+                && ty_start
+                    .bytes()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'\\' | b'?' | b'_'))
+            {
+                let ty_len = param_type_len(ty_start);
+                out.push_str(&s[copied..=i]);
+                out.push_str(ty_start[..ty_len].trim_end());
+                out.push_str("...");
+                // Skip the parameter name, if any, up to the separator.
+                let tail = &ty_start[ty_len..];
+                let name_len = tail.find([',', ')']).unwrap_or(tail.len());
+                i = s.len() - tail.len() + name_len;
+                copied = i;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if copied == 0 {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    out.push_str(&s[copied..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Length of the type at the start of a callable parameter: everything up
+/// to the first top-level `,`, `)`, `=` or `$`.
+fn param_type_len(s: &str) -> usize {
+    let mut depth = 0usize;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b'(' | b'<' | b'{' | b'[' => depth += 1,
+            b')' | b'>' | b'}' | b']' if depth > 0 => depth -= 1,
+            b',' | b')' | b'=' | b'$' if depth == 0 => return i,
+            _ => {}
+        }
+    }
+    s.len()
+}
+
 fn replace_hyphenated_keywords(s: &str) -> std::borrow::Cow<'_, str> {
     let mut result = std::borrow::Cow::Borrowed(s);
     for &(hyphenated, placeholder) in HYPHENATED_KEYWORDS {
@@ -378,14 +462,37 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         cst::Type::Shape(s) => {
             let entries = shape_entries(src, s.fields.iter());
 
-            match s.kind {
-                cst::ShapeTypeKind::Array
-                | cst::ShapeTypeKind::NonEmptyArray
-                | cst::ShapeTypeKind::AssociativeArray => PhpType::array_shape(entries),
-                cst::ShapeTypeKind::List | cst::ShapeTypeKind::NonEmptyList => {
-                    PhpType::list_shape(entries)
+            let is_list = matches!(
+                s.kind,
+                cst::ShapeTypeKind::List | cst::ShapeTypeKind::NonEmptyList
+            );
+            let shape = if is_list {
+                PhpType::list_shape(entries)
+            } else {
+                PhpType::array_shape(entries)
+            };
+            let Some(additional) = &s.additional_fields else {
+                return shape;
+            };
+            // `...` alone leaves the other entries unconstrained, and
+            // `...<V>` names only their value type.
+            let mut params: Vec<PhpType> = additional
+                .parameters
+                .iter()
+                .flat_map(|params| params.entries.iter())
+                .map(|e| convert(src, &e.inner))
+                .collect();
+            let (key, value) = match params.len() {
+                2 => {
+                    let value = params.pop().unwrap();
+                    (params.pop().unwrap(), value)
                 }
-            }
+                1 if is_list => (PhpType::int(), params.pop().unwrap()),
+                1 => (PhpType::named(atom("array-key")), params.pop().unwrap()),
+                _ if is_list => (PhpType::int(), PhpType::mixed()),
+                _ => (PhpType::named(atom("array-key")), PhpType::mixed()),
+            };
+            PhpType::unsealed_shape(shape, key, value)
         }
 
         // -- Object type (with optional shape) --------------------------------
@@ -432,13 +539,22 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Conditional types ------------------------------------------------
-        cst::Type::Conditional(c) => PhpType::conditional(
-            c.subject.to_string(),
-            c.is_negated(),
-            convert(src, c.target),
-            convert(src, c.then),
-            convert(src, c.r#else),
-        ),
+        cst::Type::Conditional(c) => {
+            let condition = convert(src, c.target);
+            let then_type = convert(src, c.then);
+            let else_type = convert(src, c.r#else);
+            match literal_subject_satisfies(&convert(src, c.subject), &condition) {
+                Some(satisfied) if satisfied ^ c.is_negated() => then_type,
+                Some(_) => else_type,
+                None => PhpType::conditional(
+                    c.subject.to_string(),
+                    c.is_negated(),
+                    condition,
+                    then_type,
+                    else_type,
+                ),
+            }
+        }
 
         // -- class-string / interface-string ----------------------------------
         cst::Type::ClassString(c) => {
@@ -560,17 +676,30 @@ fn convert_keyword_with_optional_generics(
 
 /// Convert the fields of an `array{…}` or `object{…}` shape to
 /// [`ShapeEntry`] values.
+///
+/// A key written twice is one key, as it is in an array literal: the later
+/// field replaces the earlier one where that one stood.
 fn shape_entries<'a, 'ast: 'a>(
     src: &str,
     fields: impl Iterator<Item = &'a cst::ShapeField<'ast>>,
 ) -> Vec<ShapeEntry> {
-    fields
-        .map(|field| ShapeEntry {
+    let mut entries: Vec<ShapeEntry> = Vec::new();
+    for field in fields {
+        let entry = ShapeEntry {
             key: field.key.as_ref().map(|k| shape_key_text(src, &k.key)),
             optional: field.is_optional(),
             value_type: convert(src, field.value),
-        })
-        .collect()
+        };
+        match entry
+            .key
+            .as_ref()
+            .and_then(|key| entries.iter_mut().find(|e| e.key.as_ref() == Some(key)))
+        {
+            Some(existing) => *existing = entry,
+            None => entries.push(entry),
+        }
+    }
+    entries
 }
 
 /// Recursively flatten a left-leaning binary union tree into a flat `Vec`.
@@ -609,6 +738,31 @@ fn flatten_binary<'ast>(
     }
 }
 
+/// Decide a conditional whose subject is a literal value (`5 is int`,
+/// `true is true`), which needs no argument to settle.
+///
+/// Returns `None` when the subject is not a literal, or when the condition
+/// names something a literal could still satisfy without being a subtype of
+/// it as written: a class, a template, or `callable` (a string can name a
+/// function).
+fn literal_subject_satisfies(subject: &PhpType, condition: &PhpType) -> Option<bool> {
+    let is_literal = subject.as_literal().is_some()
+        || subject.is_true()
+        || subject.is_false()
+        || subject.is_null();
+    if !is_literal {
+        return None;
+    }
+    if subject.is_subtype_of(condition) {
+        return Some(true);
+    }
+    let settled_by_value = condition
+        .union_members()
+        .iter()
+        .all(|member| member.is_primitive_scalar() && !member.is_callable());
+    settled_by_value.then_some(false)
+}
+
 // ---------------------------------------------------------------------------
 // Type operator evaluation (key-of, value-of, T[K])
 // ---------------------------------------------------------------------------
@@ -616,34 +770,84 @@ fn flatten_binary<'ast>(
 /// Evaluate `key-of<T>` when `T` is a concrete array or shape type.
 ///
 /// - `key-of<array{a: int, b: string}>` → `'a'|'b'`
+/// - `key-of<array{'x', 5: 'y'}>` → `0|5`
 /// - `key-of<array<string, mixed>>` → `string`
+/// - `key-of<array<mixed>>` → `array-key`
 /// - `key-of<list<T>>` → `int`
+/// - `key-of<list<int>|array{a: int}>` → `int|'a'`
 /// - Otherwise returns `key-of<T>` unchanged.
 pub(crate) fn evaluate_key_of(resolved: &PhpType) -> PhpType {
     match resolved.kind() {
         TypeKind::ArrayShape(entries) => {
-            let keys: Vec<PhpType> = entries
+            // An unkeyed entry sits at its position, and PHP stores a
+            // decimal-integer string key as the integer itself, so both
+            // come back as int literals.
+            let mut keys: Vec<PhpType> = entries
                 .iter()
-                .filter_map(|e| e.key.as_ref())
-                .map(PhpType::literal_string_value)
+                .enumerate()
+                .map(|(position, e)| match e.key.as_deref() {
+                    None => PhpType::literal_int(position.to_string()),
+                    Some(key) if is_canonical_int_key(key) => PhpType::literal_int(key.to_string()),
+                    Some(key) => PhpType::literal_string_value(key),
+                })
                 .collect();
+            dedup_types(&mut keys);
             if keys.is_empty() {
                 PhpType::named(atom("never"))
             } else {
                 PhpType::union(keys)
             }
         }
+        // `key-of<A|B>` is every key either member can have.  Only folded
+        // when every member folds, so an operand still waiting on a
+        // constant or template keeps the operator for a later pass.
+        TypeKind::Union(members) => {
+            let mut keys = Vec::with_capacity(members.len());
+            for member in members {
+                let key = evaluate_key_of(member);
+                if matches!(key.kind(), TypeKind::KeyOf(_)) {
+                    return PhpType::key_of(resolved.clone());
+                }
+                keys.push(key);
+            }
+            dedup_types(&mut keys);
+            PhpType::union(keys)
+        }
         TypeKind::Generic(g) => {
             let n = g.name.to_ascii_lowercase();
             match n.as_str() {
                 "array" | "non-empty-array" if g.args.len() == 2 => g.args[0].clone(),
-                "array" | "non-empty-array" if g.args.len() == 1 => PhpType::named(atom("int")),
+                // The single-argument form leaves the keys unconstrained.
+                "array" | "non-empty-array" if g.args.len() == 1 => {
+                    PhpType::named(atom("array-key"))
+                }
                 "list" | "non-empty-list" => PhpType::named(atom("int")),
                 _ => PhpType::key_of(resolved.clone()),
             }
         }
-        TypeKind::Array(_) => PhpType::named(atom("int")),
+        TypeKind::Array(_) => PhpType::named(atom("array-key")),
         _ => PhpType::key_of(resolved.clone()),
+    }
+}
+
+/// Whether PHP stores an array key written as this string as an integer:
+/// a decimal integer with no sign on zero, no leading zeros, and no
+/// surrounding whitespace, within the platform integer range.
+pub(crate) fn is_canonical_int_key(key: &str) -> bool {
+    let digits = key.strip_prefix('-').unwrap_or(key);
+    !digits.is_empty()
+        && digits.bytes().all(|b| b.is_ascii_digit())
+        && (digits == "0" && key == "0" || !digits.starts_with('0'))
+        && key.parse::<i64>().is_ok()
+}
+
+/// The integer a shape key names, when [`is_canonical_int_key`] says PHP
+/// stores it as one.
+pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
+    if is_canonical_int_key(key) {
+        key.parse().ok()
+    } else {
+        None
     }
 }
 
@@ -691,6 +895,21 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
         if let Some(bare_key) = literal_or_named_shape_key(index) {
             for entry in entries {
                 if entry.key.as_deref() == Some(bare_key.as_str()) {
+                    return entry.value_type.clone();
+                }
+            }
+        }
+        // An int offset names an entry written with that key, or the
+        // unkeyed entry sitting at that position (`array{'a', 'b'}[1]`).
+        if let TypeKind::Literal(lit) = index.kind()
+            && let LiteralValue::Int(raw) = &**lit
+        {
+            for (position, entry) in entries.iter().enumerate() {
+                let matches = match entry.key.as_deref() {
+                    Some(key) => key == &**raw,
+                    None => position.to_string() == **raw,
+                };
+                if matches {
                     return entry.value_type.clone();
                 }
             }

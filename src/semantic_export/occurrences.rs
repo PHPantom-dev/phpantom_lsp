@@ -70,7 +70,11 @@ pub(super) fn export_span(
             let resolved = if *is_fqn {
                 backend.find_or_load_class(name.trim_start_matches('\\'))
             } else {
-                let loader = backend.class_loader(context);
+                let loader = backend.class_loader_with(
+                    &context.classes,
+                    context.use_map_at(span.start),
+                    context.namespace_at(span.start),
+                );
                 loader(name)
             };
             let symbol = resolved.as_ref().map(|class| class.fqn().to_string());
@@ -116,7 +120,11 @@ pub(super) fn export_span(
             is_definition,
             is_docblock_reference,
         } => {
-            let loader = backend.function_loader(context);
+            let loader = backend.function_loader_with(
+                context.resolved_names.as_deref(),
+                context.use_map_at(span.start),
+                context.namespace_at(span.start),
+            );
             let function = loader(name, span.start);
             let symbol = function.as_ref().map(function_fqn);
             output.occurrences.push(ExportOccurrence {
@@ -183,7 +191,11 @@ pub(super) fn export_span(
             name,
             is_definition,
         } => {
-            let loader = backend.constant_loader(context);
+            let loader = backend.constant_loader_with(
+                context.resolved_names.as_deref(),
+                context.use_map_at(span.start),
+                context.namespace_at(span.start),
+            );
             let resolved = loader(name, span.start);
             let symbol = if *is_definition {
                 Some(declared_constant_symbol(

@@ -58,6 +58,38 @@ pub(crate) struct PregOutcome {
     pub matches_all: bool,
 }
 
+/// Which of the keys read through an object a call on it invalidates.
+///
+/// See [`ScopeState::invalidate_receiver_state`].
+pub(crate) enum MemberInvalidation {
+    /// Only the recorded results of calls on it.
+    Calls,
+    /// Every key read through it, except the ones listed.
+    Members { kept: Vec<String> },
+}
+
+/// One thing invoking a closure literal does to a capture, worked out once
+/// when the closure is assigned to a variable rather than re-derived from
+/// its body at every call site.
+///
+/// `$cb = function () { $this->stop(); }; call_user_func($cb);` invalidates
+/// `$this` exactly as if `$this->stop()` were written inline at the
+/// `call_user_func` call, but by the time that call is walked the closure's
+/// body is gone from view — only the variable that named it is left. See
+/// [`ScopeState::closure_capture_effects`].
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ClosureCaptureEffect {
+    /// Scope key the effect targets (e.g. `"$this"`, `"$counter"`).
+    pub subject: Atom,
+    /// Key of the call doing the invalidating, whose own proof survives.
+    pub made: Option<Atom>,
+    /// Whether property paths through the subject go too, not just call
+    /// results.
+    pub members: bool,
+    /// The method called on the subject, when it is the receiver.
+    pub method: Option<Atom>,
+}
+
 /// What has to be shown about a proof's holder before the proof applies.
 #[derive(Clone, Debug)]
 pub(crate) enum ProofTrigger {
@@ -162,6 +194,25 @@ impl ScopeProofs<'_> {
     }
 }
 
+/// Which keys arrays are known to hold on one path, for writing through
+/// a key PHP already has.
+///
+/// A write through such a key lands on an entry that is already there, so
+/// it keeps the array's key type, its list promise, and whatever it said
+/// about being empty. PHPStan calls this a write to an existing offset.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct KeyFacts {
+    /// (array subject key, key variable) pairs: the key variable holds a
+    /// key the array has, because a `foreach` over the array bound it and
+    /// nothing since has removed an entry.
+    pub existing_keys: Vec<(Atom, Atom)>,
+    /// Pairs of subject keys known to hold the same keys: the value
+    /// variable a keyed `foreach` binds and the element it was read from
+    /// (`$inner` and `$convert[$outerKey]`). A key a nested `foreach` over
+    /// one of them binds is then an existing key of the other as well.
+    pub key_set_aliases: Vec<(Atom, Atom)>,
+}
+
 /// The type-state of all variables at a single program point.
 ///
 /// This is the equivalent of PHPStan's `expressionTypes` map and Mago's
@@ -253,6 +304,21 @@ pub(crate) struct ScopeState {
     /// behind.
     pub ruled_out: AtomMap<Vec<PhpType>>,
 
+    /// Variable name → what invoking the closure literal it was last
+    /// assigned does to its captures, precomputed at the assignment so a
+    /// later call through the variable can apply it without the closure's
+    /// body in view.
+    ///
+    /// Cleared whenever the variable is reassigned or removed (see
+    /// [`Self::invalidate_proofs`]), the same as every other proof keyed on
+    /// a variable's identity.
+    pub closure_captures: AtomMap<Vec<ClosureCaptureEffect>>,
+
+    /// What this path knows about which keys arrays hold; see
+    /// [`KeyFacts`]. Boxed and `None` while there is nothing to say, which
+    /// is almost always: scopes are cloned and cached by the thousand.
+    pub key_facts: Option<Box<KeyFacts>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -285,8 +351,34 @@ impl ScopeState {
             preg_outcomes: AtomMap::default(),
             unresolved: AtomSet::default(),
             ruled_out: AtomMap::default(),
+            closure_captures: AtomMap::default(),
+            key_facts: None,
             unreachable: false,
         }
+    }
+
+    /// What invoking the closure literal `var_name` last held does to its
+    /// captures, or `&[]` when it never held one (or the closure's body has
+    /// no state-changing effect worth recording).
+    pub fn closure_capture_effects(&self, var_name: &str) -> &[ClosureCaptureEffect] {
+        self.closure_captures
+            .get(&atom(var_name))
+            .map_or(&[], |v| v.as_slice())
+    }
+
+    /// Record what invoking the closure literal just assigned to `var_name`
+    /// does to its captures.  A no-op for an empty list, matching
+    /// [`Self::set`]: nothing worth recording is the same as nothing
+    /// recorded.
+    pub fn set_closure_capture_effects(
+        &mut self,
+        var_name: &str,
+        effects: Vec<ClosureCaptureEffect>,
+    ) {
+        if effects.is_empty() {
+            return;
+        }
+        self.closure_captures.insert(atom(var_name), effects);
     }
 
     /// Borrow the proofs this scope holds that are not variable types.
@@ -385,6 +477,7 @@ impl ScopeState {
         let key = atom(var_name);
         self.locals.remove(&key);
         self.unresolved.remove(&key);
+        self.closure_captures.remove(&key);
         self.invalidate_proofs(var_name);
     }
 
@@ -399,25 +492,26 @@ impl ScopeState {
         });
     }
 
-    /// Drop what an impure call on `receiver` could have changed: every
-    /// recorded call read through it, and every check whose subject is
-    /// one.
+    /// Drop what a call on `receiver` could have changed.
     ///
     /// The receiver keeps its own type — a call does not replace the
-    /// object the variable holds — and so does a property path
-    /// (`$stmt->row`) or an element (`$stmt["id"]`) read through it.
-    /// What goes is the recorded call (`$stmt->fetch('id')`), which is
-    /// the case that matters: proving `$stmt->fetch('id') !== false`
-    /// says nothing about what the same call returns once
-    /// `$stmt->execute()` has run.
+    /// object the variable holds.  What goes depends on `members`:
     ///
-    /// Dropping the property paths as well would be sound — the callee
-    /// may write to any of them — but it costs far more than it buys.
-    /// Guard, call, use (`if (!$p->id) { throw; } $o = $p->load(); f($p->id);`)
-    /// is ordinary code, and forgetting the guard there reports a null
-    /// the program has already ruled out. PHPStan keeps property fetches
-    /// across a method call for the same reason, and Psalm keeps them
-    /// across anything it can see is pure.
+    /// - [`MemberInvalidation::Calls`] drops every recorded call read
+    ///   through it (`$stmt->fetch('id')`), and every check whose subject
+    ///   is one.  Proving `$stmt->fetch('id') !== false` says nothing about
+    ///   what the same call returns once `$stmt->execute()` has run.  A
+    ///   property path (`$stmt->row`) or an element (`$stmt["id"]`) read
+    ///   through it stays: this is what a call we cannot classify, or a
+    ///   write to one of the object's properties, costs.
+    /// - [`MemberInvalidation::Members`] also drops the property paths and
+    ///   elements, except the ones listed as kept (a readonly property
+    ///   cannot have been written).  This is for a call known to change
+    ///   state: one that returns nothing, returns `$this`, or is declared
+    ///   impure.  A call that computes a value keeps them all, which is
+    ///   what keeps guard, call, use (`if (!$p->id) { throw; } $o =
+    ///   $p->load(); f($p->id);`) working; PHPStan draws the line in the
+    ///   same place.
     ///
     /// `made` is the key of the call doing the invalidating, when it has
     /// one, and is kept. A proof about `$s->getClassReflection()` is a
@@ -425,12 +519,22 @@ impl ScopeState {
     /// the proof is about rather than an event that invalidates it —
     /// dropping it would make the guard-then-use idiom hold for exactly
     /// one use, which is not what a `@phpstan-assert` tag promises.
-    pub fn invalidate_receiver_state(&mut self, receiver: &str, made: Option<&str>) {
+    pub fn invalidate_receiver_state(
+        &mut self,
+        receiver: &str,
+        made: Option<&str>,
+        members: &MemberInvalidation,
+    ) {
         let reads_receiver = |key: &str| {
             key != receiver
                 && Some(key) != made
-                && crate::type_engine::types::narrowing::is_call_key(key)
                 && crate::type_engine::types::narrowing::key_reads_variable(key, receiver)
+                && match members {
+                    MemberInvalidation::Calls => {
+                        crate::type_engine::types::narrowing::is_call_key(key)
+                    }
+                    MemberInvalidation::Members { kept } => !kept.iter().any(|k| k == key),
+                }
         };
         self.locals.retain(|key, _| !reads_receiver(key));
         self.non_null_implications
@@ -454,6 +558,7 @@ impl ScopeState {
     /// stop being a pair the moment one of them is written on its own.
     pub fn invalidate_proofs(&mut self, var_name: &str) {
         let key = atom(var_name);
+        self.closure_captures.remove(&key);
         let stale = |subject: &Atom| {
             *subject == key
                 || crate::type_engine::types::narrowing::key_reads_variable(subject, var_name)
@@ -483,6 +588,106 @@ impl ScopeState {
         }
         if !self.ruled_out.is_empty() {
             self.ruled_out.retain(|subject, _| !stale(subject));
+        }
+        self.retain_key_facts(
+            |subject, key_var| !stale(subject) && *key_var != key,
+            |side| !stale(side),
+        );
+    }
+
+    /// Whether `key_var` holds a key the array `subject` is known to have.
+    pub fn is_existing_key(&self, subject: &str, key_var: &str) -> bool {
+        self.key_facts.as_ref().is_some_and(|facts| {
+            facts
+                .existing_keys
+                .iter()
+                .any(|(s, k)| s.as_str() == subject && k.as_str() == key_var)
+        })
+    }
+
+    /// Record that a `foreach` over `subject` just bound `key_var` to one of
+    /// its keys, and `value_var` (when there is one) to the entry there.
+    ///
+    /// Whatever the two variables stood for on the previous iteration is
+    /// dropped first. A key of `subject` is also a key of every subject
+    /// known to hold the same keys, and the entry there holds the same keys
+    /// as the value variable does.
+    pub fn record_foreach_keys(&mut self, subject: &str, key_var: &str, value_var: Option<&str>) {
+        let key = atom(key_var);
+        let names_a_bound_var = |side: &Atom| {
+            let reads = |var: &str| {
+                side.as_str() == var
+                    || crate::type_engine::types::narrowing::key_reads_variable(side, var)
+            };
+            reads(key_var) || value_var.is_some_and(reads)
+        };
+        self.retain_key_facts(
+            |s, k| *k != key && !names_a_bound_var(s),
+            |side| !names_a_bound_var(side),
+        );
+        let facts = self.key_facts.get_or_insert_with(Box::default);
+        let subject_atom = atom(subject);
+        let mut subjects = vec![subject_atom];
+        for (a, b) in &facts.key_set_aliases {
+            if *a == subject_atom {
+                subjects.push(*b);
+            } else if *b == subject_atom {
+                subjects.push(*a);
+            }
+        }
+        for s in &subjects {
+            facts.existing_keys.push((*s, key));
+        }
+        if let Some(value_var) = value_var {
+            let value = atom(value_var);
+            for s in subjects {
+                facts
+                    .key_set_aliases
+                    .push((value, atom(&format!("{s}[{key_var}]"))));
+            }
+        }
+    }
+
+    /// Drop what an element write or removal on the array `subject` may
+    /// have invalidated.
+    ///
+    /// `keys_lost` marks a write that replaced the value at `subject`, or an
+    /// `unset()` that removed one of its entries: every key fact about
+    /// `subject` and what is read through it goes. Otherwise the write only
+    /// added a key to it, which keeps the keys every subject is known to
+    /// have but ends any claim that another subject holds the same ones.
+    pub fn note_element_write(&mut self, subject: &str, keys_lost: bool) {
+        if self.key_facts.is_none() {
+            return;
+        }
+        let at_or_below = |side: &Atom| {
+            side.as_str() == subject
+                || crate::type_engine::types::narrowing::key_reads_variable(side, subject)
+        };
+        if keys_lost {
+            self.retain_key_facts(|s, _| !at_or_below(s), |side| !at_or_below(side));
+        } else {
+            self.retain_key_facts(|_, _| true, |side| side.as_str() != subject);
+        }
+    }
+
+    /// Keep the existing-key facts `keep_key` accepts and the aliases whose
+    /// both sides `keep_side` accepts, going back to `None` once nothing is
+    /// left.
+    fn retain_key_facts(
+        &mut self,
+        keep_key: impl Fn(&Atom, &Atom) -> bool,
+        keep_side: impl Fn(&Atom) -> bool,
+    ) {
+        let Some(facts) = self.key_facts.as_mut() else {
+            return;
+        };
+        facts.existing_keys.retain(|(s, k)| keep_key(s, k));
+        facts
+            .key_set_aliases
+            .retain(|(a, b)| keep_side(a) && keep_side(b));
+        if facts.existing_keys.is_empty() && facts.key_set_aliases.is_empty() {
+            self.key_facts = None;
         }
     }
 

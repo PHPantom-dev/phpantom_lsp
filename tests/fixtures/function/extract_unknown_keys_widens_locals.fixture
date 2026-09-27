@@ -1,0 +1,15 @@
+// test: extract() of an array whose keys are not known widens every local
+// feature: hover
+// Any key may name any local, so what the variables held before is gone.
+// expect_hover: $rx => $rx = mixed
+// expect_hover: $ry => $ry = mixed
+---
+<?php
+
+function test(array $data): void {
+    $x = 1;
+    $y = 'a';
+    extract($data);
+    $rx = $x;
+    $ry = $y;<>
+}

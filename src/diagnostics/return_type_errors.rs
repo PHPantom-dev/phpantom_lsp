@@ -8,8 +8,10 @@
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
@@ -176,14 +178,16 @@ impl Backend {
                 with_parsed_program(content, "return_type_diagnostics", |program, _content| {
                     let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
                     for stmt in program.statements.iter() {
+                        // A top-level statement lies in one `namespace` block.
+                        let offset = stmt.span().start.offset;
                         process_top_level_statement(
                             stmt,
                             uri,
                             content,
                             ctx.file_ctx,
-                            ctx.class_loader,
-                            ctx.function_loader,
-                            ctx.constant_loader,
+                            ctx.class_loader_at(offset),
+                            ctx.function_loader_at(offset),
+                            ctx.constant_loader_at(offset),
                             self,
                             &mut resolved_returns,
                         );
@@ -209,7 +213,7 @@ impl Backend {
                         if is_type_compatible(
                             ty,
                             &ret.declared_type,
-                            &ctx.class_loader,
+                            ctx.class_loader_at(ret.start as u32),
                             ctx.strict_types,
                         ) =>
                     {
@@ -270,6 +274,7 @@ fn resolve_return_and_push(
     end: usize,
     stmt_start: usize,
     declared_return: &PhpType,
+    template_bounds: &HashMap<String, PhpType>,
     current_class: &ClassInfo,
     content: &str,
     all_classes: &[Arc<ClassInfo>],
@@ -302,7 +307,12 @@ fn resolve_return_and_push(
             }
 
             let resolve_class_names = |ty: PhpType| {
-                ty.resolve_names(&|name: &str| {
+                let ty = if template_bounds.is_empty() {
+                    ty
+                } else {
+                    ty.substitute(template_bounds)
+                };
+                let ty = ty.resolve_names(&|name: &str| {
                     if name.contains("__anonymous@") {
                         return name.to_string();
                     }
@@ -311,7 +321,13 @@ fn resolve_return_and_push(
                     } else {
                         name.to_string()
                     }
-                })
+                });
+                // A Laravel model operator is a name for a class too, and
+                // this is where names become classes. Leaving it for the
+                // comparison alone would report the operator's own
+                // spelling back at the reader, who wrote a type that does
+                // name something.
+                crate::virtual_members::laravel::expand_model_type(&ty, class_loader)
             };
 
             // A standalone `/** @var Type */` docblock (no variable name)
@@ -385,8 +401,15 @@ fn indexed_return_type(
     uri: &str,
     func_name: &str,
     func_offset: u32,
-) -> Option<PhpType> {
+) -> Option<(PhpType, HashMap<String, PhpType>)> {
     let fqn = file_ctx.resolve_name_at(func_name, func_offset);
+    let with_bounds = |fi: &crate::types::FunctionInfo| {
+        let ret = fi.return_type.clone()?;
+        Some((
+            ret,
+            template_bounds(&fi.template_params, &fi.template_param_bounds),
+        ))
+    };
 
     {
         let fmap = backend.global_functions().read();
@@ -394,7 +417,7 @@ fn indexed_return_type(
             if let Some((decl_uri, fi)) = fmap.get(name)
                 && decl_uri == uri
             {
-                return fi.return_type.clone();
+                return with_bounds(fi);
             }
         }
     }
@@ -402,10 +425,29 @@ fn indexed_return_type(
     let dups = backend.symbols.duplicate_functions.read();
     for name in [fqn.as_str(), func_name] {
         if let Some(fi) = dups.get(name).and_then(|by_uri| by_uri.get(uri)) {
-            return fi.return_type.clone();
+            return with_bounds(fi);
         }
     }
     None
+}
+
+/// Map each template parameter to its bound, or `mixed` when it has none.
+///
+/// Template parameters are plain names in a `PhpType`, so left in place they
+/// would be looked up as classes and a same-named class would stand in for
+/// them.  A value that fails the bound fails the template too, so the bound is
+/// what a return is checked against.
+fn template_bounds(
+    params: &[crate::atom::Atom],
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> HashMap<String, PhpType> {
+    params
+        .iter()
+        .map(|param| {
+            let bound = bounds.get(param).cloned();
+            (param.to_string(), bound.unwrap_or_else(PhpType::mixed))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -503,16 +545,25 @@ fn process_top_level_statement(
             // against `array<string, int>` rather than bare `array`.  Falling
             // back to the AST hint covers a function the index has not caught
             // up with yet.
-            let declared_return =
-                indexed_return_type(backend, file_ctx, uri, func_name, func_offset).or_else(|| {
-                    func.return_type_hint
-                        .as_ref()
-                        .map(|rth| crate::parser::extract_hint_type(&rth.hint))
-                });
+            let (declared_return, template_bounds) =
+                match indexed_return_type(backend, file_ctx, uri, func_name, func_offset) {
+                    Some((ret, bounds)) => (Some(ret), bounds),
+                    None => (
+                        func.return_type_hint
+                            .as_ref()
+                            .map(|rth| crate::parser::extract_hint_type(&rth.hint)),
+                        HashMap::new(),
+                    ),
+                };
 
             let declared_return = match declared_return {
                 Some(t) if !t.is_untyped() && !t.is_mixed() => t,
                 _ => return,
+            };
+            let declared_return = if template_bounds.is_empty() {
+                declared_return
+            } else {
+                declared_return.substitute(&template_bounds)
             };
 
             // Skip generators.
@@ -559,6 +610,7 @@ fn process_top_level_statement(
                     end,
                     stmt_start,
                     &declared_return,
+                    &template_bounds,
                     current_class,
                     content,
                     &file_ctx.classes,
@@ -642,13 +694,28 @@ fn process_class_member(
     };
 
     // Look up the method's declared return type from the parsed MethodInfo.
-    let declared_return = current_class
-        .get_method(method_name)
-        .and_then(|mi| mi.return_type.clone());
+    let method_info = current_class.get_method(method_name);
+    let declared_return = method_info.and_then(|mi| mi.return_type.clone());
 
     let declared_return = match declared_return {
         Some(t) if !t.is_untyped() && !t.is_mixed() => t,
         _ => return,
+    };
+    let mut bounds = template_bounds(
+        &current_class.template_params,
+        &current_class.template_param_bounds,
+    );
+    if let Some(mi) = method_info {
+        bounds.extend(template_bounds(
+            &mi.template_params,
+            &mi.template_param_bounds,
+        ));
+    }
+    let template_bounds = bounds;
+    let declared_return = if template_bounds.is_empty() {
+        declared_return
+    } else {
+        declared_return.substitute(&template_bounds)
     };
 
     // Skip generators.
@@ -692,6 +759,8 @@ fn process_class_member(
         function_loader,
         backend,
     );
+    let declared_return =
+        crate::virtual_members::laravel::expand_model_type(&declared_return, class_loader);
 
     let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
     let loaders = owned_loaders.loaders();
@@ -703,6 +772,7 @@ fn process_class_member(
             end,
             stmt_start,
             &declared_return,
+            &template_bounds,
             current_class,
             content,
             &file_ctx.classes,

@@ -107,6 +107,15 @@ pub(crate) type TransResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<crate::p
 pub(crate) type ScopeVarResolverFn<'a> =
     Option<&'a dyn Fn(&str) -> Vec<crate::types::ResolvedType>>;
 
+/// Type alias for the optional scope-membership resolver from the
+/// forward walker.  Unlike [`ScopeVarResolverFn`], which returns an empty
+/// vec both when a variable was never assigned on any surviving path and
+/// when it was assigned but its type could not be resolved, this answers
+/// which of the two it is: `true` when the variable has *some* entry in
+/// the walker's `ScopeState` (even an empty/unresolved one), `false` when
+/// it has none at all.
+pub(crate) type ScopeContainsResolverFn<'a> = Option<&'a dyn Fn(&str) -> bool>;
+
 /// Optional Laravel macro callback `$this` resolver.
 pub(crate) type LaravelMacroThisResolverFn<'a> = Option<&'a dyn Fn(&str) -> Option<Arc<ClassInfo>>>;
 
@@ -347,6 +356,15 @@ pub(crate) struct VarResolutionCtx<'a> {
     /// variable's types from the forward walker's in-progress
     /// `ScopeState`.
     pub scope_var_resolver: ScopeVarResolverFn<'a>,
+    /// Optional scope-membership resolver, set alongside
+    /// `scope_var_resolver`.
+    ///
+    /// `resolve_null_coalesce_chain` uses this to tell a bare variable
+    /// that was never assigned on any surviving path (contributes
+    /// nothing to a `??` chain, like a stripped `null`) apart from one
+    /// that was assigned but whose type resolution failed (still
+    /// contributes `mixed`, per `widen_unresolved_branch`).
+    pub scope_contains_resolver: ScopeContainsResolverFn<'a>,
     /// The proofs that scope holds which are not variable types: what a
     /// boolean stands for, which `preg_match` outcome a variable is, and
     /// whose null a value's null stands for.
@@ -395,6 +413,7 @@ impl<'a> VarResolutionCtx<'a> {
             top_level_scope: None,
             match_arm_narrowing: HashMap::new(),
             scope_var_resolver: None,
+            scope_contains_resolver: None,
             scope_proofs: None,
         }
     }

@@ -29,6 +29,12 @@ use App\Models\ReviewCollection;
 use Database\Factories\AnnotatedPostFactory;
 use Database\Factories\BlogAuthorFactory;
 use Database\Factories\EditorialFactory;
+use Illuminate\Container\Attributes\Auth as InjectAuth;
+use Illuminate\Container\Attributes\Authenticated as InjectAuthenticated;
+use Illuminate\Container\Attributes\Cache as InjectCache;
+use Illuminate\Container\Attributes\Database as InjectDatabase;
+use Illuminate\Container\Attributes\Log as InjectLog;
+use Illuminate\Container\Attributes\Storage as InjectStorage;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Http\Client\Factory as HttpFactory;
@@ -40,11 +46,16 @@ use Illuminate\Support\Env;
 use Illuminate\Support\Facades\App;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Lang;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Facades\Response;
@@ -313,6 +324,41 @@ class Demo
 
         // An argument typed as a number is a count, the same as writing one.
         BlogAuthor::factory($count)->create()->first();       // → BlogAuthor|null
+    }
+
+    // ── Model PHPDoc types ──────────────────────────────────────────────────
+    // The Laravel PHPStan extensions let a docblock name a model and have the
+    // class it works through inferred: its builder, its collection, its
+    // factory, or one of its relationships. Each resolves to whatever the
+    // model actually uses, so a custom collection or builder survives, and a
+    // model naming none of them gets the framework's own class.
+
+    /**
+     * @param builder-of<BlogAuthor> $query
+     * @param collection-of<BlogAuthor> $authors
+     * @param factory-of<BlogAuthor> $factory
+     */
+    public function modelDocblockTypes($query, $authors, $factory): void
+    {
+        $query->get()->emails();              // → AuthorCollection
+        $authors->byName();                   // → AuthorCollection
+        $factory->makeOne()->displayName;     // → BlogAuthor
+    }
+
+    /**
+     * A relation path names the relationship itself, one segment at a time:
+     * `posts` is BlogAuthor::posts(), and `posts.author` follows it on to
+     * BlogPost::author(). The builder form ends on the related model instead.
+     *
+     * @param relation-of<BlogAuthor, 'posts'> $posts
+     * @param relation-of<BlogAuthor, 'posts.author'> $writer
+     * @param builder-of<BlogAuthor, 'posts'> $postQuery
+     */
+    public function relationDocblockTypes($posts, $writer, $postQuery): void
+    {
+        $posts->getResults()->first()?->getTitle();   // HasMany<BlogPost> → BlogPost
+        $writer->getResults()->displayName;           // BelongsTo<BlogAuthor> → BlogAuthor
+        $postQuery->get()->first()?->getSlug();       // Builder<BlogPost> → BlogPost
     }
 
 
@@ -634,6 +680,12 @@ class Demo
         // this call site ($theme completes as string, $author as BlogAuthor).
         view('theme.dashboard', ['theme' => 'dark'])->with('author', new BlogAuthor());
 
+        // A parameter declared `view-string` asks for a template name, so
+        // its arguments are completed and checked like view()'s own — even
+        // though nothing about the call's spelling says it renders.
+        $this->renderTemplate('welcome');
+        $this->renderTemplate('theme.dashboard');
+
         // Named Routes
         route('home');
         route('admin.users.index');
@@ -759,6 +811,23 @@ class Demo
             'user' => BlogAuthor::first(),
             'posts' => BlogPost::where('published', true)->get(),
         ];
+    }
+
+    /**
+     * `view-string` is the subset of `string` that names a Blade template,
+     * the Laravel PHPStan extensions' way of saying a parameter renders
+     * what it is given. It stays a plain `string` for every other purpose,
+     * so passing a runtime value is fine; only a literal is checked.
+     *
+     * Try: type a quote inside one of the renderTemplate() calls above to
+     * complete the project's templates, and misspell one to see it
+     * reported the way a bad view() name is.
+     *
+     * @param view-string $template
+     */
+    private function renderTemplate(string $template): mixed
+    {
+        return view($template);
     }
 
 
@@ -921,6 +990,46 @@ class Demo
         config('app.name');
         Config::get('database.default');
         Config::set('app.timezone', 'UTC');
+    }
+
+
+    // ── Config-backed Laravel resource names ───────────────────────────
+
+    public function injectedNamedResources(
+        #[InjectAuth(guard: 'admin')] mixed $guard,
+        #[InjectAuthenticated(guard: 'admin')] mixed $user,
+        #[InjectCache(store: 'memory')] mixed $cache,
+        #[InjectLog(channel: 'daily')] mixed $logger,
+        #[InjectStorage(disk: 'pantry')] mixed $disk,
+        #[InjectDatabase(connection: 'mysql')] mixed $database,
+    ): void
+    {
+        // Contextual-attribute arguments complete and navigate against the
+        // same family-specific config entries as their facade counterparts.
+    }
+
+    public function namedLaravelResources(): void
+    {
+        // Hover identifies each resource family, Ctrl+Click opens its config
+        // entry, and references include direct config() access to that entry.
+        auth('admin');
+        Auth::guard('admin');
+        Cache::store('memory');
+        Log::channel('daily');
+        Log::stack(['daily', 'stderr']);
+        Storage::disk('pantry');
+        DB::connection('mysql');
+        DB::connection('mysql::read');
+        Queue::connection('redis');
+        Mail::mailer('transactional');
+        Broadcast::connection('internal');
+        Route::middleware(['auth:admin']);
+        config('cache.stores.memory');
+
+        // Laravel supplies these null drivers at runtime even though no
+        // matching child needs to exist in cache.php or queue.php.
+        Cache::store('null');
+        Queue::connection('null');
     }
 
 
@@ -1199,16 +1308,15 @@ class Demo
     {
         // fake() declares the Filesystem contract but always builds a
         // FilesystemAdapter, so the adapter-only assertion helpers resolve.
-        // Disk names complete from config/filesystems.php, hover as their full
-        // config keys, and navigate back to their declarations — in the
-        // #[Storage] attribute above as much as in the calls below.
+        // Disk names complete from config/filesystems.php, hover with their
+        // resource family, and navigate back to their declarations.
         Storage::fake('avatars')->assertExists('me.png');
         Storage::persistentFake(disk: 'logs')->assertMissing('old.log');
 
         // forgetDisk() takes one name or a list of them, and tolerates a disk
         // that was never configured, so an unknown name here is not flagged.
         Storage::forgetDisk('avatars');
-        Storage::forgetDisk(['avatars', 'logs']);
+        Storage::forgetDisk(disk: ['avatars', 'logs']);
     }
 
 

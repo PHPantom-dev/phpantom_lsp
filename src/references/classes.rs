@@ -79,7 +79,10 @@ impl Backend {
                             if !name.eq_ignore_ascii_case(target_short) {
                                 false
                             } else {
-                                let fqn = build_fqn(name, fqn_resolver.namespace.as_deref());
+                                let fqn = build_fqn(
+                                    name,
+                                    fqn_resolver.namespace_at(span.start).as_deref(),
+                                );
                                 class_names_match(&fqn, target, target_short)
                             }
                         }
