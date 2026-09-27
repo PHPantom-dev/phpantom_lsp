@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790536394234,
+  "lastUpdate": 1790544671296,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34271,6 +34271,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "01a26d6f06d57a564d6b6c8f9eb4ac8a08a198f5",
+          "message": "Add Laravel config resource name intelligence\n\nRecognize auth guards, cache stores, log channels, database and queue\nconnections, mailers, and broadcast connections across direct Laravel\nhelpers, facades, contextual attributes, and route middleware.\n\nDrive completion, hover, navigation, diagnostics, and references from\none descriptor table while preserving semantic alias and homonym\nhandling.",
+          "timestamp": "2026-09-27T23:13:33+02:00",
+          "tree_id": "d84365c97abeae74897a69080f3421089a3d852e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/01a26d6f06d57a564d6b6c8f9eb4ac8a08a198f5"
+        },
+        "date": 1790544660855,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.7,
             "unit": "MiB"
           }
         ]
