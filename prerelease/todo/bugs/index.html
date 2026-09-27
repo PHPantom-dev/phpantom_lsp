@@ -1010,17 +1010,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b534-an-inline-var-above-an-array-element-assignment-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B534. An inline <code>@var</code> above an array-element assignment is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1676,17 +1665,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b534-an-inline-var-above-an-array-element-assignment-is-ignored" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B534. An inline <code>@var</code> above an array-element assignment is ignored
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1829,15 +1807,6 @@ declared <code>@param-out int</code>, so the wrong literal comes out looking pre
 <a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">// $a: string, should be 0</span>
 </code></pre></div>
 <p>Found porting Psalm's <code>Php70Test.php</code> (<code>nullCoalesceWithReference</code>).</p>
-<h3 id="b534-an-inline-var-above-an-array-element-assignment-is-ignored">B534. An inline <code>@var</code> above an array-element assignment is ignored<a class="headerlink" href="#b534-an-inline-var-above-an-array-element-assignment-is-ignored" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @var string */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$GLOBALS[&#39;sql_query&#39;] = rand(0, 1) ? &#39;asd&#39; : null;</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">// &#39;asd&#39;|null, should be string</span>
-</code></pre></div>
-<p>A nameless <code>@var</code> above an assignment types its right-hand side. It is
-honoured when the target is a variable, not when it is an array element.</p>
-<p>Found porting Psalm's <code>TypeReconciliation/EmptyTest.php</code> (<code>issue-9341-1</code>).</p>
 
 
 
