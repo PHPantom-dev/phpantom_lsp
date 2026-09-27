@@ -1345,10 +1345,43 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l32-config-backed-named-resource-strings" class="md-nav__link">
+  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L32. Config-backed named-resource strings
+        L56. Typed Laravel connection names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L59. Typed controller middleware names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l57-laravel-queue-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L57. Laravel queue names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L58. Laravel rate limiter names
       </span>
     </span>
   </a>
@@ -2038,10 +2071,43 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l32-config-backed-named-resource-strings" class="md-nav__link">
+  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
-        L32. Config-backed named-resource strings
+        L56. Typed Laravel connection names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L59. Typed controller middleware names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l57-laravel-queue-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L57. Laravel queue names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L58. Laravel rate limiter names
       </span>
     </span>
   </a>
@@ -2826,7 +2892,7 @@ same static sources the model provider already uses (casts, fillable,
 accessors, <code>@property</code> tags) — no database needed.</p>
 <h4 id="l31-string-key-rename-highlight-and-semantic-tokens">L31. String-key rename, highlight, and semantic tokens<a class="headerlink" href="#l31-string-key-rename-highlight-and-semantic-tokens" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>References and go-to-definition already work for the four indexed
+<p>References and go-to-definition already work for indexed Laravel
 string kinds, but the rename, document-highlight, and semantic-token
 arms are explicit no-ops. Wiring them up exceeds the Laravel LSP (which
 has none of the three): renaming a translation key updates the lang
@@ -2834,41 +2900,38 @@ files across every locale plus all usages; renaming a route name
 updates the <code>-&gt;name()</code> declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.</p>
-<h4 id="l32-config-backed-named-resource-strings">L32. Config-backed named-resource strings<a class="headerlink" href="#l32-config-backed-named-resource-strings" title="Permanent link">&para;</a></h4>
+<h4 id="l56-typed-laravel-connection-names">L56. Typed Laravel connection names<a class="headerlink" href="#l56-typed-laravel-connection-names" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Storage disks are one instance of a general pattern: a method argument
-names an entry under a known config subtree, and the config scanner
-already parses those files. Auth guards (<code>auth('...')</code>,
-<code>Auth::guard()</code>, <code>-&gt;middleware('auth:web')</code>), cache stores
-(<code>Cache::store()</code>), log channels (<code>Log::channel()</code>), and storage disks
-(<code>Storage::disk()</code>, test fakes, disk eviction, and <code>#[Storage]</code>) already
-complete against their config subtree — but all of them route through
-the generic <code>LaravelStringKind::Config</code> kind rather than a dedicated
-one, so they get completion plus the shared config
-diagnostics/go-to-definition and nothing family-specific (a "cache
-store" hovers with the same generic wording as any other config key).
-<code>Log::stack()</code> (array values) isn't recognized at all. Generalize into
-a declarative table of <code>(trigger context, config path)</code> pairs so each
-new family is one table row, and cover the rest of the family in one
-pass:</p>
-<ul>
-<li><strong>Database connections</strong> — <code>DB::connection()</code>, <code>-&gt;connection()</code> /
-  <code>$connection</code> on models and jobs → <code>database.connections.*</code>.</li>
-<li><strong>Queue connections and queues</strong> — <code>Queue::connection()</code>,
-  <code>-&gt;onConnection()</code> → <code>queue.connections.*</code>; <code>-&gt;onQueue()</code> names are
-  free-form (completion from literals seen elsewhere, no diagnostic).</li>
-<li><strong>Mailers</strong> — <code>Mail::mailer()</code> → <code>mail.mailers.*</code>.</li>
-<li><strong>Broadcast connections</strong> — <code>Broadcast::connection()</code> →
-  <code>broadcasting.connections.*</code>.</li>
-<li><strong>Rate limiter names</strong> — not config-backed: registered via
-  <code>RateLimiter::for('name', …)</code> in providers. Scan literal
-  registrations (same shape as the macro scanner) and validate
-  <code>throttle:name</code> middleware parameters and <code>new RateLimited('name')</code>
-  against the set.</li>
-</ul>
-<p>Each family gets the full string-kind treatment for free once wired
-as a <code>LaravelStringKey</code>: completion, go-to-definition (jump to the
-config entry), hover, diagnostics, and references.</p>
+<p>The method name <code>-&gt;connection()</code> does not identify one config subtree: the
+receiver may select <code>database.connections.*</code>, <code>queue.connections.*</code>, or
+<code>broadcasting.connections.*</code>. Resolve it through the shared type engine, and
+treat <code>-&gt;onConnection()</code> as a queue connection. A model's <code>$connection</code> is a
+database connection, while the same property on a queueable job selects a
+queue connection. Each confirmed literal should receive the same completion,
+hover, navigation, diagnostics, and references as the direct facade spelling.</p>
+<h4 id="l59-typed-controller-middleware-names">L59. Typed controller middleware names<a class="headerlink" href="#l59-typed-controller-middleware-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>$this-&gt;middleware('auth:admin')</code> names middleware only when <code>$this</code> is a
+Laravel controller; an unrelated class may define the same method for a
+different purpose. Confirm the enclosing class through the shared type engine
+before completing or validating embedded authentication guards. Static and
+fluent <code>Route::middleware()</code> calls remain syntactically unambiguous.</p>
+<h4 id="l57-laravel-queue-names">L57. Laravel queue names<a class="headerlink" href="#l57-laravel-queue-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>-&gt;onQueue()</code> names are free-form rather than config-backed. Complete from
+literals seen elsewhere in the project and connect those occurrences for
+navigation and references, but do not diagnose a name merely because the
+static index has not seen it.</p>
+<h4 id="l58-laravel-rate-limiter-names">L58. Laravel rate limiter names<a class="headerlink" href="#l58-laravel-rate-limiter-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Rate limiter names are registered through <code>RateLimiter::for('name', …)</code> in
+service providers. Scan literal registrations using the same provider-aware
+shape as the macro scanner, then complete, navigate, and validate
+<code>throttle:name</code> middleware parameters and <code>new RateLimited('name')</code> against
+the discovered set. Numeric inline limits such as <code>throttle:60,1</code> remain
+values rather than named registrations. Keep the world open when no
+registration source can be read so a partial index does not create false
+diagnostics.</p>
 <h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
