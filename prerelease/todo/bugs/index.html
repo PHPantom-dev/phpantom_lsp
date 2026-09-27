@@ -1246,23 +1246,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B498. A variable first introduced by a by-reference closure <code>use</code> is not typed <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2151,23 +2134,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B498. A variable first introduced by a by-reference closure <code>use</code> is not typed <code>null</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -2454,15 +2420,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <p><code>TArray</code> binds to <code>array{}</code>, but <code>TKey</code> is only reached through <code>TArray</code>'s bound, and an empty array leaves it on its own bound instead of <code>never</code>. A template bound directly from an empty array (<code>@param iterable&lt;T&gt;</code> handed <code>[]</code>) already binds <code>never</code>.</p>
 <p>Found porting PHPStan's <code>nsrt/conditional-types.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null">B498. A variable first introduced by a by-reference closure <code>use</code> is not typed <code>null</code><a class="headerlink" href="#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$callback = function () use (&amp;$untouched) {</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">    $untouched; // should be null, has no type</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">};</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">$untouched;     // should be null, has no type</span>
-</code></pre></div>
-<p>Capturing an undefined variable by reference creates it, as <code>null</code>, in both scopes.</p>
-<p>Found porting PHPStan's <code>nsrt/closure-passed-by-reference.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p>No outstanding items.</p>
 
 
 
