@@ -11,7 +11,9 @@ use crate::text_position::LineIndex;
 
 use super::provider_resources::ProviderResource;
 use super::trans_json::collect_json_trans_declarations;
-use super::trans_keys::{app_lang_group, collect_trans_declarations, published_trans_dirs};
+use super::trans_keys::{
+    app_lang_locale_and_group, collect_trans_declarations, published_trans_dirs,
+};
 
 /// A language file shared by all the keys it declares.
 pub(crate) struct TranslationFile {
@@ -136,6 +138,37 @@ impl TranslationCatalog {
         self.insert_locale_files(backend, path, locale, namespace, "");
     }
 
+    fn insert_locale_entry(
+        &mut self,
+        backend: &Backend,
+        path: &Path,
+        locale: &str,
+        namespace: &str,
+        subdir: &str,
+        is_directory: bool,
+    ) {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            return;
+        };
+        if is_directory {
+            self.insert_locale_files(
+                backend,
+                path,
+                locale,
+                namespace,
+                &format!("{subdir}{name}/"),
+            );
+        } else if let Some(stem) = name.strip_suffix(".php") {
+            self.insert_file(
+                backend,
+                path,
+                locale,
+                namespace,
+                Some(&format!("{subdir}{stem}")),
+            );
+        }
+    }
+
     fn insert_locale_files(
         &mut self,
         backend: &Backend,
@@ -148,29 +181,30 @@ impl TranslationCatalog {
             return;
         };
         for file in files.flatten() {
-            let path = file.path();
-            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
             // Do not recurse through directory symlinks back into the locale tree.
-            if file.file_type().is_ok_and(|kind| kind.is_dir()) {
-                self.insert_locale_files(
-                    backend,
-                    &path,
-                    locale,
-                    namespace,
-                    &format!("{subdir}{name}/"),
-                );
-            } else if let Some(stem) = name.strip_suffix(".php") {
-                self.insert_file(
-                    backend,
-                    &path,
-                    locale,
-                    namespace,
-                    Some(&format!("{subdir}{stem}")),
-                );
-            }
+            self.insert_locale_entry(
+                backend,
+                &file.path(),
+                locale,
+                namespace,
+                subdir,
+                file.file_type().is_ok_and(|kind| kind.is_dir()),
+            );
         }
+    }
+
+    fn insert_open_group(&mut self, backend: &Backend, uri: &str, locale: &str, group: &str) {
+        if self.files.iter().any(|file| file.uri.as_str() == uri) {
+            return;
+        }
+        let Ok(parsed_uri) = Url::parse(uri) else {
+            return;
+        };
+        let Ok(path) = parsed_uri.to_file_path() else {
+            return;
+        };
+        self.locales.insert(locale.to_string());
+        self.insert_file(backend, &path, locale, "", Some(group));
     }
 }
 
@@ -235,25 +269,10 @@ impl Backend {
         if let Some(root) = workspace_root {
             let root_uri = crate::util::path_to_uri(&root);
             for (uri, _) in self.user_file_symbol_maps_nonblocking() {
-                let Some(group) = app_lang_group(&root_uri, &uri) else {
+                let Some((locale, group)) = app_lang_locale_and_group(&root_uri, &uri) else {
                     continue;
                 };
-                if catalog.files.iter().any(|file| file.uri.as_str() == uri) {
-                    continue;
-                }
-                let Ok(parsed_uri) = Url::parse(&uri) else {
-                    continue;
-                };
-                let Ok(path) = parsed_uri.to_file_path() else {
-                    continue;
-                };
-                let Some((_, locale)) =
-                    uri[..uri.len() - group.len() - ".php".len() - 1].rsplit_once('/')
-                else {
-                    continue;
-                };
-                catalog.locales.insert(locale.to_string());
-                catalog.insert_file(self, &path, locale, "", Some(group));
+                catalog.insert_open_group(self, &uri, locale, group);
             }
         }
         for entries in catalog.entries.values_mut() {

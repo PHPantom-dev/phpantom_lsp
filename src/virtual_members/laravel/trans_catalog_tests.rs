@@ -207,9 +207,23 @@ fn translation_catalog_handles_invalid_and_removed_paths() {
         .write()
         .insert(uri.to_string(), Arc::new("<?php return [];".to_string()));
     catalog.insert_file(&backend, &invalid_file, "en", "", None);
+    catalog.insert_locale_entry(&backend, &invalid_file, "en", "", "", false);
     assert!(catalog.files.is_empty());
     catalog.insert_locale(&backend, &dir.path().join("removed"), "");
     assert!(catalog.entries.is_empty());
+}
+
+#[test]
+fn translation_catalog_rejects_invalid_open_group_uris() {
+    let backend = make_backend();
+    let mut catalog = TranslationCatalog::default();
+
+    for uri in ["relative.php", "https://example.test/lang/en/messages.php"] {
+        catalog.insert_open_group(&backend, uri, "en", "messages");
+        assert!(catalog.files.is_empty(), "{uri}");
+        assert!(catalog.entries.is_empty(), "{uri}");
+        assert!(catalog.locales.is_empty(), "{uri}");
+    }
 }
 
 // macOS filesystems reject non-UTF-8 filenames before the scanner sees them.

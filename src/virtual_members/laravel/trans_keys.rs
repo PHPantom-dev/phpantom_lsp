@@ -62,15 +62,18 @@ pub(crate) fn resolve_trans_definitions(backend: &Backend, key: &str) -> Vec<Loc
 /// exists; both are read so a project part-way through the move resolves.
 const APP_LANG_DIRS: [&str; 2] = ["lang", "resources/lang"];
 
-/// The group an application translation file holds, or `None` when `uri` is
-/// not one.
+/// The locale and group an application translation file holds, or `None`
+/// when `uri` is not one.
 ///
 /// `FileLoader` reads `<lang>/<locale>/<group>.php`, and a group may name a
 /// subdirectory: `lang/en/admin/users.php` is the `admin/users` group.
 /// `<lang>/vendor/` holds published package overrides, which are only read
 /// for their namespace, and a `lang/` directory anywhere else in the project
 /// (a package's own) is not the application's.
-pub(crate) fn app_lang_group<'a>(root_uri: &str, uri: &'a str) -> Option<&'a str> {
+pub(crate) fn app_lang_locale_and_group<'a>(
+    root_uri: &str,
+    uri: &'a str,
+) -> Option<(&'a str, &'a str)> {
     let rel = uri
         .strip_prefix(root_uri.trim_end_matches('/'))?
         .strip_prefix('/')?;
@@ -81,7 +84,9 @@ pub(crate) fn app_lang_group<'a>(root_uri: &str, uri: &'a str) -> Option<&'a str
     if locale == "vendor" {
         return None;
     }
-    file.strip_suffix(".php").filter(|group| !group.is_empty())
+    file.strip_suffix(".php")
+        .filter(|group| !group.is_empty())
+        .map(|group| (locale, group))
 }
 
 /// The directories an application publishes a package's translations into,
