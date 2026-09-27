@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790503907558,
+  "lastUpdate": 1790505437025,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -33557,6 +33557,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 80.9,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "5b591a115f4d10f0e34bd9e5b8764e23186f0d97",
+          "message": "A call whose argument can never be reached is itself `never`, not the\ncallee's declared return type",
+          "timestamp": "2026-09-27T12:19:09+02:00",
+          "tree_id": "2804c060c07f22b0ce5848e88cb0d51a6a1a7bb5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/5b591a115f4d10f0e34bd9e5b8764e23186f0d97"
+        },
+        "date": 1790505426190,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.1,
             "unit": "MiB"
           }
         ]
