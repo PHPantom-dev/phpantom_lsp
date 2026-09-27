@@ -999,17 +999,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B533. A reference assigned inside <code>??</code>'s left operand takes the fallback's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1654,17 +1643,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B533. A reference assigned inside <code>??</code>'s left operand takes the fallback's type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1800,13 +1778,6 @@ reach. A <code>return</code> leaves the parameter holding whatever it held there
 each <code>return</code> has to contribute to the join too. The reading narrows the
 declared <code>@param-out int</code>, so the wrong literal comes out looking precise.</p>
 <p>Found porting Psalm's <code>ReferenceConstraintTest.php</code>.</p>
-<h3 id="b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type">B533. A reference assigned inside <code>??</code>'s left operand takes the fallback's type<a class="headerlink" href="#b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$var = 0;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">($a =&amp; $var) ?? &#39;hello&#39;;</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">// $a: string, should be 0</span>
-</code></pre></div>
-<p>Found porting Psalm's <code>Php70Test.php</code> (<code>nullCoalesceWithReference</code>).</p>
 
 
 
