@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790505694142,
+  "lastUpdate": 1790508140834,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -33625,6 +33625,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 86.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "7d77990cfd68b7c552f5b5310ff9c8e47ffe9957",
+          "message": "Port a range of Psalm tests",
+          "timestamp": "2026-09-27T13:04:21+02:00",
+          "tree_id": "4cd979d128d8620c44ecf36621f0863c41ff9a1c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/7d77990cfd68b7c552f5b5310ff9c8e47ffe9957"
+        },
+        "date": 1790508131715,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.2,
             "unit": "MiB"
           }
         ]
