@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790524979579,
+  "lastUpdate": 1790526458730,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -33829,6 +33829,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "d38e72b5c56fb4db5a5bd053061374344018e39f",
+          "message": "An object built inline in a chain binds its templates like one assigned\nfirst",
+          "timestamp": "2026-09-27T18:03:10+02:00",
+          "tree_id": "b72e173ad9a7bcf883b2d1982578d34a7ad96f5a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/d38e72b5c56fb4db5a5bd053061374344018e39f"
+        },
+        "date": 1790526448946,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.3,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79.9,
             "unit": "MiB"
           }
         ]
