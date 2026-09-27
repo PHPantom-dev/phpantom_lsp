@@ -1167,17 +1167,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B463. A method template with a bound is shown as its bound inside the method
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2094,17 +2083,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B463. A method template with a bound is shown as its bound inside the method
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -2432,109 +2410,88 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
-<h3 id="b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method">B463. A method template with a bound is shown as its bound inside the method<a class="headerlink" href="#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @template T of A&amp;B @param iterable&lt;T&gt; $items */</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">function f($items) {</span>
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">    foreach ($items as $item) {</span>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">        $item; // should be T, is A&amp;B</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="x">    }</span>
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="x">}</span>
-</code></pre></div>
-<p>An unbounded method template, and a class template, keep their name inside the body (<code>T</code>); a method template with a bound is replaced by the bound when the parameter is seeded (<code>substitute_template_param_bounds</code> and <code>substitute_class_string_template_bounds</code>, called from <code>resolve_param_type</code> in <code>forward_walk/param_seeding.rs</code>). The value is still <code>T</code>, so hover should show <code>T</code>, and a value returned or passed on should carry the template rather than the bound. A method template bounded by a class template (<code>@template F of E</code>) shows the class template's name <code>E</code> instead of <code>F</code>.</p>
-<p>Dropping the substitution alone is not a fix, because the substitution is what gives these values their members. A class template named in a type resolves to classes through its owning class's bounds (the fallback at the end of <code>type_hint_to_classes_typed_depth</code> in <code>type_engine/types/resolution.rs</code>). Nothing records a method template's bound where a later lookup can reach it, so with the bare name, member access on anything derived from the parameter stops working: <code>$item-&gt;</code> in the example above, <code>$res[$position]-&gt;</code> for an <code>array&lt;T&gt;</code>. Some of those lookups run after the body walk has finished (completion re-resolving <code>array&lt;T&gt;</code>'s element), so a thread-local pushed while the walk is running does not cover them either.</p>
-<p>What needs doing: make the bound travel with the type. The likely shape is a new <code>TypeKind</code> for a bounded template parameter (name plus bound), modelled on how <code>StaticType</code> carries its class:</p>
-<ul>
-<li>It displays as the template name, so hover and the assertion runner see <code>T</code>.</li>
-<li>It resolves to classes, and is judged by subtyping and narrowing, as its bound (<code>is_string($t)</code> on <code>T of int|string</code> narrows like the bound does).</li>
-<li><code>substitute()</code> replaces it by name like <code>Named</code>, so call-site template substitution keeps working.</li>
-<li>Parameter seeding produces it instead of substituting the bound.</li>
-</ul>
-<p>Every <code>match</code> on <code>TypeKind</code> needs checking for the new arm; the ones that list <code>StaticType</code> explicitly (about 15 files) are the place to start.</p>
-<p>Done when the <code>// SKIP</code>'d assertions below pass, completion and unknown-member diagnostics on bounded method template values behave as they do today, and the full suite passes.</p>
-<p>Found porting PHPStan's <code>Rules/Methods/data/bug-7511.php</code>, <code>Rules/Methods/data/bug-5562.php</code>, <code>Rules/Generics/data/bug-3769.php</code>, <code>Rules/PhpDoc/data/bug-4643.php</code> and <code>Rules/Functions/data/bug-7823.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_data/</code>. <code>nsrt/conditional-types.php</code>, <code>nsrt/nested-generic-types-unwrapping.php</code> and <code>nsrt/nested-generic-types-unwrapping-covariant.php</code> show it too, under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array">B500. A key template bound from an array that names only its value type binds the whole array<a class="headerlink" href="#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/** @template T of array-key @param array&lt;T, mixed&gt; $one @return T */</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">function uksort(array $one) {}</span>
-<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">/** @var Foo[] $items */</span>
-<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">uksort($items); // should be int|string, is array&lt;Foo&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="x">/** @template T of array-key @param array&lt;T, mixed&gt; $one @return T */</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="x">function uksort(array $one) {}</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="x">/** @var Foo[] $items */</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="x">uksort($items); // should be int|string, is array&lt;Foo&gt;</span>
 </code></pre></div>
 <p><code>Foo[]</code> has the implicit key type <code>array-key</code>, which is what <code>T</code> binds to.</p>
 <p>Found porting PHPStan's <code>nsrt/uksort-bug.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b501-an-assertion-on-this-that-names-a-generic-class-loses-the-template-arguments">B501. An assertion on <code>$this</code> that names a generic class loses the template arguments<a class="headerlink" href="#b501-an-assertion-on-this-that-names-a-generic-class-loses-the-template-arguments" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @template TOk @template TErr */</span>
-<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">interface Result {</span>
-<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">    /** @phpstan-assert-if-true Ok&lt;TOk&gt; $this */</span>
-<a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="x">    public function isOk(): bool;</span>
-<a id="__codelineno-19-5" name="__codelineno-19-5" href="#__codelineno-19-5"></a><span class="x">}</span>
-<a id="__codelineno-19-6" name="__codelineno-19-6" href="#__codelineno-19-6"></a><span class="x">/** @var Result&lt;int, string&gt; $result */</span>
-<a id="__codelineno-19-7" name="__codelineno-19-7" href="#__codelineno-19-7"></a><span class="x">if ($result-&gt;isOk()) {</span>
-<a id="__codelineno-19-8" name="__codelineno-19-8" href="#__codelineno-19-8"></a><span class="x">    $result; // should be Ok&lt;int&gt;, is Ok</span>
-<a id="__codelineno-19-9" name="__codelineno-19-9" href="#__codelineno-19-9"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="x">/** @template TOk @template TErr */</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="x">interface Result {</span>
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="x">    /** @phpstan-assert-if-true Ok&lt;TOk&gt; $this */</span>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="x">    public function isOk(): bool;</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="x">}</span>
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a><span class="x">/** @var Result&lt;int, string&gt; $result */</span>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="x">if ($result-&gt;isOk()) {</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a><span class="x">    $result; // should be Ok&lt;int&gt;, is Ok</span>
+<a id="__codelineno-18-9" name="__codelineno-18-9" href="#__codelineno-18-9"></a><span class="x">}</span>
 </code></pre></div>
 <p>The narrowing picks the right class and its members resolve (<code>$result-&gt;unwrap()</code> is <code>int</code>), but the asserted type's own template arguments are not substituted with the receiver's.</p>
 <p>Found porting PHPStan's <code>nsrt/assert-this.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b502-a-global-constant-as-a-conditional-types-target-is-not-resolved-to-its-value">B502. A global constant as a conditional type's target is not resolved to its value<a class="headerlink" href="#b502-a-global-constant-as-a-conditional-types-target-is-not-resolved-to-its-value" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @return ($flag is PREG_SPLIT_NO_EMPTY ? true : false) */</span>
-<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f(int $flag): bool {}</span>
-<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">f(PREG_SPLIT_NO_EMPTY); // should be true, is false</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="x">/** @return ($flag is PREG_SPLIT_NO_EMPTY ? true : false) */</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="x">function f(int $flag): bool {}</span>
+<a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="x">f(PREG_SPLIT_NO_EMPTY); // should be true, is false</span>
 </code></pre></div>
 <p>The target names a constant, which has to be read as its value (<code>1</code>) before the argument can be compared with it.</p>
 <p>Found porting PHPStan's <code>nsrt/conditional-types-constant.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch">B503. A conditional on a name that is not a parameter picks the else branch<a class="headerlink" href="#b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @return ($parameter is true ? int : string) */</span>
-<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function f() {}</span>
-<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">f(); // should be int|string, is string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="x">/** @return ($parameter is true ? int : string) */</span>
+<a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a><span class="x">function f() {}</span>
+<a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a><span class="x">f(); // should be int|string, is string</span>
 </code></pre></div>
 <p>Nothing is known about a name the signature does not declare, so both branches remain.</p>
 <p>Found porting PHPStan's <code>nsrt/conditional-types.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b504-a-conditional-type-whose-subject-is-a-literal-is-not-evaluated">B504. A conditional type whose subject is a literal is not evaluated<a class="headerlink" href="#b504-a-conditional-type-whose-subject-is-a-literal-is-not-evaluated" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/** @return (5 is int ? true : false) */</span>
-<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x">function f() {}</span>
-<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x">f(); // should be true, is false</span>
-<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a>
-<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x">/** @param (true is true ? string : bool) $foo */</span>
-<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x">function g($foo) {</span>
-<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">    $foo; // should be string, is shown as the raw conditional</span>
-<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="x">/** @return (5 is int ? true : false) */</span>
+<a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="x">function f() {}</span>
+<a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="x">f(); // should be true, is false</span>
+<a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a>
+<a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="x">/** @param (true is true ? string : bool) $foo */</span>
+<a id="__codelineno-21-6" name="__codelineno-21-6" href="#__codelineno-21-6"></a><span class="x">function g($foo) {</span>
+<a id="__codelineno-21-7" name="__codelineno-21-7" href="#__codelineno-21-7"></a><span class="x">    $foo; // should be string, is shown as the raw conditional</span>
+<a id="__codelineno-21-8" name="__codelineno-21-8" href="#__codelineno-21-8"></a><span class="x">}</span>
 </code></pre></div>
 <p>A literal subject decides the condition without any argument.</p>
 <p>Found porting PHPStan's <code>nsrt/conditional-types.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b505-a-template-bound-through-another-templates-bound-from-an-empty-array-does-not-bind-never">B505. A template bound through another template's bound from an empty array does not bind <code>never</code><a class="headerlink" href="#b505-a-template-bound-through-another-templates-bound-from-an-empty-array-does-not-bind-never" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">/**</span>
-<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x"> * @template TKey of array-key</span>
-<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x"> * @template TArray of array&lt;TKey, mixed&gt;</span>
-<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x"> * @param TArray $array</span>
-<a id="__codelineno-23-5" name="__codelineno-23-5" href="#__codelineno-23-5"></a><span class="x"> * @return (TArray is non-empty-array ? non-empty-list&lt;TKey&gt; : list&lt;TKey&gt;)</span>
-<a id="__codelineno-23-6" name="__codelineno-23-6" href="#__codelineno-23-6"></a><span class="x"> */</span>
-<a id="__codelineno-23-7" name="__codelineno-23-7" href="#__codelineno-23-7"></a><span class="x">function arrayKeys(array $array) {}</span>
-<a id="__codelineno-23-8" name="__codelineno-23-8" href="#__codelineno-23-8"></a><span class="x">arrayKeys([]); // should be list&lt;never&gt;, is list&lt;array-key&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="x">/**</span>
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="x"> * @template TKey of array-key</span>
+<a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="x"> * @template TArray of array&lt;TKey, mixed&gt;</span>
+<a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="x"> * @param TArray $array</span>
+<a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="x"> * @return (TArray is non-empty-array ? non-empty-list&lt;TKey&gt; : list&lt;TKey&gt;)</span>
+<a id="__codelineno-22-6" name="__codelineno-22-6" href="#__codelineno-22-6"></a><span class="x"> */</span>
+<a id="__codelineno-22-7" name="__codelineno-22-7" href="#__codelineno-22-7"></a><span class="x">function arrayKeys(array $array) {}</span>
+<a id="__codelineno-22-8" name="__codelineno-22-8" href="#__codelineno-22-8"></a><span class="x">arrayKeys([]); // should be list&lt;never&gt;, is list&lt;array-key&gt;</span>
 </code></pre></div>
 <p><code>TArray</code> binds to <code>array{}</code>, but <code>TKey</code> is only reached through <code>TArray</code>'s bound, and an empty array leaves it on its own bound instead of <code>never</code>. A template bound directly from an empty array (<code>@param iterable&lt;T&gt;</code> handed <code>[]</code>) already binds <code>never</code>.</p>
 <p>Found porting PHPStan's <code>nsrt/conditional-types.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null">B498. A variable first introduced by a by-reference closure <code>use</code> is not typed <code>null</code><a class="headerlink" href="#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">$callback = function () use (&amp;$untouched) {</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">    $untouched; // should be null, has no type</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">};</span>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">$untouched;     // should be null, has no type</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="x">$callback = function () use (&amp;$untouched) {</span>
+<a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a><span class="x">    $untouched; // should be null, has no type</span>
+<a id="__codelineno-23-3" name="__codelineno-23-3" href="#__codelineno-23-3"></a><span class="x">};</span>
+<a id="__codelineno-23-4" name="__codelineno-23-4" href="#__codelineno-23-4"></a><span class="x">$untouched;     // should be null, has no type</span>
 </code></pre></div>
 <p>Capturing an undefined variable by reference creates it, as <code>null</code>, in both scopes.</p>
 <p>Found porting PHPStan's <code>nsrt/closure-passed-by-reference.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape">B499. <code>array_map()</code> with a closure that rewrites its parameter keeps the parameter's shape<a class="headerlink" href="#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-25-1" name="__codelineno-25-1" href="#__codelineno-25-1"></a><span class="x">/** @var list&lt;array{a: int}&gt; $results */</span>
-<a id="__codelineno-25-2" name="__codelineno-25-2" href="#__codelineno-25-2"></a><span class="x">array_map(static function (array $result): array {</span>
-<a id="__codelineno-25-3" name="__codelineno-25-3" href="#__codelineno-25-3"></a><span class="x">    $result[&#39;a&#39;] = (string) $result[&#39;a&#39;];</span>
-<a id="__codelineno-25-4" name="__codelineno-25-4" href="#__codelineno-25-4"></a><span class="x">    return $result;</span>
-<a id="__codelineno-25-5" name="__codelineno-25-5" href="#__codelineno-25-5"></a><span class="x">}, $results); // should be list&lt;array{a: string}&gt;, is list&lt;array{a: int}&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @var list&lt;array{a: int}&gt; $results */</span>
+<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">array_map(static function (array $result): array {</span>
+<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">    $result[&#39;a&#39;] = (string) $result[&#39;a&#39;];</span>
+<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">    return $result;</span>
+<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">}, $results); // should be list&lt;array{a: string}&gt;, is list&lt;array{a: int}&gt;</span>
 </code></pre></div>
 <p>The closure's return type is read as its parameter's inferred type rather than from what the body returns after the write.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-4587.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
