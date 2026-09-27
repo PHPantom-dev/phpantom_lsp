@@ -2192,6 +2192,11 @@ intentional).</p>
 <li>Future diagnostic (D-series) can warn on access of possibly-undefined
    variables.</li>
 </ol>
+<p>Knowing that a target is definitely set also settles <code>??=</code>: on a target
+that is set and never null (a non-nullable parameter, a required shape
+key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
+<code>string</code>. Today the fallback is always added; the assertions in
+<code>tests/phpstan_nsrt/coalesce-assign.php</code> are <code>// SKIP</code> against this item.</p>
 <p><strong>References:</strong>
 - Psalm: <code>Context::$vars_in_scope</code> and <code>Context::$vars_possibly_in_scope</code>
   (<code>Psalm\Context</code>)</p>
@@ -2293,7 +2298,9 @@ to the current class name identically to <code>Expression::Self_</code>.</p>
 <p><strong>Tests to update once fixed:</strong> the <code>static::</code>/<code>$this::</code> assertions in
 upstream's <code>nsrt/class-constant-types.php</code> were dropped when
 <code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
-<code>self::</code> cases survive); port them back.</p>
+<code>self::</code> cases survive); port them back. The <code>static::</code>/<code>$this::</code>
+assertions in <code>tests/phpstan_nsrt/class-constant-native-type.php</code> are
+<code>// SKIP</code> against this item.</p>
 <hr />
 <h2 id="t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument">T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument<a class="headerlink" href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
