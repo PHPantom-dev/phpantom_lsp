@@ -1055,17 +1055,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B508. A closure that captures its own variable by reference is typed <code>null</code> inside its body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1776,17 +1765,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B508. A closure that captures its own variable by reference is typed <code>null</code> inside its body
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1948,13 +1926,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body">B508. A closure that captures its own variable by reference is typed <code>null</code> inside its body<a class="headerlink" href="#b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$callback = function () use (&amp;$callback, $loop): void {</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    $loop-&gt;addTimer(1.0, $callback); // reported: expects callable, got null</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">};</span>
-</code></pre></div>
-<p>PHP creates <code>$callback</code> as <code>null</code> when the closure literal runs, but the assignment stores the closure into it before the body can ever execute, so inside the body it is the closure. Treating the capture as <code>null</code> is right only when nothing assigns the variable afterwards. This appeared with the change that types an undefined by-reference capture as <code>null</code>, and shows as three false positives in phpstan-src (<code>src/Command/FixerApplication.php</code>, <code>monitorFileChanges()</code>).</p>
 <h3 id="b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites">B510. An overriding method's narrower return type is lost on some call sites<a class="headerlink" href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Unknown</strong></p>
 <p>In pdepend, <code>ASTMethod::getParent(): ?AbstractASTClassOrInterface</code> overrides <code>AbstractASTArtifact::getParent(): ?ASTNode</code>, yet <code>$method-&gt;getParent()</code> resolves to the parent's <code>?ASTNode</code> at eight call sites (<code>ClassDependencyAnalyzer.php</code>, <code>CodeRankAnalyzer/MethodStrategy.php</code>, <code>CouplingAnalyzer.php</code>, <code>ASTParameter.php</code>), plus one in phpmd (<code>Rule/CleanCode/UndefinedVariable.php</code>). These all came back in the 2026-09-27 sweep and are present at <code>063275b0</code>, so one of that day's earlier commits introduced them. A reduced three-level hierarchy with the same shape resolves correctly, so the trigger has not been isolated yet; bisecting the day's commits against <code>analyze</code> on pdepend is the quickest way in.</p>
