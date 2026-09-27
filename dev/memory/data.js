@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790494409851,
+  "lastUpdate": 1790494452286,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -33115,6 +33115,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "3e847e47a0c7a1063cfcba4f15de6447612c6c51",
+          "message": "A bounded template stays itself inside the function that declares it",
+          "timestamp": "2026-09-27T09:16:14+02:00",
+          "tree_id": "b959abb58cc83091ce997d8d15749be5b592690f",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/3e847e47a0c7a1063cfcba4f15de6447612c6c51"
+        },
+        "date": 1790494442314,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.8,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.9,
             "unit": "MiB"
           }
         ]
