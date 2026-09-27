@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790505437025,
+  "lastUpdate": 1790505694142,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -33591,6 +33591,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 79.1,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "4e6481c1c299d5019787afc3e5b1330fb2d7b5bc",
+          "message": "A branch's positional shape re-folds with a sibling branch's keyed shape",
+          "timestamp": "2026-09-27T12:24:36+02:00",
+          "tree_id": "69268a74bcf6dc7f26edb33456c788d543c3fa8a",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/4e6481c1c299d5019787afc3e5b1330fb2d7b5bc"
+        },
+        "date": 1790505685293,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 86.6,
             "unit": "MiB"
           }
         ]
