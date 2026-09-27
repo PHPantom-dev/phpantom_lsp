@@ -862,17 +862,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b481-an-element-function-drops-the-false-or-null-an-empty-array-gives" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B481. An element function drops the <code>false</code> or <code>null</code> an empty array gives
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b482-key-functions-widen-the-literal-keys-of-an-array-literal" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -921,6 +910,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B486. <code>strlen()</code> of a known literal string is not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B506. A pointer function passed an empty array widens it to <code>array|object</code>
       </span>
     </span>
   </a>
@@ -1038,6 +1038,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B507. An assertion on a value typed as a union of classes and <code>null</code> leaves the <code>null</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1065,17 +1076,6 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B494. A nullsafe access does not add <code>null</code> for a nullable receiver
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types" class="md-nav__link">
@@ -1789,17 +1789,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b481-an-element-function-drops-the-false-or-null-an-empty-array-gives" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B481. An element function drops the <code>false</code> or <code>null</code> an empty array gives
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b482-key-functions-widen-the-literal-keys-of-an-array-literal" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1848,6 +1837,17 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         B486. <code>strlen()</code> of a known literal string is not folded
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B506. A pointer function passed an empty array widens it to <code>array|object</code>
       </span>
     </span>
   </a>
@@ -1965,6 +1965,17 @@
   
 </li>
         
+          <li class="md-nav__item">
+  <a href="#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B507. An assertion on a value typed as a union of classes and <code>null</code> leaves the <code>null</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
       </ul>
     </nav>
   
@@ -1992,17 +2003,6 @@
   
     <nav class="md-nav" aria-label="Symbol resolution">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B494. A nullsafe access does not add <code>null</code> for a nullable receiver
-      </span>
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types" class="md-nav__link">
@@ -2256,60 +2256,58 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="type-comparison">Type comparison<a class="headerlink" href="#type-comparison" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
-<h3 id="b481-an-element-function-drops-the-false-or-null-an-empty-array-gives">B481. An element function drops the <code>false</code> or <code>null</code> an empty array gives<a class="headerlink" href="#b481-an-element-function-drops-the-false-or-null-an-empty-array-gives" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/** @param \stdClass[] $objects */</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function f(array $objects): void {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    reset($objects);     // should be stdClass|false, is stdClass</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    reset([]);           // should be false, is mixed|false</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    array_shift($objects); // should be stdClass|null, is stdClass</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>reset()</code>, <code>end()</code>, <code>current()</code>, <code>next()</code>, <code>prev()</code> return <code>false</code> and <code>array_pop()</code>, <code>array_shift()</code>, <code>array_first()</code>, <code>array_last()</code> return <code>null</code> when the array has no entries. <code>array_func_element_type</code> answers the element type alone, so the sentinel is only right for an array that is provably non-empty (a literal with entries). Adding it back will surface new argument-type diagnostics where a result is passed on unchecked, so re-run <code>analyze</code> on the sample projects before and after.</p>
-<p>Found porting PHPStan's <code>nsrt/array-pointer-functions.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b482-key-functions-widen-the-literal-keys-of-an-array-literal">B482. Key functions widen the literal keys of an array literal<a class="headerlink" href="#b482-key-functions-widen-the-literal-keys-of-an-array-literal" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$a = [2 =&gt; 1, 3 =&gt; 2, 4 =&gt; 1];</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">array_keys($a);     // should be array{2, 3, 4}, is list&lt;int&gt;</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">array_keys($a, 1);  // should be list&lt;2|3|4&gt;, is list&lt;int&gt;</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">array_key_last(rand(0, 1) ? [] : [&#39;one&#39;, &#39;two&#39;]); // should be 0|1|null, is int|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$a = [2 =&gt; 1, 3 =&gt; 2, 4 =&gt; 1];</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">array_keys($a);     // should be array{2, 3, 4}, is list&lt;int&gt;</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">array_keys($a, 1);  // should be list&lt;2|3|4&gt;, is list&lt;int&gt;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">array_key_last(rand(0, 1) ? [] : [&#39;one&#39;, &#39;two&#39;]); // should be 0|1|null, is int|null</span>
 </code></pre></div>
 <p>The key template is bound from the shape's widened key type. A declared <code>array&lt;1|2|3, V&gt;</code> keeps its literal keys, so only the array literal's own keys are lost.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-11928.php</code> and <code>nsrt/bug-14081.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b483-preg_replace-over-an-array-shape-loses-its-keys">B483. <code>preg_replace()</code> over an array shape loses its keys<a class="headerlink" href="#b483-preg_replace-over-an-array-shape-loses-its-keys" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param array{a: string, b: string} $arr */</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function f(array $arr) {</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    preg_replace(&#39;/^a/&#39;, &#39;x&#39;, $arr); // should be array{a?: string, b?: string}, is array&lt;array-key, string&gt;</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/** @param array{a: string, b: string} $arr */</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">function f(array $arr) {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    preg_replace(&#39;/^a/&#39;, &#39;x&#39;, $arr); // should be array{a?: string, b?: string}, is array&lt;array-key, string&gt;</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>Given an array subject, <code>preg_replace()</code> returns the subject's keys (each optional, since an entry whose replacement fails is dropped) with string values.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-11547.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b484-array_merge-of-array-literals-does-not-produce-the-merged-shape">B484. <code>array_merge()</code> of array literals does not produce the merged shape<a class="headerlink" href="#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">array_merge([&#39;foo&#39; =&gt; 1, &#39;bar&#39; =&gt; 2], [2, 3]); // should be array{foo: 1, bar: 2, 0: 2, 1: 3}, is array</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">array_merge([&#39;foo&#39; =&gt; 1, &#39;bar&#39; =&gt; 2], [2, 3]); // should be array{foo: 1, bar: 2, 0: 2, 1: 3}, is array</span>
 </code></pre></div>
 <p>Merging known shapes has a known result: string keys from later arrays overwrite earlier ones and integer keys are renumbered. Array key completion on the result is where this shows.</p>
 <p>Found porting PHPStan's <code>nsrt/array-merge2.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape">B485. <code>array_shift()</code> does not drop the first entry of a list shape<a class="headerlink" href="#b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param list&lt;int&gt; $items */</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(array $items) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if (count($items) === 3) {</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        array_shift($items);</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">        $items; // should be array{int, int}, is array{int, int, int}</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    }</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param list&lt;int&gt; $items */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function f(array $items) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if (count($items) === 3) {</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        array_shift($items);</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        $items; // should be array{int, int}, is array{int, int, int}</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    }</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>The by-reference write leaves the argument as it was. A list shape loses its first entry and the rest move down one key.</p>
 <p>Found porting PHPStan's <code>nsrt/list-count.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b486-strlen-of-a-known-literal-string-is-not-folded">B486. <code>strlen()</code> of a known literal string is not folded<a class="headerlink" href="#b486-strlen-of-a-known-literal-string-is-not-folded" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$this-&gt;foo = &#39;&#39;;</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">strlen($this-&gt;foo); // should be 0, is int&lt;0, max&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$this-&gt;foo = &#39;&#39;;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">strlen($this-&gt;foo); // should be 0, is int&lt;0, max&gt;</span>
 </code></pre></div>
 <p>A literal argument has a known length, the same way the other scalar folds read one.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-5129.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<h3 id="b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject">B506. A pointer function passed an empty array widens it to <code>array|object</code><a class="headerlink" href="#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$empty = [];</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">reset($empty); // false (correct)</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">$empty;        // should be array{}, is object|array</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">end($empty);   // should be false, is mixed|false</span>
+</code></pre></div>
+<p><code>reset()</code>, <code>end()</code>, <code>next()</code> and <code>prev()</code> take their array by reference only to move its internal pointer, so the value is the same after the call. The by-reference seeding in <code>seed_pass_by_ref_primitives</code> drops an empty shape on purpose (a <code>preg_match_all()</code> out-parameter really is overwritten) and falls back to the stub's <code>array|object</code>. A non-empty shape survives only because it is a subtype of the hint. The pointer functions need to be marked as leaving their argument's value alone.</p>
+<p>Found porting PHPStan's <code>nsrt/array-pointer-functions.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
 <h3 id="b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally">B493. A <code>catch</code> the try body cannot reach is still merged into <code>finally</code><a class="headerlink" href="#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium-High</strong></p>
@@ -2389,19 +2387,20 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p><code>seed_constructor_readonly_properties</code> carries the class's own readonly properties into the other methods. A path through two readonly properties cannot change either, so it can be carried too.</p>
 <p>Found porting PHPStan's <code>nsrt/remember-readonly-constructor-narrowed.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<h3 id="b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null">B507. An assertion on a value typed as a union of classes and <code>null</code> leaves the <code>null</code><a class="headerlink" href="#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">class A { /** @return A|B|null */ public function abn() {} }</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">/** @psalm-assert A $v */</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">function assertA($v): void {}</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$x = $a-&gt;abn();</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">assertA($x);</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">$x; // should be A, is A|null</span>
+</code></pre></div>
+<p>The value resolves to one entry per class plus a separate <code>null</code> entry, and the assertion narrows the class entries without dropping the <code>null</code> one. A single class (<code>?A</code>) carries the <code>null</code> inside its own entry and narrows correctly. PHPUnit's <code>assertInstanceOf()</code> goes through the same path.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver">B494. A nullsafe access does not add <code>null</code> for a nullable receiver<a class="headerlink" href="#b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">function f(?\Exception $e) {</span>
-<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    $e?-&gt;getMessage(); // should be string|null, is string</span>
-<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
-<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">$null = null;</span>
-<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">$null?-&gt;foo;           // should be null, has no type</span>
-</code></pre></div>
-<p>A <code>?-&gt;</code> call or property read short-circuits to <code>null</code> when its receiver is null, so its type is the member's type plus <code>null</code> whenever the receiver may be null, and <code>null</code> alone when it always is. Like B481 this will surface new argument-type diagnostics, so re-run <code>analyze</code> on the sample projects.</p>
-<p>Found porting PHPStan's <code>nsrt/nullsafe.php</code> and <code>nsrt/bug-4757.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types">B495. A method on an intersection returns the union of its members' return types<a class="headerlink" href="#b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @var WithFoo&amp;WithFooAndBarInterface $x */</span>
