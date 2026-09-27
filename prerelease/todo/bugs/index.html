@@ -1260,17 +1260,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B499. <code>array_map()</code> with a closure that rewrites its parameter keeps the parameter's shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2176,17 +2165,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B499. <code>array_map()</code> with a closure that rewrites its parameter keeps the parameter's shape
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2485,16 +2463,6 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 </code></pre></div>
 <p>Capturing an undefined variable by reference creates it, as <code>null</code>, in both scopes.</p>
 <p>Found porting PHPStan's <code>nsrt/closure-passed-by-reference.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
-<h3 id="b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape">B499. <code>array_map()</code> with a closure that rewrites its parameter keeps the parameter's shape<a class="headerlink" href="#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-24-1" name="__codelineno-24-1" href="#__codelineno-24-1"></a><span class="x">/** @var list&lt;array{a: int}&gt; $results */</span>
-<a id="__codelineno-24-2" name="__codelineno-24-2" href="#__codelineno-24-2"></a><span class="x">array_map(static function (array $result): array {</span>
-<a id="__codelineno-24-3" name="__codelineno-24-3" href="#__codelineno-24-3"></a><span class="x">    $result[&#39;a&#39;] = (string) $result[&#39;a&#39;];</span>
-<a id="__codelineno-24-4" name="__codelineno-24-4" href="#__codelineno-24-4"></a><span class="x">    return $result;</span>
-<a id="__codelineno-24-5" name="__codelineno-24-5" href="#__codelineno-24-5"></a><span class="x">}, $results); // should be list&lt;array{a: string}&gt;, is list&lt;array{a: int}&gt;</span>
-</code></pre></div>
-<p>The closure's return type is read as its parameter's inferred type rather than from what the body returns after the write.</p>
-<p>Found porting PHPStan's <code>nsrt/bug-4587.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 
 
 
