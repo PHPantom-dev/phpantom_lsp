@@ -1,4 +1,7 @@
-use crate::common::{create_psr4_workspace, lsp_pos_to_offset, open_document, open_php};
+use crate::common::{
+    create_psr4_workspace, definition_locations, goto_definition_at, lsp_pos_to_offset,
+    markup_hover_at, open_document, open_php,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -14,6 +17,65 @@ fn position(content: &str, needle: &str) -> Position {
         before.bytes().filter(|b| *b == b'\n').count() as u32,
         before.rsplit('\n').next().unwrap().encode_utf16().count() as u32,
     )
+}
+
+#[tokio::test]
+async fn new_php_translation_buffers_resolve_before_their_first_save() {
+    for (path, group, locale) in [
+        ("lang/en/messages.php", "messages", "en"),
+        ("resources/lang/fr/admin/users.php", "admin/users", "fr"),
+    ] {
+        let source = format!("<?php\n__('{group}.saved');\n__('existing.saved');\n");
+        let existing = "<?php return ['saved' => 'Existing'];";
+        let translation = "<?php\nreturn [\n    'saved' => 'Saved from buffer',\n];\n";
+        let (backend, dir) = create_psr4_workspace(
+            COMPOSER,
+            &[
+                ("src/usage.php", &source),
+                ("lang/en/existing.php", existing),
+            ],
+        );
+        let source_uri = Url::from_file_path(dir.path().join("src/usage.php")).unwrap();
+        let existing_uri = Url::from_file_path(dir.path().join("lang/en/existing.php")).unwrap();
+        let translation_path = dir.path().join(path);
+        let translation_uri = Url::from_file_path(&translation_path).unwrap();
+        open_php(&backend, &source_uri, &source).await;
+        open_php(&backend, &existing_uri, existing).await;
+
+        assert!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await).is_empty()
+        );
+        open_php(&backend, &translation_uri, translation).await;
+        assert!(!translation_path.exists());
+        assert_eq!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await),
+            vec![Location::new(
+                translation_uri.clone(),
+                Range::new(Position::new(2, 5), Position::new(2, 10)),
+            )],
+            "{path}"
+        );
+        let hover = markup_hover_at(&backend, &source_uri, 1, 5).await;
+        assert!(
+            hover.contains(&format!("`{locale}`: `Saved from buffer`")),
+            "{hover}"
+        );
+        let existing_definitions =
+            definition_locations(goto_definition_at(&backend, &source_uri, 2, 5).await);
+        assert_eq!(existing_definitions.len(), 1);
+        assert_eq!(existing_definitions[0].uri, existing_uri);
+
+        backend
+            .did_close(DidCloseTextDocumentParams {
+                text_document: TextDocumentIdentifier {
+                    uri: translation_uri,
+                },
+            })
+            .await;
+        assert!(
+            definition_locations(goto_definition_at(&backend, &source_uri, 1, 5).await).is_empty()
+        );
+    }
 }
 
 async fn references(

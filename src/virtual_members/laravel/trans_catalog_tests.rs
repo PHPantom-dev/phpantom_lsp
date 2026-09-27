@@ -211,3 +211,36 @@ fn translation_catalog_handles_invalid_and_removed_paths() {
     catalog.insert_locale(&backend, &dir.path().join("removed"), "");
     assert!(catalog.entries.is_empty());
 }
+
+// macOS filesystems reject non-UTF-8 filenames before the scanner sees them.
+#[cfg(target_os = "linux")]
+#[test]
+fn translation_catalog_skips_non_utf8_entries_without_losing_valid_translations() {
+    use std::os::unix::ffi::OsStringExt;
+
+    let backend = make_backend();
+    let dir = tempfile::tempdir().unwrap();
+    let locale = dir.path().join("en");
+    std::fs::create_dir(&locale).unwrap();
+    let invalid_name = std::ffi::OsString::from_vec(vec![0xff, b'.', b'p', b'h', b'p']);
+    std::fs::write(
+        locale.join(invalid_name),
+        "<?php return ['ignored' => 'no'];",
+    )
+    .unwrap();
+    std::fs::write(
+        locale.join("messages.php"),
+        "<?php return ['saved' => 'Saved'];",
+    )
+    .unwrap();
+
+    let mut catalog = TranslationCatalog::default();
+    catalog.insert_locale(&backend, &locale, "");
+
+    assert_eq!(catalog.files.len(), 1);
+    assert_eq!(catalog.entries.len(), 1);
+    assert_eq!(
+        catalog.entries["messages.saved"][0].value.as_deref(),
+        Some("Saved")
+    );
+}
