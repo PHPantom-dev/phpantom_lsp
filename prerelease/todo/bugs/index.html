@@ -913,23 +913,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B514. <code>join_shapes</code> refuses a shape with a positional entry even when the other side anchors it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1529,23 +1512,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Array types">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B514. <code>join_shapes</code> refuses a shape with a positional entry even when the other side anchors it
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1623,8 +1589,11 @@ pipeline so it produces correct data. Downstream consumers
 (diagnostics, hover, completion, definition) should never need
 to second-guess upstream output.</p>
 <p>Each entry below carries an <strong>Impact · Complexity</strong> rating using the same
-scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>; that table is also where
-each bug's row lives in the current sprint/backlog.</p>
+scale defined in <a href="../../todo/"><code>docs/todo.md</code></a>, but a bug's row lives
+<strong>here only</strong> — do not add or link a bug entry to <code>docs/todo.md</code>'s sprint
+or backlog tables. This file is its own list, not a domain document
+sprint items draw from: whenever it holds anything, that is actively
+addressed, independently of sprint planning.</p>
 <p>Bugs land here from wherever they surface: found while working on another
 task, or sweeps of the sample projects under <code>projects/</code>. Entries are
 grouped by the mechanism that has to change, not by the symptom that
@@ -1644,24 +1613,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
-<h3 id="b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it">B514. <code>join_shapes</code> refuses a shape with a positional entry even when the other side anchors it<a class="headerlink" href="#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @param array{mixed}|array{0: mixed, 1?: string|null} $row</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> */</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function f($row) {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    if (count($row) === 2) {</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        // array{mixed, string|null}</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    } else {</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        // array{mixed}</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    }</span>
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    $row; // should re-fold to array{0: mixed, 1?: string|null}, PHPantom keeps two alternatives</span>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
-</code></pre></div>
-<p>The union-folding half of this gap (<code>array{mixed}|array{0: mixed, 1?: string|null}</code> collapsing to the wider shape as written, with no branching involved) is fixed: <code>PhpType::union</code> now drops a shape member another member already covers exactly (<code>absorb_subsumed_shapes</code> in <code>php_type/normalize.rs</code>).</p>
-<p>The branch-join half is not: <code>join_shape_entries</code> (<code>php_type/mod.rs</code>) refuses to pair up two shapes at all when either side has a positional (keyless) entry, on the theory that two independently-written positional literals describe unrelated arrays and pairing their slots by position would invent a row neither holds. That is the right call when <em>both</em> sides are bare positional shapes (<code>array{int, string}</code> and <code>array{float}</code> must stay separate), but it is too strict when the <em>other</em> side spells the position out with an explicit key (<code>array{mixed}</code> against <code>array{0: mixed, 1?: string|null}</code>): the explicit key is exactly the anchor that makes the pairing safe, but <code>join_shape_entries</code> blocks it before ever looking at the other side.</p>
-<p>A first attempt loosened the block to allow this ("anchored" case) but it over-fired: <code>array{string}|array{0: int, 1?: string|null}</code> (a genuine two-branch tagged union, not a single positional shape) narrowed by <code>count($row) === 2</code> produces <code>array{string}</code> (unchanged) beside <code>array{0: int}</code> (narrowed, keeping its <em>explicit</em> key from the original docblock, not a bare positional one), and the loosened check joined those into one shape (<code>array{0: int|string}</code>) where PHPStan and the existing test suite (<code>testOptionalKeysInListsOfTaggedUnion</code> in <code>tests/phpstan_nsrt/list-count.php</code>) expect them to stay two alternatives. So "the other side has an explicit key at that position" is not by itself sufficient to prove the pairing is safe — the fix needs something more, e.g. only pairing when the position is the <em>only</em> thing distinguishing the two shapes, not when the two shapes are alternatives of a union that a completely separate code path produced by narrowing.</p>
-<p>Found porting PHPStan's <code>nsrt/list-count.php</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
