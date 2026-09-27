@@ -1032,17 +1032,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B535. First-class callables built from a dynamic name or an invokable object have no return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1720,17 +1709,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B535. First-class callables built from a dynamic name or an invokable object have no return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1909,16 +1887,6 @@ so the array keeps its keys and its values take the parameter's type.</p>
 <p>A nameless <code>@var</code> above an assignment types its right-hand side. It is
 honoured when the target is a variable, not when it is an array element.</p>
 <p>Found porting Psalm's <code>TypeReconciliation/EmptyTest.php</code> (<code>issue-9341-1</code>).</p>
-<h3 id="b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type">B535. First-class callables built from a dynamic name or an invokable object have no return type<a class="headerlink" href="#b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$name = &#39;length&#39;;</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$f = $test-&gt;$name(...);    // calling $f gives mixed, should be int</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$g = Test::$name(...);     // same</span>
-<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$h = $test(...);           // same, for an object with __invoke(): int</span>
-</code></pre></div>
-<p><code>$test-&gt;length(...)</code> resolves; a method name held in a variable with a
-literal value, and an invokable object, do not.</p>
-<p>Found porting Psalm's <code>ClosureTest.php</code>.</p>
 
 
 
