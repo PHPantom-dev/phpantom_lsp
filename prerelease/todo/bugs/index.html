@@ -985,23 +985,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B530. A constant whose initializer uses another constant has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1629,23 +1612,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B530. A constant whose initializer uses another constant has no type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1747,28 +1713,7 @@ references against the block they are written in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b530-a-constant-whose-initializer-uses-another-constant-has-no-type">B530. A constant whose initializer uses another constant has no type<a class="headerlink" href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">const ONE = 1;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">const TWO = ONE * 2;           // no type, should be 2</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">class C {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    const ONE = 1;</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    const THREE = 3;</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    const ONE_THIRD = self::ONE / self::THREE;               // no type, should be float</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    const SENTENCE = &#39;The value of THREE is &#39; . self::THREE; // no type</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">class Child extends Base {</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    const A = [...parent::KEYS, &#39;c&#39; =&gt; &#39;c&#39;];                 // array, should be the shape</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">}</span>
-</code></pre></div>
-<p><code>self::ONE * 2</code> and <code>self::ONE &gt;&gt; 2</code> in a class constant fold, but
-division, concatenation and a spread do not, and a global constant's
-initializer that names another constant does not fold at all.</p>
-<p>The SKIPs are in <code>tests/psalm_assertions/php56.php</code> and
-<code>array_assignment.php</code>. Found porting Psalm's <code>Php56Test.php</code> and
-<code>ArrayAssignmentTest.php</code>.</p>
+<p>No outstanding items.</p>
 
 
 
