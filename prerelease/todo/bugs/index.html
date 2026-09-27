@@ -978,17 +978,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b537-a-spread-of-an-array-filled-through-a-dynamic-key-makes-the-call-never" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B537. A spread of an array filled through a dynamic key makes the call <code>never</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1677,17 +1666,6 @@
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#b537-a-spread-of-an-array-filled-through-a-dynamic-key-makes-the-call-never" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B537. A spread of an array filled through a dynamic key makes the call <code>never</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1863,42 +1841,21 @@ file). Not yet isolated to a root cause.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b537-a-spread-of-an-array-filled-through-a-dynamic-key-makes-the-call-never">B537. A spread of an array filled through a dynamic key makes the call <code>never</code><a class="headerlink" href="#b537-a-spread-of-an-array-filled-through-a-dynamic-key-makes-the-call-never" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">$floats = [&#39;a&#39; =&gt; [], &#39;b&#39; =&gt; []];</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">foreach ([&#39;a&#39; =&gt; $x, &#39;b&#39; =&gt; $y] as $key =&gt; $types) {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    foreach ($types as $type) {</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">        $floats[$key][] = $type;</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    }</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">if (count($floats[&#39;a&#39;]) === 0) { … } elseif (count($floats[&#39;b&#39;]) === 0) { … }</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">$aTypes = TypeCombinator::union(...$floats[&#39;a&#39;]);</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">$aTypes-&gt;equals($b);</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">// Cannot access method &#39;equals&#39; on type &#39;never&#39;</span>
-</code></pre></div>
-<p>Two things seem to go wrong here (not yet confirmed in isolation).
-<code>$floats[$key][] = …</code> with a non-literal key probably leaves
-<code>$floats['a']</code> as <code>array{}</code>. And spreading an empty array passes no
-arguments, which is a perfectly reachable call. It should not count as an
-argument that can never be reached, so it should not make the call <code>never</code>.</p>
-<p>Found in phpstan-src's <code>MutatingScope.php</code> (the only diagnostic
-<code>analyze</code> reports on it). It is already there at HEAD, before the
-template fixes.</p>
 <h3 id="b530-a-constant-whose-initializer-uses-another-constant-has-no-type">B530. A constant whose initializer uses another constant has no type<a class="headerlink" href="#b530-a-constant-whose-initializer-uses-another-constant-has-no-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">const ONE = 1;</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">const TWO = ONE * 2;           // no type, should be 2</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">class C {</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    const ONE = 1;</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    const THREE = 3;</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    const ONE_THIRD = self::ONE / self::THREE;               // no type, should be float</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">    const SENTENCE = &#39;The value of THREE is &#39; . self::THREE; // no type</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">}</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="x">class Child extends Base {</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">    const A = [...parent::KEYS, &#39;c&#39; =&gt; &#39;c&#39;];                 // array, should be the shape</span>
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">const ONE = 1;</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">const TWO = ONE * 2;           // no type, should be 2</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">class C {</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    const ONE = 1;</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    const THREE = 3;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    const ONE_THIRD = self::ONE / self::THREE;               // no type, should be float</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    const SENTENCE = &#39;The value of THREE is &#39; . self::THREE; // no type</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">class Child extends Base {</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">    const A = [...parent::KEYS, &#39;c&#39; =&gt; &#39;c&#39;];                 // array, should be the shape</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>self::ONE * 2</code> and <code>self::ONE &gt;&gt; 2</code> in a class constant fold, but
 division, concatenation and a spread do not, and a global constant's
@@ -1908,16 +1865,16 @@ initializer that names another constant does not fold at all.</p>
 <code>ArrayAssignmentTest.php</code>.</p>
 <h3 id="b531-an-out-type-read-from-the-callees-body-ignores-the-paths-that-return-early">B531. An out type read from the callee's body ignores the paths that return early<a class="headerlink" href="#b531-an-out-type-read-from-the-callees-body-ignores-the-paths-that-return-early" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @param-out int $s */</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function addFoo(?string &amp;$s): void {</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">    if ($s === null) {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">        $s = 5;</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">        return;</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    }</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    $s = 4;</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">}</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">addFoo($a);</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">// 4, should be 4|5</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">/** @param-out int $s */</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">function addFoo(?string &amp;$s): void {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    if ($s === null) {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">        $s = 5;</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        return;</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    $s = 4;</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">}</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">addFoo($a);</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">// 4, should be 4|5</span>
 </code></pre></div>
 <p><code>read_out_type</code> (<code>type_engine/call_resolution/out_param.rs</code>) resolves the
 parameter at the body's closing brace, which only the fall-through paths
@@ -1927,10 +1884,10 @@ declared <code>@param-out int</code>, so the wrong literal comes out looking pre
 <p>Found porting Psalm's <code>ReferenceConstraintTest.php</code>.</p>
 <h3 id="b532-unpacking-an-array-into-a-by-reference-variadic-parameter-replaces-the-array">B532. Unpacking an array into a by-reference variadic parameter replaces the array<a class="headerlink" href="#b532-unpacking-an-array-into-a-by-reference-variadic-parameter-replaces-the-array" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function example(int &amp;...$x): void {}</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">$z = [0];</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">example(...$z);</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// int, should be array&lt;int, int&gt;</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function example(int &amp;...$x): void {}</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">$z = [0];</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">example(...$z);</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">// int, should be array&lt;int, int&gt;</span>
 </code></pre></div>
 <p>The write-back treats the spread argument as if it were the parameter
 itself. Each element of the unpacked array is what the callee writes to,
@@ -1938,26 +1895,26 @@ so the array keeps its keys and its values take the parameter's type.</p>
 <p>Found porting Psalm's <code>ArgTest.php</code> (<code>unpackByRefArg</code>).</p>
 <h3 id="b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type">B533. A reference assigned inside <code>??</code>'s left operand takes the fallback's type<a class="headerlink" href="#b533-a-reference-assigned-inside-s-left-operand-takes-the-fallbacks-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">$var = 0;</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">($a =&amp; $var) ?? &#39;hello&#39;;</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">// $a: string, should be 0</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$var = 0;</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">($a =&amp; $var) ?? &#39;hello&#39;;</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">// $a: string, should be 0</span>
 </code></pre></div>
 <p>Found porting Psalm's <code>Php70Test.php</code> (<code>nullCoalesceWithReference</code>).</p>
 <h3 id="b534-an-inline-var-above-an-array-element-assignment-is-ignored">B534. An inline <code>@var</code> above an array-element assignment is ignored<a class="headerlink" href="#b534-an-inline-var-above-an-array-element-assignment-is-ignored" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @var string */</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$GLOBALS[&#39;sql_query&#39;] = rand(0, 1) ? &#39;asd&#39; : null;</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">// &#39;asd&#39;|null, should be string</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @var string */</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$GLOBALS[&#39;sql_query&#39;] = rand(0, 1) ? &#39;asd&#39; : null;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">// &#39;asd&#39;|null, should be string</span>
 </code></pre></div>
 <p>A nameless <code>@var</code> above an assignment types its right-hand side. It is
 honoured when the target is a variable, not when it is an array element.</p>
 <p>Found porting Psalm's <code>TypeReconciliation/EmptyTest.php</code> (<code>issue-9341-1</code>).</p>
 <h3 id="b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type">B535. First-class callables built from a dynamic name or an invokable object have no return type<a class="headerlink" href="#b535-first-class-callables-built-from-a-dynamic-name-or-an-invokable-object-have-no-return-type" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">$name = &#39;length&#39;;</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">$f = $test-&gt;$name(...);    // calling $f gives mixed, should be int</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">$g = Test::$name(...);     // same</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">$h = $test(...);           // same, for an object with __invoke(): int</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">$name = &#39;length&#39;;</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">$f = $test-&gt;$name(...);    // calling $f gives mixed, should be int</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">$g = Test::$name(...);     // same</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">$h = $test(...);           // same, for an object with __invoke(): int</span>
 </code></pre></div>
 <p><code>$test-&gt;length(...)</code> resolves; a method name held in a variable with a
 literal value, and an invokable object, do not.</p>
