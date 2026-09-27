@@ -869,23 +869,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B512. A call whose argument is <code>*NEVER*</code> still has its declared return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1502,23 +1485,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B512. A call whose argument is <code>*NEVER*</code> still has its declared return type
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1670,17 +1636,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<h3 id="b512-a-call-whose-argument-is-never-still-has-its-declared-return-type">B512. A call whose argument is <code>*NEVER*</code> still has its declared return type<a class="headerlink" href="#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">$this-&gt;foo = &#39;x&#39;;</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">if (strlen($this-&gt;foo) &gt; 0) {</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    return;</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">$this-&gt;foo;         // *NEVER* (correct)</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">strlen($this-&gt;foo); // should be *NEVER*, is int&lt;0, max&gt;</span>
-</code></pre></div>
-<p>Evaluating the argument never completes, so neither does the call. The call resolvers read the callee's return type without looking at whether an argument could have been produced at all.</p>
-<p>Found porting PHPStan's <code>nsrt/bug-5129.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
@@ -1690,17 +1646,17 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <h3 id="b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it">B514. <code>join_shapes</code> refuses a shape with a positional entry even when the other side anchors it<a class="headerlink" href="#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">/**</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x"> * @param array{mixed}|array{0: mixed, 1?: string|null} $row</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x"> */</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">function f($row) {</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    if (count($row) === 2) {</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">        // array{mixed, string|null}</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">    } else {</span>
-<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">        // array{mixed}</span>
-<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    }</span>
-<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    $row; // should re-fold to array{0: mixed, 1?: string|null}, PHPantom keeps two alternatives</span>
-<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @param array{mixed}|array{0: mixed, 1?: string|null} $row</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> */</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">function f($row) {</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    if (count($row) === 2) {</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">        // array{mixed, string|null}</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    } else {</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">        // array{mixed}</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    }</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">    $row; // should re-fold to array{0: mixed, 1?: string|null}, PHPantom keeps two alternatives</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="x">}</span>
 </code></pre></div>
 <p>The union-folding half of this gap (<code>array{mixed}|array{0: mixed, 1?: string|null}</code> collapsing to the wider shape as written, with no branching involved) is fixed: <code>PhpType::union</code> now drops a shape member another member already covers exactly (<code>absorb_subsumed_shapes</code> in <code>php_type/normalize.rs</code>).</p>
 <p>The branch-join half is not: <code>join_shape_entries</code> (<code>php_type/mod.rs</code>) refuses to pair up two shapes at all when either side has a positional (keyless) entry, on the theory that two independently-written positional literals describe unrelated arrays and pairing their slots by position would invent a row neither holds. That is the right call when <em>both</em> sides are bare positional shapes (<code>array{int, string}</code> and <code>array{float}</code> must stay separate), but it is too strict when the <em>other</em> side spells the position out with an explicit key (<code>array{mixed}</code> against <code>array{0: mixed, 1?: string|null}</code>): the explicit key is exactly the anchor that makes the pairing safe, but <code>join_shape_entries</code> blocks it before ever looking at the other side.</p>
