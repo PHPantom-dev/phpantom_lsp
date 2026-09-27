@@ -1008,23 +1008,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B510. An overriding method's narrower return type is lost on some call sites
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1675,23 +1658,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B510. An overriding method's narrower return type is lost on some call sites
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1779,9 +1745,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites">B510. An overriding method's narrower return type is lost on some call sites<a class="headerlink" href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Medium · Complexity: Unknown</strong></p>
-<p>In pdepend, <code>ASTMethod::getParent(): ?AbstractASTClassOrInterface</code> overrides <code>AbstractASTArtifact::getParent(): ?ASTNode</code>, yet <code>$method-&gt;getParent()</code> resolves to the parent's <code>?ASTNode</code> at eight call sites (<code>ClassDependencyAnalyzer.php</code>, <code>CodeRankAnalyzer/MethodStrategy.php</code>, <code>CouplingAnalyzer.php</code>, <code>ASTParameter.php</code>), plus one in phpmd (<code>Rule/CleanCode/UndefinedVariable.php</code>). These all came back in the 2026-09-27 sweep and are present at <code>063275b0</code>, so one of that day's earlier commits introduced them. A reduced three-level hierarchy with the same shape resolves correctly, so the trigger has not been isolated yet; bisecting the day's commits against <code>analyze</code> on pdepend is the quickest way in.</p>
+<p>No outstanding items.</p>
 
 
 
