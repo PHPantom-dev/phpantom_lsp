@@ -869,23 +869,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B493. A <code>catch</code> the try body cannot reach is still merged into <code>finally</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1607,23 +1590,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Reachability">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B493. A <code>catch</code> the try body cannot reach is still merged into <code>finally</code>
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1880,105 +1846,93 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="standard-library-return-types">Standard-library return types<a class="headerlink" href="#standard-library-return-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="reachability">Reachability<a class="headerlink" href="#reachability" title="Permanent link">&para;</a></h2>
-<h3 id="b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally">B493. A <code>catch</code> the try body cannot reach is still merged into <code>finally</code><a class="headerlink" href="#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">try {</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    $s = 1;</span>
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    $this-&gt;throwsLogicException(); // @throws LogicException</span>
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">} catch (\RuntimeException $e) {</span>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    $s = &#39;bar&#39;;</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">} finally {</span>
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">    $s; // should be 1, is 1|&#39;bar&#39;</span>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">}</span>
-</code></pre></div>
-<p>Telling that a catch is dead needs the exceptions the try body can throw, read from the <code>@throws</code> of what it calls.</p>
-<p>Found porting PHPStan's <code>nsrt/finally-scope.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
+<p>No outstanding items.</p>
 <h2 id="narrowing">Narrowing<a class="headerlink" href="#narrowing" title="Permanent link">&para;</a></h2>
 <h3 id="b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property">B487. An impure call does not forget what was proved about a static property<a class="headerlink" href="#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">private static int|float $i;</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">public function __construct() {</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    self::$i = getInt();</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    $this-&gt;impureCall(); // @phpstan-impure</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    self::$i; // should be float|int, is int</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">private static int|float $i;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">public function __construct() {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    self::$i = getInt();</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">    $this-&gt;impureCall(); // @phpstan-impure</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    self::$i; // should be float|int, is int</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>process_receiver_mutation</code> invalidates what is known through the receiver (<code>$this-&gt;…</code>), but any impure call can write a static property, so <code>self::$x</code>, <code>static::$x</code>, <code>parent::$x</code> and <code>Foo::$x</code> keys have to go too.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-12902.php</code> and <code>nsrt/bug-12902-non-strict.php</code>; the assertions are <code>// SKIP</code> in the ported copies under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b488-a-call-proved-through-stays-narrowed-under-its-spelling-when-the-method-is-impure">B488. A call proved through <code>?-&gt;</code> stays narrowed under its <code>-&gt;</code> spelling when the method is impure<a class="headerlink" href="#b488-a-call-proved-through-stays-narrowed-under-its-spelling-when-the-method-is-impure" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">if ($bar?-&gt;getImpure() !== null) { // @phpstan-impure, returns ?int</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    $bar-&gt;getImpure();  // should be int|null, is int</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    $bar?-&gt;getImpure(); // int|null (correct)</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">if ($bar?-&gt;getImpure() !== null) { // @phpstan-impure, returns ?int</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    $bar-&gt;getImpure();  // should be int|null, is int</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $bar?-&gt;getImpure(); // int|null (correct)</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
 </code></pre></div>
 <p>The nullsafe spelling of the call is forgotten as an impure result, but the <code>-&gt;</code> spelling the condition also proves is kept.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-4757.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b489-a-comparison-does-not-narrow-a-union-of-float-literals">B489. A comparison does not narrow a union of float literals<a class="headerlink" href="#b489-a-comparison-does-not-narrow-a-union-of-float-literals" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">$x = 0.0;</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">if ($y &gt; 0) { $x += 1; }</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">if ($x &gt; 0) {</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    $x; // should be 1.0, is 0.0|1.0</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$x = 0.0;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">if ($y &gt; 0) { $x += 1; }</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">if ($x &gt; 0) {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">    $x; // should be 1.0, is 0.0|1.0</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">}</span>
 </code></pre></div>
 <p>Integer literal unions are narrowed by <code>&lt;</code>, <code>&gt;</code>, <code>&lt;=</code> and <code>&gt;=</code>; float literals are left as they were.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-5309.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b509-a-false-strlen-0-guard-does-not-narrow-the-string-to">B509. A false <code>strlen() &gt; 0</code> guard does not narrow the string to <code>''</code><a class="headerlink" href="#b509-a-false-strlen-0-guard-does-not-narrow-the-string-to" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">function f(string $s) {</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">    if (strlen($s) &gt; 0) {</span>
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">        return;</span>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">    }</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    $s;         // should be &#39;&#39;, is string</span>
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">    strlen($s); // should be 0, is int&lt;0, max&gt;</span>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">function f(string $s) {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    if (strlen($s) &gt; 0) {</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">        return;</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">    }</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">    $s;         // should be &#39;&#39;, is string</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">    strlen($s); // should be 0, is int&lt;0, max&gt;</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">}</span>
 </code></pre></div>
 <p>A comparison on the length of a string says what the string is: a length of zero is the empty string, a positive one is <code>non-empty-string</code>.</p>
 <p>Found porting PHPStan's <code>nsrt/bug-5129.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries">B490. <code>count()</code> does not size a shape with explicit keys and optional entries<a class="headerlink" href="#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">/** @param array{0: mixed, 1?: string|null} $row */</span>
-<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">function f(array $row) {</span>
-<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    if (count($row) === 1) {</span>
-<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">        $row; // should be array{mixed}, is array{0: mixed, 1?: string|null}</span>
-<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">    } else {</span>
-<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">        $row; // should be array{mixed, string|null}</span>
-<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">    }</span>
-<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">/** @param array{0: mixed, 1?: string|null} $row */</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">function f(array $row) {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    if (count($row) === 1) {</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">        $row; // should be array{mixed}, is array{0: mixed, 1?: string|null}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">    } else {</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">        $row; // should be array{mixed, string|null}</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">    }</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>list_of_size</code> gives up on a shape whose entries spell out their keys, even when the keys are the sequential ones a list has. The branch where the sizes differ learns nothing either, although it rules out the size the check named.</p>
 <p>Found porting PHPStan's <code>nsrt/list-count.php</code>; the assertions are <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments">B491. The receiver of a nullsafe call is not narrowed inside its arguments<a class="headerlink" href="#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">function f(?\Exception $e) {</span>
-<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">    $e?-&gt;getMessage(g($e)); // $e should be Exception inside the arguments, is ?Exception</span>
-<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">function f(?\Exception $e) {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    $e?-&gt;getMessage(g($e)); // $e should be Exception inside the arguments, is ?Exception</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">}</span>
 </code></pre></div>
 <p>The arguments are only evaluated when the receiver is not null.</p>
 <p>Found porting PHPStan's <code>nsrt/nullsafe.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered">B492. What the constructor proves about a readonly property of a readonly property is not remembered<a class="headerlink" href="#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">public readonly ?Foo $prop; // Foo has `public readonly int $readonly`</span>
-<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">public function __construct() {</span>
-<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $this-&gt;prop = new Foo();</span>
-<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">    if ($this-&gt;prop-&gt;readonly != 5) { throw new LogicException(); }</span>
-<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">}</span>
-<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">public function doFoo() {</span>
-<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">    $this-&gt;prop-&gt;readonly; // should be 5, is int</span>
-<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">public readonly ?Foo $prop; // Foo has `public readonly int $readonly`</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">public function __construct() {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    $this-&gt;prop = new Foo();</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">    if ($this-&gt;prop-&gt;readonly != 5) { throw new LogicException(); }</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="x">}</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="x">public function doFoo() {</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="x">    $this-&gt;prop-&gt;readonly; // should be 5, is int</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="x">}</span>
 </code></pre></div>
 <p><code>seed_constructor_readonly_properties</code> carries the class's own readonly properties into the other methods. A path through two readonly properties cannot change either, so it can be carried too.</p>
 <p>Found porting PHPStan's <code>nsrt/remember-readonly-constructor-narrowed.php</code>; the assertion is <code>// SKIP</code> in the ported copy under <code>tests/phpstan_nsrt/</code>.</p>
 <h3 id="b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null">B507. An assertion on a value typed as a union of classes and <code>null</code> leaves the <code>null</code><a class="headerlink" href="#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Low-Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">class A { /** @return A|B|null */ public function abn() {} }</span>
-<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">/** @psalm-assert A $v */</span>
-<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">function assertA($v): void {}</span>
-<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
-<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">$x = $a-&gt;abn();</span>
-<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">assertA($x);</span>
-<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="x">$x; // should be A, is A|null</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">class A { /** @return A|B|null */ public function abn() {} }</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">/** @psalm-assert A $v */</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">function assertA($v): void {}</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">$x = $a-&gt;abn();</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">assertA($x);</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">$x; // should be A, is A|null</span>
 </code></pre></div>
 <p>The value resolves to one entry per class plus a separate <code>null</code> entry, and the assertion narrows the class entries without dropping the <code>null</code> one. A single class (<code>?A</code>) carries the <code>null</code> inside its own entry and narrows correctly. PHPUnit's <code>assertInstanceOf()</code> goes through the same path.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
@@ -1996,9 +1950,9 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
 <h3 id="b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body">B508. A closure that captures its own variable by reference is typed <code>null</code> inside its body<a class="headerlink" href="#b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body" title="Permanent link">&para;</a></h3>
 <p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">$callback = function () use (&amp;$callback, $loop): void {</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    $loop-&gt;addTimer(1.0, $callback); // reported: expects callable, got null</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">};</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$callback = function () use (&amp;$callback, $loop): void {</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    $loop-&gt;addTimer(1.0, $callback); // reported: expects callable, got null</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">};</span>
 </code></pre></div>
 <p>PHP creates <code>$callback</code> as <code>null</code> when the closure literal runs, but the assignment stores the closure into it before the body can ever execute, so inside the body it is the closure. Treating the capture as <code>null</code> is right only when nothing assigns the variable afterwards. This appeared with the change that types an undefined by-reference capture as <code>null</code>, and shows as three false positives in phpstan-src (<code>src/Command/FixerApplication.php</code>, <code>monitorFileChanges()</code>).</p>
 <h3 id="b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites">B510. An overriding method's narrower return type is lost on some call sites<a class="headerlink" href="#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites" title="Permanent link">&para;</a></h3>
