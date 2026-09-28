@@ -24,8 +24,8 @@ use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, ParameterInfo};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use super::classify_relationship_typed;
 use super::helpers::{snake_to_pascal, walks_parent_chain};
+use super::{classify_relationship_typed, is_soft_deletes_trait};
 
 use super::super::{ResolvedClassCache, VirtualMemberProvider, VirtualMembers};
 
@@ -45,10 +45,7 @@ pub(crate) fn is_factory_class(class_name: &str) -> bool {
 }
 
 /// The fully-qualified name of the `Factory` base class.
-const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
-
-/// The fully-qualified name of Laravel's `SoftDeletes` trait.
-const SOFT_DELETES_FQN: &str = "Illuminate\\Database\\Eloquent\\SoftDeletes";
+pub(super) const FACTORY_FQN: &str = "Illuminate\\Database\\Eloquent\\Factories\\Factory";
 
 /// Derive the conventional factory FQN from a model FQN.
 ///
@@ -77,6 +74,41 @@ pub(crate) fn model_to_factory_fqn(model_fqn: &str) -> String {
 
     // No `Models` segment — put factory in `Database\Factories`
     format!("Database\\Factories\\{short}Factory")
+}
+
+/// The factory class `model` builds through, in the precedence
+/// `Model::factory()` itself follows: a `newFactory()` override, a static
+/// `$factory` property, `#[UseFactory]`, then Laravel's naming convention.
+/// Each source is read off the model or the nearest ancestor that declares
+/// one, since all four apply to every subclass.
+///
+/// Falls back to `Factory<Model>` when the selected class cannot be loaded
+/// or is not an Eloquent factory: the base class still carries `create()`,
+/// `make()`, `count()` and the rest, where a name nothing can resolve
+/// carries nothing at all.
+pub(crate) fn factory_for_model(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_factory.as_ref())
+            .and_then(|ty| ty.base_name())
+            .map(str::to_owned)
+    };
+    let factory = declared(model)
+        .or_else(|| {
+            crate::inheritance::ancestors(model, class_loader)
+                .find_map(|(_, parent)| declared(&parent))
+        })
+        .unwrap_or_else(|| model_to_factory_fqn(&model.fqn()));
+    if let Some(class) = class_loader(&factory)
+        && extends_eloquent_factory(&class, class_loader)
+    {
+        return PhpType::named(atom(&class.fqn()));
+    }
+    PhpType::generic(FACTORY_FQN, vec![PhpType::named(atom(&model.fqn()))])
 }
 
 /// Derive the conventional model FQN from a factory FQN.
@@ -283,19 +315,13 @@ fn relationship_param(name: &str, type_str: &str) -> ParameterInfo {
         is_variadic: false,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }
 }
 
 /// Whether `class` uses Laravel's `SoftDeletes` trait directly.
-///
-/// `used_traits` may hold the FQN or the imported short name, so we match
-/// all three forms — mirroring the established `class_uses_conditionable`
-/// detector.
 fn class_uses_soft_deletes_trait(class: &ClassInfo) -> bool {
-    class
-        .used_traits
-        .iter()
-        .any(|t| t == SOFT_DELETES_FQN || t == "SoftDeletes" || t.ends_with("\\SoftDeletes"))
+    class.used_traits.iter().any(|t| is_soft_deletes_trait(t))
 }
 
 /// Whether `class` or any ancestor uses the `SoftDeletes` trait.

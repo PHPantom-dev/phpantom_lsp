@@ -8,7 +8,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use super::classify_class_origin;
+use super::{classify_class_origin, path_aliases};
 use crate::Backend;
 use crate::classmap_scanner::{self, WorkspaceScanResult};
 use crate::composer;
@@ -28,13 +28,10 @@ type PharScannedBlock = (usize, Vec<PharClass>);
 /// Build the vendor URI prefixes (raw and canonicalized) for a vendor
 /// directory path, used to detect and skip vendor files.
 fn vendor_uri_prefixes_for_path(vendor_path: &std::path::Path) -> Vec<String> {
-    let mut prefixes = vec![format!("{}/", crate::util::path_to_uri(vendor_path))];
-    if let Ok(canonical) = vendor_path.canonicalize() {
-        prefixes.push(format!("{}/", crate::util::path_to_uri(&canonical)));
-    }
-    prefixes.sort();
-    prefixes.dedup();
-    prefixes
+    path_aliases(vendor_path)
+        .iter()
+        .map(|path| format!("{}/", crate::util::path_to_uri(path)))
+        .collect()
 }
 
 impl Backend {
@@ -48,14 +45,10 @@ impl Backend {
         // of filesystem calls.
         {
             let mut paths = self.workspace.vendor_dir_paths.lock();
-            let mut insert = |path: PathBuf| {
+            for path in path_aliases(vendor_path) {
                 if !paths.contains(&path) {
                     paths.push(path);
                 }
-            };
-            insert(vendor_path.to_path_buf());
-            if let Ok(canonical) = vendor_path.canonicalize() {
-                insert(canonical);
             }
         }
         // Store URI prefixes for URI-level skip logic (diagnostics, find
@@ -97,6 +90,7 @@ impl Backend {
             // clone before `composer install`). Register it again now so the
             // shared vendor filters cache both raw and canonical spellings.
             self.add_vendor_dir(&vendor_path);
+            let vendor_paths = path_aliases(&vendor_path);
 
             // Rebuild vendor classmap, tracking dependency provenance so
             // completion ranking stays accurate after a composer change.
@@ -106,7 +100,9 @@ impl Backend {
                 &vendor_dir,
                 &HashSet::new(),
                 &explicit_deps,
+                &self.index_filters(),
                 None,
+                Some(self.followed_links()),
             );
             // Package roots came out of the same `installed.json` parse
             // `scan_vendor_packages_with_skip` already did; no need to
@@ -130,7 +126,7 @@ impl Backend {
                             .get(&fqn)
                             .copied()
                             .unwrap_or_else(|| {
-                                classify_class_origin(&path, &vendor_path, &vendor_package_roots)
+                                classify_class_origin(&path, &vendor_paths, &vendor_package_roots)
                             });
                     origins.insert(fqn.clone(), origin);
                     idx.insert(fqn, crate::util::path_to_uri(&path));
@@ -142,7 +138,7 @@ impl Backend {
                 // Purge functions that pointed into the old vendor tree
                 // before re-inserting, so symbols removed by a
                 // `composer update` no longer resolve.
-                fi.retain(|_, v| !v.starts_with(&vendor_path));
+                fi.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
                 for (fqn, path) in vendor_scan.function_index {
                     let origin = vendor_scan
                         .function_origins
@@ -157,7 +153,7 @@ impl Backend {
                 let mut ci = self.symbols.autoload_constant_index.write();
                 let mut origins = self.symbols.autoload_constant_origin_index.write();
                 // Same for constants from the old vendor tree.
-                ci.retain(|_, v| !v.starts_with(&vendor_path));
+                ci.retain(|_, v| !vendor_paths.iter().any(|vendor| v.starts_with(vendor)));
                 for (name, path) in vendor_scan.constant_index {
                     let origin = vendor_scan
                         .constant_origins
@@ -187,9 +183,15 @@ impl Backend {
         self.symbols.duplicate_classes.write().clear();
         self.symbols.method_store.write().clear();
         self.symbols.gti_index.write().clear();
+        self.symbols.gti_parents_index.write().clear();
         self.clear_class_not_found_cache();
-        self.resolved_class_cache.write().clear();
+        self.clear_resolved_class_cache();
         self.member_completion_cache.lock().clear();
+
+        // Composer changes can introduce or remove functions/classes that
+        // shadow Laravel's runtime helper and facade aliases. Only maps with
+        // such candidates are revisited.
+        self.refresh_all_published_laravel_candidates();
     }
 
     /// Scan autoload files for a single project root and populate the
@@ -309,7 +311,16 @@ impl Backend {
         let visited: Vec<PathBuf> = visited.into_iter().collect();
         {
             let mut paths = self.symbols.autoload_file_paths.write();
-            paths.extend(visited.iter().cloned());
+            // A rediscovery pass walks the same autoload chain again, so
+            // record only what is new; the fallback lookups that read
+            // this list would otherwise re-check the same file per pass.
+            let known: HashSet<&PathBuf> = paths.iter().collect();
+            let mut fresh: Vec<PathBuf> = visited
+                .iter()
+                .filter(|path| !known.contains(path))
+                .cloned()
+                .collect();
+            paths.append(&mut fresh);
         }
         if let Some(p) = progress {
             p.begin_phase(0.4, 1.0, "Parsing autoload helpers");
@@ -514,7 +525,9 @@ impl Backend {
                         return classmap_scanner::scan_workspace_fallback_full(
                             project_root,
                             &skip_dirs,
+                            &self.index_filters(),
                             progress,
+                            Some(self.followed_links()),
                         );
                     }
                 }
@@ -541,13 +554,16 @@ impl Backend {
         if let Some(p) = progress {
             p.begin_phase(0.0, 0.2, "Scanning project files");
         }
+        let filters = self.index_filters();
         let vendor_dir_paths = vec![project_root.join(vendor_dir)];
         let classmap = classmap_scanner::scan_psr4_directories_with_skip(
             &psr4_dirs,
             &classmap_dirs,
             &vendor_dir_paths,
             skip_paths,
+            &filters,
             progress,
+            Some(self.followed_links()),
         );
 
         // Scan vendor packages from installed.json.
@@ -560,7 +576,9 @@ impl Backend {
             vendor_dir,
             skip_paths,
             &explicit_deps,
+            &filters,
             progress,
+            Some(self.followed_links()),
         );
 
         let mut result = WorkspaceScanResult {

@@ -207,8 +207,6 @@ Each item must include:
 
 - **What to do** (concrete action, not "consider refactoring X").
 - **Which files to change** (list specific paths).
-- **Why it matters for the sprint** (which task it unblocks or
-  de-risks).
 
 ---
 

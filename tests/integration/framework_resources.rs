@@ -377,6 +377,17 @@ return App::config([
             .any(|text| text == "App\\\\Service\\\\MessageMailer"),
         "expected escaped service class edit, got {config_edits:?}"
     );
+    // `Mailer::class` is both a PHP class reference and a framework one;
+    // it must be edited once, not by both renames.
+    let mut ranges: Vec<Range> = edit.changes.as_ref().unwrap()[&config_uri]
+        .iter()
+        .map(|edit| edit.range)
+        .collect();
+    ranges.sort_by_key(|range| (range.start.line, range.start.character));
+    assert!(
+        ranges.windows(2).all(|pair| pair[0].end <= pair[1].start),
+        "config edits must not overlap: {ranges:?}"
+    );
 }
 
 #[tokio::test]
@@ -866,5 +877,44 @@ return static function (ContainerConfigurator $container): void {
     assert!(
         titles.contains(&"Symfony service class: Mailer"),
         "expected PHP service declaration class lens, got {titles:?}"
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_controller_action_from_php_updates_the_route() {
+    let controller_php = "<?php\nnamespace App\\Controller;\nclass HomeController {\n    public function index(): void {}\n}\n";
+    let routes_yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("config/routes.yaml", routes_yaml),
+        ],
+    );
+
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let routes_uri = uri_for(&dir, "config/routes.yaml");
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+    open_doc(&backend, routes_uri.clone(), "yaml", routes_yaml).await;
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: controller_uri.clone(),
+                },
+                position: Position::new(3, 21),
+            },
+            new_name: "dashboard".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("method rename should produce edits");
+
+    assert_eq!(edit_texts_for_uri(&edit, &routes_uri), vec!["dashboard"]);
+    assert_eq!(
+        edit_texts_for_uri(&edit, &controller_uri),
+        vec!["dashboard"]
     );
 }

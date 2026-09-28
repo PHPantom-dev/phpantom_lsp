@@ -8,24 +8,19 @@
 //! argument, an array element, a ternary condition, a nested operand)
 //! reading the un-narrowed type.
 
-use crate::common::{create_test_backend, create_test_backend_with_function_stubs};
-use tower_lsp::lsp_types::*;
+use crate::common::{
+    create_test_backend, create_test_backend_with_function_stubs, slow_diagnostic_messages,
+};
 
 /// Collect argument-type diagnostics through the slow pipeline, which is
 /// what activates the forward walker's scope-snapshot cache.
 fn type_errors_with(backend: phpantom_lsp::Backend, php: &str) -> Vec<String> {
-    let uri = "file:///nested_short_circuit.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(
+        &backend,
+        "file:///nested_short_circuit.php",
+        php,
+        "type_mismatch_argument",
+    )
 }
 
 /// The positions matrix only needs user-declared functions, so it runs
@@ -136,5 +131,41 @@ function probe(?string $c): void {
         errors.iter().any(|m| m.contains("expects string")),
         "the chain proves nothing about `$c` after the statement it \
          sits in, so the later call must still be reported, got: {errors:?}"
+    );
+}
+
+/// A `?->` call short-circuits too: its arguments only run when the
+/// receiver is not null.
+#[test]
+fn the_arguments_of_a_nullsafe_call_see_the_receiver_as_not_null() {
+    let php = r#"<?php
+class Box { public function take(int $n): int { return $n; } }
+function needBox(Box $b): int { return 1; }
+function probe(?Box $box): void {
+    $box?->take(needBox($box));
+}
+"#;
+    let errors = type_errors(php);
+    assert!(
+        errors.is_empty(),
+        "the arguments of `$box?->take()` only run when `$box` is not null, \
+         got: {errors:?}"
+    );
+}
+
+/// What the arguments see ends with the call.
+#[test]
+fn a_nullsafe_call_does_not_narrow_its_receiver_past_itself() {
+    let php = r#"<?php
+class Box { public function take(int $n): int { return $n; } }
+function needBox(Box $b): int { return 1; }
+function probe(?Box $box): void {
+    $box?->take(needBox($box)) + needBox($box);
+}
+"#;
+    let errors = type_errors(php);
+    assert!(
+        errors.len() == 1 && errors[0].contains("expects Box"),
+        "`$box` is still nullable after the call, got: {errors:?}"
     );
 }

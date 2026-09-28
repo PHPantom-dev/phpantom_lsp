@@ -1,0 +1,12 @@
+// test: `->call()` on a closure returns what the closure returns with `$this` rebound
+// feature: hover
+// expect: $bound = stdClass
+---
+<?php
+
+class Bar {
+    public function f(\stdClass $o): void {
+        $bound = (fn () => $this)->call($o);
+        echo $bou<>nd;
+    }
+}

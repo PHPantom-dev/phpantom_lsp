@@ -1,0 +1,13 @@
+// test: extract() of a union of shapes writes each key from every alternative
+// feature: hover
+// expect_hover: $a => int|float
+// expect_hover: $b => string
+---
+<?php
+
+/** @param array{a: int, b: string}|array{a: float} $row */
+function test(array $row): void {
+    extract($row);
+    $a;
+    $b;<>
+}

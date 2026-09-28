@@ -1,8 +1,8 @@
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::composer;
-use crate::diagnostics::namespace_mismatch::is_structural_single_classlike_file;
+use crate::diagnostics::helpers::make_diagnostic;
+use crate::diagnostics::namespace_mismatch::psr4_expectation;
 use crate::text_position::offset_to_position;
 use crate::types::{ClassInfo, ClassLikeKind};
 
@@ -25,23 +25,10 @@ pub(crate) fn class_name_mismatch_diagnostic(
     uri: &str,
     content: &str,
 ) -> Option<Diagnostic> {
-    if !is_structural_single_classlike_file(content) {
-        return None;
-    }
-
-    let file_path = Url::parse(uri).ok().and_then(|u| u.to_file_path().ok())?;
-
-    // Only files that fall under a PSR-4 mapping are required to name their
-    // single class after the file. Standalone scripts, non-autoloaded files,
-    // and projects without a `composer.json` have no such constraint, so we
-    // gate the check on PSR-4 membership exactly like the namespace check.
-    let workspace_root = backend.workspace_root().read().clone()?;
-    let mappings = backend.psr4_mappings().read().clone();
-    if mappings.is_empty() {
-        return None;
-    }
-    let (_, expected_name) =
-        composer::resolve_namespace_from_path(&mappings, &workspace_root, &file_path)?;
+    // Only files that fall under a PSR-4 mapping are required to name
+    // their single class after the file, which is what the shared gate
+    // establishes; see [`psr4_expectation`].
+    let (_, expected_name) = psr4_expectation(backend, uri, content)?;
 
     let classes = backend.parse_php(content);
     if classes.len() != 1 {
@@ -54,17 +41,15 @@ pub(crate) fn class_name_mismatch_diagnostic(
 
     let range = class_name_range(content, class)?;
 
-    Some(Diagnostic {
+    Some(make_diagnostic(
         range,
-        severity: Some(DiagnosticSeverity::WARNING),
-        code: Some(NumberOrString::String("class_name_mismatch".to_string())),
-        source: Some("phpantom".to_string()),
-        message: format!(
-            "Class name `{}` does not match filename `{}`",
-            class.name, expected_name,
+        DiagnosticSeverity::WARNING,
+        "class_name_mismatch",
+        format!(
+            "Class name `{}` does not match filename `{expected_name}`",
+            class.name
         ),
-        ..Default::default()
-    })
+    ))
 }
 
 pub(crate) fn class_name_range(content: &str, class: &ClassInfo) -> Option<Range> {

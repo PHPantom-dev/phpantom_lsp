@@ -17,6 +17,7 @@
 //! properties have their template parameter references replaced with the
 //! concrete types.
 
+pub mod ancestry;
 pub mod enrichment;
 pub mod generics;
 pub mod traits;
@@ -32,6 +33,7 @@ use crate::virtual_members::{
 };
 
 // Re-export functions that are used internally
+pub(crate) use ancestry::{ancestors, find_declaring_ancestor, find_declaring_trait};
 pub(crate) use enrichment::enrich_method_arc_from_ancestor;
 pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 
@@ -39,9 +41,11 @@ pub(crate) use enrichment::enrich_property_arc_from_ancestor;
 pub(crate) use generics::apply_substitution;
 pub(crate) use generics::{
     apply_generic_args, apply_substitution_to_conditional, apply_substitution_to_method,
-    apply_substitution_to_property, bind_inherited_class_keywords, build_generic_subs,
-    build_substitution_map, class_scoped_template_values, default_type_args,
-    method_has_inherited_class_keyword, method_references_params, property_references_params,
+    apply_substitution_to_property, bind_inherited_class_keywords,
+    bind_inherited_class_keywords_in_property, build_generic_subs, build_substitution_map,
+    class_scoped_template_values, default_type_args, extends_type_args, fill_template_bounds,
+    generic_arg_offset, method_has_inherited_class_keyword, method_references_params,
+    property_has_inherited_class_keyword, property_references_params,
     template_values_with_defaults,
 };
 
@@ -109,9 +113,42 @@ impl MergeDedup {
             constants: class.constants.iter().map(|c| c.name).collect(),
         }
     }
+
+    /// Copy every member of `source` a subclass inherits into `merged`,
+    /// sharing each one's `Arc` rather than cloning it.
+    ///
+    /// A private member is not inherited, and a name already merged wins
+    /// over the one further up the chain, which is PHP's own precedence.
+    /// This is the plain form, without the generic substitution and
+    /// docblock enrichment the `extends` walk in
+    /// [`resolve_class_with_inheritance`] layers on top.
+    pub(crate) fn merge_visible_members(&mut self, source: &ClassInfo, merged: &mut ClassInfo) {
+        for method in &source.methods {
+            if method.visibility != Visibility::Private
+                && self
+                    .methods
+                    .insert(crate::atom::ascii_lowercase_atom(&method.name))
+            {
+                merged.methods.push(Arc::clone(method));
+            }
+        }
+        for property in &source.properties {
+            if property.visibility != Visibility::Private && self.properties.insert(property.name) {
+                merged.properties.push(Arc::clone(property));
+            }
+        }
+        for constant in &source.constants {
+            if constant.visibility != Visibility::Private && self.constants.insert(constant.name) {
+                merged.constants.push(Arc::clone(constant));
+            }
+        }
+    }
 }
 
-use crate::virtual_members::laravel::{factory_model_type, is_factory_class};
+use crate::virtual_members::laravel::{
+    ELOQUENT_MODEL_FQN, factory_model_type, has_inheritable_model_metadata, inherit_model_metadata,
+    is_factory_class,
+};
 
 /// Resolve a class together with all inherited members from its parent
 /// chain.
@@ -209,6 +246,18 @@ pub(crate) fn resolve_class_with_inheritance(
         // properties it inherits are readonly as well.
         merged.is_readonly |= parent.is_readonly;
 
+        // Eloquent model configuration (`$fillable`, `$casts`,
+        // `$primaryKey`, …) comes from the nearest class that declares it.
+        // The framework's own `Model` is skipped: its declarations are the
+        // defaults (`$guarded = ['*']`, `$primaryKey = 'id'`, …) that an
+        // undeclared setting already stands for.
+        if let Some(parent_meta) = parent.laravel()
+            && has_inheritable_model_metadata(parent_meta)
+            && !parent.fqn().eq_ignore_ascii_case(ELOQUENT_MODEL_FQN)
+        {
+            inherit_model_metadata(merged.laravel_mut(), parent_meta);
+        }
+
         // Build the substitution map for this parent level.
         //
         // Look through current's `extends_generics` for an entry
@@ -240,18 +289,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // substitution filled the map, fall back to the template
         // parameter bounds (e.g. `@template T of object` → `object`)
         // so that inherited methods don't leak raw template names.
-        if !parent.template_params.is_empty() {
-            for param_name in &parent.template_params {
-                if !level_subs.contains_key(param_name.to_string().as_str()) {
-                    let bound = parent
-                        .template_param_bounds
-                        .get(param_name)
-                        .cloned()
-                        .unwrap_or_else(PhpType::mixed);
-                    level_subs.insert(param_name.to_string(), bound);
-                }
-            }
-        }
+        fill_template_bounds(&parent, &mut level_subs);
 
         // Merge traits used by the parent class as well, so that
         // grandparent-level trait members are visible.
@@ -397,6 +435,35 @@ pub(crate) fn resolve_class_with_inheritance(
                 continue;
             }
             let needs_sub = property_references_params(property, &sub_keys);
+            // A bare `self` / `parent` in the type names the declaring
+            // class and its parent, not the class the property is read
+            // through, exactly as for an inherited method.
+            let needs_keywords =
+                property_has_inherited_class_keyword(property, declaring_parent.as_deref());
+            let transformed = if !needs_sub && !needs_keywords {
+                // Neither transform applies: keep the shared `Arc`.
+                Arc::clone(property)
+            } else {
+                let fp = match (needs_sub, needs_keywords) {
+                    (true, false) => fp_sub,
+                    (false, true) => fp_self,
+                    _ => fp_both,
+                };
+                intern_transformed_property(property, fp, || {
+                    let mut p = (**property).clone();
+                    if needs_sub {
+                        apply_substitution_to_property(&mut p, &level_subs);
+                    }
+                    if needs_keywords {
+                        bind_inherited_class_keywords_in_property(
+                            &mut p,
+                            &parent_fqn,
+                            declaring_parent.as_deref(),
+                        );
+                    }
+                    p
+                })
+            };
             if !dedup.properties.insert(property.name) {
                 // Child already has this property — enrich it from parent.
                 if let Some(existing) = merged
@@ -405,30 +472,10 @@ pub(crate) fn resolve_class_with_inheritance(
                     .iter_mut()
                     .find(|p| p.name == property.name)
                 {
-                    if needs_sub {
-                        let ancestor_property =
-                            intern_transformed_property(property, fp_sub, || {
-                                let mut p = (**property).clone();
-                                apply_substitution_to_property(&mut p, &level_subs);
-                                p
-                            });
-                        enrich_property_arc_from_ancestor(existing, &ancestor_property);
-                    } else {
-                        enrich_property_arc_from_ancestor(existing, property);
-                    }
+                    enrich_property_arc_from_ancestor(existing, &transformed);
                 }
                 continue;
             }
-            if !needs_sub {
-                // Substitution is a no-op: keep the shared `Arc`.
-                merged.properties.push(Arc::clone(property));
-                continue;
-            }
-            let transformed = intern_transformed_property(property, fp_sub, || {
-                let mut p = (**property).clone();
-                apply_substitution_to_property(&mut p, &level_subs);
-                p
-            });
             merged.properties.push(transformed);
         }
 
@@ -480,16 +527,7 @@ pub(crate) fn resolve_class_with_inheritance(
         // to fall through to their own convention-based resolution.
         let mut iface_subs =
             build_substitution_map(&ClassRef::Borrowed(class), &iface, &HashMap::new());
-        for param_name in &iface.template_params {
-            if !iface_subs.contains_key(param_name.as_str()) {
-                let fallback = iface
-                    .template_param_bounds
-                    .get(param_name)
-                    .cloned()
-                    .unwrap_or_else(PhpType::mixed);
-                iface_subs.insert(param_name.to_string(), fallback);
-            }
-        }
+        fill_template_bounds(&iface, &mut iface_subs);
         let iface_sub_keys: Vec<String> = iface_subs.keys().cloned().collect();
         let fp_iface = TransformFingerprint::new(Some(&iface_subs), None, 0);
 

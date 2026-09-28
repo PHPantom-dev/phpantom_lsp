@@ -1,0 +1,15 @@
+// test: comparing a foreach key narrows the offset read of the array at that key
+// feature: hover
+// expect: $entry = list<string>
+---
+<?php
+
+/** @param array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+function f(array $data): void {
+    foreach ($data as $key => $value) {
+        if ($key === 'classmap') {
+            $entry = $data[$key];
+            $<>entry;
+        }
+    }
+}

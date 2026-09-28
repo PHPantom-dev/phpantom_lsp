@@ -91,7 +91,7 @@ fn a_before_callback_opens_the_ability_space_only_for_project_code() {
         Gate::before(fn () => null);\n";
 
     let mut vendor_only = LaravelGateIndex::default();
-    vendor_only.set_file(
+    vendor_only.files.set_file(
         "file:///app/vendor/acme/auth/src/AuthServiceProvider.php".to_string(),
         scan(content),
     );
@@ -99,7 +99,7 @@ fn a_before_callback_opens_the_ability_space_only_for_project_code() {
     assert!(!vendor_only.ability_space_is_open());
 
     let mut project = LaravelGateIndex::default();
-    project.set_file(
+    project.files.set_file(
         "file:///app/src/Providers/AuthServiceProvider.php".to_string(),
         scan(content),
     );
@@ -496,7 +496,7 @@ fn unreadable_policies_declarations_register_nothing() {
 fn a_duplicate_ability_keeps_one_registration() {
     let mut index = LaravelGateIndex::default();
     for uri in ["file:///a.php", "file:///b.php"] {
-        index.set_file(
+        index.files.set_file(
             uri.to_string(),
             scan(
                 "<?php\nuse Illuminate\\Support\\Facades\\Gate;\nGate::define('shared', fn () => true);\n",
@@ -513,7 +513,7 @@ fn a_duplicate_ability_keeps_one_registration() {
 #[test]
 fn a_policy_lookup_accepts_a_leading_separator_and_dedupes_the_policy_list() {
     let mut index = LaravelGateIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///provider.php".to_string(),
         scan(
             "<?php\n\
@@ -547,11 +547,11 @@ fn a_policy_lookup_accepts_a_leading_separator_and_dedupes_the_policy_list() {
 #[test]
 fn index_merges_files_and_keeps_the_first_registration() {
     let mut index = LaravelGateIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         scan("<?php\nuse Illuminate\\Support\\Facades\\Gate;\nGate::define('a', fn () => true);\n"),
     );
-    index.set_file(
+    index.files.set_file(
         "file:///b.php".to_string(),
         scan("<?php\nuse Illuminate\\Support\\Facades\\Gate;\nGate::define('b', fn () => true);\n"),
     );
@@ -560,13 +560,15 @@ fn index_merges_files_and_keeps_the_first_registration() {
     let mut names = index.definition_names();
     names.sort();
     assert_eq!(names, vec!["a".to_string(), "b".to_string()]);
-    assert!(index.has_uri("file:///a.php"));
+    assert!(index.files.has_uri("file:///a.php"));
 
     // Removing a file's contribution drops only its own abilities.
-    index.set_file("file:///a.php".to_string(), GateScan::default());
+    index
+        .files
+        .set_file("file:///a.php".to_string(), GateScan::default());
     index.rebuild();
     assert_eq!(index.definition_names(), vec!["b".to_string()]);
-    assert!(!index.has_uri("file:///a.php"));
+    assert!(!index.files.has_uri("file:///a.php"));
 }
 
 #[test]
@@ -610,7 +612,7 @@ fn backend_with(files: &[(&str, &str)], provider: Option<(&str, &str)>) -> crate
     if let Some((uri, content)) = provider {
         backend.update_ast(uri, content);
         let mut index = backend.laravel_gates.write();
-        index.set_file(uri.to_string(), scan(content));
+        index.files.set_file(uri.to_string(), scan(content));
         index.rebuild();
     }
     backend

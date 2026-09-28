@@ -413,6 +413,7 @@ fn make_param(name: &str, type_hint: Option<&str>, required: bool) -> ParameterI
         is_variadic: false,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }
 }
 
@@ -543,6 +544,7 @@ fn completions_variadic_detail() {
         is_variadic: true,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }];
     let ctx = NamedArgContext {
         call_expression: "foo".to_string(),

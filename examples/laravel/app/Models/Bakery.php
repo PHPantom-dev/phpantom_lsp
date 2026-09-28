@@ -55,6 +55,9 @@ class Bakery extends Model
     /** @return BelongsToMany<BakeryRecipe, $this> */
     public function masterRecipe(): mixed { return $this->belongsToMany(BakeryRecipe::class)->using(RecipeIngredient::class)->withPivot('quantity', 'unit'); }
 
+    /** @return BelongsToMany<BakeryRecipe, $this, RecipeIngredient, 'ingredient'> */
+    public function seasonalRecipes(): mixed { return $this->belongsToMany(BakeryRecipe::class)->as('ingredient')->using(RecipeIngredient::class)->withPivot('quantity'); }
+
     public function vendor() { return $this->morphTo(); }
 
     public function scopeTopping(Builder $query, string $type): void

@@ -12,13 +12,35 @@ impl fmt::Display for PhpType {
             // The leniency marker is a note about where the type came from,
             // not something a developer reading `string|false` should see.
             TypeKind::Benevolent(inner) => write!(f, "{inner}"),
+            // The name is a `class-string<T>` wherever it is shown.
+            TypeKind::ClassNameLiteral(inner) => write!(f, "{inner}"),
             // The ordering promise is part of the type the developer wrote,
             // so it is spelled back the same way.
             TypeKind::ListShape(inner) => match inner.kind() {
                 TypeKind::ArrayShape(entries) => write_shape(f, "list", entries),
                 _ => write!(f, "{inner}"),
             },
+            TypeKind::UnsealedShape(unsealed) => {
+                let (base, entries) = match unsealed.shape.kind() {
+                    TypeKind::ArrayShape(entries) if unsealed.shape.is_list_shape() => {
+                        ("list", entries)
+                    }
+                    TypeKind::ArrayShape(entries) => ("array", entries),
+                    _ => return write!(f, "{}", unsealed.shape),
+                };
+                write!(f, "{base}{{")?;
+                for entry in entries.iter() {
+                    write!(f, "{entry}, ")?;
+                }
+                if base == "list" {
+                    write!(f, "...<{}>}}", unsealed.value)
+                } else {
+                    write!(f, "...<{}, {}>}}", unsealed.key, unsealed.value)
+                }
+            }
             TypeKind::Named(s) => write!(f, "{s}"),
+            // The value is the template, whatever it is known to be.
+            TypeKind::TemplateParam(name, _) => write!(f, "{name}"),
             TypeKind::StaticType(bound) => write!(f, "static({bound})"),
             TypeKind::ThisType(bound) => write!(f, "$this({bound})"),
 
@@ -191,8 +213,13 @@ fn format_shape_key(key: &str) -> String {
     if is_simple {
         return key.to_string();
     }
-    // Pure integer keys: emit bare.
-    if key.parse::<i64>().is_ok() {
+    // Integer keys: emit bare. `'+15'` and `'015'` are string keys.
+    if super::is_canonical_int_key(key) {
+        return key.to_string();
+    }
+    // A class-constant key is stored as its spelling, and written back the
+    // same way so that it reads back as the constant rather than a string.
+    if super::class_constant_key(key).is_some() {
         return key.to_string();
     }
 

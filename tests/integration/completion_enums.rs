@@ -1685,6 +1685,99 @@ async fn test_completion_unit_enum_inherits_cases_from_stub() {
     }
 }
 
+/// Ported from Mago issue_1002.php: a parameter typed as an intersection
+/// that includes `UnitEnum` (`UnitEnum&A&B`) should still surface
+/// `UnitEnum`'s static `cases()` on `$c::` completion, merged with the
+/// other intersection members. Distinct from the enum-declaration tests
+/// above (which complete on the enum's own name); here the intersection
+/// only appears at a parameter's type, and the receiver is a variable.
+#[tokio::test]
+async fn test_completion_intersection_with_unit_enum_static_access() {
+    let backend = create_test_backend();
+
+    let stub_uri = Url::parse("file:///stubs/UnitEnum.php").unwrap();
+    let unit_enum_stub = concat!(
+        "<?php\n",
+        "interface UnitEnum\n",
+        "{\n",
+        "    public static function cases(): array;\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: stub_uri,
+                language_id: "php".to_string(),
+                version: 1,
+                text: unit_enum_stub.to_string(),
+            },
+        })
+        .await;
+
+    let uri = Url::parse("file:///intersection_unit_enum.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface A {\n",
+        "    public function a(): void;\n",
+        "}\n",
+        "interface B {\n",
+        "    public function b(): void;\n",
+        "}\n",
+        "\n",
+        "function x(UnitEnum&A&B $c): void {\n",
+        "    $c::\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // `$c::` on line 9
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 9,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let method_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                method_names.contains(&"cases"),
+                "Intersection incl. UnitEnum should offer static 'cases()' \
+                 on $c::, got: {:?}",
+                method_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 /// When a BackedEnum stub is available, a backed enum should inherit its
 /// methods (e.g. `from()`, `tryFrom()`, `cases()`) via the implicit
 /// interface added to `used_traits`.

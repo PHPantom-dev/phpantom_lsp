@@ -157,7 +157,9 @@ Collection::macro('doubled', function (): int { return 2; });
 "#;
     let regs = extract_macro_registrations(content, None);
     let mut index = LaravelMacroIndex::default();
-    index.set_file("file:///provider.php".to_string(), regs);
+    index
+        .files
+        .set_file("file:///provider.php".to_string(), regs);
     index.rebuild();
 
     let methods = index
@@ -177,7 +179,7 @@ Collection::macro('sumPrices', function (): float { return 0.0; });
 "#;
     let regs = extract_macro_registrations(content, None);
     let mut index = LaravelMacroIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///app/Providers/AppServiceProvider.php".to_string(),
         regs,
     );
@@ -487,12 +489,14 @@ Collection::macro('temp', function () {});
 "#;
     let uri = "file:///provider.php".to_string();
     let mut index = LaravelMacroIndex::default();
-    index.set_file(uri.clone(), extract_macro_registrations(content, None));
+    index
+        .files
+        .set_file(uri.clone(), extract_macro_registrations(content, None));
     index.rebuild();
     assert!(!index.is_empty());
 
     // File edited to remove the macro.
-    index.set_file(uri, Vec::new());
+    index.files.set_file(uri, Vec::new());
     index.rebuild();
     assert!(index.is_empty());
 }

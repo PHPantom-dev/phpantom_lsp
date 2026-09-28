@@ -562,7 +562,7 @@ fn try_isset_coalescing(
     else_expr: &Expression<'_>,
     content: &str,
 ) -> Option<Simplification> {
-    let condition = unwrap_parens(condition);
+    let condition = crate::parser::unwrap_parens(condition);
 
     let isset = match condition {
         Expression::Construct(Construct::Isset(isset)) => isset,
@@ -598,7 +598,7 @@ fn try_null_comparison_simplify(
     content: &str,
     php_version: PhpVersion,
 ) -> Option<Simplification> {
-    let condition = unwrap_parens(condition);
+    let condition = crate::parser::unwrap_parens(condition);
 
     let bin = match condition {
         Expression::Binary(bin) => bin,
@@ -737,15 +737,10 @@ fn expr_source_text<'c>(expr: &Expression<'_>, content: &'c str) -> &'c str {
 }
 
 fn is_null_literal(expr: &Expression<'_>) -> bool {
-    matches!(unwrap_parens(expr), Expression::Literal(Literal::Null(_)))
-}
-
-/// Unwrap any number of surrounding parentheses from an expression.
-fn unwrap_parens<'a, 'b>(expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    match expr {
-        Expression::Parenthesized(p) => unwrap_parens(p.expression),
-        other => other,
-    }
+    matches!(
+        crate::parser::unwrap_parens(expr),
+        Expression::Literal(Literal::Null(_))
+    )
 }
 
 /// Find the root object of a member access chain.
