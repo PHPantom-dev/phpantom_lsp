@@ -67,7 +67,6 @@ src/
 │
 │   # Class & type resolution
 ├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
-├── proxy_metadata.rs       # Transparent proxy → real-class relations for metadata consumers
 ├── symfony/                # Static compiled-container adapters and event metadata
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
@@ -148,13 +147,12 @@ every consumer benefits.
 ### Framework Runtime Metadata
 
 Framework-generated files feed small metadata adapters instead of creating a
-second symbol resolver. `proxy_metadata.rs` is the shared proxy-to-real-class
-relation. `symfony/container.rs` reads compiled containers as text and exposes
+second symbol resolver. `symfony/container.rs` reads compiled containers as text and exposes
 listener registrations and proxied service candidates; it never includes PHP.
 `symfony/events.rs` combines that exact runtime wiring with configured
 attribute rules, then serves go-to-definition, references, and code lenses.
-Metadata owners are canonicalized through the proxy relation before lookup, so
-all consumers agree on the real class without rewriting normal PHP types.
+Both inputs name the real classes: a compiled container records the class it
+hands to a proxy factory, not the generated subclass.
 
 ## External Crates
 

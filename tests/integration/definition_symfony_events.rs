@@ -11,10 +11,6 @@ const CONFIG: &str = r#"
 [indexing]
 strategy = "none"
 
-[[php.proxies]]
-paths = ["var/cache/*/proxies/*.php"]
-marker-interface = 'Acme\Proxy\TransparentProxy'
-
 [symfony.container]
 environment = "dev"
 
@@ -76,16 +72,10 @@ final class AuditListener
 const CONTAINER: &str = r#"<?php
 $dispatcher->addListener(
     'use_case.post.publish_course.async',
-    [#[\Closure(name: 'Generated\\CourseListenerProxy')] fn () => ($container->privates['Generated\\CourseListenerProxy'] ?? null), 'onPublished'],
+    [#[\Closure(name: 'App\\Listener\\CourseListener')] fn () => ($container->privates['App\\Listener\\CourseListener'] ?? null), 'onPublished'],
     0,
 );
 $factory->createProxy(new \App\UseCase\PublishCourse());
-"#;
-
-const LISTENER_PROXY: &str = r#"<?php
-namespace Generated;
-
-final class CourseListenerProxy extends \App\Listener\CourseListener implements \Acme\Proxy\TransparentProxy {}
 "#;
 
 async fn open_php(backend: &Backend, uri: Url, content: &str) {
@@ -152,10 +142,6 @@ async fn compiled_container_and_configured_attributes_drive_symfony_event_naviga
             ("src/UseCase/PublishCourse.php", PUBLISHER),
             ("src/Listener/CourseListener.php", COMPILED_LISTENER),
             ("src/Listener/AuditListener.php", CONFIGURED_LISTENER),
-            (
-                "var/cache/dev/proxies/CourseListenerProxy.php",
-                LISTENER_PROXY,
-            ),
             (
                 "var/cache/dev/ContainerAbc/KernelDevDebugContainer.php",
                 CONTAINER,

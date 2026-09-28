@@ -67,17 +67,11 @@ impl Backend {
         position: Position,
     ) -> Option<Location> {
         match symbol_at(content, position)? {
-            ResourceSymbol::Class(fqn) => self
-                .metadata_class_family(&fqn)
-                .iter()
-                .find_map(|target| self.class_declaration_location(target)),
+            ResourceSymbol::Class(fqn) => self.class_declaration_location(&fqn),
             ResourceSymbol::Member {
                 class_fqn,
                 member_name,
-            } => self
-                .metadata_class_family(&class_fqn)
-                .iter()
-                .find_map(|target| self.class_member_declaration_location(target, &member_name)),
+            } => self.class_member_declaration_location(&class_fqn, &member_name),
         }
     }
 
@@ -113,35 +107,6 @@ impl Backend {
         self.reindex_references_for_symbol_maps_batch(maps);
     }
 
-    /// Rebuild already-indexed resource maps after proxy configuration changes.
-    pub(crate) fn refresh_indexed_resource_symbols(&self) {
-        let uris: Vec<String> = self
-            .symbol_maps
-            .read()
-            .keys()
-            .filter(|uri| is_resource_document(uri))
-            .cloned()
-            .collect();
-        let maps: Vec<(String, Arc<SymbolMap>)> = uris
-            .into_iter()
-            .filter_map(|uri| {
-                let content = self.get_file_content(&uri)?;
-                Some((uri, Arc::new(self.resource_symbol_map(&content))))
-            })
-            .collect();
-        if maps.is_empty() {
-            return;
-        }
-
-        {
-            let mut symbol_maps = self.symbol_maps.write();
-            for (uri, map) in &maps {
-                symbol_maps.insert(uri.clone(), Arc::clone(map));
-            }
-        }
-        self.reindex_references_for_symbol_maps_batch(maps);
-    }
-
     fn resource_symbol_map(&self, content: &str) -> SymbolMap {
         let mut spans = Vec::new();
         for symbol in scan_symbols(content) {
@@ -156,16 +121,11 @@ impl Backend {
             });
 
             if let Some((member_name, member_start, member_end)) = symbol.member {
-                let canonical_class = self
-                    .metadata_class_family(&symbol.class_fqn)
-                    .into_iter()
-                    .next()
-                    .unwrap_or(symbol.class_fqn);
                 spans.push(SymbolSpan {
                     start: member_start as u32,
                     end: member_end as u32,
                     kind: SymbolKind::MemberAccess {
-                        subject_text: SubjectText::owned(canonical_class),
+                        subject_text: SubjectText::owned(symbol.class_fqn),
                         member_name: atom(&member_name),
                         is_static: false,
                         is_method_call: true,

@@ -13,31 +13,6 @@
           "type": "string",
           "description": "Override the detected PHP version (e.g. \"8.3\"). When unset, PHPantom infers from composer.json's platform or require.php.",
           "pattern": "^\\d+\\.\\d+(\\.\\d+)?$"
-        },
-        "proxies": {
-          "type": "array",
-          "description": "Generated transparent-proxy discovery rules. Matching subclasses keep their PHP type, while project metadata is attributed to their real parent class.",
-          "items": {
-            "type": "object",
-            "properties": {
-              "paths": {
-                "type": "array",
-                "description": "Workspace-relative PHP files, directories, or glob patterns to scan for generated proxy subclasses.",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "marker-interface": {
-                "type": "string",
-                "description": "Fully-qualified interface that a generated subclass must directly implement to be treated as a transparent proxy."
-              }
-            },
-            "required": [
-              "paths",
-              "marker-interface"
-            ]
-          },
-          "default": []
         }
       }
     },

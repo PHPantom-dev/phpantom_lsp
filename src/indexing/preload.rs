@@ -273,7 +273,6 @@ impl Backend {
         let phase1_uri_set: HashSet<&str> = phase1_uris.iter().map(|uri| uri.as_str()).collect();
         let (phase2_work, resource_work) = if let Some(root) = workspace_root.clone() {
             let vendor_dir_paths = self.workspace.vendor_dir_paths.lock().clone();
-            let proxy_rules = self.config().php.proxies;
 
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
@@ -294,9 +293,6 @@ impl Backend {
             let php_work = php_files
                 .into_iter()
                 .filter_map(|path| {
-                    if crate::proxy_metadata::is_configured_proxy_path(&root, &path, &proxy_rules) {
-                        return None;
-                    }
                     let uri = crate::util::path_to_uri(&path);
                     if existing_uris.contains(&uri) || phase1_uri_set.contains(uri.as_str()) {
                         None
