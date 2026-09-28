@@ -2776,6 +2776,12 @@ class SpreadOperatorDemo
 
         $everything = [...$penList, ...$pencilList];
         $everything[0]->label();                  // union: Scaffolding\Pen|Scaffolding\Pencil from multiple spreads
+
+        // Entries written beside a spread stay known one by one:
+        // array{sketcher: Scaffolding\Pencil, ...<int, Scaffolding\Pen>}
+        $kit = ['sketcher' => new Scaffolding\Pencil(), ...$penList];
+        $kit['sketcher']->sharpen();              // Scaffolding\Pencil only, not the spread's Pen
+        // Try: $kit['   → offers 'sketcher'
     }
 }
 

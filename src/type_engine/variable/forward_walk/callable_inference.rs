@@ -72,7 +72,7 @@ pub(crate) fn infer_callable_params_from_function_fw(
             }
         }
 
-        params
+        handed_to_callback(params, ctx)
     } else {
         vec![]
     }
@@ -158,25 +158,64 @@ pub(crate) fn infer_callable_params_from_receiver_fw(
         params
     };
 
-    if let Some(receiver) = receiver_classes.first() {
+    let params = if let Some(receiver) = receiver_classes.first() {
         let receiver_type = super::super::closure_resolution::build_receiver_self_type_pub(
             receiver,
             ctx.class_loader,
         );
+        // Late static binding only carries across a forwarding call
+        // (`$this->`, or a receiver that is itself still bound); any other
+        // receiver pins `static` to the class it was declared as, just as
+        // it does for a `@return static` on the same call.
+        let forwards = ctx.content.get(obj_start as usize..obj_end as usize) == Some("$this")
+            || resolved_types.iter().any(|rt| {
+                matches!(
+                    rt.type_string.kind(),
+                    TypeKind::StaticType(_) | TypeKind::ThisType(_)
+                )
+            });
         params
             .into_iter()
-            .map(|p| p.replace_self_with_type(&receiver_type))
+            .map(|p| {
+                if forwards {
+                    p.replace_self_with_type(&receiver_type)
+                } else {
+                    p.replace_self_fixed(&receiver_type)
+                }
+            })
             .collect()
     } else {
         params
-    }
+    };
+    handed_to_callback(params, ctx)
+}
+
+/// The types a callee hands a callback, with each base Eloquent collection
+/// of a concrete model narrowed to the collection that model builds, the
+/// same as the collection a caller gets back from `get()`.
+fn handed_to_callback(params: Vec<PhpType>, ctx: &ForwardWalkCtx<'_>) -> Vec<PhpType> {
+    params
+        .into_iter()
+        .map(|p| {
+            crate::virtual_members::laravel::replace_eloquent_collections_in_type(
+                &p,
+                ctx.class_loader,
+            )
+            .unwrap_or(p)
+        })
+        .collect()
 }
 
 /// Filter inferred callable param types, replacing any param whose type
-/// has an unresolvable base (e.g. PHPStan pseudo-types like
-/// `collection-of<T>`) with `PhpType::mixed()`.  `mixed` is not
-/// considered informative by `seed_closure_params`, so the param simply
-/// won't be seeded — much better than skipping the entire closure body.
+/// has an unresolvable base (e.g. PHPStan pseudo-types we have no model
+/// for) with `PhpType::mixed()`.  `mixed` is not considered informative
+/// by `seed_closure_params`, so the param simply won't be seeded — much
+/// better than skipping the entire closure body.
+///
+/// The Laravel model operators are resolved first rather than discarded:
+/// `Closure(builder-of<static>)` is a real class once `static` is bound
+/// to the receiver, which the caller has already done by the time this
+/// runs, so the closure receives the model's builder instead of nothing.
 pub(crate) fn filter_resolvable_inferred_params(
     inferred: &[PhpType],
     ctx: &ForwardWalkCtx<'_>,
@@ -184,10 +223,15 @@ pub(crate) fn filter_resolvable_inferred_params(
     inferred
         .iter()
         .map(|ty| {
-            if has_unresolvable_base(ty, ctx) {
-                PhpType::mixed()
+            let ty = if crate::virtual_members::laravel::has_model_type_operator(ty) {
+                crate::virtual_members::laravel::expand_model_type(ty, ctx.class_loader)
             } else {
                 ty.clone()
+            };
+            if has_unresolvable_base(&ty, ctx) {
+                PhpType::mixed()
+            } else {
+                ty
             }
         })
         .collect()
@@ -370,7 +414,7 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             ctx.resolved_class_cache,
         );
         let params =
-            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list);
+            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list, ctx);
 
         // Build a template substitution map from the owner class.
         // When the owner is a generic class (e.g. `Builder<Customer>`
@@ -421,10 +465,11 @@ pub(crate) fn infer_callable_params_from_static_receiver_fw(
             params
         };
 
-        params
+        let params = params
             .into_iter()
             .map(|p| p.replace_self_with_type(&receiver_type))
-            .collect()
+            .collect();
+        handed_to_callback(params, ctx)
     } else {
         vec![]
     }
@@ -457,7 +502,8 @@ pub(crate) fn find_callable_params_on_classes_fw(
         // `resolve_class_fully_maybe_cached` would load the base
         // class definition (keyed by FQN with empty generic args),
         // discarding those substitutions.
-        let result = find_callable_params_on_method_fw(cls, method_name, arg_idx, argument_list);
+        let result =
+            find_callable_params_on_method_fw(cls, method_name, arg_idx, argument_list, ctx);
         if !result.is_empty() {
             return result;
         }
@@ -473,7 +519,7 @@ pub(crate) fn find_callable_params_on_classes_fw(
             ctx.resolved_class_cache,
         );
         let result =
-            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list);
+            find_callable_params_on_method_fw(&resolved, method_name, arg_idx, argument_list, ctx);
         if !result.is_empty() {
             return result;
         }
@@ -483,18 +529,56 @@ pub(crate) fn find_callable_params_on_classes_fw(
 
 /// Look up method `method_name` on `class` and extract callable
 /// parameter types from the parameter bound to call-position `arg_idx`.
+///
+/// A parameter typed with a type alias (`@param SettingsFactory $fn`) is
+/// read through the alias, looked up on `class` and the classes it
+/// inherits members from.
 pub(crate) fn find_callable_params_on_method_fw(
     class: &ClassInfo,
     method_name: &str,
     arg_idx: usize,
     argument_list: &ArgumentList<'_>,
+    ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<PhpType> {
-    let method = class.get_method(method_name);
-    if let Some(m) = method {
-        extract_callable_params_at_fw(&m.parameters, argument_list, arg_idx)
-    } else {
-        vec![]
+    let Some(m) = class.get_method(method_name) else {
+        return vec![];
+    };
+    let Some(hint) =
+        declared_param_at(&m.parameters, argument_list, arg_idx).and_then(|p| p.type_hint.as_ref())
+    else {
+        return vec![];
+    };
+    if let Some(params) = callable_param_hints(hint) {
+        return params;
     }
+    crate::type_engine::type_resolution::expand_member_type_aliases(
+        hint,
+        class,
+        ctx.all_classes,
+        ctx.class_loader,
+    )
+    .and_then(|expanded| callable_param_hints(&expanded))
+    .unwrap_or_default()
+}
+
+/// The parameter call-position `arg_idx` binds to, accounting for named
+/// arguments, which can reorder or skip parameters.
+fn declared_param_at<'p>(
+    params: &'p [crate::types::ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+    arg_idx: usize,
+) -> Option<&'p crate::types::ParameterInfo> {
+    let declared_idx = crate::call_args::resolve_declared_arg_indices(params, argument_list)
+        .get(arg_idx)
+        .copied()
+        .flatten()?;
+    params.get(declared_idx)
+}
+
+/// The parameter types of a `callable(...)` / `Closure(...)` hint.
+fn callable_param_hints(hint: &PhpType) -> Option<Vec<PhpType>> {
+    hint.callable_param_types()
+        .map(|cps| cps.iter().map(|cp| cp.type_hint.clone()).collect())
 }
 
 /// Given a list of parameters and the call's argument list, resolve the
@@ -507,24 +591,10 @@ pub(crate) fn extract_callable_params_at_fw(
     argument_list: &ArgumentList<'_>,
     arg_idx: usize,
 ) -> Vec<PhpType> {
-    let Some(declared_idx) = crate::call_args::resolve_declared_arg_indices(params, argument_list)
-        .get(arg_idx)
-        .copied()
-        .flatten()
-    else {
-        return vec![];
-    };
-    let param = params.get(declared_idx);
-    if let Some(p) = param
-        && let Some(ref hint) = p.type_hint
-        && let Some(callable_params) = hint.callable_param_types()
-    {
-        return callable_params
-            .iter()
-            .map(|cp| cp.type_hint.clone())
-            .collect();
-    }
-    vec![]
+    declared_param_at(params, argument_list, arg_idx)
+        .and_then(|p| p.type_hint.as_ref())
+        .and_then(callable_param_hints)
+        .unwrap_or_default()
 }
 
 /// Extract the text of the first positional argument, stripping quotes.

@@ -88,6 +88,19 @@ pub(crate) fn resolve_class_names_to_union(
     union
 }
 
+/// The subject key a property read keys under: the receiver's own key
+/// followed by `->` and the property name.
+fn property_subject_key(
+    object: &Expression<'_>,
+    property: &ClassLikeMemberSelector<'_>,
+) -> Option<String> {
+    let object_key = expr_to_subject_key(object)?;
+    let ClassLikeMemberSelector::Identifier(ident) = property else {
+        return None;
+    };
+    Some(format!("{}->{}", object_key, bytes_to_str(ident.value)))
+}
+
 /// Convert an AST expression to a subject key string for narrowing comparison.
 ///
 /// Handles:
@@ -103,22 +116,15 @@ pub(crate) fn resolve_class_names_to_union(
 pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Option<String> {
     match expr {
         Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name).to_string()),
-        Expression::Access(Access::Property(pa)) => {
-            let obj = expr_to_subject_key(pa.object)?;
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
-            } else {
-                None
-            }
-        }
-        Expression::Access(Access::NullSafeProperty(pa)) => {
-            let obj = expr_to_subject_key(pa.object)?;
-            if let ClassLikeMemberSelector::Identifier(ident) = &pa.property {
-                Some(format!("{}->{}", obj, bytes_to_str(ident.value)))
-            } else {
-                None
-            }
-        }
+        // `->` and `?->` read the same storage, so both key under `->`.
+        Expression::Access(
+            Access::Property(PropertyAccess {
+                object, property, ..
+            })
+            | Access::NullSafeProperty(NullSafePropertyAccess {
+                object, property, ..
+            }),
+        ) => property_subject_key(object, property),
         // `self::$repo`, `static::$repo`, `Foo::$repo` — keyed under the
         // class as the source names it.  Two spellings of the same
         // storage (`self::$x` in `Foo` and `Foo::$x`) get different keys,
@@ -140,12 +146,20 @@ pub(in crate::type_engine) fn expr_to_subject_key(expr: &Expression<'_>) -> Opti
         // subject in its own right — a call whose argument is itself a
         // statement (an assignment, an increment) is not the same call
         // twice.
-        Expression::Call(Call::Method(mc)) => {
-            method_call_key(mc.object, &mc.method, &mc.argument_list)
-        }
-        Expression::Call(Call::NullSafeMethod(mc)) => {
-            method_call_key(mc.object, &mc.method, &mc.argument_list)
-        }
+        Expression::Call(
+            Call::Method(MethodCall {
+                object,
+                method,
+                argument_list,
+                ..
+            })
+            | Call::NullSafeMethod(NullSafeMethodCall {
+                object,
+                method,
+                argument_list,
+                ..
+            }),
+        ) => method_call_key(object, method, argument_list),
         Expression::Call(Call::StaticMethod(sc)) => {
             let class = static_class_key(sc.class)?;
             let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {

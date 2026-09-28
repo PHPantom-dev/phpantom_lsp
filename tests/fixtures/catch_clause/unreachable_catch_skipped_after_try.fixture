@@ -1,0 +1,24 @@
+// test: a catch for an exception nothing in the try body declares is not joined after the try
+// feature: hover
+// expect: $s
+// expect_absent: caught
+---
+<?php
+
+class MailError extends \Exception {}
+class QueueError extends \Exception {}
+
+class Mailer {
+    /** @throws MailError */
+    public function send(): void {}
+}
+
+function test(Mailer $mailer): void {
+    $s = 1;
+    try {
+        $mailer->send();
+    } catch (QueueError $e) {
+        $s = 'caught';
+    }
+    echo $<>s;
+}

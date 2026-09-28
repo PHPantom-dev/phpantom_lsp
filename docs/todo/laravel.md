@@ -354,31 +354,6 @@ methods, or document this as a known limitation.
 
 ---
 
-#### L12. `HasUuids` / `HasUlids` trait — `$id` typed as `string`
-
-**Impact: Low-Medium · Complexity: Medium**
-
-Models that use `Illuminate\Database\Eloquent\Concerns\HasUuids` or
-`HasUlids` have their primary key (`$id` by default) typed as
-`string` instead of `int`. Currently PHPantom does not inspect these
-traits, so `$model->id` resolves to `int` (from the default Model
-stub) instead of `string`.
-
-Larastan's `bug-2188.php` tests this: `assertType('string', $uuidModel->id)`.
-
-**Where to change:** In `LaravelModelProvider::provide`, after
-synthesizing other virtual properties, check whether the model's
-`used_traits` (recursively, including parent traits) contains
-`HasUuids` or `HasUlids`. If so, synthesize a virtual `id` property
-typed as `string` (or override the existing one). The trait also
-overrides `getKeyType()` to return `'string'` and
-`getIncrementing()` to return `false`, but for virtual property
-purposes just the `id` type is the main gap.
-
-Alternatively, if the stubs for these traits include `@property`
-tags or a typed `$id` override, the PHPDoc provider may handle it
-automatically once the traits are loaded.
-
 #### L47. Morph aliases in `*_type` column comparisons
 
 **Impact: Low-Medium · Complexity: Medium-High**
@@ -588,17 +563,34 @@ requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.
 
-#### L24. Translation depth: JSON lang files, locales, placeholders
+#### L55. JSON translation key navigation lands on line 0, not the key
 
 **Impact: Medium-High · Complexity: Medium-High**
+
+`lang/{locale}.json` (the "translation string as key" style) completes
+and resolves go-to-definition, but three related navigation gaps remain:
+
+- The definition always lands on the top of the file rather than the
+  key's actual line, and find-references does not cover JSON keys at
+  all.
+- `Translator::get()` consults the JSON catalogue *first*, even for a
+  dotted key, but go-to-definition and hover list the group file ahead
+  of it.
+- A package's `loadJsonTranslationsFrom()` directory is known to the
+  diagnostic but never navigated to.
+
+The ignored tests `laravel_translation_keys::a_json_phrase_lands_on_its_own_line`,
+`a_json_line_wins_over_a_group_file_line_for_the_same_key`, and
+`a_package_json_phrase_reaches_its_catalogue` cover all three; un-ignore
+them once this lands.
+
+#### L24. Translation depth: locales, placeholders, hover, quick-fix
+
+**Impact: Medium · Complexity: Medium**
 
 Statically recoverable translation features the Laravel LSP has and we
 still partially lack:
 
-- **JSON lang files.** `lang/{locale}.json` (the "translation string as
-  key" style) now completes and resolves go-to-definition, but the
-  definition always lands on the top of the file rather than the key's
-  actual line, and find-references does not cover JSON keys at all.
 - **Locale argument completion.** The `$locale` parameter of `__()`,
   `trans()`, `trans_choice()`, `Lang::get()/choice()/hasForLocale()`
   (positional or named) completes from the locale set derived from
@@ -615,18 +607,6 @@ still partially lack:
   `'item' => '...'` entry (existing keys as siblings for placement,
   empty string as the value). No fix when the group file itself doesn't
   exist yet; that case still just diagnoses.
-
-#### L25. Storage disk name strings
-
-**Impact: Low-Medium · Complexity: Low**
-
-`Storage::disk('...')` and the `#[Storage]` container attribute already
-complete against `filesystems.disks.*`, navigate to the disk's entry in
-`config/filesystems.php`, and flag an unknown disk. `Storage::fake()`,
-`persistentFake()`, and `forgetDisk()` still name a disk with none of
-that: their return type is patched to `FilesystemAdapter`, but the
-disk-name argument itself gets no completion, go-to-definition, or
-diagnostic.
 
 #### L27. Legacy `Controller@method` action strings
 
@@ -675,7 +655,7 @@ accessors, `@property` tags) — no database needed.
 
 **Impact: Low-Medium · Complexity: Medium**
 
-References and go-to-definition already work for the four indexed
+References and go-to-definition already work for indexed Laravel
 string kinds, but the rename, document-highlight, and semantic-token
 arms are explicit no-ops. Wiring them up exceeds the Laravel LSP (which
 has none of the three): renaming a translation key updates the lang
@@ -684,42 +664,49 @@ updates the `->name()` declaration and all usages; highlight and
 semantic tokens reuse the existing spans. Renaming a view name implies
 moving the Blade file — defer that one until the rest is in place.
 
-#### L32. Config-backed named-resource strings
+#### L56. Typed Laravel connection names
 
 **Impact: Medium · Complexity: Medium**
 
-L25 (storage disks) is one instance of a general pattern: a method
-argument names an entry under a known config subtree, and the config
-scanner already parses those files. Auth guards (`auth('...')`,
-`Auth::guard()`, `->middleware('auth:web')`), cache stores
-(`Cache::store()`), log channels (`Log::channel()`), and storage disks
-(L25) already complete against their config subtree — but all of them
-route through the generic `LaravelStringKind::Config` kind rather than
-a dedicated one, so they get completion plus the shared config
-diagnostics/go-to-definition and nothing family-specific (a "cache
-store" hovers with the same generic wording as any other config key).
-`Log::stack()` (array values) isn't recognized at all. Generalize into
-a declarative table of `(trigger context, config path)` pairs so each
-new family is one table row, and cover the rest of the family in one
-pass:
+The method name `->connection()` does not identify one config subtree: the
+receiver may select `database.connections.*`, `queue.connections.*`, or
+`broadcasting.connections.*`. Resolve it through the shared type engine, and
+treat `->onConnection()` as a queue connection. A model's `$connection` is a
+database connection, while the same property on a queueable job selects a
+queue connection. Each confirmed literal should receive the same completion,
+hover, navigation, diagnostics, and references as the direct facade spelling.
 
-- **Database connections** — `DB::connection()`, `->connection()` /
-  `$connection` on models and jobs → `database.connections.*`.
-- **Queue connections and queues** — `Queue::connection()`,
-  `->onConnection()` → `queue.connections.*`; `->onQueue()` names are
-  free-form (completion from literals seen elsewhere, no diagnostic).
-- **Mailers** — `Mail::mailer()` → `mail.mailers.*`.
-- **Broadcast connections** — `Broadcast::connection()` →
-  `broadcasting.connections.*`.
-- **Rate limiter names** — not config-backed: registered via
-  `RateLimiter::for('name', …)` in providers. Scan literal
-  registrations (same shape as the macro scanner) and validate
-  `throttle:name` middleware parameters and `new RateLimited('name')`
-  against the set.
+#### L59. Typed controller middleware names
 
-Each family gets the full string-kind treatment for free once wired
-as a `LaravelStringKey`: completion, go-to-definition (jump to the
-config entry), hover, diagnostics, and references.
+**Impact: Low-Medium · Complexity: Medium**
+
+`$this->middleware('auth:admin')` names middleware only when `$this` is a
+Laravel controller; an unrelated class may define the same method for a
+different purpose. Confirm the enclosing class through the shared type engine
+before completing or validating embedded authentication guards. Static and
+fluent `Route::middleware()` calls remain syntactically unambiguous.
+
+#### L57. Laravel queue names
+
+**Impact: Low-Medium · Complexity: Medium**
+
+`->onQueue()` names are free-form rather than config-backed. Complete from
+literals seen elsewhere in the project and connect those occurrences for
+navigation and references, but do not diagnose a name merely because the
+static index has not seen it.
+
+#### L58. Laravel rate limiter names
+
+**Impact: Medium · Complexity: Medium**
+
+Rate limiter names are registered through `RateLimiter::for('name', …)` in
+service providers. Scan literal registrations using the same provider-aware
+shape as the macro scanner, then complete, navigate, and validate
+`throttle:name` middleware parameters and `new RateLimited('name')` against
+the discovered set. Numeric inline limits such as `throttle:60,1` remain
+values rather than named registrations. Keep the world open when no
+registration source can be read so a partial index does not create false
+diagnostics.
 
 #### L39. Unused view and translation key detection
 
@@ -839,25 +826,6 @@ where possible and otherwise leaving placeholders.
 pattern used by other "declare the missing thing" fixes;
 `virtual_members/laravel/route_names.rs` for the existing scanner
 this reuses for the diagnostic and the insertion point.
-
-#### L52. "Create missing view" quick-fix for an unresolved view name
-
-**Impact: Low-Medium · Complexity: Medium**
-
-The `invalid_laravel_view` diagnostic (`diagnostics/mod.rs`, fed by the
-same view-key set completion and go-to-definition already resolve
-against) has no accompanying fix, the same gap L50 fixes for route
-names. The official `laravel/lsp` already ships this exact action:
-on an unresolved `view('name')`/`View::make('name')` string it offers
-"Create missing view", which creates
-`resources/views/{name with dots as slashes}.blade.php` (respecting a
-project's configured view paths, not just the default) via a
-`workspace/applyEdit` document-create change, then opens the new file.
-
-**Where to look:** `code_actions/` for the code-action registration
-pattern used by other "declare the missing thing" fixes; wherever the
-view-key set backing `invalid_laravel_view` and view-name completion
-is built, for the configured view roots to create the file under.
 
 #### L51. "Convert facade call to dependency injection" refactor
 

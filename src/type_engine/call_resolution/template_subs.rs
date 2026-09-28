@@ -4,18 +4,19 @@
 use std::collections::HashMap;
 
 use crate::Backend;
-use crate::atom::{Atom, AtomSet, atom};
+use crate::atom::{Atom, AtomMap, atom};
 use crate::class_lookup::is_self_or_static;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::variable::rhs_resolution::{
-    TemplateBindingMode, classify_template_binding, extract_array_position,
-};
 use crate::types::*;
 
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_cache};
+use crate::type_engine::variable::forward_walk::{
+    ForwardWalkCtx, ScopeState, suspend_diagnostic_scope, suspend_return_edges, walk_body_forward,
+};
+use mago_syntax::cst::{Expression, Statement};
 
 use super::return_types::{
-    resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
+    literal_arg_type, resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
     resolve_expression_to_type, resolve_literal_type, resolve_operator_type,
     resolve_static_access_type,
 };
@@ -42,526 +43,45 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> HashMap<String, PhpType> {
         // Find the method — first on the class directly, then via inheritance.
-        let method = class_info.get_method(method_name).cloned().or_else(|| {
-            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                class_info,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-            );
-            merged.get_method(method_name).cloned()
-        });
+        // An override without a docblock of its own inherits the ancestor's
+        // `@template` tags in the merge, so a direct method that declares
+        // none is looked up again there.
+        let own = class_info.get_method(method_name);
+        let may_inherit_templates = class_info.parent_class.is_some()
+            || !class_info.interfaces.is_empty()
+            || !class_info.used_traits.is_empty();
+        let method = match own {
+            Some(m) if !m.template_params.is_empty() || !may_inherit_templates => Some(m.clone()),
+            _ => {
+                let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+                    class_info,
+                    ctx.class_loader,
+                    ctx.resolved_class_cache,
+                );
+                merged
+                    .get_method(method_name)
+                    .cloned()
+                    .or_else(|| own.cloned())
+            }
+        };
 
         let method = match method {
             Some(m) if !m.template_params.is_empty() => m,
             _ => return HashMap::new(),
         };
 
-        let mut subs = HashMap::new();
-
-        // Bind the raw source-order argument texts to parameters by PHP's
-        // rules so a named argument (`id: Foo::class`) is routed to the
-        // parameter it targets rather than its ordinal slot, and its `name:`
-        // prefix is stripped off the value.
-        let bound = crate::call_args::bind_text_args_to_params(&method.parameters, arg_texts);
-
-        for (tpl_name, param_name) in &method.template_bindings {
-            let param_idx = match method
-                .parameters
-                .iter()
-                .position(|p| p.name == param_name.as_str())
-            {
-                Some(idx) => idx,
-                None => continue,
-            };
-
-            // Classify how the template param appears in the parameter's
-            // type hint (direct, array element, generic wrapper, or
-            // callable return type).
-            let param_hint = method
-                .parameters
-                .get(param_idx)
-                .and_then(|p| p.type_hint.as_ref());
-            let binding_mode = classify_template_binding(tpl_name, param_hint);
-
-            let tpl_bound = method.template_param_bounds.get(&atom(tpl_name));
-
-            let arg_text = match bound.get(param_idx).and_then(|o| o.as_deref()) {
-                Some(text) => text,
-                None => {
-                    let default_value = method
-                        .parameters
-                        .get(param_idx)
-                        .and_then(|p| p.default_value.as_deref());
-                    // A template bounded by a type operator resolves
-                    // against the one literal it binds to, and an omitted
-                    // argument has such a literal whenever the parameter
-                    // declares a scalar default — known at the declaration
-                    // site exactly as an explicit argument is known at the
-                    // call site.
-                    match default_value {
-                        Some(d)
-                            if !subs.contains_key(tpl_name.as_str())
-                                && type_operator_bound_literal(tpl_bound, d).is_some() =>
-                        {
-                            d
-                        }
-                        _ => match &binding_mode {
-                            TemplateBindingMode::ClassStringInner => match default_value {
-                                Some(d) if !subs.contains_key(tpl_name.as_str()) => d,
-                                None => continue,
-                                _ => continue,
-                            },
-                            TemplateBindingMode::Direct => match default_value {
-                                Some(d)
-                                    if !subs.contains_key(tpl_name.as_str())
-                                        && (d == "null" || d.ends_with("::class")) =>
-                                {
-                                    d
-                                }
-                                _ => continue,
-                            },
-                            _ => continue,
-                        },
-                    }
-                }
-            };
-
-            if let Some(literal) = type_operator_bound_literal(tpl_bound, arg_text) {
-                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                    &mut subs,
-                    tpl_name.to_string(),
-                    literal,
-                );
-                continue;
-            }
-
-            match binding_mode {
-                TemplateBindingMode::Direct => {
-                    if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
-                        // `resolve_arg_text_to_type` collapses any `[...]`
-                        // literal to the bare `array` keyword, which loses
-                        // the argument's own keys. When the template binds
-                        // directly (e.g. `@template T of array<array-key,
-                        // mixed>` with `@param T $items`), that erased
-                        // shape is the only source of type information —
-                        // there is no wrapping hint to unify against — so
-                        // build the literal's real key/value shape here
-                        // instead, letting `key-of<T>`/`value-of<T>` on the
-                        // bound template project the caller's actual keys.
-                        let literal_shape = resolved_type
-                            .is_bare_array()
-                            .then(|| array_literal_shape_type(arg_text, ctx))
-                            .flatten();
-
-                        // `Direct` is also where the classifier lands for a
-                        // hint that buries the template deeper than it
-                        // models (`array<string, array<string, T>>`).
-                        // Binding the whole argument there would re-wrap it,
-                        // so unify the two shapes when the hint is not just
-                        // the template name.
-                        let unify_hint = param_hint.filter(
-                            |h| !matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name.as_str()),
-                        );
-                        let bound_type = unify_hint
-                            .and_then(|h| {
-                                // A union hint that offers an array-like
-                                // alternative alongside the bare template
-                                // name (`iterable<array-key, T>|T`) still
-                                // classifies as `Direct`, because the bare
-                                // alternative matches any argument. An
-                                // array *literal* argument resolves to a
-                                // bare `array` with no element type
-                                // though, so unifying against it falls
-                                // through to `mixed` — unwrap the
-                                // literal's first element the same way
-                                // `GenericWrapper` binding does and retry
-                                // before that fallback.
-                                if resolved_type.is_bare_array()
-                                    && let Some(elem) =
-                                        first_array_literal_element_type(arg_text, ctx)
-                                    && let Some(unified) =
-                                        unify_template(h, &PhpType::array_of(elem), tpl_name)
-                                {
-                                    return Some(unified);
-                                }
-                                unify_template(h, &resolved_type, tpl_name)
-                            })
-                            .or(literal_shape)
-                            .unwrap_or(resolved_type);
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            bound_type,
-                        );
-                    }
-                }
-                TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
-                    // When the argument is a closure and the param hint
-                    // union contains a Callable variant (e.g.
-                    // `iterable<T>|(Closure(): Generator<T>)`), try yield
-                    // inference first — before array-like or hierarchy
-                    // extraction, which would incorrectly bind `Closure`.
-                    if let Some(concrete) = Self::try_closure_return_type_for_template(
-                        arg_text,
-                        tpl_name,
-                        tpl_position,
-                        param_hint,
-                        ctx,
-                    ) {
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            concrete,
-                        );
-                        continue;
-                    }
-
-                    // For array-like wrappers (`array<T>`, `list<T>`, etc.)
-                    // resolve the argument to its array type and extract the
-                    // positional generic argument.
-                    //
-                    // `classify_template_binding` assigns positions by index
-                    // in the generic args list: `array<T>` → position 0,
-                    // `array<TKey, TValue>` → positions 0 and 1.  For
-                    // single-param `array<T>`, T is semantically the
-                    // *value* type even though it sits at index 0.  We
-                    // detect this by checking the param hint's generic
-                    // args count: if there's only one arg, position 0
-                    // maps to the value type; otherwise position 0 is the
-                    // key type and position 1 is the value type.
-                    if crate::type_engine::variable::rhs_resolution::is_array_like_wrapper(
-                        wrapper_name,
-                    ) {
-                        // Array literal: `[1, 2, 3]` — resolve individual
-                        // elements to infer the element type.
-                        // `resolve_arg_text_to_type("[1, 2, 3]")` returns
-                        // bare `array` (no generics), so we must unwrap the
-                        // literal and resolve the first element directly.
-                        if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                            if let Some(resolved_elem) =
-                                first_array_literal_element_type(arg_text, ctx)
-                            {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    resolved_elem,
-                                );
-                            }
-                            continue;
-                        }
-
-                        // Variable or expression argument: resolve to a
-                        // typed value and extract the positional generic
-                        // argument (key or value type).
-                        if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
-                            // Walk the parameter hint and the argument type
-                            // together first.  Positional extraction only
-                            // unwraps one level, so it binds the whole inner
-                            // array for a hint like
-                            // `array<string, array<string, T>>`.
-                            if let Some(unified) = param_hint
-                                .filter(|h| !names_template_directly(h, tpl_name))
-                                .and_then(|h| unify_template(h, &resolved_type, tpl_name))
-                            {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    unified,
-                                );
-                                continue;
-                            }
-                            let generic_arg_count = param_hint
-                                .and_then(|h| match h.kind() {
-                                    crate::php_type::TypeKind::Generic(g) => Some(g.args.len()),
-                                    _ => None,
-                                })
-                                .unwrap_or(1);
-
-                            let concrete = if generic_arg_count <= 1 {
-                                // Single-param: `array<T>`, `list<T>` — T is the value/element type.
-                                resolved_type.extract_value_type(false).cloned()
-                            } else {
-                                match tpl_position {
-                                    0 => resolved_type.extract_key_type(false).cloned(),
-                                    1 => resolved_type.extract_value_type(false).cloned(),
-                                    _ => None,
-                                }
-                            };
-                            if let Some(concrete) = concrete {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    concrete,
-                                );
-                            } else {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    resolved_type,
-                                );
-                            }
-                        }
-                        continue;
-                    }
-
-                    if let Some(resolved_type) = Self::resolve_arg_text_to_type(arg_text, ctx) {
-                        // Special handling for class-string<T> to avoid double-wrapping
-                        if wrapper_name == "class-string"
-                            && tpl_position == 0
-                            && let Some(inner) = resolved_type.unwrap_class_string_inner()
-                        {
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                inner.clone(),
-                            );
-                            continue;
-                        }
-
-                        // For non-array-like generic wrappers (e.g.
-                        // `Iterator<T>`, `Traversable<T>`), try to
-                        // extract the positional generic arg through
-                        // the class hierarchy.  When the argument type
-                        // is a class that implements/extends the wrapper
-                        // interface with concrete generic args, use
-                        // those args instead of the raw class name.
-                        //
-                        // 1. If the resolved type is itself Generic with
-                        //    a matching wrapper name, extract directly.
-                        // 2. Otherwise resolve the type to a class and
-                        //    check implements_generics / extends_generics
-                        //    for the wrapper interface.
-                        let extracted = (|| -> Option<PhpType> {
-                            // Direct match: resolved type is already
-                            // `Wrapper<..., ConcreteArg, ...>`.
-                            if let TypeKind::Generic(g) = &resolved_type.kind() {
-                                let args = &g.args;
-                                let short = crate::util::short_name(&g.name);
-                                let wrapper_short = crate::util::short_name(wrapper_name);
-                                if short == wrapper_short {
-                                    // When the param hint has fewer
-                                    // generic args than the resolved
-                                    // type (e.g. `Iterator<T>` vs
-                                    // `Iterator<int, ASTClass>`), the
-                                    // single param-hint arg represents
-                                    // the value/last type.
-                                    let param_generic_count = param_hint
-                                        .and_then(|h| match h.kind() {
-                                            TypeKind::Generic(g) => Some(g.args.len()),
-                                            _ => None,
-                                        })
-                                        .unwrap_or(1);
-                                    if param_generic_count == 1 && args.len() > 1 {
-                                        return args.last().cloned();
-                                    }
-                                    return args.get(tpl_position).cloned();
-                                }
-                            }
-
-                            // Hierarchy lookup: resolve the type to a
-                            // class and search its implements_generics
-                            // and extends_generics for the wrapper.
-                            let base_name = resolved_type.base_name()?;
-                            let cls = (ctx.class_loader)(base_name)?;
-                            let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
-                                &cls,
-                                ctx.class_loader,
-                                ctx.resolved_class_cache,
-                            );
-                            let wrapper_short = crate::util::short_name(wrapper_name);
-
-                            // Build a substitution map from the class's
-                            // template params to the concrete generic
-                            // args from the resolved type.  E.g. when
-                            // the resolved type is
-                            // `ASTArtifactList<ASTClass>` and the class
-                            // declares `@template T of ASTArtifact`,
-                            // this maps `T → ASTClass`.  Without this,
-                            // the `@implements Iterator<int|string, T>`
-                            // would return the raw `T` instead of the
-                            // concrete `ASTClass`.
-                            let class_tpl_subs: HashMap<String, PhpType> =
-                                if let TypeKind::Generic(g) = &resolved_type.kind() {
-                                    merged
-                                        .template_params
-                                        .iter()
-                                        .zip(g.args.iter())
-                                        .map(|(name, ty)| (name.to_string(), ty.clone()))
-                                        .collect()
-                                } else {
-                                    HashMap::new()
-                                };
-
-                            for (iface_name, args) in merged
-                                .implements_generics
-                                .iter()
-                                .chain(merged.extends_generics.iter())
-                            {
-                                let iface_short = crate::util::short_name(iface_name);
-                                if iface_short != wrapper_short {
-                                    continue;
-                                }
-                                if args.is_empty() {
-                                    continue;
-                                }
-
-                                // Apply class-level template subs so
-                                // that e.g. `Iterator<int|string, T>`
-                                // becomes `Iterator<int|string, ASTClass>`.
-                                let args: Vec<PhpType> = if !class_tpl_subs.is_empty() {
-                                    args.iter().map(|a| a.substitute(&class_tpl_subs)).collect()
-                                } else {
-                                    args.clone()
-                                };
-
-                                let param_generic_count = param_hint
-                                    .and_then(|h| match h.kind() {
-                                        TypeKind::Generic(g) => Some(g.args.len()),
-                                        _ => None,
-                                    })
-                                    .unwrap_or(1);
-                                // When the @param hint has a single
-                                // generic arg but the @implements
-                                // clause has multiple, the single arg
-                                // represents the value (last) type.
-                                if param_generic_count == 1 && args.len() > 1 {
-                                    return args.last().cloned();
-                                }
-                                return args.get(tpl_position).cloned();
-                            }
-
-                            None
-                        })();
-
-                        if let Some(concrete) = extracted {
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                concrete,
-                            );
-                        } else {
-                            // The closure-return-type fallback for union
-                            // param hints like `iterable<T>|(Closure(): T)`
-                            // already ran at the top of this branch, so a
-                            // failed extraction here binds the resolved arg
-                            // type directly.
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                resolved_type,
-                            );
-                        }
-                    }
-                }
-                TemplateBindingMode::CallableReturnType => {
-                    if let Some(bound) =
-                        bind_callable_return_template(arg_text, param_hint, tpl_name, ctx)
-                    {
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            bound,
-                        );
-                    }
-                }
-                TemplateBindingMode::CallableReturnArrayPosition(position) => {
-                    // `@param callable(...): array<TKey, TValue> $cb`
-                    // (`mapWithKeys()`, `mapToGroups()`) — bind from the
-                    // key (0) or value (1) of the callback's array-shaped
-                    // return, not the whole return type. A bare `: array`
-                    // annotation carries no key/value information, so
-                    // fall back to the literal array the body returns
-                    // (e.g. `fn ($o): array => ['x' => $o]`).
-                    let extracted = Self::infer_closure_return_type(arg_text, ctx)
-                        .and_then(|ret_type| extract_array_position(&ret_type, position))
-                        .or_else(|| {
-                            let body =
-                                crate::completion::source::helpers::extract_closure_body_expr_text(
-                                    arg_text,
-                                )?;
-                            let resolved =
-                                Self::resolve_closure_body_type(arg_text, body, None, ctx)?;
-                            extract_array_position(&resolved, position)
-                        });
-                    if let Some(extracted) = extracted {
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            extracted,
-                        );
-                    }
-                }
-                TemplateBindingMode::CallableParamType(position) => {
-                    // `@param Closure(T): void $cb` — extract the closure's
-                    // parameter type annotation at the given position.
-                    if let Some(param_type) = bind_callable_param_template(arg_text, position, ctx)
-                    {
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            param_type,
-                        );
-                    }
-                }
-                TemplateBindingMode::ArrayElement => {
-                    // `@param T[] $items` or `@param array<T> $items` —
-                    // resolve individual array elements from array literals.
-                    // For `[1, 2, 3]`, extract the first element `1` and
-                    // resolve it to `int` so that `T = int`.
-                    if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                        let inner = arg_text[1..arg_text.len() - 1].trim();
-                        if !inner.is_empty() {
-                            let first_elem =
-                                crate::type_engine::types::conditional::split_text_args(inner);
-                            if let Some(elem) = first_elem.first()
-                                && let Some(resolved_type) =
-                                    Self::resolve_arg_text_to_type(elem.trim(), ctx)
-                            {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    resolved_type,
-                                );
-                            }
-                        }
-                    } else if let Some(resolved_type) =
-                        Self::resolve_arg_text_to_type(arg_text, ctx)
-                    {
-                        // Extract the element type from array-like types
-                        // so we bind T to the element, not the whole array.
-                        if let Some(elem_type) =
-                            crate::type_engine::variable::rhs_resolution::array_element_binding(
-                                resolved_type,
-                            )
-                        {
-                            crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                &mut subs,
-                                tpl_name.to_string(),
-                                elem_type,
-                            );
-                        }
-                    }
-                }
-                TemplateBindingMode::ClassStringInner => {
-                    if let Some(binding) =
-                        crate::type_engine::variable::rhs_resolution::class_string_inner_binding(
-                            arg_text, ctx,
-                        )
-                    {
-                        crate::type_engine::variable::rhs_resolution::insert_or_union(
-                            &mut subs,
-                            tpl_name.to_string(),
-                            binding,
-                        );
-                    }
-                }
-            }
-        }
+        let callee = super::TemplateCallee {
+            parameters: &method.parameters,
+            template_bindings: &method.template_bindings,
+            template_param_bounds: &method.template_param_bounds,
+        };
+        let mut subs = super::bind_template_args(&callee, arg_texts, None, ctx);
 
         finish_template_subs(
             &mut subs,
             &method.template_params,
             &method.template_param_bounds,
+            &method.template_param_defaults,
             method.return_type.as_ref(),
             ctx,
         );
@@ -753,10 +273,18 @@ impl Backend {
             && !is_self_or_static(trimmed)
             && !trimmed.eq_ignore_ascii_case("parent")
             && let Some(backend) = ctx.backend
-            && let Some(Some(value)) = backend.lookup_global_constant(trimmed)
-            && let Some(ty) =
-                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(&value)
+            && let Some(ty) = match backend.lookup_global_constant(trimmed) {
+                None => None,
+                Some(Some(value)) => {
+                    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+                        &value,
+                    )
                     .or_else(|| super::folded_global_constant_type(trimmed, &value, ctx))
+                }
+                Some(None) => {
+                    crate::hover::constants::unversioned_php_version_constant_type(trimmed)
+                }
+            }
         {
             return Some(ty);
         }
@@ -770,8 +298,9 @@ impl Backend {
 
         // ClassName::Member — enum cases and class constants.
         // Enum cases resolve to the enum type; class constants
-        // resolve to the constant's declared type hint.
-        if !has_arrow_chain && let Some(ty) = resolve_static_access_type(trimmed, ctx) {
+        // resolve to the constant's declared type hint.  Of the `->`
+        // chains, it answers only a case's `->name` / `->value`.
+        if let Some(ty) = resolve_static_access_type(trimmed, ctx) {
             return Some(ty);
         }
 
@@ -848,13 +377,9 @@ impl Backend {
 
     /// Infer a closure/arrow-function argument's effective return type.
     ///
-    /// Three sources are tried in turn: an explicit `: ReturnType`
-    /// annotation, generator `yield` inference, and finally the body
-    /// expression resolved through the shared type resolver (an arrow
-    /// `fn() => EXPR`, or the first `return EXPR;` of a full closure body).
-    /// The body-resolution fallback lets template params bind from
-    /// unannotated closures like `Cache::remember($k, $ttl, fn() => new
-    /// Order())`.
+    /// See [`infer_closure_return_type_seeded`](Self::infer_closure_return_type_seeded);
+    /// this is the variant for a call site that knows nothing about what
+    /// the closure's parameters receive.
     ///
     /// Returns `None` when the text is not a closure literal or nothing can
     /// be inferred.
@@ -862,28 +387,56 @@ impl Backend {
         arg_text: &str,
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
-        crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
-            // A `: ReturnType` annotation is raw source text, so its class
-            // names are still spelled as the file writes them (`Support\Pen`
-            // behind a `use App\Support;`).  A template bound from it is
-            // compared against types that arrived fully qualified, so the
-            // spelling has to be canonicalised before it is bound.
-            .map(|ty| crate::util::resolve_php_type_names(&ty, ctx.class_loader))
-            .or_else(|| {
-                crate::completion::source::helpers::infer_generator_type_from_closure_yields(
-                    arg_text,
-                )
-            })
-            .or_else(|| {
-                let body =
-                    crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-                // A body that resolves to `mixed` says nothing about the
-                // template, and binding it hides the template's own bound
-                // (`@template TNewKey of array-key`), which is strictly more
-                // informative.  Leave the template unbound instead.
-                Self::resolve_closure_body_type(arg_text, body, None, ctx)
-                    .filter(|ty| !ty.is_mixed())
-            })
+        Self::infer_closure_return_type_seeded(arg_text, &[], ctx)
+    }
+
+    /// Infer a closure/arrow-function argument's effective return type,
+    /// with its parameters seeded from `param_seeds` (one per position;
+    /// see [`resolve_closure_body_type`](Self::resolve_closure_body_type)).
+    ///
+    /// The body expression (an arrow `fn() => EXPR`, or the first `return
+    /// EXPR;` of a full closure body) is resolved through the shared type
+    /// resolver.  A closure really returns what its body produces narrowed
+    /// by what it declares, so an explicit `: ReturnType` annotation only
+    /// wins when the body resolves to something that is not a subtype of
+    /// it (this includes scalar refinements like `class-string` under a
+    /// declared `string`).  An unannotated closure tries generator `yield`
+    /// inference before its body.  The body fallback lets template params
+    /// bind from unannotated closures like `Cache::remember($k, $ttl,
+    /// fn() => new Order())`.
+    pub(crate) fn infer_closure_return_type_seeded(
+        arg_text: &str,
+        param_seeds: &[Option<PhpType>],
+        ctx: &ResolutionCtx<'_>,
+    ) -> Option<PhpType> {
+        let body_type = || {
+            let body =
+                crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
+            // A body that resolves to `mixed` says nothing about the
+            // template, and binding it hides the template's own bound
+            // (`@template TNewKey of array-key`), which is strictly more
+            // informative.  Leave the template unbound instead.
+            Self::resolve_closure_body_type(arg_text, body, param_seeds, ctx)
+                .filter(|ty| !ty.is_mixed())
+        };
+        let Some(declared) =
+            crate::completion::source::helpers::extract_closure_return_type_from_text(arg_text)
+        else {
+            return crate::completion::source::helpers::infer_generator_type_from_closure_yields(
+                arg_text,
+            )
+            .or_else(body_type);
+        };
+        // A `: ReturnType` annotation is raw source text, so its class
+        // names are still spelled as the file writes them (`Support\Pen`
+        // behind a `use App\Support;`).  A template bound from it is
+        // compared against types that arrived fully qualified, so the
+        // spelling has to be canonicalised before it is bound.
+        let declared = crate::util::resolve_php_type_names(&declared, ctx.class_loader);
+        let narrowed = body_type().filter(|body| {
+            crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+        });
+        Some(narrowed.unwrap_or(declared))
     }
 
     /// Infer a closure/arrow-function argument's return type from its
@@ -901,30 +454,31 @@ impl Backend {
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let body = crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)?;
-        Self::resolve_closure_body_type(arg_text, body, Some(param_type), ctx)
+        Self::resolve_closure_body_type(arg_text, body, &[Some(param_type.clone())], ctx)
     }
 
-    /// Resolve an unannotated closure's body expression to a type,
-    /// seeding the closure's own typed parameters into variable
-    /// resolution.
+    /// Resolve a closure's body expression to a type, seeding the
+    /// closure's own parameters into variable resolution.
     ///
     /// A body expression rooted at a closure parameter (e.g.
     /// `fn(Decimal $carry, $op) => $carry->add(...)`) cannot resolve
     /// through outer-scope assignment scanning because the parameter is
     /// declared in the closure's own signature.  This injects a
-    /// `scope_var_resolver` that answers parameter lookups from the
-    /// declared type hints and delegates everything else to the
-    /// resolution the body would otherwise get (the outer scope
-    /// resolver when present, assignment scanning otherwise).
+    /// `scope_var_resolver` that answers parameter lookups and delegates
+    /// everything else to the resolution the body would otherwise get
+    /// (the outer scope resolver when present, assignment scanning
+    /// otherwise).
     ///
-    /// `first_param_seed` supplies the type of the first parameter when
-    /// the closure declares none and the call site knows what it
-    /// receives (see
-    /// [`infer_closure_return_type_from_body`](Self::infer_closure_return_type_from_body)).
+    /// `param_seeds` holds, per position, what the call site hands that
+    /// parameter when it knows (`array_map($cb, $users)` hands `$cb` a
+    /// `User`).  An untyped parameter takes its seed; a typed one takes it
+    /// only when the seed is a subtype of the declared hint, as a
+    /// `Timeline<Percentage>` is of `Timeline`, and otherwise keeps the
+    /// hint.
     fn resolve_closure_body_type(
         closure_text: &str,
         body: &str,
-        first_param_seed: Option<&PhpType>,
+        param_seeds: &[Option<PhpType>],
         ctx: &ResolutionCtx<'_>,
     ) -> Option<PhpType> {
         let typed_params: Vec<(String, PhpType)> =
@@ -932,10 +486,28 @@ impl Backend {
                 .unwrap_or_default()
                 .into_iter()
                 .enumerate()
-                .filter_map(|(index, (name, ty))| match ty {
-                    Some(t) => Some((name, t)),
-                    None if index == 0 => first_param_seed.map(|t| (name, t.clone())),
-                    None => None,
+                .filter_map(|(index, (name, declared))| {
+                    let seed = param_seeds.get(index).and_then(Option::as_ref);
+                    // The parameter hint is raw source text, so it carries
+                    // the file's own spelling of the class name; canonicalise
+                    // it so the seeded type matches one resolved any other
+                    // way.
+                    let declared =
+                        declared.map(|t| crate::util::resolve_php_type_names(&t, ctx.class_loader));
+                    let ty = match (declared, seed) {
+                        (Some(declared), Some(seed))
+                            if crate::class_lookup::is_subtype_of_typed(
+                                seed,
+                                &declared,
+                                ctx.class_loader,
+                            ) =>
+                        {
+                            seed.clone()
+                        }
+                        (Some(declared), _) => declared,
+                        (None, seed) => seed?.clone(),
+                    };
+                    Some((name, ty))
                 })
                 .collect();
         if typed_params.is_empty() {
@@ -961,10 +533,6 @@ impl Backend {
         let param_types: HashMap<String, Vec<ResolvedType>> = typed_params
             .into_iter()
             .map(|(name, ty)| {
-                // The parameter hint is raw source text, so it carries the
-                // file's own spelling of the class name; canonicalise it so
-                // the seeded type matches one resolved any other way.
-                let ty = crate::util::resolve_php_type_names(&ty, ctx.class_loader);
                 // Each alternative of a union is seeded on its own so it
                 // keeps its own generic arguments. Two instantiations of the
                 // same class (`Builder<A>|Builder<B>`) resolve to one class,
@@ -981,8 +549,23 @@ impl Backend {
             })
             .collect();
 
+        let walked_locals = walk_closure_body_locals(closure_text, &param_types, ctx);
+
         let outer_resolver = ctx.scope_var_resolver;
         let param_aware_resolver = move |name: &str| -> Vec<ResolvedType> {
+            // A full closure body may reassign a parameter before
+            // returning it (`$result['a'] = (string) $result['a']; return
+            // $result;`), so the walked locals — the forward walker's own
+            // scope after running the body — answer first when they have
+            // something to say.  They fall back to the raw seed for a
+            // parameter the body never touches, and for an arrow function
+            // (nothing to walk).
+            if let Some(locals) = &walked_locals
+                && let Some(types) = locals.get(&atom(name))
+                && !types.is_empty()
+            {
+                return types.clone();
+            }
             if let Some(types) = param_types.get(name) {
                 return types.clone();
             }
@@ -1033,6 +616,92 @@ impl Backend {
         };
         Self::resolve_arg_text_to_type(body, &param_ctx)
     }
+}
+
+/// Walk a full closure literal's own body with the shared forward walker,
+/// seeded with the parameter types the call site hands it, and return the
+/// scope those statements leave behind.
+///
+/// [`Backend::resolve_closure_body_type`] otherwise resolves only the
+/// return expression's text against the raw parameter seed, so a body that
+/// reassigns a parameter before returning it (`$result['a'] = (string)
+/// $result['a']; return $result;`) still reports the parameter's original
+/// shape. Re-parsing the closure in isolation and running its body through
+/// [`walk_body_forward`] answers with what the body actually leaves in
+/// `$result`, the same as any other consumer of the forward walker.
+///
+/// Returns `None` when `closure_text` is not a full (`function`) closure
+/// literal — an arrow function's body is a single expression with nothing
+/// to walk, so the caller's raw-seed resolver already answers correctly.
+fn walk_closure_body_locals(
+    closure_text: &str,
+    param_types: &HashMap<String, Vec<ResolvedType>>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<AtomMap<Vec<ResolvedType>>> {
+    let trimmed = closure_text.trim().trim_end_matches(';');
+    let wrapped = format!("<?php $__closure = {trimmed};");
+
+    // The closure body is parsed and walked in complete isolation from
+    // the file the call site sits in: its own offsets are unrelated to
+    // (and may numerically collide with) the real file's, so neither the
+    // diagnostic scope cache nor the chain-resolution cache may read
+    // from, or record into, the active ones while this walk runs. See
+    // `out_param::read_out_type`, which walks another file's body for the
+    // same reason.
+    let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
+    let _barrier = suspend_return_edges();
+
+    crate::parser::with_parsed_program(
+        &wrapped,
+        "closure_body_return_narrowing",
+        |program, content| {
+            let closure = program.statements.iter().find_map(|stmt| {
+                let Statement::Expression(expr_stmt) = stmt else {
+                    return None;
+                };
+                let Expression::Assignment(assignment) = expr_stmt.expression else {
+                    return None;
+                };
+                let Expression::Closure(closure) = assignment.rhs else {
+                    return None;
+                };
+                Some(closure)
+            })?;
+
+            let dummy_class;
+            let current_class = match ctx.current_class {
+                Some(cc) => cc,
+                None => {
+                    dummy_class = crate::class_lookup::class_context_placeholder(content, 0);
+                    &dummy_class
+                }
+            };
+
+            let fw_ctx = ForwardWalkCtx {
+                current_class,
+                all_classes: ctx.all_classes,
+                content,
+                cursor_offset: u32::MAX,
+                class_loader: ctx.class_loader,
+                backend: ctx.backend,
+                loaders: Loaders::with_function(ctx.function_loader),
+                resolved_class_cache: ctx.resolved_class_cache,
+                enclosing_return_type: None,
+                top_level_scope: None,
+                in_loop: false,
+                template_markers: None,
+            };
+
+            let mut scope = ScopeState::new();
+            for (name, types) in param_types {
+                scope.seed(name, types.clone());
+            }
+
+            walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+
+            Some(scope.locals)
+        },
+    )
 }
 
 /// Build the full template substitution map for a method call: class-level
@@ -1127,11 +796,59 @@ pub(crate) fn build_call_template_subs(
 ///
 /// A template two arguments both bind is not covered: those disagree with
 /// each other rather than with themselves, which is a real check.
+///
+/// The substitution is circular, but a template's `of` bound is not: it
+/// is what the argument had to satisfy to bind the template at all. Each
+/// parameter maps to its declared type with the templates only it binds
+/// replaced by their bounds, or to `None` when none of those templates
+/// declares one, since then there is nothing to check. Every other
+/// template the declaration binds becomes `mixed`: another argument
+/// decides it, and that argument's own check is where the two can
+/// disagree.
 pub(crate) fn self_bound_template_params(
     bindings: &[(Atom, Atom)],
     parameters: &[ParameterInfo],
     arg_texts: &[&str],
-) -> AtomSet {
+    bound_of: &dyn Fn(&Atom) -> Option<PhpType>,
+) -> AtomMap<Option<PhpType>> {
+    let self_bound = exclusively_bound_templates(bindings, parameters, arg_texts);
+    let mut result = AtomMap::default();
+    for (tpl_name, param_name) in &self_bound {
+        let bounds = result.entry(*param_name).or_insert_with(HashMap::new);
+        if let Some(bound) = bound_of(tpl_name) {
+            bounds.insert(tpl_name.to_string(), bound);
+        }
+    }
+    result
+        .into_iter()
+        .map(|(param_name, bounds): (Atom, HashMap<String, PhpType>)| {
+            if bounds.is_empty() {
+                return (param_name, None);
+            }
+            let declared = parameters
+                .iter()
+                .find(|p| p.name == param_name.as_str())
+                .and_then(|p| p.type_hint.as_ref());
+            let checked = declared.map(|hint| {
+                let mut bound_subs: HashMap<String, PhpType> = bindings
+                    .iter()
+                    .map(|(tpl_name, _)| (tpl_name.to_string(), PhpType::mixed()))
+                    .collect();
+                bound_subs.extend(bounds);
+                hint.substitute(&bound_subs)
+            });
+            (param_name, checked)
+        })
+        .collect()
+}
+
+/// The `(template, parameter)` bindings the call fills, keeping only the
+/// templates exactly one filled parameter binds.
+fn exclusively_bound_templates(
+    bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    arg_texts: &[&str],
+) -> Vec<(Atom, Atom)> {
     let bound = crate::call_args::bind_text_args_to_params(parameters, arg_texts);
     let was_passed = |param_name: &Atom| {
         parameters
@@ -1144,36 +861,64 @@ pub(crate) fn self_bound_template_params(
         .filter(|(_, param_name)| was_passed(param_name))
         .collect();
 
-    let mut result = AtomSet::default();
-    for (tpl_name, param_name) in &filled {
-        if filled.iter().filter(|(t, _)| t == tpl_name).count() == 1 {
-            result.insert(*param_name);
-        }
-    }
-    result
+    filled
+        .iter()
+        .filter(|(tpl_name, _)| filled.iter().filter(|(t, _)| t == tpl_name).count() == 1)
+        .map(|binding| **binding)
+        .collect()
 }
 
-/// Resolve an array literal argument's first element to a type.
+/// Resolve the elements of an array literal argument to the type a template
+/// bound through them takes.
 ///
 /// `resolve_arg_text_to_type("[1, 2, 3]")` collapses the whole literal to
 /// a bare `array` with no element type, so callers that need the element
 /// type itself (binding a template through an array-like wrapper) must
-/// unwrap the literal and resolve the first element directly instead.
+/// unwrap the literal and resolve its elements directly instead.  A scalar
+/// literal element stays a literal, as a scalar argument bound directly
+/// does (`[1, 2]` binds `1|2`), and an empty literal has no element at all,
+/// so it binds `never`.
 ///
-/// Returns `None` when `arg_text` is not a `[...]` literal, or the literal
-/// is empty.
-fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+/// Returns `None` when `arg_text` is not a `[...]` literal, or an element
+/// (a spread, or an expression we cannot resolve) says nothing definite.
+pub(crate) fn array_literal_element_type(
+    arg_text: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))?
         .trim();
     if inner.is_empty() {
-        return None;
+        return Some(PhpType::never());
     }
-    let elems = crate::type_engine::types::conditional::split_text_args(inner);
-    let elem = elems.first()?;
-    Backend::resolve_arg_text_to_type(elem.trim(), ctx)
+    let mut members: Vec<PhpType> = Vec::new();
+    for elem in crate::type_engine::types::conditional::split_text_args(inner) {
+        let elem = elem.trim();
+        if elem.is_empty() {
+            continue;
+        }
+        if elem.starts_with("...") {
+            return None;
+        }
+        let value_text = match elem.find("=>") {
+            Some(arrow_pos) => elem[arrow_pos + 2..].trim(),
+            None => elem,
+        };
+        let ty = literal_arg_type(value_text)
+            .or_else(|| Backend::resolve_arg_text_to_type(value_text, ctx))?;
+        for member in ty.union_members() {
+            if !members.contains(member) {
+                members.push(member.clone());
+            }
+        }
+    }
+    match members.len() {
+        0 => None,
+        1 => members.pop(),
+        _ => Some(PhpType::union(members)),
+    }
 }
 
 /// Build an `array{key: type, ...}` shape from an array literal argument's
@@ -1192,6 +937,21 @@ fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> 
 /// `[...]`/`array(...)` literal, or none of its entries have a literal
 /// string/int key.
 pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    array_literal_shape_type_with(arg_text, &|text| {
+        Backend::resolve_arg_text_to_type(text, ctx)
+    })
+}
+
+/// [`array_literal_shape_type`] with the values that are not scalar
+/// literals resolved by `resolve_value`, for a caller that has an argument
+/// resolver rather than a resolution context.
+///
+/// A value that is itself an array literal gets a shape of its own
+/// (`[['a', 'b']]` is `array{array{'a', 'b'}}`).
+pub(crate) fn array_literal_shape_type_with(
+    arg_text: &str,
+    resolve_value: &dyn Fn(&str) -> Option<PhpType>,
+) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed
         .strip_prefix('[')
@@ -1206,16 +966,46 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
         return None;
     }
 
-    let mut entries = Vec::new();
+    let mut entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
+    // The key PHP gives the next element written without one: one past the
+    // largest integer key so far.  Unknown once a key we cannot read (or a
+    // spread) could have been an integer.
+    let mut next_index: Option<i64> = Some(0);
     for elem in crate::type_engine::types::conditional::split_text_args(inner) {
         let elem = elem.trim();
-        let Some(arrow_pos) = elem.find("=>") else {
+        if elem.is_empty() {
+            continue;
+        }
+        let (key, value_text, unkeyed) = match elem.find("=>") {
+            Some(arrow_pos) => {
+                let key = literal_array_key_text(elem[..arrow_pos].trim());
+                match key.as_deref().map(str::parse::<i64>) {
+                    Some(Ok(int_key)) => {
+                        next_index = next_index.map(|next| next.max(int_key.saturating_add(1)));
+                    }
+                    Some(Err(_)) => {}
+                    None => next_index = None,
+                }
+                (key, elem[arrow_pos + 2..].trim(), false)
+            }
+            None if elem.starts_with("...") => {
+                next_index = None;
+                (None, elem, false)
+            }
+            None => {
+                let key = next_index.map(|index| index.to_string());
+                next_index = next_index.map(|index| index.saturating_add(1));
+                (key, elem, true)
+            }
+        };
+        let Some(key) = key else {
             continue;
         };
-        let Some(key) = literal_array_key_text(elem[..arrow_pos].trim()) else {
-            continue;
-        };
-        let value_text = elem[arrow_pos + 2..].trim();
+        // Positional while it lands on the index a reader counting the
+        // positional entries before it would expect, the way the AST's
+        // array literal inference spells it.
+        let positional_count = entries.iter().filter(|entry| entry.key.is_none()).count();
+        let key = (!unkeyed || positional_count.to_string() != key).then_some(key);
         // `resolve_arg_text_to_type` widens a scalar literal to its base
         // type (`1` → `int`), which would leave `value-of<T>` over the
         // bound shape with the scalar rather than the literal the caller
@@ -1226,10 +1016,11 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
                 value_text,
             )
             .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
-            .or_else(|| Backend::resolve_arg_text_to_type(value_text, ctx))
+            .or_else(|| array_literal_shape_type_with(value_text, resolve_value))
+            .or_else(|| resolve_value(value_text))
             .unwrap_or_else(PhpType::mixed);
         entries.push(crate::php_type::ShapeEntry {
-            key: Some(key),
+            key,
             value_type,
             optional: false,
         });
@@ -1281,10 +1072,24 @@ pub(crate) fn type_operator_bound_literal(
 pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
     let value = match name.rsplit_once("::") {
         Some((class_part, const_name)) => {
+            // `class_part` is a source-level reference, so an unqualified
+            // name must resolve against the declaring class's namespace
+            // before falling back to the global scope — otherwise a file
+            // with several braced `namespace` blocks that each declare the
+            // same short class name always picks the first one, regardless
+            // of which block actually declared the operand.
             let class_name =
                 crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
-                    .unwrap_or_else(|| class_part.to_string());
-            let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
+                    .unwrap_or_else(|| {
+                        let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+                        crate::util::resolve_source_class_name(
+                            class_part,
+                            ns,
+                            ctx.all_classes,
+                            ctx.class_loader,
+                        )
+                    });
+            let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
                 .cloned()
                 .or_else(|| (ctx.class_loader)(&class_name))?;
             let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
@@ -1404,11 +1209,89 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
         return None;
     }
     let subs = constant_operand_subs(std::iter::once(ty), &[], ctx);
-    if subs.is_empty() {
+    let evaluated = if subs.is_empty() {
+        ty.clone()
+    } else {
+        ty.substitute(&subs)
+    };
+    let evaluated = if evaluated.contains_unevaluated_operator() {
+        evaluate_enum_value_of(&evaluated, ctx)
+    } else {
+        evaluated
+    };
+    (evaluated != *ty).then_some(evaluated)
+}
+
+/// Finish every `value-of<…>` in `ty` whose operand is a backed enum or one
+/// of its cases, re-evaluating the operators around it.
+///
+/// `value-of<Suit::Hearts>` is the case's backing value and `value-of<Suit>`
+/// the union of every case's, which is what a template bound to an enum
+/// case reads a shape through (`Data[value-of<T>]` with `T` bound to
+/// `Target::DASHBOARD`).  An operand that is not a backed enum, or a case
+/// with no backing value, leaves the operator standing.
+fn evaluate_enum_value_of(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
+    if !ty.contains_unevaluated_operator() {
+        return ty.clone();
+    }
+    let recurse = |inner: &PhpType| evaluate_enum_value_of(inner, ctx);
+    match ty.kind() {
+        TypeKind::ValueOf(operand) => {
+            enum_backing_values(operand, ctx).unwrap_or_else(|| PhpType::value_of(recurse(operand)))
+        }
+        TypeKind::KeyOf(operand) => crate::php_type::evaluate_key_of(&recurse(operand)),
+        TypeKind::IndexAccess(base, index) => {
+            crate::php_type::evaluate_index_access(&recurse(base), &recurse(index))
+        }
+        _ => ty.map_children(&recurse),
+    }
+}
+
+/// The backing value of the enum case `operand` names (`Suit::Hearts`), or
+/// the union of every case's for a backed enum named by itself.
+fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let name: &str = match operand.kind() {
+        TypeKind::Named(name) => name,
+        TypeKind::Raw(raw) => raw,
+        _ => return None,
+    };
+    let (class_part, case) = match name.rsplit_once("::") {
+        Some((class_part, case)) => (class_part, Some(case)),
+        None => (name, None),
+    };
+    let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
+        .unwrap_or_else(|| {
+            let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+            crate::util::resolve_source_class_name(
+                class_part,
+                ns,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        });
+    let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
+        .cloned()
+        .or_else(|| (ctx.class_loader)(&class_name))?;
+    if class.kind != crate::types::ClassLikeKind::Enum {
         return None;
     }
-    let evaluated = ty.substitute(&subs);
-    (evaluated != *ty).then_some(evaluated)
+    let mut values: Vec<PhpType> = Vec::new();
+    for constant in class.constants.iter().filter(|c| c.is_enum_case) {
+        if case.is_some_and(|case| constant.name != case) {
+            continue;
+        }
+        let value = crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+            constant.enum_value.as_deref()?,
+        )?;
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    match values.len() {
+        0 => None,
+        1 => values.pop(),
+        _ => Some(PhpType::union(values)),
+    }
 }
 
 /// Recover a template parameter no argument names directly, from the
@@ -1491,7 +1374,8 @@ fn ancestor_bound_binding(
 /// bound names, then fill in the template params no argument bound.
 ///
 /// The halves exist so a raw name never leaks downstream. An unbound
-/// template resolves to its declared upper bound (`@template T of Foo` →
+/// template resolves to its declared default (`@template T of object =
+/// \stdClass` → `stdClass`), else its upper bound (`@template T of Foo` →
 /// `Foo`) or `mixed`, following PHPStan's `resolveToBounds()`. A constant
 /// operand resolves to the array shape it names, which is what lets the
 /// substitution every call site already runs finish the operator:
@@ -1505,9 +1389,11 @@ pub(crate) fn finish_template_subs(
     subs: &mut HashMap<String, PhpType>,
     template_params: &[Atom],
     template_param_bounds: &crate::atom::AtomMap<PhpType>,
+    template_param_defaults: &[(Atom, PhpType)],
     return_type: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) {
+    drop_bindings_outside_bounds(subs, template_params, template_param_bounds, ctx);
     propagate_bound_template_bindings(subs, template_params, template_param_bounds, ctx);
 
     let constant_subs = constant_operand_subs(
@@ -1519,16 +1405,79 @@ pub(crate) fn finish_template_subs(
     );
 
     for tpl_name in template_params {
-        subs.entry(tpl_name.to_string()).or_insert_with(|| {
-            template_param_bounds
-                .get(tpl_name)
-                .map(|bound| bound.substitute(&constant_subs))
-                .unwrap_or_else(PhpType::mixed)
-        });
+        if subs.contains_key(tpl_name.as_str()) {
+            continue;
+        }
+        let fallback = template_param_defaults
+            .iter()
+            .find(|(name, _)| name == tpl_name)
+            .map(|(_, default)| default.substitute(subs))
+            .or_else(|| {
+                template_param_bounds
+                    .get(tpl_name)
+                    .map(|bound| bound.substitute(&constant_subs))
+            })
+            .unwrap_or_else(PhpType::mixed);
+        subs.insert(tpl_name.to_string(), fallback);
     }
 
     for (name, shape) in constant_subs {
         subs.entry(name).or_insert(shape);
+    }
+}
+
+/// Unbind every template an argument bound to a class its bound rules out.
+///
+/// `@template F of User` handed an `Article` cannot be `Article`: the call
+/// is an error, and the template falls back to the bound it fails to
+/// satisfy, which is what the call is declared to deal in (PHPStan does the
+/// same).  Only a class judged against a class bound is decided here; a
+/// class nobody can load, a bound that still names a template, or anything
+/// but a class on either side keeps its binding.
+fn drop_bindings_outside_bounds(
+    subs: &mut HashMap<String, PhpType>,
+    template_params: &[Atom],
+    template_param_bounds: &AtomMap<PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    if template_param_bounds.is_empty() || subs.is_empty() {
+        return;
+    }
+    let loaded_class_names = |ty: &PhpType| -> Option<Vec<Atom>> {
+        let mut names = Vec::new();
+        for member in ty.union_members() {
+            let name = match member.kind() {
+                TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => *name,
+                TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => g.name,
+                _ => return None,
+            };
+            if template_params.contains(&name) || (ctx.class_loader)(&name).is_none() {
+                return None;
+            }
+            names.push(name);
+        }
+        Some(names)
+    };
+    for tpl_name in template_params {
+        let Some(bound) = template_param_bounds.get(tpl_name) else {
+            continue;
+        };
+        let Some(bound_to) = subs.get(tpl_name.as_str()) else {
+            continue;
+        };
+        let (Some(bound_classes), Some(bound_to_classes)) =
+            (loaded_class_names(bound), loaded_class_names(bound_to))
+        else {
+            continue;
+        };
+        let satisfies = bound_to_classes.iter().all(|sub| {
+            bound_classes
+                .iter()
+                .any(|sup| crate::class_lookup::is_subtype_of_names(sub, sup, ctx.class_loader))
+        });
+        if !satisfies {
+            subs.remove(tpl_name.as_str());
+        }
     }
 }
 
@@ -1545,33 +1494,44 @@ fn literal_array_key_text(key_text: &str) -> Option<String> {
         .then(|| key_text.to_string())
 }
 
-/// Bind the template a `@param callable(...): …` hint names in its return
-/// type, from the closure argument written at the call site.
+/// `bindings` in the order they should be bound: those read off a
+/// callable-typed parameter come after all the rest.
 ///
-/// The closure's own return type comes from its annotation, its generator
-/// yields, or (unannotated) its body.  Two things then stand between that
-/// type and the template:
-///
-/// The annotation may be less specific than what the closure actually
-/// returns.  `fn ($c): array => arrStr($c)` says only `array` while
-/// `arrStr()` declares `array<int, string>`, so a hint that asks for
-/// `array<TKey, TValue>` has nothing to take a key or a value from.  When
-/// the declared return has structure to fill and the closure's own is the
-/// opaque `array` keyword, the body is resolved instead.
-///
-/// And the template is rarely the whole return type: `array<TKey, TValue>`,
-/// `list<TValue>`, and Laravel's `Collection<TKey, TValue>|array<TKey,
-/// TValue>` each name it at a position inside a larger shape.  The inferred
-/// type is matched against that shape so each template binds to its own
-/// part rather than to the whole return type.
+/// A callable argument's return type is inferred with its parameters
+/// seeded from the templates the other arguments bound, and a template it
+/// names in a parameter position only binds when nothing else did, so both
+/// need every other argument bound first, whatever order the `@param` tags
+/// are written in.
+pub(crate) fn callable_bindings_last<'a>(
+    bindings: &'a [(Atom, Atom)],
+    params: &'a [ParameterInfo],
+) -> impl Iterator<Item = &'a (Atom, Atom)> {
+    let is_callable = move |binding: &&(Atom, Atom)| {
+        params
+            .iter()
+            .find(|p| p.name == binding.1.as_str())
+            .and_then(|p| p.type_hint.as_ref())
+            .is_some_and(|h| h.callable_param_types().is_some())
+    };
+    bindings
+        .iter()
+        .filter(move |b| !is_callable(b))
+        .chain(bindings.iter().filter(is_callable))
+}
+
 /// Bind a template parameter that a `@param Closure(T): void` hint names in
 /// the callback's *parameter* list, reading the type off the closure
 /// argument's own annotation at `position`.
 ///
 /// The annotation is raw source text, so it carries the file's spelling of
 /// the class rather than its FQCN (`Support\Pen` behind a `use App\Support;`).
-/// A template bound from it is compared against — and unioned with — types
-/// that arrived fully qualified, so the spelling is canonicalised here.
+/// A template bound from it is compared against types that arrived fully
+/// qualified, so the spelling is canonicalised here.
+///
+/// A parameter position is contravariant: the closure accepting a
+/// `Timeline` says nothing about the `Timeline<Percentage>` the call hands
+/// it.  Callers therefore only bind from here when no other argument bound
+/// the template (see [`callable_bindings_last`]).
 pub(crate) fn bind_callable_param_template(
     arg_text: &str,
     position: usize,
@@ -1586,34 +1546,79 @@ pub(crate) fn bind_callable_param_template(
     ))
 }
 
+/// Bind the template a `@param callable(...): …` hint names in its return
+/// type, from the closure argument written at the call site.
+///
+/// A closure's return type is what its body produces, narrowed by what it
+/// declares (PHPStan's `intersectButNotNever`).  `fn (Timeline $t): Timeline
+/// => $t` handed a `Timeline<Percentage>` returns `Timeline<Percentage>`,
+/// and `fn ($c): array => arrStr($c)` returns the `array<int, string>` that
+/// `arrStr()` declares.  The body is resolved with each closure parameter
+/// seeded from the hint's own parameter types wherever the templates they
+/// name are already in `bound`, so an untyped `fn ($t) => $t` receives what
+/// the call hands it.  An annotation the body cannot narrow (a scalar, or a
+/// body that resolves to something unrelated) stands as written, and an
+/// unannotated closure falls back to its generator yields.
+///
+/// The template is rarely the whole return type: `array<TKey, TValue>`,
+/// `list<TValue>`, and Laravel's `Collection<TKey, TValue>|array<TKey,
+/// TValue>` each name it at a position inside a larger shape.  The inferred
+/// type is matched against that shape so each template binds to its own
+/// part rather than to the whole return type.
+///
+/// `bindings` is the callee's full template binding list, which is how an
+/// unbound template in the hint's parameter types is told apart from a
+/// class name.
 pub(crate) fn bind_callable_return_template(
     arg_text: &str,
     param_hint: Option<&PhpType>,
     tpl_name: &str,
+    bound: &HashMap<String, PhpType>,
+    bindings: &[(Atom, Atom)],
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let declared_ret = param_hint.and_then(|h| h.callable_return_type());
-    let mut ret_type = Backend::infer_closure_return_type(arg_text, ctx);
-
-    // `callable(): T` binds the whole return type, so a bare `array` is the
-    // right answer there and there is no shape to decompose against.  Any
-    // richer declared return has parts the bare keyword cannot fill.
-    let has_shape =
-        declared_ret.is_some_and(|d| !matches!(d.kind(), TypeKind::Named(n) if &**n == tpl_name));
-
-    if has_shape
-        && ret_type.as_ref().is_some_and(PhpType::is_bare_array)
-        && let Some(body_type) =
-            crate::completion::source::helpers::extract_closure_body_expr_text(arg_text)
-                .and_then(|body| Backend::resolve_closure_body_type(arg_text, body, None, ctx))
-                .filter(|ty| !ty.is_mixed() && !ty.is_bare_array())
-    {
-        ret_type = Some(body_type);
-    }
-
-    let ret_type = ret_type?;
+    let ret_type = if crate::completion::source::helpers::is_closure_like_text(arg_text.trim()) {
+        let seeds = callable_param_seeds(param_hint, bound, bindings);
+        Backend::infer_closure_return_type_seeded(arg_text, &seeds, ctx)?
+    } else {
+        // A callable held in a variable or returned by a call has no body
+        // to read, but its own type (`callable(callable(): int): string`)
+        // still says what it returns.
+        Backend::resolve_arg_text_to_type(arg_text, ctx)?
+            .callable_return_type()?
+            .clone()
+    };
     let bound = declared_ret.and_then(|declared| unify_template(declared, &ret_type, tpl_name));
     Some(bound.unwrap_or(ret_type))
+}
+
+/// The types a callable hint promises each of its parameters, with the
+/// callee's already-bound templates substituted in.
+///
+/// A position whose hint still names an unbound template has nothing
+/// concrete to promise and is left `None`.
+fn callable_param_seeds(
+    param_hint: Option<&PhpType>,
+    bound: &HashMap<String, PhpType>,
+    bindings: &[(Atom, Atom)],
+) -> Vec<Option<PhpType>> {
+    let Some(params) = param_hint.and_then(|h| h.callable_param_types()) else {
+        return Vec::new();
+    };
+    params
+        .iter()
+        .map(|p| {
+            let names_unbound = bindings.iter().any(|(t, _)| {
+                !bound.contains_key(t.as_str())
+                    && crate::type_engine::variable::rhs_resolution::type_contains_name(
+                        &p.type_hint,
+                        t,
+                    )
+            });
+            (!names_unbound).then(|| p.type_hint.substitute(bound))
+        })
+        .collect()
 }
 
 /// Bind a template parameter by walking a parameter hint and an argument
@@ -1634,7 +1639,11 @@ pub(crate) fn bind_callable_return_template(
 ///
 /// Returns `None` when the hint does not name the template, or when the two
 /// shapes disagree, leaving the caller's positional extraction to run.
-fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> Option<PhpType> {
+pub(super) fn unify_template(
+    param_hint: &PhpType,
+    arg_type: &PhpType,
+    tpl_name: &str,
+) -> Option<PhpType> {
     match param_hint.kind() {
         TypeKind::Named(name) if &**name == tpl_name => Some(arg_type.clone()),
         TypeKind::Union(members) => {
@@ -1669,6 +1678,10 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
             if !crate::type_engine::variable::rhs_resolution::is_array_like_wrapper(&hint.name) {
                 return None;
             }
+            // An empty array has no key or value for the template to be.
+            if arg_type.is_empty_array_shape() && names_template_directly(param_hint, tpl_name) {
+                return Some(PhpType::never());
+            }
             let key_match = (hint.args.len() >= 2)
                 .then(|| arg_type.extract_key_type(false))
                 .flatten()
@@ -1700,14 +1713,77 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
     }
 }
 
+/// How many arguments the `wrapper_name<…>` in a parameter hint takes, or 1
+/// when the hint holds no such generic.
+///
+/// The wrapper can sit inside a union (`ArrayIterator`'s constructor takes
+/// `array<TKey, TValue>|object`), and reading the arity off the union
+/// itself would count one argument and bind the key template to the value
+/// type.
+pub(super) fn wrapper_arity(param_hint: Option<&PhpType>, wrapper_name: &str) -> usize {
+    let wrapper_short = crate::util::short_name(wrapper_name);
+    let find = |ty: &PhpType| -> Option<usize> {
+        let members: &[PhpType] = match ty.kind() {
+            TypeKind::Union(members) => members,
+            _ => std::slice::from_ref(ty),
+        };
+        members
+            .iter()
+            .find_map(|m| match m.unwrap_nullable().kind() {
+                TypeKind::Generic(g)
+                    if crate::util::short_name(&g.name).eq_ignore_ascii_case(wrapper_short) =>
+                {
+                    Some(g.args.len())
+                }
+                _ => None,
+            })
+    };
+    match param_hint {
+        Some(hint) => find(hint).unwrap_or(match hint.kind() {
+            TypeKind::Generic(g) => g.args.len(),
+            _ => 1,
+        }),
+        None => 1,
+    }
+}
+
 /// Whether a generic hint names `tpl_name` as one of its own arguments.
 ///
 /// The flat case (`array<TKey, TValue>`) is the positional extractor's
 /// business — it knows the key/value arity quirks — so structural
 /// unification stays out of its way.
-fn names_template_directly(hint: &PhpType, tpl_name: &str) -> bool {
+pub(super) fn names_template_directly(hint: &PhpType, tpl_name: &str) -> bool {
     matches!(hint.kind(), TypeKind::Generic(g)
         if g.args.iter().any(|a| matches!(a.kind(), TypeKind::Named(n) if &**n == tpl_name)))
+}
+
+/// Generalize a literal bound to a template of an object type.
+///
+/// An object outlives the call that shaped it, so `new Box(42)` is a
+/// `Box<int>` that can hold any int later rather than a `Box<42>`, the way
+/// PHPStan generalizes it; a `@phpstan-self-out self<T>` result is the same
+/// kind of type. A bound that is itself a scalar (`@template T of 'a'|'b'`,
+/// `of int`) says the literal is the point, except `array-key`, which only
+/// says the value can index an array.
+pub(crate) fn generalize_object_template_arg(ty: &PhpType, bound: Option<&PhpType>) -> PhpType {
+    let keeps_literals = bound.is_some_and(|bound| {
+        !bound.is_array_key()
+            && bound.union_members().iter().all(|member| {
+                member.is_string_subtype()
+                    || member.is_int_subtype()
+                    || member.is_float_subtype()
+                    || member.is_bool()
+                    || member.is_true()
+                    || member.is_false()
+                    || matches!(member.kind(), TypeKind::Named(n)
+                        if n.eq_ignore_ascii_case("scalar") || n.eq_ignore_ascii_case("numeric"))
+            })
+    });
+    if keeps_literals {
+        ty.clone()
+    } else {
+        ty.widen_scalar_literals()
+    }
 }
 
 #[cfg(test)]

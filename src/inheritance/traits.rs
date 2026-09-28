@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::atom::{Atom, atom};
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MAX_TRAIT_DEPTH, Visibility};
+use crate::types::{ClassInfo, MAX_TRAIT_DEPTH};
 use crate::util::short_name;
 use crate::virtual_members::laravel::{
     extends_eloquent_model, is_has_factory_trait, model_to_factory_fqn,
@@ -19,9 +19,9 @@ use crate::virtual_members::{
 };
 
 use super::generics::{
-    apply_substitution_to_method, apply_substitution_to_property, method_has_bare_self,
-    method_references_params, property_references_params, replace_bare_self_in_method,
-    right_align_offset,
+    apply_substitution_to_method, apply_substitution_to_property, fill_template_bounds,
+    method_has_bare_self, method_references_params, property_references_params,
+    replace_bare_self_in_method, right_align_offset,
 };
 use super::{MergeDedup, TraitContext};
 
@@ -76,7 +76,12 @@ pub(crate) fn merge_traits_into(
             && extends_eloquent_model(merged, class_loader)
         {
             let model_fqn = merged.fqn();
-            let factory_fqn = model_to_factory_fqn(&model_fqn);
+            let factory_fqn = merged
+                .laravel()
+                .and_then(|l| l.custom_factory.as_ref())
+                .and_then(|ty| ty.base_name())
+                .map(str::to_owned)
+                .unwrap_or_else(|| model_to_factory_fqn(&model_fqn));
             if class_loader(&factory_fqn).is_some() {
                 for param in &trait_info.template_params {
                     trait_subs.insert(param.to_string(), PhpType::named(atom(&factory_fqn)));
@@ -89,28 +94,33 @@ pub(crate) fn merge_traits_into(
         // and no convention-based provider filled the map, fall back
         // to the template parameter bounds (e.g. `@template T of object`
         // → `object`) so inherited methods don't leak raw template names.
-        if !trait_info.template_params.is_empty() {
-            for param_name in &trait_info.template_params {
-                if !trait_subs.contains_key(param_name.to_string().as_str()) {
-                    let bound = trait_info
-                        .template_param_bounds
-                        .get(param_name)
-                        .cloned()
-                        .unwrap_or_else(PhpType::mixed);
-                    trait_subs.insert(param_name.to_string(), bound);
-                }
-            }
-        }
+        fill_template_bounds(&trait_info, &mut trait_subs);
 
         // Recursively merge traits used by this trait (trait composition).
         // The sub-trait's own `@use` generics (from the trait's docblock)
-        // apply, not the outer class's.
+        // apply, not the outer class's, but they may name this trait's
+        // template parameters (`@use CollectionTrait<TValue>`), so bind
+        // those to what the outer `@use` supplied first.
         if !trait_info.used_traits.is_empty() {
+            let substituted_use_generics: Vec<(Atom, Vec<PhpType>)> = if trait_subs.is_empty() {
+                trait_info.use_generics.clone()
+            } else {
+                trait_info
+                    .use_generics
+                    .iter()
+                    .map(|(name, args)| {
+                        (
+                            *name,
+                            args.iter().map(|arg| arg.substitute(&trait_subs)).collect(),
+                        )
+                    })
+                    .collect()
+            };
             merge_traits_into(
                 merged,
                 &trait_info.used_traits,
                 &TraitContext {
-                    use_generics: &trait_info.use_generics,
+                    use_generics: &substituted_use_generics,
                     precedences: &trait_info.trait_precedences,
                     aliases: &trait_info.trait_aliases,
                 },
@@ -158,38 +168,7 @@ pub(crate) fn merge_traits_into(
                 );
             }
 
-            for method in &parent.methods {
-                if method.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup
-                    .methods
-                    .insert(crate::atom::ascii_lowercase_atom(&method.name))
-                {
-                    continue;
-                }
-                merged.methods.push(Arc::clone(method));
-            }
-
-            for property in &parent.properties {
-                if property.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup.properties.insert(property.name) {
-                    continue;
-                }
-                merged.properties.push(Arc::clone(property));
-            }
-
-            for constant in &parent.constants {
-                if constant.visibility == Visibility::Private {
-                    continue;
-                }
-                if !dedup.constants.insert(constant.name) {
-                    continue;
-                }
-                merged.constants.push(Arc::clone(constant));
-            }
+            dedup.merge_visible_members(&parent, merged);
 
             current = parent;
         }

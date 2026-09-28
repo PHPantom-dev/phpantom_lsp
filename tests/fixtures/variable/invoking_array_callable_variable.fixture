@@ -1,0 +1,14 @@
+// test: invoking an `[$obj, 'method']` array callable returns the method's type
+// feature: hover
+// expect: $f = float
+---
+<?php
+
+class Foo {
+    public function doFoo(): float { return 1.0; }
+    public function run(): void {
+        $cb = [$this, 'doFoo'];
+        $f = $cb();
+        echo $<>f;
+    }
+}

@@ -69,9 +69,9 @@ pub(crate) fn resolve_view_definitions(backend: &Backend, name: &str) -> Vec<Loc
     // back to `resources/views`). Laravel resolves against these paths
     // in order, so the first existing candidate is the file that would
     // actually be rendered.
-    for root in backend.laravel_view_roots() {
+    for root in backend.laravel_view_roots().iter() {
         for suffix in &[".blade.php", ".php"] {
-            let candidate = root.join(format!("{rel}{suffix}"));
+            let candidate = root.path.join(format!("{rel}{suffix}"));
             if candidate.is_file()
                 && let Ok(uri) = Url::from_file_path(&candidate)
             {

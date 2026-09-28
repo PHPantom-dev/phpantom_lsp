@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{
+        create_test_backend, hover_text_at, open_document, open_php, workspace_uri,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -11,31 +13,13 @@ mod tests {
         // 1. Define a class in a PHP file
         let php_uri = Url::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         // 2. Try to use it in a Blade file
         let blade_uri = Url::parse("file:///view.blade.php").unwrap();
         let blade_text = "@php $logger = new Logger(); @endphp\n{{ $logger->info() }}";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // 3. Click on "info" in the Blade file
         let params = GotoDefinitionParams {
@@ -72,30 +56,12 @@ mod tests {
 
         let php_uri = Url::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let blade_uri = Url::parse("file:///inline.blade.php").unwrap();
         let blade_text = "@php($logger = new Logger())\n{{ $logger->info() }}";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -135,31 +101,13 @@ mod tests {
         let php_uri = Url::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} \
                         public function self_(): Logger { return $this; } }";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let blade_uri = Url::parse("file:///inline_var.blade.php").unwrap();
         let blade_text = "@php\n/** @var \\Logger $base */\n@endphp\n\
                           @php($logger = $base->self_())\n{{ $logger->info() }}";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -191,16 +139,7 @@ mod tests {
         let blade_text = "@if(true)\n    {{ config('app.name') }}\n@endif";
 
         // This should not produce any syntax errors now.
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // We check if it can resolve "config" inside the @if block.
         let params = GotoDefinitionParams {
@@ -231,16 +170,7 @@ mod tests {
         // Test user's specific example with leading space
         let blade_text = " @if(true)\n    {{ config('app.name') }}\n @endif";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         let params = GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
@@ -276,16 +206,7 @@ mod tests {
 "#;
 
         // This should not produce any syntax errors.
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // Verify no syntax errors are reported for this file.
         // (Note: Backend::new_test might not automatically publish diagnostics to a list we can check easily here,
@@ -316,30 +237,12 @@ mod tests {
 
         let php_uri = Url::parse("file:///Logger.php").unwrap();
         let php_text = "<?php class Logger { public function info() {} }";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let blade_uri = Url::parse("file:///view.blade.php").unwrap();
         let blade_text = "@php $l = new Logger(); @endphp\n{{ $l->info() }}";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         let params = ReferenceParams {
             text_document_position: TextDocumentPositionParams {
@@ -385,16 +288,7 @@ mod tests {
 @endsection
 "#;
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         // If it parses successfully without crashing or returning syntax errors, we are good.
         let params = GotoDefinitionParams {
@@ -421,32 +315,14 @@ mod tests {
 
         let php_uri = Url::parse("file:///Item.php").unwrap();
         let php_text = "<?php class Item { public string $name; public int $price; }";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri.clone(),
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let blade_uri = Url::parse("file:///shop.blade.php").unwrap();
         // Line 0: @php $item = new Item(); @endphp
         // Line 1: {{ $item-> }}
         let blade_text = "@php $item = new Item(); @endphp\n{{ $item-> }}";
 
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: blade_uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: blade_text.to_string(),
-                },
-            })
-            .await;
+        open_document(&backend, &blade_uri, "blade", blade_text).await;
 
         let params = CompletionParams {
             text_document_position: TextDocumentPositionParams {
@@ -514,8 +390,7 @@ mod tests {
                 (view_path, view_body),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join(view_path)).unwrap();
+        let uri = workspace_uri(&backend, view_path);
         (backend, dir, uri)
     }
 
@@ -537,7 +412,7 @@ mod tests {
         let body = "<img {{ $attributes->merge(['class' => 'img-fluid']) }} />\n{{ $slot }}\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/components/image.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         assert!(
             undefined_variables(&backend, &uri).await.is_empty(),
@@ -545,7 +420,9 @@ mod tests {
         );
 
         // The declared types resolve, so members on them are known.
-        let hover = hover_text(&backend, &uri, 0, 8).await;
+        let hover = hover_text_at(&backend, &uri, 0, 8)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("ComponentAttributeBag"),
             "$attributes must be typed as the attribute bag, got: {}",
@@ -560,7 +437,7 @@ mod tests {
         let body = "@props(['caption'])\n{{ $slot }}\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/widgets/box.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let undefined = undefined_variables(&backend, &uri).await;
         assert!(
@@ -579,7 +456,7 @@ mod tests {
         let body = "@props([\n    'caption' => '',\n])\n<span>{{ $caption }}</span>\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/components/box.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let undefined = undefined_variables(&backend, &uri).await;
         assert!(
@@ -588,7 +465,9 @@ mod tests {
             undefined
         );
 
-        let hover = hover_text(&backend, &uri, 3, 9).await;
+        let hover = hover_text_at(&backend, &uri, 3, 9)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("$caption = ''"),
             "$caption should resolve to its '' default, got: {}",
@@ -601,7 +480,7 @@ mod tests {
     async fn test_plain_view_still_flags_slot_as_undefined() {
         let body = "{{ $slot }}\n";
         let (backend, _dir, uri) = component_workspace("resources/views/page.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let undefined = undefined_variables(&backend, &uri).await;
         assert!(
@@ -618,7 +497,7 @@ mod tests {
     async fn test_isset_guards_short_circuit_chain_in_if_directive() {
         let body = "@if (isset($isOutlet) && $isOutlet == 1)\nyes\n@endif\n@if (!isset($stockGtr0) || $stockGtr0 == 'true')\nyes\n@endif\n";
         let (backend, _dir, uri) = component_workspace("resources/views/page.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let undefined = undefined_variables(&backend, &uri).await;
         assert!(
@@ -626,41 +505,6 @@ mod tests {
             "isset()/!isset() should guard the rest of the && / || chain: {:?}",
             undefined
         );
-    }
-
-    async fn open_blade(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
-
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result.map(|h| h.contents) {
-            Some(HoverContents::Markup(m)) => m.value,
-            _ => String::new(),
-        }
     }
 
     /// A `@var` block at the top of a template stays in scope for the
@@ -673,23 +517,16 @@ mod tests {
 
         let php_uri = Url::parse("file:///ShowViewModel.php").unwrap();
         let php_text = "<?php\nclass ShowViewModel {\n    public ?string $rawImageUrl = null;\n    public int $ratingCount = 0;\n    public float $ratingScore = 0.0;\n}\n";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let uri = Url::parse("file:///show.blade.php").unwrap();
         let body = "@php\n    /**\n     * @var ShowViewModel $model\n     */\n@endphp\n<?php\n// short\n$schema = [];\n\nif ($model->rawImageUrl !== null) {\n    $schema['image'] = $model->rawImageUrl;\n}\n\nif ($model->ratingCount > 0) {\n    $schema['aggregateRating'] = [\n        'ratingValue' => $model->ratingScore,\n    ];\n}\n?>\n";
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         // `'ratingValue' => $model->ratingScore,` — the deepest use site.
-        let hover = hover_text(&backend, &uri, 15, 26).await;
+        let hover = hover_text_at(&backend, &uri, 15, 26)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("ShowViewModel"),
             "$model must still be typed inside the nested array literal, got: {}",
@@ -714,20 +551,11 @@ mod tests {
 
         let php_uri = Url::parse("file:///Collection.php").unwrap();
         let php_text = "<?php\nnamespace App\\Models;\nclass Loaf {}\n/**\n * @template TKey of array-key\n * @template TValue\n */\nclass Collection {\n    /** @param TKey|null $key */\n    public function get($key) {}\n}\n";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let uri = Url::parse("file:///byname.blade.php").unwrap();
         let body = "@php\n/** @var \\App\\Models\\Collection<string, \\App\\Models\\Loaf> $byName */\n@endphp\n{{ $byName->get([1]) }}\n";
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -752,7 +580,7 @@ mod tests {
         let body = "@php\n/**\n * @var string $poster\n * @var string $video\n */\n@endphp\n@props(['poster', 'video'])\n\n{{ strlen($poster) }}\n{{ strlen($video) }}\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/components/player.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -768,7 +596,9 @@ mod tests {
         );
 
         for (line, name) in [(8u32, "$poster"), (9, "$video")] {
-            let hover = hover_text(&backend, &uri, line, 12).await;
+            let hover = hover_text_at(&backend, &uri, line, 12)
+                .await
+                .unwrap_or_default();
             assert!(
                 hover.contains("string"),
                 "{name} must keep its declared type, got: {hover}"
@@ -784,10 +614,12 @@ mod tests {
         let body = "@props(['variant' => 'info', 'collapsed' => false, 'tags' => [], 'heading'])\n{{ $variant }}\n{{ $collapsed }}\n{{ $tags }}\n{{ $heading }}\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/components/panel.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         for (line, expected) in [(1u32, "'info'"), (2, "false"), (3, "array")] {
-            let hover = hover_text(&backend, &uri, line, 5).await;
+            let hover = hover_text_at(&backend, &uri, line, 5)
+                .await
+                .unwrap_or_default();
             assert!(
                 hover.contains(expected),
                 "line {line} should be typed {expected}, got: {hover}"
@@ -796,7 +628,9 @@ mod tests {
 
         // A required prop must not read as `null`: that would make every use
         // of it a type error against whatever the caller really passes.
-        let hover = hover_text(&backend, &uri, 4, 5).await;
+        let hover = hover_text_at(&backend, &uri, 4, 5)
+            .await
+            .unwrap_or_default();
         assert!(
             !hover.contains("null"),
             "a required prop must not be typed null, got: {hover}"
@@ -811,7 +645,7 @@ mod tests {
         let body = "@props(['accordionId', 'headingId'])\n\n<button id=\"{{ $headingId }}\" {{ $attributes }}></button>\n";
         let (backend, _dir, uri) =
             component_workspace("resources/views/components/accordion.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -834,7 +668,7 @@ mod tests {
     async fn test_a_variable_read_by_a_raw_echo_is_not_unused() {
         let body = "<?php\n$acmeProfile = \"xxx\";\n?>\n\n{!! $acmeProfile !!}\n";
         let (backend, _dir, uri) = component_workspace("resources/views/profile.blade.php", body);
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -860,27 +694,98 @@ mod tests {
 
         let php_uri = Url::parse("file:///User.php").unwrap();
         let php_text = "<?php\nclass User {\n    public string $name = '';\n}\n";
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: php_uri,
-                    language_id: "php".to_string(),
-                    version: 1,
-                    text: php_text.to_string(),
-                },
-            })
-            .await;
+        open_php(&backend, &php_uri, php_text).await;
 
         let uri = Url::parse("file:///greeting.blade.php").unwrap();
         let body = "@php\n/** @var ?User $user */\n@endphp\n@unless (!$user)\n    {{ $user->name }}\n@endunless\n";
-        open_blade(&backend, &uri, body).await;
+        open_document(&backend, &uri, "blade", body).await;
 
         // `{{ $user->name }}` — hover on `$user`.
-        let hover = hover_text(&backend, &uri, 4, 9).await;
+        let hover = hover_text_at(&backend, &uri, 4, 9)
+            .await
+            .unwrap_or_default();
         assert!(
             hover.contains("$user = User") && !hover.contains("?User"),
             "the doubly negated guard must narrow $user the way `@if ($user)` does, got: {}",
             hover
+        );
+    }
+
+    #[tokio::test]
+    async fn test_lowering_declarations_are_not_workspace_symbols() {
+        let backend = create_test_backend();
+
+        let first = Url::parse("file:///page.blade.php").unwrap();
+        let second = Url::parse("file:///other.blade.php").unwrap();
+        let body = "@can('update', $post)\n    <p>ok</p>\n@endcan\n@section('content')\n@endsection\n@stack('scripts')\n";
+        open_document(&backend, &first, "blade", body).await;
+        open_document(&backend, &second, "blade", body).await;
+
+        // Keeping them out of the index must not turn every marker call
+        // the lowering emits into an unknown function.
+        let virtual_php = backend.blade_virtual_php(first.as_str()).unwrap();
+        let mut diags = Vec::new();
+        backend.collect_slow_diagnostics(first.as_str(), &virtual_php, &mut diags);
+        let unknown: Vec<String> = diags
+            .into_iter()
+            .filter(|d| matches!(&d.code, Some(NumberOrString::String(code)) if code == "unknown_function"))
+            .map(|d| d.message)
+            .collect();
+        assert!(
+            unknown.is_empty(),
+            "marker calls must stay resolvable inside the template: {:?}",
+            unknown
+        );
+
+        // The wrapper the body is lowered into and the marker functions
+        // the directives compile to are the preprocessor's own
+        // boilerplate: no file wrote them, so nothing should find them.
+        let leaked: Vec<String> = backend
+            .handle_workspace_symbol("blade")
+            .unwrap_or_default()
+            .into_iter()
+            .map(|symbol| symbol.name)
+            .filter(|name| name.contains("blade_") || name.contains("__blade"))
+            .collect();
+        assert!(
+            leaked.is_empty(),
+            "the lowering's own declarations reached workspace symbols: {:?}",
+            leaked
+        );
+
+        // Nor are they something to complete: a PHP file typing `blade`
+        // is not reaching for the lowering's own functions.
+        let php_uri = Url::parse("file:///helpers.php").unwrap();
+        let php = "<?php\nblade\n";
+        open_php(&backend, &php_uri, php).await;
+        let completions = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: php_uri },
+                    position: Position {
+                        line: 1,
+                        character: 5,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap();
+        let offered: Vec<String> = match completions {
+            Some(CompletionResponse::Array(items)) => items.into_iter().map(|i| i.label).collect(),
+            Some(CompletionResponse::List(list)) => {
+                list.items.into_iter().map(|i| i.label).collect()
+            }
+            None => Vec::new(),
+        };
+        assert!(
+            !offered
+                .iter()
+                .any(|label| label.contains("blade_") || label.contains("__blade")),
+            "the lowering's own functions were offered as completions: {:?}",
+            offered
         );
     }
 }

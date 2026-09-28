@@ -1,0 +1,16 @@
+// test: a write to the array at the foreach key wins over the key/value pairing
+// feature: hover
+// expect: $entry = 5
+---
+<?php
+
+/** @param array{psr-4?: array<string, string>, classmap?: list<string>} $data */
+function f(array $data): void {
+    foreach ($data as $key => $value) {
+        $data[$key] = 5;
+        if ($key === 'classmap') {
+            $entry = $data[$key];
+            $<>entry;
+        }
+    }
+}

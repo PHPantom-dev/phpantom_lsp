@@ -288,3 +288,34 @@ namespace PsalmTest_magic_method_annotation_10 {
     assertType('B', $e);
 }
 
+// Test: magicStaticMethodInheritanceWithoutCallStatic_WithReturnAndManyArgs
+namespace PsalmTest_magic_method_annotation_11 {
+    /**
+     * @method static void bar()
+     */
+    class A {}
+    class B extends A {}
+
+    /** @psalm-suppress UndefinedMethod, MixedAssignment */
+    $a = B::bar(123, "whatever");
+
+    // PHPantom, like PHPStan, honours `@method` without `__callStatic()`, and a `void` method's call yields `null`.
+    assertType('null', $a);
+}
+
+// Test: magicMethodInheritanceWithoutCall_WithReturnAndManyArgs
+namespace PsalmTest_magic_method_annotation_12 {
+    /**
+     * @method void bar()
+     */
+    class A {}
+    class B extends A {}
+
+    $obj = new B();
+
+    /** @psalm-suppress UndefinedMethod, MixedAssignment */
+    $a = $obj->bar(123, "whatever");
+
+    // PHPantom, like PHPStan, honours `@method` without `__call()`, and a `void` method's call yields `null`.
+    assertType('null', $a);
+}
