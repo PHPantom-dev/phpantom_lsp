@@ -1,59 +1,9 @@
 use std::collections::HashMap;
 
-use crate::common::{create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
+use crate::common::{
+    complete_at, create_psr4_workspace, create_test_backend, method_names, property_names,
+};
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a document and trigger completion at the given line/column.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    src: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: src.to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
-
-    let completion_params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-
-    match backend.completion(completion_params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
-
-fn property_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ─── Function first-class callable ──────────────────────────────────────────
 
@@ -1122,4 +1072,106 @@ async fn test_first_class_callable_immediate_function_invocation() {
     let items = complete_at(&backend, &uri, src, 8, 14).await;
     let names = method_names(&items);
     assert!(names.contains(&"get"), "Expected get in {:?}", names);
+}
+
+// ─── Dynamic member name, invokable object ──────────────────────────────────
+
+#[tokio::test]
+async fn test_first_class_callable_dynamic_instance_method_name() {
+    // `$obj->$name(...)` where `$name` holds a known string literal
+    // resolves through the method that literal names, same as writing
+    // `$obj->inner(...)` directly.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_dynamic_method.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Box {\n",
+        "    public function inner(): Inner { return new Inner(); }\n",
+        "}\n",
+        "class Inner {\n",
+        "    public function value(): string { return ''; }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $box = new Box();\n",
+        "        $name = 'inner';\n",
+        "        $fn = $box->$name(...);\n",
+        "        $fn()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 12: `        $fn()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 12, 15).await;
+    let names = method_names(&items);
+    assert!(names.contains(&"value"), "Expected value in {:?}", names);
+}
+
+#[tokio::test]
+async fn test_first_class_callable_dynamic_static_method_name() {
+    // `Class::$name(...)` where `$name` holds a known string literal
+    // resolves through the static method that literal names.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_dynamic_static.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Product {\n",
+        "    public function getTitle(): string { return ''; }\n",
+        "}\n",
+        "class Config {\n",
+        "    public static function make(): Product { return new Product(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $name = 'make';\n",
+        "        $fn = Config::$name(...);\n",
+        "        $fn()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 11: `        $fn()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 11, 15).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getTitle"),
+        "Expected getTitle in {:?}",
+        names,
+    );
+}
+
+#[tokio::test]
+async fn test_first_class_callable_invokable_object() {
+    // `$obj(...)` on an object whose class declares `__invoke()` resolves
+    // through that method's return type.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test/fcc_invokable.php").unwrap();
+
+    let src = concat!(
+        "<?php\n",
+        "class Result {\n",
+        "    public function getValue(): int { return 0; }\n",
+        "}\n",
+        "class Multiplier {\n",
+        "    public function __invoke(): Result { return new Result(); }\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        $test = new Multiplier();\n",
+        "        $h = $test(...);\n",
+        "        $h()->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 11: `        $h()->`  cursor after `->`
+    let items = complete_at(&backend, &uri, src, 11, 14).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"getValue"),
+        "Expected getValue in {:?}",
+        names,
+    );
 }

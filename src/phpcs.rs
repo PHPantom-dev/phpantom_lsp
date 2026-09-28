@@ -44,7 +44,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Duration;
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString};
 
 use crate::config::PhpcsConfig;
 use crate::process::paths_match;
@@ -159,9 +159,6 @@ pub(crate) fn run_phpcs(
     }
 }
 
-/// Project-wide runs multiply the per-file timeout by this factor.
-const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
-
 /// Whether the project has its own PHPCS ruleset file.
 ///
 /// A project-wide run is only attempted when one exists: PHPCS needs
@@ -193,7 +190,7 @@ pub(crate) fn run_phpcs_workspace(
     let timeout_ms = config
         .timeout
         .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .saturating_mul(WORKSPACE_TIMEOUT_FACTOR);
+        .saturating_mul(crate::process::WORKSPACE_TIMEOUT_FACTOR);
     let timeout = Duration::from_millis(timeout_ms);
 
     let mut cmd = Command::new(&resolved.path);
@@ -214,18 +211,9 @@ pub(crate) fn run_phpcs_workspace(
         None,
     )?;
 
-    match output.code {
-        0 => Ok(std::collections::HashMap::new()),
-        1 | 2 => parse_phpcs_json_workspace(&output.stdout, workspace_root),
-        _ => match parse_phpcs_json_workspace(&output.stdout, workspace_root) {
-            Ok(map) if !map.is_empty() => Ok(map),
-            _ => Err(format!(
-                "PHPCS exited with code {} (stderr: {})",
-                output.code,
-                output.stderr.trim()
-            )),
-        },
-    }
+    crate::process::workspace_run_result(&output, "PHPCS", &[1, 2], false, |stdout| {
+        parse_phpcs_json_workspace(stdout, workspace_root)
+    })
 }
 
 /// Parse PHPCS's JSON output into diagnostics grouped by file path.
@@ -365,16 +353,7 @@ fn parse_phpcs_message(msg: &serde_json::Value) -> Option<Diagnostic> {
     // precise range from a single ambiguous position, we underline the
     // full line — the same strategy PHPStan uses.
     Some(Diagnostic {
-        range: Range {
-            start: Position {
-                line: lsp_line,
-                character: 0,
-            },
-            end: Position {
-                line: lsp_line,
-                character: u32::MAX,
-            },
-        },
+        range: crate::process::full_line_range(lsp_line),
         severity: Some(severity),
         code: Some(NumberOrString::String(source_code.to_string())),
         code_description: None,

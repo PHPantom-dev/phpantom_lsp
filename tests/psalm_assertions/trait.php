@@ -45,4 +45,3 @@ namespace PsalmTest_trait_2 {
 
     assertType('A', $a);
 }
-

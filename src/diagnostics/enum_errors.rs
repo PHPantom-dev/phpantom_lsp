@@ -32,7 +32,7 @@ impl Backend {
                 _ => continue,
             };
 
-            let class_info = match ctx.declared_class(class_name) {
+            let class_info = match ctx.declared_class(class_name, span.start) {
                 Some(c) => c,
                 None => continue,
             };

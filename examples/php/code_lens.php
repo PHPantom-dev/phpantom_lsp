@@ -30,3 +30,47 @@ class CodeLensDemo extends Scaffolding\ScaffoldingAbstractShape implements Scaff
     // ◆ Scaffolding\ScaffoldingDrawable::draw  — interface implementations use ◆
     public function draw(string $color, float $opacity = 1.0): void {}
 }
+
+
+// ── Code Lens: reference counts on declarations ─────────────────────────────
+// Above a declaration PHPantom shows how many places use it, for a class,
+// method, property, constant, or a function declared outside any class, so a
+// plain helpers file gets them as well. Click the count to list the usages.
+
+function codeLensFormatLabel(string $text): string
+{
+    return ucfirst($text);
+}
+
+// codeLensFormatLabel above shows "2 references": the two calls below.
+$codeLensFirstLabel = codeLensFormatLabel('first');
+$codeLensSecondLabel = codeLensFormatLabel('second');
+
+// A function nothing calls shows "0 references", which is the quickest way
+// to spot dead code in a procedural file.
+function codeLensUnusedHelper(): void {}
+
+
+// ── Code Lens: implementation counts ────────────────────────────────────────
+// Above an interface or abstract class, and above each method it declares,
+// PHPantom shows how many classes implement it. Click the count to list them.
+
+// "2 implementations": CodeLensJsonExporter and CodeLensCsvExporter.
+interface CodeLensExporter
+{
+    // "2 implementations": the method in CodeLensJsonExporter, and the one
+    // CodeLensCsvExporter inherits unchanged from CodeLensTextExporter.
+    public function export(array $rows): string;
+}
+
+final class CodeLensJsonExporter implements CodeLensExporter
+{
+    public function export(array $rows): string { return '[' . implode(',', $rows) . ']'; }
+}
+
+class CodeLensTextExporter
+{
+    public function export(array $rows): string { return implode("\n", $rows); }
+}
+
+final class CodeLensCsvExporter extends CodeLensTextExporter implements CodeLensExporter {}

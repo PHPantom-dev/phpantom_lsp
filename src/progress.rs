@@ -302,19 +302,21 @@ impl Backend {
         let params = WorkDoneProgressCreateParams {
             token: token.clone(),
         };
-        // Use a timeout to avoid deadlocking the service loop.
-        // progress_create is a server-to-client request; if the
-        // client is busy (e.g. flooding didClose/hover), awaiting
-        // indefinitely could block the handler and starve other
-        // requests.  Progress reporting is best-effort, so timing
-        // out is harmless.
-        match tokio::time::timeout(
-            std::time::Duration::from_secs(2),
-            client.send_request::<WorkDoneProgressCreate>(params),
-        )
-        .await
-        {
-            Ok(Ok(())) => Some(token),
+        // Cap the wait so a busy client (e.g. flooding didClose/hover)
+        // cannot block the caller and starve other requests; progress
+        // reporting is best-effort, so giving up is harmless.  The
+        // request itself runs detached and is never dropped: tower-lsp
+        // panics the serve loop — killing the whole server — when a
+        // client's response arrives after the future awaiting it was
+        // dropped, which is exactly what a timeout wrapped directly
+        // around the request does to a client that answers late.
+        let client = client.clone();
+        let request =
+            tokio::spawn(
+                async move { client.send_request::<WorkDoneProgressCreate>(params).await },
+            );
+        match tokio::time::timeout(std::time::Duration::from_secs(2), request).await {
+            Ok(Ok(Ok(()))) => Some(token),
             _ => None,
         }
     }

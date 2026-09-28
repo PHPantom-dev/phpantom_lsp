@@ -1,0 +1,20 @@
+// test: a continue that targets a switch leaves it the way a break does
+// feature: hover
+// expect: 'a'
+// expect: 'b'
+// expect_absent: null
+---
+<?php
+
+function test(int $n): void {
+    $w = null;
+    switch ($n) {
+        case 1:
+            $w = 'a';
+            continue;
+        default:
+            $w = 'b';
+            break;
+    }
+    echo $<>w;
+}

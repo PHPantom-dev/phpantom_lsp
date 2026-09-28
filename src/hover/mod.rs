@@ -15,7 +15,7 @@
 //! Markdown builders.
 
 mod class;
-mod constants;
+pub(crate) mod constants;
 mod formatting;
 mod member;
 mod see_refs;
@@ -31,7 +31,7 @@ use crate::class_lookup::find_class_at_offset;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, TypeKind};
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, SymbolSpan, VarDefKind};
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::CtxLoaders;
 use crate::types::*;
 
 use formatting::*;
@@ -120,7 +120,63 @@ impl Backend {
             return Some(hover);
         }
 
+        // ── dropped trailing statement ──────────────────────────
+        // An incomplete construct at the end of a file (`$obj->` or
+        // `Foo::` with nothing typed after it yet) is a parse error mago's
+        // recovery drops entirely rather than keeping as an error node, so
+        // the symbol map has no span there at all — not just a gap between
+        // spans, but nothing past the last one it could build. Recover the
+        // bare `$variable` or class name touching the cursor from the raw
+        // text and feed it into the same variable/class hover paths a
+        // symbol-map hit would have used.
+        if let Some(hover) = self.hover_dropped_tail_identifier(uri, content, offset) {
+            return Some(hover);
+        }
+
         None
+    }
+
+    /// Fallback for [`handle_hover`] when the symbol map has nothing at or
+    /// after `offset`: read the `$variable` or bare identifier touching the
+    /// cursor directly from `content` and hover it through the normal
+    /// variable/class paths.
+    ///
+    /// Only consulted when nothing in the map extends this far, so it never
+    /// second-guesses successfully parsed code — string literals, comments,
+    /// and ordinary whitespace gaps all sit before the map's last span and
+    /// are left alone.
+    fn hover_dropped_tail_identifier(
+        &self,
+        uri: &str,
+        content: &str,
+        offset: u32,
+    ) -> Option<Hover> {
+        let past_every_span = self
+            .symbol_maps
+            .read()
+            .get(uri)
+            .is_some_and(|map| map.spans.iter().all(|s| s.end <= offset));
+        if !past_every_span {
+            return None;
+        }
+
+        let (is_variable, name, token_start) = identifier_token_at(content, offset as usize)?;
+
+        let ctx = self.file_context_at(uri, offset);
+        let current_class = find_class_at_offset(&ctx.classes, offset);
+
+        let mut hover = if is_variable {
+            self.hover_variable(&name, uri, content, offset, current_class, &ctx)?
+        } else {
+            let class_loader = self.class_loader(&ctx);
+            self.hover_class_reference(&name, uri, content, &class_loader, offset)?
+        };
+        let token_end = token_start + name.len() as u32 + u32::from(is_variable);
+        hover.range = Some(Range {
+            start: crate::text_position::offset_to_position(content, token_start as usize),
+            end: crate::text_position::offset_to_position(content, token_end as usize),
+        });
+        Some(hover)
     }
 
     /// Dispatch a symbol-map hit to the appropriate hover path.
@@ -175,20 +231,17 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
-                let rctx = ResolutionCtx {
+                let rctx = self.resolution_ctx_at(
                     current_class,
-                    all_classes: &ctx.classes,
+                    &ctx.classes,
                     content,
                     cursor_offset,
-                    class_loader: &class_loader,
-                    backend: Some(self),
-                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    function_loader: Some(&function_loader),
-                    scope_var_resolver: None,
-                    is_in_static_method: false,
-                    preserve_static: false,
-                };
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
+                    ),
+                );
 
                 let access_kind = if *is_static {
                     AccessKind::DoubleColon
@@ -196,9 +249,10 @@ impl Backend {
                     AccessKind::Arrow
                 };
 
+                let source = self.symbol_map_source(uri, content)?;
                 let candidates = ResolvedType::into_arced_classes(
                     crate::type_engine::resolver::resolve_target_classes(
-                        subject_text.as_str(content),
+                        subject_text.as_str(source),
                         access_kind,
                         &rctx,
                     ),
@@ -551,6 +605,60 @@ impl Backend {
         }
     }
 
+    /// Where a Laravel string key resolves to, with the path shortened to
+    /// start at the `dir` segment its kind is filed under.
+    ///
+    /// `config/app.php` and `lang/en/messages.php` read better in a hover
+    /// than the absolute paths they sit at. A file outside that directory
+    /// keeps its path whole rather than being cut at a segment it does
+    /// not have.
+    fn resolved_key_location(
+        &self,
+        kind: &crate::symbol_map::LaravelStringKind,
+        key: &str,
+        uri: &str,
+        dir: &str,
+    ) -> Option<(Url, String)> {
+        let locations =
+            crate::virtual_members::laravel::resolve_laravel_string_key(self, kind, key, uri);
+        let location = if matches!(kind, crate::symbol_map::LaravelStringKind::Trans) {
+            self.in_translation_locale(locations)?
+        } else {
+            locations.into_iter().next()?
+        };
+        let path = location.uri.path();
+        let short_path = match path.rsplit_once(&format!("/{dir}/")) {
+            Some((_, rest)) => format!("{dir}/{rest}"),
+            None => path.to_string(),
+        };
+        Some((location.uri, short_path))
+    }
+
+    /// The translation among `locations` the application reads: the one in
+    /// `app.locale`, else in `app.fallback_locale` (both `en` unless
+    /// configured, as in Laravel), else the first.
+    fn in_translation_locale(&self, locations: Vec<Location>) -> Option<Location> {
+        let trees = self.cached_config_trees();
+        let app = trees.iter().find(|(prefix, _)| prefix == "app");
+        let configured = |key: &str| -> String {
+            app.and_then(|(_, tree)| tree.value_at(&[key]))
+                .map(|value| value.as_strings().0)
+                .and_then(|values| values.into_iter().next())
+                .unwrap_or_else(|| "en".to_string())
+        };
+        for locale in [configured("locale"), configured("fallback_locale")] {
+            let dir = format!("/{locale}/");
+            let json = format!("/{locale}.json");
+            if let Some(found) = locations.iter().find(|l| {
+                let path = l.uri.path();
+                path.contains(&dir) || path.ends_with(&json)
+            }) {
+                return Some(found.clone());
+            }
+        }
+        locations.into_iter().next()
+    }
+
     /// Build hover content for a Laravel string key (route name, config
     /// key, view name, or translation key).
     fn hover_laravel_string_key(
@@ -588,21 +696,25 @@ impl Backend {
                 ("Route", detail)
             }
             LaravelStringKind::Config => {
+                let detail = match self.resolved_key_location(kind, key, uri, "config") {
+                    Some((_, short_path)) => format!("Defined in `{short_path}`"),
+                    None => "Config key".to_string(),
+                };
+                ("Config", detail)
+            }
+            LaravelStringKind::ConfigResource(resource) => {
+                let descriptor = crate::symbol_map::laravel_resources::descriptor(*resource);
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
                     self, kind, key, uri,
                 );
-                let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/config/")
-                        .next()
-                        .map(|p| format!("config/{}", p))
-                        .unwrap_or_else(|| path.to_string());
-                    format!("Defined in `{}`", short_path)
-                } else {
-                    "Config key".to_string()
-                };
-                ("Config", detail)
+                let detail = locations
+                    .first()
+                    .and_then(|location| self.workspace_relative_path(location.uri.as_str()))
+                    .map_or_else(
+                        || format!("Laravel {}", descriptor.label),
+                        |path| format!("Defined in `{path}`"),
+                    );
+                (descriptor.hover_label, detail)
             }
             LaravelStringKind::View => {
                 let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
@@ -622,27 +734,19 @@ impl Backend {
                 ("View", detail)
             }
             LaravelStringKind::Trans => {
-                let locations = crate::virtual_members::laravel::resolve_laravel_string_key(
-                    self, kind, key, uri,
-                );
-                let detail = if let Some(loc) = locations.first() {
-                    let path = loc.uri.path();
-                    let short_path = path
-                        .rsplit("/lang/")
-                        .next()
-                        .map(|p| format!("lang/{}", p))
-                        .unwrap_or_else(|| path.to_string());
+                let detail = match self.resolved_key_location(kind, key, uri, "lang") {
                     // The line as written: a `:placeholder` is left in
                     // place, since what it stands for is decided by the
                     // call site rather than by the translation.
-                    match crate::virtual_members::laravel::trans_line(self, key, &loc.uri) {
-                        Some(line) => {
-                            format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                    Some((location, short_path)) => {
+                        match crate::virtual_members::laravel::trans_line(self, key, &location) {
+                            Some(line) => {
+                                format!("{}\n\nDefined in `{}`", inline_code(&line), short_path)
+                            }
+                            None => format!("Defined in `{short_path}`"),
                         }
-                        None => format!("Defined in `{}`", short_path),
                     }
-                } else {
-                    "Translation key".to_string()
+                    None => "Translation key".to_string(),
                 };
                 ("Trans", detail)
             }
@@ -896,7 +1000,7 @@ impl Backend {
             return None;
         }
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, cursor_offset as u32);
         let call_expr = match &sc.subject {
             Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
             Some(subj) => format!("{}->{}", subj, sc.method_name),
@@ -924,6 +1028,68 @@ impl Backend {
 
         Some(self.hover_for_property(property, &resolved_model, &class_loader))
     }
+}
+
+/// Whether `c` can appear inside a PHP identifier.  PHP allows every byte
+/// from `0x80` up, which is why this is not just `is_alphanumeric`.
+fn is_php_identifier_char(c: char) -> bool {
+    c == '_' || c.is_ascii_alphanumeric() || (c as u32) >= 0x80
+}
+
+/// Find the `$variable` or bare identifier touching byte offset `offset`
+/// in `content`, for cursor positions no AST node covers.
+///
+/// Returns `(is_variable, name, token_start)`: `name` excludes the `$`
+/// sigil, and `token_start` is the byte offset of the `$` for a variable
+/// or of the identifier's first byte otherwise. `None` when the offset
+/// (or the byte just before it, for end-of-token cursors) does not sit on
+/// an identifier character.
+fn identifier_token_at(content: &str, offset: usize) -> Option<(bool, String, u32)> {
+    let anchor = if content
+        .get(offset..)
+        .and_then(|s| s.chars().next())
+        .is_some_and(is_php_identifier_char)
+    {
+        offset
+    } else {
+        let prev = content.get(..offset).and_then(|s| s.chars().next_back())?;
+        if !is_php_identifier_char(prev) {
+            return None;
+        }
+        offset - prev.len_utf8()
+    };
+
+    let mut start = anchor;
+    while start > 0 {
+        let Some(prev) = content[..start].chars().next_back() else {
+            break;
+        };
+        if !is_php_identifier_char(prev) {
+            break;
+        }
+        start -= prev.len_utf8();
+    }
+
+    let mut end = anchor;
+    if let Some(c) = content[anchor..].chars().next()
+        && is_php_identifier_char(c)
+    {
+        end += c.len_utf8();
+    }
+    while end < content.len() {
+        let Some(c) = content[end..].chars().next() else {
+            break;
+        };
+        if !is_php_identifier_char(c) {
+            break;
+        }
+        end += c.len_utf8();
+    }
+
+    let is_variable = start > 0 && content.as_bytes()[start - 1] == b'$';
+    let name = content[start..end].to_string();
+    let token_start = if is_variable { start - 1 } else { start };
+    Some((is_variable, name, token_start as u32))
 }
 
 /// Hover for `$this->argument('user')` / `$this->option('queue')`: resolve

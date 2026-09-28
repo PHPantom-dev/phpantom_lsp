@@ -1,6 +1,6 @@
-// test: foreach key over an array shape with string keys is string
+// test: foreach key over an array shape is the union of the shape's keys
 // feature: hover
-// expect: $k = string
+// expect: $k = 'name'|'city'
 // expect_absent: int|string
 ---
 <?php

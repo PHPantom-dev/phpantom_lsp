@@ -24,7 +24,7 @@ pub(crate) fn resolve_var_type(
     cursor_offset: u32,
     uri: &str,
 ) -> Option<PhpType> {
-    let ctx = backend.file_context(uri);
+    let ctx = backend.file_context_at(uri, cursor_offset);
     let class_loader = backend.class_loader(&ctx);
     let function_loader = backend.function_loader(&ctx);
     let constant_loader = backend.constant_loader(&ctx);

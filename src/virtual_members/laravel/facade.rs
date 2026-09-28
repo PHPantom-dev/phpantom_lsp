@@ -100,6 +100,22 @@ fn accessor_class(
     }
 }
 
+/// The class a facade forwards its static calls to, or `None` when `class`
+/// is not a facade or its accessor names nothing we can load.
+pub(crate) fn facade_concrete_class(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    cache: Option<&ResolvedClassCache>,
+) -> Option<Arc<ClassInfo>> {
+    if !LaravelFacadeProvider.applies_to(class, class_loader) {
+        return None;
+    }
+    let concrete = class_loader(&accessor_class(class, cache)?)?;
+    // A facade that names itself has nothing to forward, and resolving it
+    // would re-enter the provider.
+    (concrete.fqn() != class.fqn()).then_some(concrete)
+}
+
 /// Turn the concrete class's public instance methods into static virtual
 /// methods on the facade.
 fn build_forwarded_methods(

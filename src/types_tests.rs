@@ -41,6 +41,7 @@ fn param(name: &str, type_hint: &str) -> ParameterInfo {
         is_variadic: false,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }
 }
 
@@ -933,6 +934,29 @@ fn from_classes_with_hint_union_uses_class_names() {
     assert_eq!(result[1].type_string, PhpType::named(atom("Bar")));
 }
 
+#[test]
+fn from_classes_with_hint_union_keeps_intersection_member_together() {
+    let intersection = PhpType::intersection(vec![
+        PhpType::named(atom("Countable")),
+        PhpType::named(atom("Serializable")),
+    ]);
+    let hint = PhpType::union(vec![intersection.clone(), PhpType::named(atom("User"))]);
+    let classes = vec![
+        Arc::new(class("Countable")),
+        Arc::new(class("Serializable")),
+        Arc::new(class("User")),
+    ];
+    let result = ResolvedType::from_classes_with_hint(classes, hint.clone());
+    // One entry per class, so every class still contributes its members…
+    assert_eq!(result.len(), 3);
+    assert_eq!(result[0].type_string, intersection);
+    assert_eq!(result[1].type_string, intersection);
+    assert_eq!(result[2].type_string, PhpType::named(atom("User")));
+    // …and the join reads the intersection back as one alternative, not
+    // as `Countable|Serializable|User|Countable&Serializable`.
+    assert_eq!(ResolvedType::types_joined(&result), hint);
+}
+
 // ── types_joined: intersection ──────────────────────────────────
 
 #[test]
@@ -1110,11 +1134,13 @@ fn func(name: &str) -> FunctionInfo {
         deprecated_replacement: None,
         template_params: Vec::new(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         template_param_bounds: Default::default(),
         throws: Vec::new(),
         is_polyfill: false,
         overloads: Vec::new(),
         is_pure: false,
+        is_impure: false,
     }
 }
 

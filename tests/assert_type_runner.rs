@@ -1,6 +1,8 @@
 //! PHPStan `assertType()` fixture runner.
 //!
-//! This harness processes PHP files from PHPStan's `nsrt/` test corpus.
+//! This harness processes PHP files from PHPStan's `assertType()` corpora
+//! (`nsrt/`, and the `data/` fixtures its type-inference tests run under the
+//! default configuration) and from Psalm's extracted assertions.
 //! Each file contains calls like `assertType('expected_type', $expr)`.
 //! The runner:
 //!
@@ -11,8 +13,10 @@
 //! 4. Hovers on each `$__phpantom_assert_N` variable to resolve its type.
 //! 5. Compares the hover type against the expected type string.
 //!
-//! Files are placed in `tests/phpstan_nsrt/` and picked up automatically
-//! by `datatest_stable`. Lines containing `assertNativeType` are ignored
+//! Files are placed in `tests/phpstan_nsrt/`, `tests/phpstan_data/` (laid
+//! out like upstream's `tests/PHPStan/`, minus the `data/` segment) or
+//! `tests/psalm_assertions/`, and picked up automatically by
+//! `datatest_stable`. Lines containing `assertNativeType` are ignored
 //! (PHPantom does not track native vs PHPDoc types separately).
 //!
 //! To skip an assertion that PHPantom cannot yet handle, add `// SKIP`
@@ -33,270 +37,6 @@ use std::path::Path;
 use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
-static UNIT_ENUM_STUB: &str = r#"<?php
-interface UnitEnum
-{
-    /** @return static[] */
-    public static function cases(): array;
-    public readonly string $name;
-}
-"#;
-
-static BACKED_ENUM_STUB: &str = r#"<?php
-interface BackedEnum extends UnitEnum
-{
-    public static function from(int|string $value): static;
-    public static function tryFrom(int|string $value): ?static;
-    public readonly int|string $value;
-}
-"#;
-
-static GENERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TSend
- * @template TReturn
- */
-final class Generator
-{
-    /** @return TReturn */
-    public function getReturn(): mixed {}
-}
-"#;
-
-static NO_REWIND_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- */
-class NoRewindIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Traversable $iterator) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-}
-"#;
-
-static ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface Iterator extends Traversable
-{
-    /** @return TValue */
-    public function current(): mixed;
-    /** @return TKey */
-    public function key(): mixed;
-    public function next(): void;
-    public function rewind(): void;
-    public function valid(): bool;
-}
-"#;
-
-static ITERATOR_AGGREGATE_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface IteratorAggregate extends Traversable
-{
-    /** @return Traversable<TKey, TValue>|array<TValue> */
-    public function getIterator(): Traversable|array;
-}
-"#;
-
-static ITERATOR_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @mixin TIterator
- */
-class IteratorIterator implements Iterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Traversable $iterator) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-    public function next(): void {}
-    public function rewind(): void {}
-    public function valid(): bool {}
-}
-"#;
-
-static SPL_ITERATOR_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- * @implements Iterator<TKey, TValue>
- */
-class ArrayIterator implements Iterator
-{
-    /** @param array<TKey, TValue> $array */
-    public function __construct(array $array = []) {}
-    /** @return TValue */
-    public function current(): mixed {}
-    /** @return TKey */
-    public function key(): mixed {}
-    public function next(): void {}
-    public function rewind(): void {}
-    public function valid(): bool {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class CachingIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator) {}
-    public function hasNext(): bool {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class InfiniteIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator) {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class LimitIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator, int $offset = 0, int $limit = -1) {}
-}
-
-/**
- * @template TKey
- * @template TValue
- * @template TIterator of Iterator<TKey, TValue>
- * @extends IteratorIterator<TKey, TValue, TIterator>
- */
-class CallbackFilterIterator extends IteratorIterator
-{
-    /** @param TIterator $iterator */
-    public function __construct(Iterator $iterator, callable $callback) {}
-}
-
-/**
- * @template TValue
- */
-class SplDoublyLinkedList
-{
-    /** @param TValue $value */
-    public function add(int $index, mixed $value): void {}
-    /** @return TValue */
-    public function bottom(): mixed {}
-}
-
-/**
- * @template TKey of object
- * @template TValue
- */
-class SplObjectStorage
-{
-    /** @return TValue */
-    public function offsetGet(object $object): mixed {}
-}
-
-/**
- * @template TKey of array-key
- * @template TValue
- */
-class ArrayObject
-{
-    /** @param array<TKey, TValue> $array */
-    public function __construct(array $array = []) {}
-    /** @return ArrayIterator<TKey, TValue> */
-    public function getIterator(): ArrayIterator {}
-}
-"#;
-
-static TRAVERSABLE_STUB: &str = r#"<?php
-/**
- * @template TKey
- * @template TValue
- */
-interface Traversable {}
-"#;
-
-static DATE_INTERVAL_STUB: &str = r#"<?php
-class DateInterval
-{
-    public function __construct(string $duration) {}
-}
-"#;
-
-static DATE_TIME_IMMUTABLE_STUB: &str = r#"<?php
-class DateTimeImmutable
-{
-    public function __construct(string $datetime = "now") {}
-    public function sub(DateInterval $interval): static {}
-    public function modify(string $modifier): DateTimeImmutable|false {}
-}
-"#;
-
-static EXCEPTION_STUB: &str =
-    "<?php\nclass Exception {}\nclass LogicException extends Exception {}\n";
-
-static WEAK_REFERENCE_STUB: &str = r#"<?php
-class WeakReference
-{
-    public static function create(object $object): WeakReference {}
-    /** @return Exception|null */
-    public function get(): ?object {}
-}
-"#;
-
-static DOM_DOCUMENT_STUB: &str = "<?php\nclass DOMDocument {}\n";
-
-static DOM_ELEMENT_STUB: &str = r#"<?php
-class DOMElement
-{
-    public ?DOMDocument $ownerDocument;
-    public function __construct(string $qualifiedName, string $value = "", string $namespace = "") {}
-}
-"#;
-
-static SIMPLE_XML_ELEMENT_STUB: &str = r#"<?php
-class SimpleXMLElement
-{
-    public function __construct(string $data) {}
-    public function __get(string $name): SimpleXMLElement {}
-}
-"#;
-
-static STDCLASS_STUB: &str = "<?php\nclass stdClass {}\n";
-
-static ARRAY_FUNCTION_STUB: &str = r#"<?php
-/**
- * @return array<int, string>
- */
-function range(string $start, string $end): array {}
-"#;
-
 // ─── Assertion extraction ───────────────────────────────────────────────────
 
 /// A single `assertType('expected', expr)` call found in the source.
@@ -308,6 +48,14 @@ struct AssertTypeCall {
     expr: String,
     /// 1-based line number in the original source.
     original_line: usize,
+    /// Number of source lines the call spans (1 unless it is multi-line).
+    line_count: usize,
+    /// Byte range of the call within its line, from the function name to
+    /// the closing `)`, for a call on a single line.  The call is replaced
+    /// in place so the code around it keeps running: an assertion inside
+    /// `(fn () => assertType(…, $this))->call($foo)` must still see the
+    /// `$this` that `call()` binds.
+    in_line: Option<(usize, usize)>,
 }
 
 /// Extract all `assertType()` calls from the PHP source.
@@ -355,7 +103,17 @@ fn extract_assert_type_calls(source: &str) -> Vec<AssertTypeCall> {
             // Collect the full call text, potentially spanning multiple lines.
             let (call_text, lines_consumed) = collect_call_text(after_paren, &lines, i);
 
-            if let Some(parsed) = parse_assert_type_call(&call_text, source, &lines, i) {
+            if let Some(mut parsed) = parse_assert_type_call(&call_text, source, &lines, i) {
+                parsed.line_count = lines_consumed;
+                if lines_consumed == 1
+                    && let Some(close) = matching_close_paren(after_paren)
+                {
+                    let indent = line.len() - line.trim_start().len();
+                    let name_start = trimmed[..call_start]
+                        .rfind("assertType(")
+                        .expect("the call starts with its name");
+                    parsed.in_line = Some((indent + name_start, indent + call_start + close + 1));
+                }
                 results.push(parsed);
             }
 
@@ -437,13 +195,23 @@ fn collect_call_text(after_open_paren: &str, lines: &[&str], start_line: usize) 
 fn parse_assert_type_call(
     call_text: &str,
     _source: &str,
-    _lines: &[&str],
+    lines: &[&str],
     line_idx: usize,
 ) -> Option<AssertTypeCall> {
     let text = call_text.trim();
 
     // Parse the first argument (expected type).
-    let (expected, rest) = parse_first_argument(text)?;
+    let (mut expected, mut rest) = parse_first_argument(text)?;
+    let is_class_constant = !text.starts_with(['\'', '"']);
+    if is_class_constant && matches!(expected.as_str(), "self" | "static") {
+        expected = enclosing_class_name(lines, line_idx)?;
+    }
+    // `Foo::class . '|null'` spells the expected type as a concatenation.
+    while let Some(after_dot) = rest.trim_start().strip_prefix('.') {
+        let (suffix, after) = parse_first_argument(after_dot.trim_start())?;
+        expected.push_str(&suffix);
+        rest = after;
+    }
 
     // The rest should start with `,` after optional whitespace.
     let rest = rest.trim_start();
@@ -458,7 +226,64 @@ fn parse_assert_type_call(
         expected,
         expr,
         original_line: line_idx + 1,
+        line_count: 1,
+        in_line: None,
     })
+}
+
+/// The class-like declared nearest above `line_idx`, which is the one an
+/// assertion's `self::class` names: fixtures declare one class after
+/// another, each closing before the next opens.
+fn enclosing_class_name(lines: &[&str], line_idx: usize) -> Option<String> {
+    lines[..=line_idx].iter().rev().find_map(|line| {
+        let mut words = line.split_whitespace();
+        while let Some(word) = words.next() {
+            if matches!(word, "class" | "interface" | "trait" | "enum") {
+                let name: String = words
+                    .next()?
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                return (!name.is_empty()).then_some(name);
+            }
+            if word.starts_with("//") || word.starts_with('*') {
+                return None;
+            }
+        }
+        None
+    })
+}
+
+/// Byte offset of the `)` closing a call whose arguments start `text`,
+/// skipping parentheses inside string literals.
+fn matching_close_paren(text: &str) -> Option<usize> {
+    let mut depth = 1;
+    let mut string_char = None;
+    let mut escaped = false;
+    for (i, ch) in text.char_indices() {
+        if let Some(quote) = string_char {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == quote {
+                string_char = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => string_char = Some(ch),
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Parse the first argument of assertType, which is either:
@@ -479,10 +304,7 @@ fn parse_first_argument(text: &str) -> Option<(String, &str)> {
                 continue;
             }
             if bytes[i] == quote as u8 {
-                let value = &rest[..i];
-                // Unescape the string.
-                let unescaped = value.replace("\\'", "'").replace("\\\"", "\"");
-                return Some((unescaped, &rest[i + 1..]));
+                return Some((unescape_php_string(&rest[..i], quote), &rest[i + 1..]));
             }
             i += 1;
         }
@@ -497,6 +319,26 @@ fn parse_first_argument(text: &str) -> Option<(String, &str)> {
         }
         None
     }
+}
+
+/// Apply PHP's escapes for a quoted string literal's body: `\\` and the
+/// escaped quote character collapse to one character, and any other
+/// backslash is kept (`'Foo\Bar'` stays as written).
+fn unescape_php_string(value: &str, quote: char) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\\'
+            && let Some(&next) = chars.peek()
+            && (next == '\\' || next == quote)
+        {
+            out.push(next);
+            chars.next();
+            continue;
+        }
+        out.push(ch);
+    }
+    out
 }
 
 /// Parse the second argument — the expression to type-check.
@@ -574,19 +416,34 @@ fn transform_source(
     let mut result = String::with_capacity(source.len());
     let mut assertion_locations: Vec<(String, String, u32, usize)> = Vec::new();
     let mut output_line: u32 = 0; // 0-based line counter in output
+    // A multi-line call is replaced as a whole on its first line, so the
+    // original lines it continues onto must not be copied through.
+    let mut skip_until = 0;
 
     for (line_idx, line) in source.lines().enumerate() {
         let original_line_1based = line_idx + 1;
+
+        if original_line_1based <= skip_until {
+            continue;
+        }
 
         if let Some(indices) = line_to_assertions.get(&original_line_1based) {
             for &idx in indices {
                 let a = &assertions[idx];
                 let var_name = format!("$__phpantom_assert_{}", idx);
-                let replacement = format!("{} = {};", var_name, a.expr);
-
-                // Preserve indentation from the original line.
-                let indent = &line[..line.len() - line.trim_start().len()];
-                result.push_str(indent);
+                let replacement = match a.in_line {
+                    Some((start, end)) => {
+                        // The name may be qualified (`\PHPStan\Testing\assertType`).
+                        let before = line[..start]
+                            .trim_end_matches(|c: char| c.is_alphanumeric() || "_\\".contains(c));
+                        format!("{before}{var_name} = {}{}", a.expr, &line[end..])
+                    }
+                    None => {
+                        // Preserve indentation from the original line.
+                        let indent = &line[..line.len() - line.trim_start().len()];
+                        format!("{indent}{var_name} = {};", a.expr)
+                    }
+                };
                 result.push_str(&replacement);
                 result.push('\n');
 
@@ -596,7 +453,8 @@ fn transform_source(
                     output_line,
                     a.original_line,
                 ));
-                output_line += 1;
+                output_line += replacement.lines().count() as u32;
+                skip_until = skip_until.max(a.original_line + a.line_count - 1);
             }
         } else {
             result.push_str(line);
@@ -740,16 +598,494 @@ fn normalize_type(ty: &str) -> String {
         }
     }
 
-    result
+    let result = expand_array_key(&expand_nested_nullable(&list_shapes_as_array(&result)))
+        .replace("array<never, never>", "array{}")
+        .replace("list<never>", "array{}")
+        .replace("non-negative-int", "int<0, max>")
+        .replace("non-positive-int", "int<min, 0>")
+        .replace("positive-int", "int<1, max>")
+        .replace("negative-int", "int<min, -1>")
+        .replace("array<mixed, mixed>", "array")
+        .replace("array<mixed>", "array")
+        .replace("non-empty-array<int|string, ", "non-empty-array<")
+        .replace("non-empty-array<array-key, ", "non-empty-array<");
+    canonicalize_union_spelling(&strip_nested_grouping_parens(
+        &number_positional_shape_entries(&drop_sequential_shape_keys(&strip_template_scopes(
+            &result,
+        ))),
+    ))
+}
+
+/// Spell a sealed list shape with no optional entries, Psalm's
+/// `list{int,string}`, as the `array{int,string}` it is equal to. A list
+/// shape with an optional entry or a `...` tail has no `array{…}` twin and
+/// is left alone.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`].
+fn list_shapes_as_array(ty: &str) -> String {
+    const OPEN: &str = "list{";
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(at) = rest.find(OPEN) {
+        let prefixed = rest[..at]
+            .chars()
+            .last()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\'));
+        let body_start = at + OPEN.len();
+        let mut depth = 0i32;
+        let mut quote: Option<char> = None;
+        let mut body_end = None;
+        for (i, ch) in rest[body_start..].char_indices() {
+            if let Some(q) = quote {
+                if ch == q {
+                    quote = None;
+                }
+                continue;
+            }
+            match ch {
+                '\'' | '"' => quote = Some(ch),
+                '{' | '<' | '(' | '[' => depth += 1,
+                '}' if depth == 0 => {
+                    body_end = Some(body_start + i);
+                    break;
+                }
+                '}' | '>' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(body_end) = body_end else {
+            break;
+        };
+        let body = &rest[body_start..body_end];
+        let sealed_and_required = !body.contains("?:") && !body.contains("...");
+        out.push_str(&rest[..at]);
+        out.push_str(if !prefixed && sealed_and_required && !body.is_empty() {
+            "array{"
+        } else {
+            OPEN
+        });
+        out.push_str(&list_shapes_as_array(body));
+        out.push('}');
+        rest = &rest[body_end + 1..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Spell `array-key` as the `int|string` union it stands for, which is how
+/// PHPStan prints it (`list<(int|string)>`).
+fn expand_array_key(ty: &str) -> String {
+    const KEYWORD: &str = "array-key";
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\');
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(at) = rest.find(KEYWORD) {
+        let before = rest[..at].chars().last().or(out.chars().last());
+        let after = rest[at + KEYWORD.len()..].chars().next();
+        out.push_str(&rest[..at]);
+        if before.is_some_and(is_name_char) || after.is_some_and(is_name_char) {
+            out.push_str(KEYWORD);
+        } else {
+            out.push_str("int|string");
+        }
+        rest = &rest[at + KEYWORD.len()..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Drop the parentheses PHPStan puts around a union nested inside another
+/// type (a shape value, a generic argument), `array{a:(float|int)}`, which
+/// PHPantom prints bare. Only a `(` in a type position is a grouping one;
+/// the one opening a callable's parameter list follows its name.
+fn strip_nested_grouping_parens(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut grouping: Vec<bool> = Vec::new();
+    let mut quote: Option<char> = None;
+    for ch in ty.chars() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            out.push(ch);
+            continue;
+        }
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            '(' => {
+                let is_grouping = out
+                    .trim_end()
+                    .chars()
+                    .last()
+                    .is_some_and(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
+                grouping.push(is_grouping);
+                if !is_grouping {
+                    out.push(ch);
+                }
+            }
+            ')' => {
+                if !grouping.pop().unwrap_or(false) {
+                    out.push(ch);
+                }
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+/// Give the positional entries of every `array{…}` that also spells out a
+/// key the integer key they sit at, the way PHPStan prints such a shape:
+/// `array{foo:17,'a'}` is `array{foo:17,0:'a'}`.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`], where
+/// shape entries are separated by a bare `,` and keyed as `key:value`.
+fn number_positional_shape_entries(ty: &str) -> String {
+    const OPEN: &str = "array{";
+    let Some(start) = ty.find(OPEN) else {
+        return ty.to_string();
+    };
+    let body_start = start + OPEN.len();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut body_end = None;
+    for (i, ch) in ty[body_start..].char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' if depth == 0 => {
+                body_end = Some(body_start + i);
+                break;
+            }
+            '}' | '>' | ')' | ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    let Some(body_end) = body_end else {
+        return ty.to_string();
+    };
+
+    let entries: Vec<(Option<&str>, &str)> = split_top_level(&ty[body_start..body_end], ',')
+        .into_iter()
+        .map(|entry| match split_top_level(entry, ':').as_slice() {
+            [key, value] => (Some(*key), *value),
+            _ => (None, entry),
+        })
+        .collect();
+    let mixed = entries.iter().any(|(key, _)| key.is_some())
+        && entries.iter().any(|(key, _)| key.is_none());
+    let body: Vec<String> = if mixed {
+        let mut next: i64 = 0;
+        entries
+            .iter()
+            .map(|(key, value)| {
+                let value = number_positional_shape_entries(value);
+                match key {
+                    Some(key) => {
+                        if let Ok(index) = key.parse::<i64>() {
+                            next = next.max(index + 1);
+                        }
+                        format!("{key}:{value}")
+                    }
+                    None => {
+                        next += 1;
+                        format!("{}:{value}", next - 1)
+                    }
+                }
+            })
+            .collect()
+    } else {
+        entries
+            .iter()
+            .map(|(key, value)| {
+                let value = number_positional_shape_entries(value);
+                match key {
+                    Some(key) => format!("{key}:{value}"),
+                    None => value,
+                }
+            })
+            .collect()
+    };
+    format!(
+        "{}{}{}}}{}",
+        &ty[..start],
+        OPEN,
+        body.join(","),
+        number_positional_shape_entries(&ty[body_end + 1..])
+    )
+}
+
+/// Rewrite a nested `?T` (`list<array<?string>>`) to the `T|null` PHPStan
+/// prints. Only a plain class or keyword name is expanded: `?Foo<int>` would
+/// need its own brackets to stay unambiguous, and neither side prints it.
+fn expand_nested_nullable(ty: &str) -> String {
+    if !ty.chars().skip(1).any(|c| c == '?') {
+        return ty.to_string();
+    }
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '\\';
+    let mut out = String::with_capacity(ty.len() + 8);
+    let mut chars = ty.char_indices().peekable();
+    while let Some((i, ch)) = chars.next() {
+        let after_boundary = ty[..i]
+            .chars()
+            .next_back()
+            .is_some_and(|prev| matches!(prev, '<' | ',' | ' ' | '{' | ':' | '('));
+        if ch != '?' || !after_boundary {
+            out.push(ch);
+            continue;
+        }
+        let name_start = i + 1;
+        let name_end = ty[name_start..]
+            .find(|c: char| !is_name_char(c))
+            .map_or(ty.len(), |n| name_start + n);
+        let followed_by_args = ty[name_end..].starts_with(['<', '{', '[', '(']);
+        if name_end == name_start || followed_by_args {
+            out.push(ch);
+            continue;
+        }
+        out.push_str(&ty[name_start..name_end]);
+        out.push_str("|null");
+        while chars.peek().is_some_and(|&(j, _)| j < name_end) {
+            chars.next();
+        }
+    }
+    out
+}
+
+/// Remove the scope PHPStan appends to a template type's name
+/// (`T (method Foo::bar(), argument)`, `T of array (class Foo, parameter)`).
+fn strip_template_scopes(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(pos) = [" (class ", " (method ", " (function "]
+        .iter()
+        .filter_map(|marker| rest.find(marker))
+        .min()
+    {
+        out.push_str(&rest[..pos]);
+        drop_template_bound(&mut out);
+        // The scope can itself hold parentheses (`method Foo::bar()`), so
+        // find the `)` that closes the one opened at `pos + 1`.
+        let mut depth = 0i32;
+        let close = rest[pos + 1..].char_indices().find_map(|(i, ch)| {
+            match ch {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(i);
+                    }
+                }
+                _ => {}
+            }
+            None
+        });
+        match close {
+            Some(close) => rest = &rest[pos + 1 + close + 1..],
+            None => {
+                rest = &rest[pos..];
+                break;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Cut the ` of Bound` off a template whose scope was just stripped
+/// (`T of Foo&Bar` → `T`): PHPantom names a template without its bound,
+/// the same way PHPStan prints an unbounded one.
+///
+/// Walks back from the end of `out` at bracket depth zero, so a bound that
+/// is itself generic (`TEvent of Event<TTopic>`) or a union (`T of A|B`) is
+/// cut whole.
+fn drop_template_bound(out: &mut String) {
+    let bytes = out.as_bytes();
+    let mut depth = 0i32;
+    let mut i = bytes.len();
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b'>' | b'}' | b')' => depth += 1,
+            b'<' | b'{' | b'(' | b',' if depth == 0 => return,
+            b'<' | b'{' | b'(' => depth -= 1,
+            b' ' if depth == 0 && out[..i].ends_with(" of") => {
+                let name_end = i - " of".len();
+                let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_' || c == '-';
+                let name_start = out[..name_end]
+                    .rfind(|c: char| !is_name_char(c))
+                    .map_or(0, |n| n + 1);
+                if name_start < name_end {
+                    out.truncate(name_end);
+                }
+                return;
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Split `ty` at the `|` separators that are not nested inside brackets,
+/// braces, parentheses, or quotes.
+fn split_top_level_union(ty: &str) -> Vec<&str> {
+    split_top_level(ty, '|')
+}
+
+/// Canonicalize spellings of the same type that PHPStan and PHPantom
+/// print differently: `callable(): mixed` is `callable`, `array-key` is
+/// `int|string`, `mixed[]` and
+/// `array<int|string, V>` are `array` and `array<V>`, `(A|B)` is `A|B`,
+/// a union with `mixed` in it is `mixed`, and `array{}` beside a wider
+/// `array` member adds nothing.
+fn canonicalize_union_spelling(ty: &str) -> String {
+    let mut ty = ty.trim();
+    while ty.starts_with('(')
+        && ty.ends_with(')')
+        && split_top_level_union(&ty[1..ty.len() - 1]).len() > 1
+        && ty[1..ty.len() - 1].chars().filter(|&c| c == '(').count()
+            == ty[1..ty.len() - 1].chars().filter(|&c| c == ')').count()
+    {
+        ty = &ty[1..ty.len() - 1];
+    }
+    let canonical_member = |member: &str| -> String {
+        let member = member.trim();
+        match member {
+            "callable():mixed" => "callable".to_string(),
+            "Closure():mixed" => "Closure".to_string(),
+            "array-key" => "int|string".to_string(),
+            "mixed[]" | "array<mixed>" | "array<mixed, mixed>" => "array".to_string(),
+            _ => {
+                for prefix in ["array<int|string, ", "array<array-key, "] {
+                    if let Some(rest) = member.strip_prefix(prefix) {
+                        return format!("array<{rest}");
+                    }
+                }
+                member.to_string()
+            }
+        }
+    };
+    let members: Vec<String> = split_top_level_union(ty)
+        .into_iter()
+        .map(canonical_member)
+        .collect();
+    if members.len() > 1 && members.iter().any(|m| m == "mixed") {
+        return "mixed".to_string();
+    }
+    // `scalar` and `true|false` are other spellings of a union PHPStan
+    // prints member by member.
+    let mut members: Vec<String> = members
+        .into_iter()
+        .flat_map(|m| match m.as_str() {
+            "scalar" => ["bool", "float", "int", "string"]
+                .map(String::from)
+                .to_vec(),
+            _ => vec![m],
+        })
+        .collect();
+    if members.iter().any(|m| m == "true") && members.iter().any(|m| m == "false") {
+        members.retain(|m| m != "true" && m != "false");
+        members.push("bool".to_string());
+    }
+    let has_wider_array = members
+        .iter()
+        .any(|m| m == "array" || m.starts_with("array<"));
+    let kept: Vec<String> = members
+        .into_iter()
+        .filter(|m| !(has_wider_array && m == "array{}"))
+        .collect();
+    kept.join("|")
+}
+
+/// Rewrite every `array{0:A,1:B}` whose keys run 0, 1, 2, … with none
+/// optional to the positional `array{A,B}` spelling PHPStan prints.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`], where
+/// shape entries are separated by a bare `,` and keyed as `key:value`.
+fn drop_sequential_shape_keys(ty: &str) -> String {
+    const OPEN: &str = "array{";
+    let Some(start) = ty.find(OPEN) else {
+        return ty.to_string();
+    };
+    let body_start = start + OPEN.len();
+    // Find the matching `}` and split the body at its top-level commas.
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut entries: Vec<&str> = Vec::new();
+    let mut entry_start = body_start;
+    let mut body_end = None;
+    for (i, ch) in ty[body_start..].char_indices() {
+        let i = body_start + i;
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' if depth == 0 => {
+                entries.push(&ty[entry_start..i]);
+                body_end = Some(i);
+                break;
+            }
+            '}' | '>' | ')' | ']' => depth -= 1,
+            ',' if depth == 0 => {
+                entries.push(&ty[entry_start..i]);
+                entry_start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    let Some(body_end) = body_end else {
+        return ty.to_string();
+    };
+
+    let positional: Option<Vec<&str>> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| {
+            let (key, value) = entry.split_once(':')?;
+            (key == index.to_string()).then_some(value)
+        })
+        .collect();
+    let body = match positional {
+        Some(values) if !values.is_empty() => values.join(","),
+        _ => ty[body_start..body_end].to_string(),
+    };
+    format!(
+        "{}{}{}}}{}",
+        &ty[..start],
+        OPEN,
+        drop_sequential_shape_keys(&body),
+        drop_sequential_shape_keys(&ty[body_end + 1..])
+    )
 }
 
 /// Compare expected (PHPStan) type with actual (PHPantom hover) type.
 /// Returns true if they match after normalization.
 fn types_match(expected: &str, actual: &str) -> bool {
-    let ne = normalize_type(expected);
+    // `*NEVER*` is how PHPStan prints the bottom type, at any nesting level
+    // (`iterable<array<*NEVER*>>`).
+    let ne = normalize_type(&expected.replace("*NEVER*", "never"));
     let na = normalize_type(actual);
 
     if ne == na {
+        return true;
+    }
+
+    // `*ERROR*` is PHPStan's type for an expression it cannot resolve;
+    // PHPantom's counterpart is `mixed`.
+    if ne == "*ERROR*" && na == "mixed" {
         return true;
     }
 
@@ -770,24 +1106,127 @@ fn types_match(expected: &str, actual: &str) -> bool {
         return true;
     }
 
-    // Union type order may differ: sort members and compare.
-    let mut ne_parts: Vec<&str> = ne_short.split('|').collect();
-    let mut na_parts: Vec<&str> = na_short.split('|').collect();
-    ne_parts.sort();
-    na_parts.sort();
-    if ne_parts == na_parts {
-        return true;
-    }
+    // Union and intersection member order may differ, at any nesting level
+    // (`list<bool|string>` against `list<string|bool>`).
+    sort_members_deep(&ne_short) == sort_members_deep(&na_short)
+}
 
-    // PHPantom may display `self` where PHPStan resolves to the class name.
-    // Accept `self` as matching any class name (since we can't resolve the
-    // enclosing class from the runner context).
-    if na == "self" || na_short == "self" {
-        // `self` can match any expected class type.
-        return true;
+/// Split `ty` at the `sep` characters that are not nested inside brackets,
+/// braces, parentheses, or quotes.
+fn split_top_level(ty: &str, sep: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut start = 0;
+    for (i, ch) in ty.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' | '>' | ')' | ']' => depth -= 1,
+            _ if ch == sep && depth == 0 => {
+                parts.push(&ty[start..i]);
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
     }
+    parts.push(&ty[start..]);
+    parts
+}
 
-    false
+/// `ty` with the members of every union and intersection in it sorted, the
+/// ones nested inside type arguments and shape entries included.
+fn sort_members_deep(ty: &str) -> String {
+    let mut members: Vec<String> = split_top_level(ty, '|')
+        .into_iter()
+        .map(|member| {
+            let mut parts: Vec<String> = split_top_level(member, '&')
+                .into_iter()
+                .map(sort_nested_members)
+                .collect();
+            parts.sort();
+            parts.join("&")
+        })
+        .collect();
+    members.sort();
+    members.join("|")
+}
+
+/// [`sort_members_deep`] applied to every argument inside the brackets of a
+/// single union member (`array<K, V>`, `array{a: V}`, `Closure(A): R`).
+/// A shape entry's key stays as written; only its value is sorted.
+fn sort_nested_members(member: &str) -> String {
+    let mut out = String::with_capacity(member.len());
+    let mut quote: Option<char> = None;
+    let mut chars = member.char_indices();
+    while let Some((i, ch)) = chars.next() {
+        out.push(ch);
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        let close_char = match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                continue;
+            }
+            '<' => '>',
+            '{' => '}',
+            '(' => ')',
+            '[' => ']',
+            _ => continue,
+        };
+        let body_start = i + 1;
+        let mut depth = 0i32;
+        let mut inner_quote: Option<char> = None;
+        let mut body_end = None;
+        for (j, c) in member[body_start..].char_indices() {
+            if let Some(q) = inner_quote {
+                if c == q {
+                    inner_quote = None;
+                }
+                continue;
+            }
+            match c {
+                '\'' | '"' => inner_quote = Some(c),
+                '{' | '<' | '(' | '[' => depth += 1,
+                _ if c == close_char && depth == 0 => {
+                    body_end = Some(body_start + j);
+                    break;
+                }
+                '}' | '>' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(body_end) = body_end else {
+            out.push_str(&member[body_start..]);
+            return out;
+        };
+        // A generic argument keeps the space the whitespace pass puts after
+        // its comma, which would otherwise sort as part of its first member.
+        let args: Vec<String> = split_top_level(&member[body_start..body_end], ',')
+            .into_iter()
+            .map(str::trim_start)
+            .map(|arg| match split_top_level(arg, ':').as_slice() {
+                [key, value] => format!("{key}:{}", sort_members_deep(value)),
+                _ => sort_members_deep(arg),
+            })
+            .collect();
+        out.push_str(&args.join(","));
+        out.push(close_char);
+        for _ in member[body_start..=body_end].chars() {
+            chars.next();
+        }
+    }
+    out
 }
 
 /// Shorten FQN components in a type string.
@@ -922,37 +1361,7 @@ fn extract_type_from_hover(hover_text: &str, var_name: &str) -> Option<String> {
 // ─── Test runner ────────────────────────────────────────────────────────────
 
 fn create_assert_type_backend() -> Backend {
-    let mut class_stubs: HashMap<&'static str, &'static str> = HashMap::new();
-    class_stubs.insert("UnitEnum", UNIT_ENUM_STUB);
-    class_stubs.insert("BackedEnum", BACKED_ENUM_STUB);
-    class_stubs.insert("Generator", GENERATOR_STUB);
-    class_stubs.insert("NoRewindIterator", NO_REWIND_ITERATOR_STUB);
-    class_stubs.insert("Iterator", ITERATOR_STUB);
-    class_stubs.insert("IteratorAggregate", ITERATOR_AGGREGATE_STUB);
-    class_stubs.insert("IteratorIterator", ITERATOR_ITERATOR_STUB);
-    class_stubs.insert("ArrayIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("CachingIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("InfiniteIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("LimitIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("CallbackFilterIterator", SPL_ITERATOR_STUB);
-    class_stubs.insert("SplDoublyLinkedList", SPL_ITERATOR_STUB);
-    class_stubs.insert("SplObjectStorage", SPL_ITERATOR_STUB);
-    class_stubs.insert("ArrayObject", SPL_ITERATOR_STUB);
-    class_stubs.insert("Traversable", TRAVERSABLE_STUB);
-    class_stubs.insert("DateInterval", DATE_INTERVAL_STUB);
-    class_stubs.insert("DateTimeImmutable", DATE_TIME_IMMUTABLE_STUB);
-    class_stubs.insert("Exception", EXCEPTION_STUB);
-    class_stubs.insert("LogicException", EXCEPTION_STUB);
-    class_stubs.insert("WeakReference", WEAK_REFERENCE_STUB);
-    class_stubs.insert("DOMDocument", DOM_DOCUMENT_STUB);
-    class_stubs.insert("DOMElement", DOM_ELEMENT_STUB);
-    class_stubs.insert("SimpleXMLElement", SIMPLE_XML_ELEMENT_STUB);
-    class_stubs.insert("stdClass", STDCLASS_STUB);
-
-    let mut func_stubs: HashMap<&'static str, &'static str> = HashMap::new();
-    func_stubs.insert("range", ARRAY_FUNCTION_STUB);
-
-    Backend::new_test_with_all_stubs(class_stubs, func_stubs, HashMap::new())
+    Backend::new_test_with_full_stubs()
 }
 
 fn fixture_uri(path: &Path) -> String {
@@ -984,6 +1393,15 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
     // Create backend and open the file.
     let backend = create_assert_type_backend();
     let uri = fixture_uri(path);
+    // Register the transformed source as the open document, the way
+    // `didOpen` does. Anything that re-reads the file (the body of a
+    // by-reference callee, say) would otherwise get the fixture from disk,
+    // whose offsets stop matching the parsed ones after the first rewritten
+    // `assertType()` call.
+    backend
+        .open_files()
+        .write()
+        .insert(uri.clone(), std::sync::Arc::new(transformed.clone()));
     backend.update_ast(&uri, &transformed);
 
     let mut failures: Vec<String> = Vec::new();
@@ -1083,6 +1501,6 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
 }
 
 datatest_stable::harness! {
-    { test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
-    { test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
-}
+{ test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },}

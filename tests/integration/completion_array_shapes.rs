@@ -4062,12 +4062,10 @@ async fn test_array_shape_incremental_key_assignments() {
                     .and_then(|i| i.detail.clone())
                     .unwrap_or_default()
             };
-            // Written in the literal, so the exact value survives; a string
-            // or int assigned afterwards widens at the mutation boundary.
-            // A boolean half does not: it names one of only two values, and
-            // widening it to `bool` would invent the other one.
+            // Written in the literal or assigned once afterwards, so the
+            // exact value survives either way.
             assert_eq!(find("key1"), "key1: 1");
-            assert_eq!(find("key2"), "key2: string");
+            assert_eq!(find("key2"), "key2: 'hello'");
             assert_eq!(find("key3"), "key3: true");
         }
         _ => panic!("Expected CompletionResponse::Array"),
@@ -4189,7 +4187,7 @@ async fn test_array_shape_incremental_override_type() {
             assert_eq!(labels[0], "status");
             // The incremental assignment overrides the initial type
             let detail = items[0].detail.as_deref().unwrap();
-            assert_eq!(detail, "status: int");
+            assert_eq!(detail, "status: 42");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
@@ -5031,8 +5029,10 @@ async fn test_push_style_single_type_member_access() {
     }
 }
 
-/// `$arr = []; $arr[] = new User(); $arr[] = new AdminUser(); $arr[0]->`
-/// should resolve to members from both User and AdminUser.
+/// A push inside a loop cannot know how many times it runs, so pushing
+/// different types onto the same accumulator widens it to a list rather
+/// than tracking each push as its own positional slot: every element reads
+/// back as the union of everything ever pushed.
 #[tokio::test]
 async fn test_push_style_union_type_member_access() {
     let backend = create_test_backend();
@@ -5050,8 +5050,10 @@ async fn test_push_style_union_type_member_access() {
         "    public function grantPermission(string $perm): void {}\n",
         "}\n",
         "$arr = [];\n",
-        "$arr[] = new User();\n",
-        "$arr[] = new AdminUser();\n",
+        "do {\n",
+        "    $arr[] = new User();\n",
+        "    $arr[] = new AdminUser();\n",
+        "} while (false);\n",
         "$arr[0]->\n",
     );
 
@@ -5069,7 +5071,7 @@ async fn test_push_style_union_type_member_access() {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 13,
+                line: 15,
                 character: 10,
             },
         },
@@ -5373,10 +5375,13 @@ async fn test_push_style_inside_class_method() {
     }
 }
 
-/// Push with initial non-empty array: `$arr = [new User()]; $arr[] = new AdminUser();`
-/// String-keyed literal entries are absent, but the initial array has positional
-/// entries. Push inference should still work since positional entries don't
-/// produce string keys.
+/// Push with initial non-empty array, inside a loop so the push cannot know
+/// how many times it runs and widens the whole array to a list instead of
+/// tracking the pushed value as its own positional slot: `$arr = [new
+/// User()]; do { $arr[] = new AdminUser(); } while (false);`. String-keyed
+/// literal entries are absent, but the initial array has positional
+/// entries. Push inference should still work since positional entries
+/// don't produce string keys.
 #[tokio::test]
 async fn test_push_style_with_initial_positional_array() {
     let backend = create_test_backend();
@@ -5392,7 +5397,9 @@ async fn test_push_style_with_initial_positional_array() {
         "    public function grantPermission(string $perm): void {}\n",
         "}\n",
         "$arr = [new User()];\n",
-        "$arr[] = new AdminUser();\n",
+        "do {\n",
+        "    $arr[] = new AdminUser();\n",
+        "} while (false);\n",
         "$arr[0]->\n",
     );
 
@@ -5410,7 +5417,7 @@ async fn test_push_style_with_initial_positional_array() {
         text_document_position: TextDocumentPositionParams {
             text_document: TextDocumentIdentifier { uri },
             position: Position {
-                line: 10,
+                line: 12,
                 character: 10,
             },
         },
@@ -6464,4 +6471,98 @@ async fn test_array_shape_key_completion_from_config_return_type() {
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }
+}
+
+async fn completion_labels(
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Vec<(String, Option<CompletionItemKind>)> {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///array_shape_unsealed.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    match result {
+        Some(CompletionResponse::Array(items)) => items
+            .into_iter()
+            .map(|i| (i.filter_text.unwrap_or(i.label), i.kind))
+            .collect(),
+        Some(_) => panic!("Expected CompletionResponse::Array"),
+        None => Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_key_completion_beside_spread_of_unknown_length() {
+    let text = concat!(
+        "<?php\n",
+        "class User {}\n",
+        "class AdminUser extends User {}\n",
+        "/** @var list<User> $users */\n",
+        "$users = [];\n",
+        "$config = ['admin' => new AdminUser(), ...$users];\n",
+        "$config['\n",
+    );
+    let items = completion_labels(text, 6, 9).await;
+    let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, vec!["admin"], "got {labels:?}");
+}
+
+#[tokio::test]
+async fn test_array_shape_entry_beside_spread_of_unknown_length_keeps_its_type() {
+    let text = concat!(
+        "<?php\n",
+        "class Guest {\n",
+        "    public function visit(): void {}\n",
+        "}\n",
+        "class Admin {\n",
+        "    public function revoke(): void {}\n",
+        "}\n",
+        "/** @param list<Guest> $guests */\n",
+        "function build(array $guests): void {\n",
+        "    $people = ['admin' => new Admin(), ...$guests];\n",
+        "    $people['admin']->\n",
+        "}\n",
+    );
+    let items = completion_labels(text, 10, 23).await;
+    let methods: Vec<&str> = items
+        .iter()
+        .filter(|(_, kind)| *kind == Some(CompletionItemKind::METHOD))
+        .map(|(label, _)| label.as_str())
+        .collect();
+    assert!(methods.contains(&"revoke"), "got {methods:?}");
+    assert!(!methods.contains(&"visit"), "got {methods:?}");
+}
+
+#[tokio::test]
+async fn test_array_shape_key_completion_unsealed_annotation() {
+    let text = concat!(
+        "<?php\n",
+        "/** @var array{name: string, ...<string, mixed>} $options */\n",
+        "$options = getOptions();\n",
+        "$options['\n",
+    );
+    let items = completion_labels(text, 3, 10).await;
+    let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, vec!["name"], "got {labels:?}");
 }

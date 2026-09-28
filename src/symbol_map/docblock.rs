@@ -286,6 +286,21 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
             }
         }
 
+        // ── Type alias declarations ─────────────────────────────────
+        // The alias name itself is not a class and gets no span, but the
+        // definition behind it is an ordinary type, and the class an
+        // import names is an ordinary reference to it.
+        TagValue::TypeAlias(value) => emit_type_symbols(value.r#type, sink),
+        TagValue::TypeAliasImport(value) => {
+            let span = value.imported_from.span();
+            emit_identifier_span(
+                crate::atom::bytes_to_str(value.imported_from.value),
+                span.start.offset,
+                span.end.offset,
+                sink.spans,
+            );
+        }
+
         // ── Tags that declare a member or a template parameter ──────
         TagValue::Method(value) => emit_method_tag_symbols(value, docblock, base_offset, sink),
         TagValue::Property(value)

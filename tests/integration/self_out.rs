@@ -2,8 +2,7 @@
 //! call that changes the type the walker tracks for its receiver, the way
 //! an assignment changes a variable's type.
 
-use crate::common::create_test_backend;
-use phpantom_lsp::Backend;
+use crate::common::{create_test_backend, hover_at, hover_text};
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -30,20 +29,6 @@ final class Pen { public function write(): string { return ''; } }
 final class Pencil { public function sketch(): string { return ''; } }
 "#;
 
-fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
-    backend.update_ast(uri, content);
-    backend
-        .handle_hover(uri, content, Position { line, character })
-        .expect("expected hover")
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
-
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 /// After `$box->replace('x')`, the walker must read `$box` as
@@ -66,7 +51,7 @@ function f(MutableBox $box): void {{
     );
 
     // Hover on `$box;` on the last statement of `f`.
-    let hover = hover_at(&backend, uri, &content, 26, 4);
+    let hover = hover_at(&backend, uri, &content, 26, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("MutableBox<string>"),
@@ -97,7 +82,7 @@ function f(MutableBox $box): void {{
     );
 
     // Hover on `$box;`, the statement before the `replace()` call.
-    let hover = hover_at(&backend, uri, &content, 25, 4);
+    let hover = hover_at(&backend, uri, &content, 25, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("MutableBox<int>"),
@@ -131,7 +116,7 @@ function f(MutableBox $box): void {{
     backend.update_ast(uri, &content);
 
     // `@return T` on get() must resolve through the post-call binding.
-    let hover = hover_at(&backend, uri, &content, 26, 11);
+    let hover = hover_at(&backend, uri, &content, 26, 11).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("Pencil"),
@@ -183,7 +168,7 @@ function f(Box $box): void {
 }
 "#;
 
-    let hover = hover_at(&backend, uri, content, 16, 4);
+    let hover = hover_at(&backend, uri, content, 16, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
         text.contains("Box<int>"),
@@ -192,5 +177,71 @@ function f(Box $box): void {
     assert!(
         !text.contains("Box<string>"),
         "did not expect $box to be mutated without a self-out tag, got: {text}"
+    );
+}
+
+const FLAG_BUILDER: &str = r#"
+/** @template TReady = false */
+final class Builder {
+    /** @phpstan-self-out self<true> */
+    public function ready(): void {}
+
+    /** @return ($this is self<true> ? int : string) */
+    public function result(): int|string { return 0; }
+}
+"#;
+
+/// Hover on the last occurrence of `needle` in `content`.
+fn hover_last(content: &str, needle: &str) -> String {
+    let backend = create_test_backend();
+    let offset = content.rfind(needle).expect("needle present");
+    let before = &content[..offset];
+    let line = before.matches('\n').count() as u32;
+    let character = (offset - before.rfind('\n').map_or(0, |i| i + 1)) as u32;
+    let hover =
+        hover_at(&backend, "file:///test.php", content, line, character).expect("expected hover");
+    hover_text(&hover).to_string()
+}
+
+/// A conditional return keyed on `$this` is decided against the receiver's
+/// template arguments as a preceding `@phpstan-self-out` left them.
+#[test]
+fn this_conditional_return_follows_self_out_binding() {
+    let content = format!(
+        r#"<?php
+{FLAG_BUILDER}
+function f(): void {{
+    $b = new Builder();
+    $b->ready();
+    $r = $b->result();
+    $r;
+}}
+"#
+    );
+    let text = hover_last(&content, "$r;");
+    assert!(
+        text.contains("int") && !text.contains("string"),
+        "expected result() to read as int once ready() bound TReady to true, got: {text}"
+    );
+}
+
+/// Without the self-out call the template keeps its default, so the
+/// condition's other branch is taken.
+#[test]
+fn this_conditional_return_uses_template_default_before_self_out() {
+    let content = format!(
+        r#"<?php
+{FLAG_BUILDER}
+function f(): void {{
+    $b = new Builder();
+    $r = $b->result();
+    $r;
+}}
+"#
+    );
+    let text = hover_last(&content, "$r;");
+    assert!(
+        text.contains("string") && !text.contains("int"),
+        "expected result() to read as string while TReady is still false, got: {text}"
     );
 }

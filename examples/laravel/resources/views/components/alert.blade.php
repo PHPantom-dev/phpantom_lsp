@@ -15,6 +15,13 @@
      Laravel's own AnonymousComponent::data() merges them into the view.
      Try: hover $messages. --}}
 
+{{-- $title comes from a `<x-slot:title>` (or the legacy `<x-slot
+     name="title">`) a caller nests inside the tag, in welcome.blade.php.
+     It is declared here, in the component that receives it, never in the
+     caller that writes the tag — the same as $slot, it arrives as a
+     \Illuminate\View\ComponentSlot.
+     Try: hover $title. --}}
+
 {{-- A template-level import applies to the whole template, the same as
      it would in the compiled view. Try: Ctrl+Click OrderStatus below. --}}
 @php
@@ -22,6 +29,10 @@
 @endphp
 
 <div {{ $attributes->merge(['class' => 'alert', 'role' => 'alert']) }}>
+    @isset($title)
+        <h4>{{ $title }}</h4>
+    @endisset
+
     @if ($slot->isEmpty())
         <em>{{ __('messages.welcome') }}</em>
     @else
