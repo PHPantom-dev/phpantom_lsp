@@ -42,18 +42,6 @@ impl Backend {
                 // identifiers not tracked by mago-names (e.g. docblock-sourced
                 // references).
                 let fqn_resolver = SpanFqnResolver::new(self, file.uri());
-                // YAML/XML metadata may name a generated transparent proxy,
-                // which is a reference to the class it stands in for.
-                let in_resource = crate::resource_navigation::is_resource_document(file.uri());
-                let class_matches = |resolved: &str| {
-                    if in_resource {
-                        self.metadata_class_family(resolved)
-                            .iter()
-                            .any(|name| name.eq_ignore_ascii_case(target))
-                    } else {
-                        class_names_match(strip_fqn_prefix(resolved), target, target_short)
-                    }
-                };
 
                 // First pass: resolved-name check to avoid unnecessary content
                 // work.  Aliased imports (`use Foo as Bar; new Bar`) must still
@@ -64,7 +52,8 @@ impl Backend {
                         if crate::util::short_name(name).eq_ignore_ascii_case(target_short) {
                             true
                         } else {
-                            class_matches(&fqn_resolver.fqn(name, false, span.start))
+                            let resolved = fqn_resolver.fqn(name, false, span.start);
+                            class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                         }
                     }
                     SymbolKind::ClassDeclaration { name } => {
@@ -83,7 +72,8 @@ impl Backend {
                 for span in &symbol_map.spans {
                     let matched = match &span.kind {
                         SymbolKind::ClassReference { name, is_fqn, .. } => {
-                            class_matches(&fqn_resolver.fqn(name, *is_fqn, span.start))
+                            let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
+                            class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                         }
                         SymbolKind::ClassDeclaration { name } if include_declaration => {
                             if !name.eq_ignore_ascii_case(target_short) {

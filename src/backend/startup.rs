@@ -349,21 +349,6 @@ impl Backend {
             self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
                 .await;
 
-            // Generated transparent proxies live in opt-in cache/build paths
-            // that normal project indexing may ignore. Read their declarations
-            // into the metadata relation index; they do not enter the type
-            // engine or the workspace class map.
-            let proxy_backend = self.clone_for_blocking();
-            let proxy_root = root.clone();
-            let proxy_count = run_blocking_cancel_safe("index_php_proxies", move || {
-                proxy_backend.rebuild_configured_proxy_index(&proxy_root)
-            })
-            .await
-            .unwrap_or(0);
-            if proxy_count > 0 {
-                tracing::info!("PHPantom: indexed {} transparent proxies", proxy_count);
-            }
-
             // Symfony's generated container records the final event-listener
             // wiring after compiler passes have run. Read it statically; the
             // container PHP is never loaded or executed.

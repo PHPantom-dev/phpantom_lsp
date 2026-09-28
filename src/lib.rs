@@ -288,7 +288,6 @@ mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
 pub mod progress;
-mod proxy_metadata;
 mod reference_counts;
 mod reference_index;
 mod references;
@@ -643,12 +642,6 @@ pub struct Backend {
     /// candidate files, then run their existing semantic checks for aliases,
     /// inheritance, Laravel declarations, and `self/static/parent`.
     pub(crate) reference_index: reference_index::ReferenceIndex,
-    /// Transparent proxy-to-real-class relations for metadata consumers.
-    ///
-    /// Generated proxies remain valid PHP subclasses in the type engine,
-    /// while events, external references, and lenses can be attributed to the
-    /// class the proxy represents at runtime.
-    pub(crate) proxy_index: Arc<RwLock<proxy_metadata::ProxyIndex>>,
     /// Symfony event wiring recovered from compiled containers and configured
     /// PHP attributes.
     pub(crate) symfony_events: Arc<RwLock<symfony::SymfonyEventIndex>>,
@@ -1261,7 +1254,6 @@ impl Backend {
             framework_reference_lookup: framework::new_framework_reference_lookup_index(),
             framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
-            proxy_index: Arc::new(RwLock::new(proxy_metadata::ProxyIndex::default())),
             symfony_events: Arc::new(RwLock::new(symfony::SymfonyEventIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
@@ -2069,7 +2061,6 @@ impl Backend {
             framework_reference_lookup: Arc::clone(&self.framework_reference_lookup),
             framework_doctrine_repositories: Arc::clone(&self.framework_doctrine_repositories),
             reference_index: Arc::clone(&self.reference_index),
-            proxy_index: Arc::clone(&self.proxy_index),
             symfony_events: Arc::clone(&self.symfony_events),
             skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),

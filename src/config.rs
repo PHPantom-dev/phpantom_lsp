@@ -318,23 +318,6 @@ pub struct PhpConfig {
     /// Override the detected PHP version (e.g. `"8.3"`).
     /// When `None`, PHPantom infers from `composer.json`.
     pub version: Option<String>,
-    /// Generated transparent-proxy class rules.
-    ///
-    /// Each rule scans opt-in workspace-relative paths for subclasses that
-    /// directly implement a marker interface. Metadata attached to the
-    /// generated subclass is then attributed to its parent class.
-    pub proxies: Vec<PhpProxyConfig>,
-}
-
-/// One `[[php.proxies]]` transparent-proxy discovery rule.
-#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
-#[serde(default)]
-pub struct PhpProxyConfig {
-    /// Workspace-relative PHP files, directories, or glob patterns to scan.
-    pub paths: Vec<String>,
-    /// Interface that proves a generated subclass is a transparent proxy.
-    #[serde(rename = "marker-interface")]
-    pub marker_interface: String,
 }
 
 /// `[diagnostics]` section — toggle individual diagnostic providers.
@@ -1153,7 +1136,6 @@ mod tests {
     fn default_content_parses_successfully() {
         let config: Config = toml::from_str(DEFAULT_CONFIG_CONTENT).unwrap();
         assert!(config.php.version.is_none());
-        assert!(config.php.proxies.is_empty());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
@@ -1191,7 +1173,6 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
-        assert!(config.php.proxies.is_empty());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
@@ -1215,7 +1196,6 @@ mod tests {
         std::fs::write(&path, "").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert!(config.php.version.is_none());
-        assert!(config.php.proxies.is_empty());
         assert!(!config.diagnostics.unresolved_member_access_enabled());
         assert!(!config.diagnostics.extra_arguments_enabled());
         assert!(!config.diagnostics.report_magic_properties_enabled());
@@ -1295,30 +1275,6 @@ transport-cases = { ASYNC = ".async" }
         assert_eq!(
             config.symfony.events.subscribers[0].transport_cases["ASYNC"],
             ".async"
-        );
-    }
-
-    #[test]
-    fn parses_transparent_proxy_rules() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join(CONFIG_FILE_NAME);
-        std::fs::write(
-            &path,
-            r#"
-[[php.proxies]]
-paths = ["var/cache/*/proxies/*.php"]
-marker-interface = 'Acme\Proxy\TransparentProxy'
-"#,
-        )
-        .unwrap();
-
-        let config = load_config(dir.path()).unwrap();
-        assert_eq!(
-            config.php.proxies,
-            vec![PhpProxyConfig {
-                paths: vec!["var/cache/*/proxies/*.php".to_string()],
-                marker_interface: "Acme\\Proxy\\TransparentProxy".to_string(),
-            }]
         );
     }
 
