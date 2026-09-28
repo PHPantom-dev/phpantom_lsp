@@ -19,13 +19,9 @@
 //! available, and a reference to a class declared in the same file is
 //! already loaded, so neither reaches the autoloader.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::names::OwnedResolvedNames;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::util::resolve_to_fqn;
 
@@ -75,10 +71,8 @@ impl Backend {
             None => return Vec::new(),
         };
 
-        let file_resolved_names: Option<Arc<OwnedResolvedNames>> =
-            self.resolved_names.read().get(uri).cloned();
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let file_ctx = self.file_context(uri);
+        let file_resolved_names = &file_ctx.resolved_names;
 
         let mut out = Vec::new();
 
@@ -110,6 +104,7 @@ impl Backend {
                 // import itself), so skip it here to avoid double-reporting.
                 // Qualified and fully-qualified references carry literal
                 // casing at the reference site, so they are always checked.
+                let file_use_map = file_ctx.use_map_at(span.start);
                 if !is_fqn && !ref_name.contains('\\') {
                     let is_imported = file_resolved_names
                         .as_ref()
@@ -122,12 +117,18 @@ impl Backend {
 
                 if is_fqn {
                     ref_name.to_string()
-                } else if let Some(ref rn) = file_resolved_names {
-                    rn.get(span.start)
-                        .map(|s| s.to_string())
-                        .unwrap_or_else(|| resolve_to_fqn(ref_name, &file_use_map, &file_namespace))
                 } else {
-                    resolve_to_fqn(ref_name, &file_use_map, &file_namespace)
+                    let file_namespace = file_ctx.namespace_at(span.start);
+                    match file_resolved_names {
+                        Some(rn) => {
+                            rn.get(span.start)
+                                .map(|s| s.to_string())
+                                .unwrap_or_else(|| {
+                                    resolve_to_fqn(ref_name, file_use_map, file_namespace)
+                                })
+                        }
+                        None => resolve_to_fqn(ref_name, file_use_map, file_namespace),
+                    }
                 }
             };
 

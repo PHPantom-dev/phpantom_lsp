@@ -9,7 +9,7 @@
 //! completion "respond a few times, then stall and get cancelled."
 //!
 //! [`phpantom_lsp::LSP_CONCURRENCY`] raises that limit. This test drives the
-//! real tower-lsp [`Server`] — configured exactly as the binary configures it
+//! real tower-lsp `Server` — configured exactly as the binary configures it
 //! — over an in-memory duplex stream with a deliberately slow `completion`
 //! handler, floods it with a burst of completions, and asserts that a cheap
 //! request sent *after* the burst still comes back promptly instead of queuing
@@ -19,11 +19,12 @@
 //! It is intentionally self-contained: a dummy language server with controlled
 //! timing, no dependency on `examples/` or any real workspace.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tower_lsp::lsp_types::*;
-use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result};
+use tower_lsp::{Client, LanguageServer, jsonrpc::Result};
+
+use crate::common::lsp_transport::serve;
 
 /// One slow completion. Long enough that, if completions are processed only a
 /// few at a time, a request queued behind a burst of them is visibly delayed.
@@ -59,116 +60,49 @@ impl LanguageServer for SlowServer {
     }
 }
 
-/// Frame a JSON-RPC message with the LSP `Content-Length` header.
-fn frame(value: serde_json::Value) -> Vec<u8> {
-    let body = serde_json::to_vec(&value).unwrap();
-    let mut out = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    out.extend_from_slice(&body);
-    out
-}
-
-/// Read framed messages off the stream until one with `id == wanted` arrives,
-/// returning how long that took. Times out via the caller's `tokio::time`.
-async fn wait_for_id(stream: &mut DuplexStream, wanted: i64) -> Duration {
-    let start = Instant::now();
-    let mut buf: Vec<u8> = Vec::new();
-    let mut chunk = [0u8; 4096];
-    loop {
-        // Parse any complete frames already buffered.
-        while let Some((msg, consumed)) = try_parse_frame(&buf) {
-            buf.drain(..consumed);
-            if msg.get("id").and_then(|v| v.as_i64()) == Some(wanted) {
-                return start.elapsed();
-            }
-        }
-        let n = stream.read(&mut chunk).await.unwrap();
-        assert!(n > 0, "server closed the stream before id {wanted} arrived");
-        buf.extend_from_slice(&chunk[..n]);
-    }
-}
-
-/// Try to parse one `Content-Length`-framed JSON message from `buf`.
-fn try_parse_frame(buf: &[u8]) -> Option<(serde_json::Value, usize)> {
-    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
-    let header = std::str::from_utf8(&buf[..header_end]).ok()?;
-    let len: usize = header
-        .lines()
-        .find_map(|l| l.strip_prefix("Content-Length: "))?
-        .trim()
-        .parse()
-        .ok()?;
-    let body_start = header_end + 4;
-    let body_end = body_start + len;
-    if buf.len() < body_end {
-        return None;
-    }
-    let value = serde_json::from_slice(&buf[body_start..body_end]).ok()?;
-    Some((value, body_end))
-}
-
 /// A burst of slow completions must not starve a cheap request sent right after
 /// them: the cheap request comes back long before the whole burst could drain
 /// at low concurrency.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn cheap_request_not_starved_by_completion_burst() {
     let uri = "file:///t.php";
-    let (service, socket) = LspService::build(|_client: Client| SlowServer).finish();
-    let (mut client, server) = tokio::io::duplex(1 << 16);
-    let (server_read, server_write) = tokio::io::split(server);
-
-    // Drive the real transport with the same concurrency the binary uses.
-    tokio::spawn(
-        Server::new(server_read, server_write, socket)
-            .concurrency_level(phpantom_lsp::LSP_CONCURRENCY)
-            .serve(service),
-    );
-
-    // Initialize.
-    client
-        .write_all(&frame(serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "initialize",
-            "params": {"capabilities": {}}
-        })))
-        .await
-        .unwrap();
-    wait_for_id(&mut client, 1).await;
-    client
-        .write_all(&frame(serde_json::json!({
-            "jsonrpc": "2.0", "method": "initialized", "params": {}
-        })))
-        .await
-        .unwrap();
+    let mut client = serve(|_client: Client| SlowServer);
+    client.initialize(serde_json::json!({})).await;
 
     // Fire a burst of slow completions WITHOUT reading their responses, the way
     // an editor pipelines a keystroke barrage.
     const BURST: i64 = 40;
     for id in 100..100 + BURST {
         client
-            .write_all(&frame(serde_json::json!({
-                "jsonrpc": "2.0", "id": id, "method": "textDocument/completion",
-                "params": {
-                    "textDocument": {"uri": uri},
-                    "position": {"line": 0, "character": 0}
-                }
-            })))
-            .await
-            .unwrap();
+            .send(
+                "a completion",
+                serde_json::json!({
+                    "jsonrpc": "2.0", "id": id, "method": "textDocument/completion",
+                    "params": {
+                        "textDocument": {"uri": uri},
+                        "position": {"line": 0, "character": 0}
+                    }
+                }),
+            )
+            .await;
     }
 
     // Then a cheap request. It must not wait for the whole burst to drain.
     let cheap_id = 9999;
     client
-        .write_all(&frame(serde_json::json!({
-            "jsonrpc": "2.0", "id": cheap_id, "method": "textDocument/documentHighlight",
-            "params": {
-                "textDocument": {"uri": uri},
-                "position": {"line": 0, "character": 0}
-            }
-        })))
-        .await
-        .unwrap();
+        .send(
+            "the cheap request",
+            serde_json::json!({
+                "jsonrpc": "2.0", "id": cheap_id, "method": "textDocument/documentHighlight",
+                "params": {
+                    "textDocument": {"uri": uri},
+                    "position": {"line": 0, "character": 0}
+                }
+            }),
+        )
+        .await;
 
-    let latency = tokio::time::timeout(Duration::from_secs(5), wait_for_id(&mut client, cheap_id))
+    let latency = tokio::time::timeout(Duration::from_secs(5), client.wait_for_id(cheap_id))
         .await
         .expect("server wedged: cheap request did not return within 5s under a completion burst");
 

@@ -15,7 +15,7 @@ use tower_lsp::lsp_types::{
 };
 
 use crate::Backend;
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::{LineIndex, offset_to_position, position_to_offset};
 use crate::util::strip_fqn_prefix;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,7 +179,7 @@ impl Backend {
                 } => {
                     lookup.methods.entry(member_name.clone()).or_default().push(
                         IndexedFrameworkMemberLocation {
-                            class_fqn: framework_fqn_lookup_key(class_fqn),
+                            class_fqn: normalize_framework_fqn(class_fqn),
                             location,
                         },
                     );
@@ -383,12 +383,20 @@ impl Backend {
         locations
     }
 
+    /// Whether any framework resource names a method called `member`, so a
+    /// caller can skip building the class scope a lookup would filter by.
+    pub(crate) fn has_framework_member_references(&self, member: &str) -> bool {
+        self.framework_reference_lookup
+            .read()
+            .methods
+            .contains_key(member)
+    }
+
     pub(crate) fn framework_member_reference_locations(
         &self,
         target_member: &str,
-        hierarchy: Option<&HashSet<String>>,
+        hierarchy: Option<&crate::references::MemberScope>,
     ) -> Vec<Location> {
-        let hierarchy = hierarchy.map(normalized_framework_hierarchy);
         let lookup = self.framework_reference_lookup.read();
         let mut locations = lookup
             .methods
@@ -396,9 +404,7 @@ impl Backend {
             .into_iter()
             .flatten()
             .filter(|entry| {
-                hierarchy
-                    .as_ref()
-                    .is_none_or(|hierarchy| hierarchy.contains(&entry.class_fqn))
+                hierarchy.is_none_or(|hierarchy| hierarchy.contains(self, &entry.class_fqn))
             })
             .filter_map(|entry| entry.location.to_lsp())
             .collect();
@@ -511,14 +517,52 @@ impl Backend {
         }
     }
 
+    /// Edits that move every framework resource name under `old_prefix` to
+    /// `new_prefix`: the namespace itself, the namespace-prefix service keys
+    /// under it, and every class it contains.
     pub(crate) fn collect_framework_namespace_edits(
         &self,
         old_prefix: &str,
         new_prefix: &str,
         changes: &mut HashMap<Url, Vec<TextEdit>>,
     ) {
-        let old_prefix = normalize_framework_fqn(old_prefix);
-        let old_prefix_lower = old_prefix.to_ascii_lowercase();
+        self.collect_framework_name_edits(old_prefix, new_prefix, true, changes);
+    }
+
+    /// Edits that rename class `old_fqn` to `new_fqn` wherever a framework
+    /// resource names it, `Class::method` controller strings included.
+    pub(crate) fn collect_framework_class_edits(
+        &self,
+        old_fqn: &str,
+        new_fqn: &str,
+        changes: &mut HashMap<Url, Vec<TextEdit>>,
+    ) {
+        self.collect_framework_name_edits(old_fqn, new_fqn, false, changes);
+    }
+
+    /// Rewrite the framework resource names equal to `old_name`, or nested
+    /// under it when `nested` is set, to the matching name under
+    /// `new_name`.
+    ///
+    /// Each occurrence is written back in the spelling its document uses
+    /// (a leading backslash, the doubled backslashes of a quoted YAML
+    /// string), which is why these edits are built here rather than by the
+    /// PHP rename.  Each occurrence is also checked against the document's
+    /// current text on its own: one the index no longer matches is left
+    /// alone instead of cancelling the edits around it.
+    fn collect_framework_name_edits(
+        &self,
+        old_name: &str,
+        new_name: &str,
+        nested: bool,
+        changes: &mut HashMap<Url, Vec<TextEdit>>,
+    ) {
+        let old_name = normalize_framework_fqn(old_name);
+        let new_name = normalize_framework_fqn(new_name);
+        if old_name.is_empty() || new_name.is_empty() {
+            return;
+        }
+        let nested_prefix = format!("{}\\", old_name.to_ascii_lowercase());
 
         for (uri, refs) in self.framework_references.read().iter() {
             let Ok(parsed_uri) = Url::parse(uri) else {
@@ -527,36 +571,43 @@ impl Backend {
             let Some(content) = self.get_file_content_arc(uri) else {
                 continue;
             };
+            let mut line_index = None;
             for reference in refs.iter() {
-                let Some(name) = framework_reference_class_or_namespace(&reference.kind) else {
-                    continue;
+                let name = match &reference.kind {
+                    FrameworkReferenceKind::Class { fqn } => fqn,
+                    FrameworkReferenceKind::Namespace { prefix } if nested => prefix,
+                    _ => continue,
                 };
                 let normalized = normalize_framework_fqn(name);
-                let normalized_lower = normalized.to_ascii_lowercase();
-                if normalized_lower != old_prefix_lower
-                    && !normalized_lower.starts_with(&format!("{}\\", old_prefix_lower))
+                let exact = normalized.eq_ignore_ascii_case(&old_name);
+                if !exact
+                    && !(nested && normalized.to_ascii_lowercase().starts_with(&nested_prefix))
                 {
                     continue;
                 }
-
-                let replacement = if normalized.len() == old_prefix.len() {
-                    new_prefix.to_string()
-                } else {
-                    format!("{}{}", new_prefix, &normalized[old_prefix.len()..])
+                let Some(source) = content.get(reference.start as usize..reference.end as usize)
+                else {
+                    continue;
                 };
-                let source = content
-                    .get(reference.start as usize..reference.end as usize)
-                    .unwrap_or("");
-                let new_text = rewrite_framework_fqn_literal(source, &replacement);
+                if !normalize_framework_fqn(source).eq_ignore_ascii_case(&normalized) {
+                    continue;
+                }
+
+                let replacement = if exact {
+                    new_name.clone()
+                } else {
+                    format!("{}{}", new_name, &normalized[old_name.len()..])
+                };
+                let index = line_index.get_or_insert_with(|| LineIndex::new(&content));
                 changes
                     .entry(parsed_uri.clone())
                     .or_default()
                     .push(TextEdit {
                         range: Range {
-                            start: offset_to_position(&content, reference.start as usize),
-                            end: offset_to_position(&content, reference.end as usize),
+                            start: index.position(reference.start as usize),
+                            end: index.position(reference.end as usize),
                         },
-                        new_text,
+                        new_text: rewrite_framework_fqn_literal(source, &replacement),
                     });
             }
         }
@@ -627,14 +678,6 @@ impl Backend {
                     });
             }
         }
-    }
-}
-
-fn framework_reference_class_or_namespace(kind: &FrameworkReferenceKind) -> Option<&str> {
-    match kind {
-        FrameworkReferenceKind::Class { fqn } => Some(fqn),
-        FrameworkReferenceKind::Namespace { prefix } => Some(prefix),
-        FrameworkReferenceKind::Method { .. } | FrameworkReferenceKind::Path { .. } => None,
     }
 }
 
@@ -1070,13 +1113,6 @@ fn framework_fqn_lookup_key(name: &str) -> String {
     key
 }
 
-fn normalized_framework_hierarchy(hierarchy: &HashSet<String>) -> HashSet<String> {
-    hierarchy
-        .iter()
-        .map(|fqn| framework_fqn_lookup_key(fqn))
-        .collect()
-}
-
 fn valid_framework_name(name: &str) -> bool {
     let name = name.trim_matches('\\');
     if name.is_empty() {
@@ -1109,7 +1145,10 @@ pub(crate) fn namespace_segment_range_at_offset(
 ) -> Option<(usize, u32, u32)> {
     let normalized_source = source.trim_end_matches('\\');
     let mut offset = absolute_start;
-    for (idx, segment) in normalized_source.split('\\').enumerate() {
+    // An escaped `App\\Service` splits into an empty piece between the two
+    // backslashes; only the non-empty pieces are namespace segments.
+    let mut idx = 0;
+    for segment in normalized_source.split('\\') {
         if segment.is_empty() {
             offset += 1;
             continue;
@@ -1119,6 +1158,7 @@ pub(crate) fn namespace_segment_range_at_offset(
             return Some((idx, offset, end));
         }
         offset = end + 1;
+        idx += 1;
     }
     None
 }
@@ -1278,6 +1318,21 @@ fn normalize_path(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn namespace_segments_count_only_names_in_escaped_and_rooted_spellings() {
+        // `App\\Domain\\` as a quoted YAML string: `Domain` is segment 1.
+        let escaped = "App\\\\Domain\\\\";
+        assert_eq!(
+            namespace_segment_range_at_offset(escaped, 10, 16),
+            Some((1, 15, 21))
+        );
+        // `\App\Domain`: the leading separator is not a segment.
+        assert_eq!(
+            namespace_segment_range_at_offset("\\App\\Domain", 0, 2),
+            Some((0, 1, 4))
+        );
+    }
 
     #[test]
     fn doctrine_repository_index_updates_with_framework_resource() {

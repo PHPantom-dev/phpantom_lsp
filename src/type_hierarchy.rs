@@ -110,12 +110,14 @@ impl Backend {
         // Fall back to resolve_to_fqn (via the item's file context) for
         // names that were not post-processed (e.g. stubs, edge cases).
         let ctx = self.file_context(item_uri);
+        let use_map = ctx.use_map_at(class_info.start_offset);
+        let namespace = ctx.namespace_at(class_info.start_offset);
 
         for name in supertype_names {
             let (resolved_fqn, super_info) = if let Some(info) = self.find_or_load_class(name) {
                 (name.to_string(), info)
             } else {
-                let fqn = Self::resolve_to_fqn(name, &ctx.use_map, &ctx.namespace);
+                let fqn = Self::resolve_to_fqn(name, use_map, namespace);
                 match self.find_or_load_class(&fqn) {
                     Some(info) => (fqn, info),
                     None => continue,

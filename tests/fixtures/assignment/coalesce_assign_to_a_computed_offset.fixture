@@ -1,0 +1,16 @@
+// test: ??= on an offset whose key is not a variable stores the element
+// feature: hover
+// expect: $total = int
+// expect_absent: null
+---
+<?php
+
+/** @param list<int> $items */
+function test(array $items): void {
+    $totals = [];
+    foreach ($items as $item) {
+        $totals[(string) $item] ??= 0;
+        $total = $totals[(string) $item];
+        $<>total;
+    }
+}

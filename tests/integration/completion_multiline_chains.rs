@@ -1,5 +1,4 @@
-use crate::common::{block_on, create_psr4_workspace, create_test_backend};
-use tower_lsp::LanguageServer;
+use crate::common::{block_on, complete_labels_at, create_psr4_workspace, create_test_backend};
 use tower_lsp::lsp_types::*;
 
 // ─── Multi-line method chain completion tests ───────────────────────────────
@@ -8,44 +7,6 @@ use tower_lsp::lsp_types::*;
 // completions. The cursor is on a continuation line (one that starts with
 // `->` or `?->` after optional whitespace), and the resolver must join the
 // preceding lines to reconstruct the full chain expression.
-
-/// Helper: open a document, send a completion request, return item labels.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<String> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items.iter().map(|i| i.label.clone()).collect(),
-        _ => vec![],
-    }
-}
 
 // ─── Basic multi-line chain ─────────────────────────────────────────────────
 
@@ -70,7 +31,7 @@ async fn test_multiline_chain_basic() {
     );
 
     // Cursor on line 8 (`            ->`) right after `->`
-    let names = complete_at(&backend, &uri, text, 8, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 8, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("findAll(")),
         "Should offer Repo::findAll(), got: {names:?}"
@@ -104,7 +65,7 @@ async fn test_multiline_chain_three_lines() {
     );
 
     // Cursor on line 13 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 13, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 13, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("limit(")),
         "Should offer Builder::limit(), got: {names:?}"
@@ -137,7 +98,7 @@ async fn test_multiline_chain_nullsafe_continuation() {
     );
 
     // Cursor on line 8 (`            ?->`) after `?->`
-    let names = complete_at(&backend, &uri, text, 8, 15).await;
+    let names = complete_labels_at(&backend, &uri, text, 8, 15).await;
     assert!(
         names.iter().any(|n| n.starts_with("getName(")),
         "Should offer City::getName() through nullsafe chain, got: {names:?}"
@@ -168,7 +129,7 @@ async fn test_multiline_chain_static_base() {
     );
 
     // Cursor on line 10 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 10, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 10, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("execute(")),
         "Should offer QBuilder::execute(), got: {names:?}"
@@ -200,7 +161,7 @@ async fn test_multiline_chain_with_variable_assignment() {
     );
 
     // Cursor on line 10 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 10, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 10, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("total(")),
         "Should offer Paginator::total(), got: {names:?}"
@@ -232,7 +193,7 @@ async fn test_multiline_chain_with_arguments() {
     );
 
     // Cursor on line 11 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 11, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("build(")),
         "Should offer Fluent::build(), got: {names:?}"
@@ -263,7 +224,7 @@ async fn test_single_line_chain_still_works() {
     );
 
     // Cursor on line 6 after `->`
-    let names = complete_at(&backend, &uri, text, 6, 43).await;
+    let names = complete_labels_at(&backend, &uri, text, 6, 43).await;
     assert!(
         names.iter().any(|n| n.starts_with("getName(")),
         "Single-line chain should still offer Item::getName(), got: {names:?}"
@@ -323,7 +284,7 @@ async fn test_multiline_chain_cross_file() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 7, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 7, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("where(")),
         "Should offer Builder::where() through multi-line PSR-4 chain, got: {names:?}"
@@ -360,7 +321,7 @@ async fn test_multiline_chain_partial_identifier() {
     );
 
     // Cursor after `the` on line 11
-    let names = complete_at(&backend, &uri, text, 11, 17).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 17).await;
     assert!(
         names.iter().any(|n| n.starts_with("then(")),
         "Should offer Pipeline::then() with partial identifier, got: {names:?}"
@@ -390,7 +351,7 @@ async fn test_multiline_chain_this_on_own_line() {
     );
 
     // Cursor on line 5 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 5, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 5, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("render(")),
         "Should offer Widget::render() when $this is on preceding line, got: {names:?}"
@@ -426,7 +387,7 @@ async fn test_multiline_chain_with_blank_line() {
 
     // Cursor on line 9 (`            ->`) right after `->`
     // A blank line separates the base expression from the continuation.
-    let names = complete_at(&backend, &uri, text, 9, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 9, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("findAll(")),
         "Should offer Repo::findAll() even with a blank line in the chain, got: {names:?}"
@@ -458,7 +419,7 @@ async fn test_multiline_chain_with_multiple_blank_lines() {
     );
 
     // Cursor on line 13 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 13, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 13, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("orderBy(")),
         "Should offer Builder::orderBy() with multiple blank lines in chain, got: {names:?}"
@@ -490,7 +451,7 @@ async fn test_multiline_chain_with_whitespace_only_line() {
     );
 
     // Cursor on line 9 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 9, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 9, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("findAll(")),
         "Should offer Repo::findAll() with a whitespace-only line in the chain, got: {names:?}"
@@ -521,7 +482,7 @@ async fn test_multiline_chain_with_closure_arg() {
     );
 
     // Cursor on line 12 (`            ->`) after `->`
-    let names = complete_at(&backend, &uri, text, 12, 14).await;
+    let names = complete_labels_at(&backend, &uri, text, 12, 14).await;
     assert!(
         names.iter().any(|n| n.starts_with("count(")),
         "Should offer Collection::count() after chain with closure args, got: {names:?}"
@@ -553,7 +514,7 @@ async fn test_multiline_chain_same_line_after_closure_arg_close() {
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 11, 17).await;
+    let names = complete_labels_at(&backend, &uri, text, 11, 17).await;
     assert!(
         names.iter().any(|n| n.starts_with("all(")),
         "Should offer Collection::all() after same-line closure close, got: {names:?}"
@@ -588,7 +549,7 @@ async fn test_multiline_chain_same_line_after_bracket_close_does_not_misresolve(
         "}\n",
     );
 
-    let names = complete_at(&backend, &uri, text, 10, 12).await;
+    let names = complete_labels_at(&backend, &uri, text, 10, 12).await;
     assert!(
         !names.iter().any(|n| n.starts_with("open(")),
         "Should not resolve Box::open() from a malformed collapsed expression, got: {names:?}"
@@ -647,7 +608,7 @@ fn test_long_union_return_chain_completes_quickly() {
         .stack_size(phpantom_lsp::PARSE_WORKER_STACK_SIZE)
         .spawn(move || {
             let backend = create_test_backend();
-            let names = block_on(complete_at(&backend, &uri, &text, cursor_line, 14));
+            let names = block_on(complete_labels_at(&backend, &uri, &text, cursor_line, 14));
             let _ = tx.send(names);
         })
         .expect("spawn union-chain completion thread");

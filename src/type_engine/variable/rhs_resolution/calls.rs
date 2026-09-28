@@ -18,11 +18,6 @@ use crate::type_engine::call_resolution::MethodReturnCtx;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
-use super::array_access::{class_string_inner_binding, insert_or_union};
-use super::instantiation::{
-    TemplateBindingMode, array_element_binding, candidate_binding_modes, classify_template_binding,
-    extract_array_position, extract_generic_arg_from_ancestor,
-};
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
     resolved_type_with_lookup,
@@ -40,205 +35,6 @@ use super::{
 /// ask the walker rather than grow a second set of expression rules.
 pub(crate) type ArgWalkerTypes<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
-/// Apply one binding mode for `tpl_name`, recording whatever it resolves
-/// into `subs`.
-///
-/// Returns without touching `subs` when the mode cannot bind the argument
-/// it was given, which is what lets a union `@param` try its alternatives
-/// in turn (see [`candidate_binding_modes`]).
-#[allow(clippy::too_many_arguments)]
-fn apply_template_binding_mode(
-    subs: &mut HashMap<String, PhpType>,
-    binding_mode: &TemplateBindingMode,
-    tpl_name: &str,
-    arg_text: &str,
-    walker_types: Option<ArgWalkerTypes<'_>>,
-    param_hint: Option<&PhpType>,
-    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
-) {
-    // Only consulted where the text-driven resolver came back empty, so a
-    // caller that reached this through the AST pays for the walk exactly
-    // on the arguments that would otherwise bind nothing.
-    let from_walker = || walker_types.and_then(|lookup| lookup(arg_text));
-    match *binding_mode {
-        TemplateBindingMode::Direct => {
-            if let Some(resolved_type) =
-                Backend::resolve_arg_text_to_type(arg_text, rctx).or_else(from_walker)
-            {
-                // An array-literal argument resolves only to the bare
-                // `array` keyword, which erases its own keys. Bound
-                // directly (no wrapping hint to unify against), that
-                // erased shape is all downstream `key-of<T>`/
-                // `value-of<T>` would have to work with, so build the
-                // literal's real key/value shape instead.
-                let bound_type = if resolved_type.is_bare_array() {
-                    crate::type_engine::call_resolution::array_literal_shape_type(arg_text, rctx)
-                        .unwrap_or(resolved_type)
-                } else {
-                    resolved_type
-                };
-                insert_or_union(subs, tpl_name.to_string(), bound_type);
-            }
-        }
-        TemplateBindingMode::CallableReturnType => {
-            if let Some(bound) = crate::type_engine::call_resolution::bind_callable_return_template(
-                arg_text, param_hint, tpl_name, rctx,
-            ) {
-                insert_or_union(subs, tpl_name.to_string(), bound);
-            }
-        }
-        TemplateBindingMode::CallableReturnArrayPosition(position) => {
-            // `@param callable(...): array<TKey, TValue> $cb` — bind
-            // from the key/value of the callback's array-shaped
-            // return, not the whole return type.
-            if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
-                .and_then(|ret_type| extract_array_position(&ret_type, position))
-            {
-                insert_or_union(subs, tpl_name.to_string(), extracted);
-            }
-        }
-        TemplateBindingMode::CallableParamType(position) => {
-            // `@param Closure(T): void $cb` — extract the closure's
-            // parameter type annotation at the given position.
-            if let Some(param_type) =
-                crate::type_engine::call_resolution::bind_callable_param_template(
-                    arg_text, position, rctx,
-                )
-            {
-                insert_or_union(subs, tpl_name.to_string(), param_type);
-            }
-        }
-        TemplateBindingMode::ArrayElement => {
-            // `@param T[] $items` — resolve individual array elements.
-            if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                let inner = arg_text[1..arg_text.len() - 1].trim();
-                if inner.is_empty() {
-                    // Empty array `[]` → element type is `never`.
-                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
-                } else {
-                    let first_elem =
-                        crate::type_engine::conditional_resolution::split_text_args(inner);
-                    if let Some(elem) = first_elem.first()
-                        && let Some(resolved_type) =
-                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                    {
-                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                    }
-                }
-            } else if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
-                .or_else(from_walker)
-            {
-                // Extract the element type from array-like types
-                // so we bind T to the element, not the whole array.
-                // The call-expression fallback covers arguments whose
-                // declared return type is an array (`getConfigs()`
-                // returning `array<string, Config>`) — those carry no
-                // class info, so the general resolver yields nothing.
-                if let Some(elem_type) = array_element_binding(resolved_type) {
-                    insert_or_union(subs, tpl_name.to_string(), elem_type);
-                }
-            }
-        }
-        TemplateBindingMode::ClassStringInner => {
-            if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
-                insert_or_union(subs, tpl_name.to_string(), binding);
-            }
-        }
-        TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
-            // When the argument is a closure and the param hint
-            // union contains a Callable variant, try yield inference
-            // before array-like or hierarchy extraction.
-            if let Some(concrete) = Backend::try_closure_return_type_for_template(
-                arg_text,
-                tpl_name,
-                tpl_position,
-                param_hint,
-                rctx,
-            ) {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-                return;
-            }
-            // For `@param array<TKey, TValue> $value`, resolve the
-            // argument's raw iterable type — from a variable's
-            // annotations/assignments (`$users` as `array<int, User>`)
-            // or from a call expression's declared return type
-            // (`$this->getUsers()` returning `array<int, User>`) —
-            // and extract the positional generic argument.
-            if is_array_like_wrapper(wrapper_name)
-                && let Some(resolved) =
-                    resolve_arg_iterable_raw_type(arg_text, rctx).or_else(from_walker)
-                && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
-            {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-                return;
-            }
-            // Array literal argument for array-like wrappers:
-            // `[1, 2, 3]` for `@param array<T>` → infer T from elements.
-            if is_array_like_wrapper(wrapper_name)
-                && arg_text.starts_with('[')
-                && arg_text.ends_with(']')
-            {
-                let inner = arg_text[1..arg_text.len() - 1].trim();
-                if inner.is_empty() {
-                    // Empty array `[]` → element type is `never`.
-                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
-                    return;
-                } else {
-                    let elems = crate::type_engine::conditional_resolution::split_text_args(inner);
-                    // For `array<T>` (position 0 with 1 generic arg) or
-                    // `array<K, V>` (position 1 = value), infer from
-                    // element values.  For position 0 in a 2-arg generic
-                    // (the key), infer from keys if available.
-                    if let Some(elem) = elems.first()
-                        && let Some(resolved_type) =
-                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                    {
-                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                        return;
-                    }
-                }
-            }
-            // Special case: unwrap class-string<class-string<T>> to class-string<T>
-            if wrapper_name == "class-string"
-                && tpl_position == 0
-                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-            {
-                if let Some(inner) = resolved_type.unwrap_class_string_inner() {
-                    insert_or_union(subs, tpl_name.to_string(), inner.clone());
-                } else {
-                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                }
-            }
-            // ── Class generic wrapper resolution ────────────────
-            // For `@param Container<TItem> $c` where the argument
-            // is a subclass like `FooContainer extends Container<Foo>`,
-            // resolve the argument type and walk its @extends chain
-            // to find the wrapper class's generic arg at the right
-            // position.
-            if !is_array_like_wrapper(wrapper_name)
-                && wrapper_name != "class-string"
-                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                && let Some(concrete) = extract_generic_arg_from_ancestor(
-                    &resolved_type,
-                    wrapper_name,
-                    tpl_position,
-                    rctx,
-                )
-            {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-            }
-            // When array-type extraction fails (e.g. bare `array`
-            // property without generic annotation), do NOT fall back
-            // to a Direct resolve — that would bind the template
-            // param to the whole argument type instead of its
-            // positional generic arg.  Leave it unbound so the
-            // "fill in unbound" code below maps it to its declared
-            // upper bound or `mixed`.
-        }
-    }
-}
-
 /// Build a template substitution map for a function-level `@template` call.
 ///
 /// Uses the function's `template_bindings` to match template parameters to
@@ -248,122 +44,32 @@ fn apply_template_binding_mode(
 ///   - Generic wrapper: `@param array<TKey, TValue> $v` + `func($users)` →
 ///     positional resolution through the wrapper's generic arguments.
 ///
-/// Every binding site unions into the substitution rather than
-/// overwriting it, so a template bound from several parameters resolves
-/// to what all of its arguments have in common: `@param T[] $a, T[] $b`
-/// with `combine([1], ['x'])` binds `T` to `int|string`.  Letting the
-/// last binding site win would leave every other argument measured
-/// against a type taken from one of its siblings.
+/// The binding itself is [`bind_template_args`](crate::type_engine::call_resolution::bind_template_args),
+/// shared with methods and constructors.
 pub(crate) fn build_function_template_subs(
     func_info: &crate::types::FunctionInfo,
     arg_texts: &[String],
     walker_types: Option<ArgWalkerTypes<'_>>,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
-    let mut subs = HashMap::new();
-
-    // Bind the raw source-order argument texts to parameters by PHP's rules
-    // so a named argument (`id: Foo::class`) is routed to the parameter it
-    // targets rather than its ordinal slot, and its `name:` prefix is
-    // stripped off the value.
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let bound = crate::call_args::bind_text_args_to_params(&func_info.parameters, &arg_refs);
-
-    for (tpl_name, param_name) in &func_info.template_bindings {
-        let param_idx = match func_info
-            .parameters
-            .iter()
-            .position(|p| p.name == param_name.as_str())
-        {
-            Some(idx) => idx,
-            None => continue,
-        };
-
-        let provided_arg = bound.get(param_idx).and_then(|o| o.as_deref());
-
-        // Determine the binding mode by inspecting the parameter's
-        // docblock type hint.  The type hint tells us how the template
-        // param is embedded in the `@param` annotation.
-        let param_hint = func_info
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.type_hint.as_ref());
-        let binding_mode = classify_template_binding(tpl_name, param_hint);
-
-        // Fall back to the parameter's default value only for binding
-        // modes where the default is meaningful (class-string<T> with
-        // a `Foo::class` default, or direct bindings with `::class`).
-        let default_value = func_info
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.default_value.as_deref());
-        let tpl_bound = func_info
-            .template_param_bounds
-            .get(&crate::atom::atom(tpl_name));
-        let arg_text: &str = match provided_arg {
-            Some(text) => text,
-            // A template bounded by a type operator resolves against the
-            // one literal it binds to, and an omitted argument has such a
-            // literal whenever the parameter declares a scalar default —
-            // known at the declaration site exactly as an explicit
-            // argument is known at the call site.
-            None => match default_value {
-                Some(d)
-                    if crate::type_engine::call_resolution::type_operator_bound_literal(
-                        tpl_bound, d,
-                    )
-                    .is_some() =>
-                {
-                    d
-                }
-                _ => match &binding_mode {
-                    TemplateBindingMode::ClassStringInner => match default_value {
-                        Some(d) => d,
-                        None => continue,
-                    },
-                    TemplateBindingMode::Direct => match default_value {
-                        Some(d) if d.ends_with("::class") => d,
-                        _ => continue,
-                    },
-                    _ => continue,
-                },
-            },
-        };
-
-        if let Some(literal) =
-            crate::type_engine::call_resolution::type_operator_bound_literal(tpl_bound, arg_text)
-        {
-            insert_or_union(&mut subs, tpl_name.to_string(), literal);
-            continue;
-        }
-
-        // A union `@param` names one binding site per alternative
-        // (`Collection<TKey, TValue>|array<TKey, TValue>`), and the one the
-        // argument's own shape matches is the one that should bind. Try
-        // them in order and stop at the first that resolves; a non-union
-        // hint yields a single mode, which is the path every other
-        // parameter takes.
-        let before = subs.get(tpl_name.as_str()).cloned();
-        for mode in candidate_binding_modes(tpl_name, param_hint) {
-            apply_template_binding_mode(
-                &mut subs,
-                &mode,
-                tpl_name,
-                arg_text,
-                walker_types,
-                param_hint,
-                rctx,
-            );
-            if subs.get(tpl_name.as_str()) != before.as_ref() {
-                break;
-            }
-        }
-    }
+    let callee = crate::type_engine::call_resolution::TemplateCallee {
+        parameters: &func_info.parameters,
+        template_bindings: &func_info.template_bindings,
+        template_param_bounds: &func_info.template_param_bounds,
+    };
+    let mut subs = crate::type_engine::call_resolution::bind_template_args(
+        &callee,
+        &arg_refs,
+        walker_types,
+        rctx,
+    );
 
     crate::type_engine::call_resolution::finish_template_subs(
         &mut subs,
         &func_info.template_params,
         &func_info.template_param_bounds,
+        &func_info.template_param_defaults,
         func_info.return_type.as_ref(),
         rctx,
     );
@@ -573,7 +279,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
 /// method-level template substitutions apply to the returned type.
 /// Returns `None` when the text is not a call expression or the callee
 /// has no declared return type.
-pub(super) fn resolve_arg_call_raw_type(
+pub(crate) fn resolve_arg_call_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -607,7 +313,7 @@ pub(super) fn resolve_arg_call_raw_type(
 /// an element read out of another array goes through
 /// [`resolve_arg_dim_raw_type`].  Anything left over is handed to the
 /// general argument resolver.
-pub(super) fn resolve_arg_iterable_raw_type(
+pub(crate) fn resolve_arg_iterable_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -633,7 +339,7 @@ fn resolve_arg_dim_raw_type(
 ) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed.strip_suffix(']')?;
-    let open = matching_subscript_start(inner)?;
+    let open = crate::text_scan::find_matching_backward(trimmed, trimmed.len() - 1, b'[', b']')?;
     let base = inner[..open].trim();
     // An array literal (`[1, 2, 3]`) is all subscript and no base.
     if base.is_empty() {
@@ -654,45 +360,6 @@ fn resolve_arg_dim_raw_type(
         .or_else(|| base_type.extract_value_type(false).cloned())
 }
 
-/// The byte index of the `[` that opens the subscript closed by the `]`
-/// this text used to end with, or `None` when the brackets do not balance.
-fn matching_subscript_start(before_close: &str) -> Option<usize> {
-    let mut depth = 0usize;
-    for (idx, ch) in before_close.char_indices().rev() {
-        match ch {
-            ']' => depth += 1,
-            '[' if depth == 0 => return Some(idx),
-            '[' => depth -= 1,
-            _ => {}
-        }
-    }
-    None
-}
-
-/// Extract the concrete type at `position` from an array type string.
-///
-/// For array types with two generic parameters (key + value):
-/// - `array<int, User>` at position 0 → `"int"`, position 1 → `"User"`
-/// - `User[]` at position 0 → nothing, position 1 → `"User"`
-/// - `list<User>` at position 0 → `"int"`, position 1 → `"User"`
-/// - `array{a: int, b: int}` at position 0 → `"string"`, position 1 → `"int"`
-///
-/// For single-param forms:
-/// - `array<User>` at position 0 → `"User"`
-pub(super) fn extract_array_type_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
-    match position {
-        // Only the types that actually pin their keys down answer here: a
-        // `list<V>` and an `array{…}` shape name no key argument but are
-        // not silent about their keys, while `array<V>`, `V[]` and a bare
-        // `array` are. Leaving the open ones unbound is what lets `TKey`
-        // fall back to the `array-key` its declaration already promises,
-        // rather than inventing the `int` a sequential array would have.
-        0 => crate::type_engine::variable::array_func_rules::array_key_domain(ty),
-        1 => ty.extract_value_type(false).cloned(),
-        _ => None,
-    }
-}
-
 /// Whether a wrapper type name should be treated as array-like for
 /// positional generic argument extraction.
 ///
@@ -710,6 +377,24 @@ pub(crate) fn is_array_like_wrapper(name: &str) -> bool {
     ) || crate::util::short_name(name).eq_ignore_ascii_case("arrayable")
 }
 
+/// Whether evaluating any argument in `argument_list` never completes.
+///
+/// PHP evaluates call arguments before the call itself, so a `never`
+/// argument (an expression already proven unreachable, e.g. a variable
+/// narrowed to nothing by a prior guard clause) means the call can never
+/// be reached either, regardless of what its callee is declared to
+/// return.
+pub(super) fn any_argument_is_never(
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> bool {
+    argument_list.arguments.iter().any(|arg| {
+        resolve_rhs_expression(arg.value(), ctx)
+            .iter()
+            .any(|rt| rt.type_string.is_never())
+    })
+}
+
 /// Resolve function, method, and static method calls to their return
 /// types.
 pub(super) fn resolve_rhs_call<'b>(
@@ -717,6 +402,16 @@ pub(super) fn resolve_rhs_call<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    let argument_list = match call {
+        Call::Function(func_call) => &func_call.argument_list,
+        Call::Method(method_call) => &method_call.argument_list,
+        Call::NullSafeMethod(method_call) => &method_call.argument_list,
+        Call::StaticMethod(static_call) => &static_call.argument_list,
+    };
+    if any_argument_is_never(argument_list, ctx) {
+        return vec![ResolvedType::from_type_string(PhpType::never())];
+    }
+
     let mut resolved = match call {
         Call::Function(func_call) => resolve_rhs_function_call(func_call, expr, ctx),
         Call::Method(method_call) => resolve_rhs_method_call_inner(
@@ -734,33 +429,56 @@ pub(super) fn resolve_rhs_call<'b>(
         Call::StaticMethod(static_call) => resolve_rhs_static_call(static_call, ctx),
     };
 
-    // A `@return value-of<ID_TABLE>` arrives here with the operator still
-    // standing: the docblock parser saw a name it could not read, and only
-    // the template path reads the constant behind it.  Finish it so the
-    // caller gets the value union the table describes rather than a type
-    // expression that widens to `mixed`.
-    if resolved
+    finish_return_constant_operands(&mut resolved, ctx);
+    resolved
+}
+
+/// Evaluate the type operators a call's return type reads through a
+/// constant.
+///
+/// A `@return value-of<ID_TABLE>` arrives with the operator still standing:
+/// the docblock parser saw a name it could not read, and only the template
+/// path reads the constant behind it.  Finish it so the caller gets the
+/// value union the table describes rather than a type expression that
+/// widens to `mixed`.
+pub(super) fn finish_return_constant_operands(
+    resolved: &mut [ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) {
+    if !resolved
         .iter()
         .any(|rt| rt.type_string.contains_unevaluated_operator())
     {
-        let rctx = ctx.as_resolution_ctx();
-        for rt in &mut resolved {
-            if let Some(evaluated) = crate::type_engine::call_resolution::evaluate_constant_operands(
-                &rt.type_string,
-                &rctx,
-            ) {
-                rt.type_string = evaluated;
-            }
+        return;
+    }
+    let rctx = ctx.as_resolution_ctx();
+    for rt in resolved {
+        if let Some(evaluated) =
+            crate::type_engine::call_resolution::evaluate_constant_operands(&rt.type_string, &rctx)
+        {
+            rt.type_string = evaluated;
         }
     }
-
-    resolved
 }
 
 pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
+    // `$fn(...)` wraps a callable value rather than naming a function, so
+    // the closure it makes has that value's own signature.
+    if let Expression::PartialApplication(PartialApplication::Function(fpa)) = expr
+        && !matches!(fpa.function, Expression::Identifier(_))
+    {
+        let resolved = resolve_rhs_expression(fpa.function, ctx);
+        if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
+            return PhpType::callable_type(crate::php_type::CallableType {
+                kind: atom("Closure"),
+                ..(**callable).clone()
+            });
+        }
+    }
+
     let explicit_or_yield = {
         let span = expr.span();
         let start = (span.start.offset as usize).min(ctx.content.len());
@@ -776,30 +494,116 @@ pub(crate) fn infer_closure_literal_type(
         })
     };
 
-    let inferred_return = explicit_or_yield.or_else(|| match expr {
-        Expression::ArrowFunction(arrow) => {
-            let resolved = resolve_rhs_expression(arrow.expression, ctx);
-            if resolved.is_empty() {
-                None
-            } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        }
-        // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
-        // `ClassName::method(...)`.  Resolve the underlying function/method's
-        // return type from the callable's own source text.
-        Expression::PartialApplication(_) => {
-            let span = expr.span();
-            let start = (span.start.offset as usize).min(ctx.content.len());
-            let end = (span.end.offset as usize).min(ctx.content.len());
-            ctx.content.get(start..end).and_then(|text| {
-                let rctx = ctx.as_resolution_ctx();
-                crate::completion::source::helpers::resolve_first_class_callable_return_type(
-                    text, &rctx,
-                )
+    // What the body actually produces, independent of any declared
+    // return type: an arrow function's expression, or a full closure
+    // body's first top-level `return`.
+    let body_return = || -> Option<PhpType> {
+        let (parameter_list, ret_expr) = match expr {
+            Expression::ArrowFunction(arrow) => (&arrow.parameter_list, Some(arrow.expression)),
+            Expression::Closure(closure) => (
+                &closure.parameter_list,
+                closure.body.statements.iter().find_map(|stmt| match stmt {
+                    Statement::Return(ret) => ret.value,
+                    _ => None,
+                }),
+            ),
+            _ => return None,
+        };
+        let ret_expr = ret_expr?;
+
+        // The body may read the closure's own parameters (`fn (?string
+        // $value): string => $value ?? '-'`), which nothing outside the
+        // closure ever assigns, so the outer scope's variable resolution
+        // cannot see them. Seed each hinted one so the body resolves
+        // against its own signature the way a call to it would.
+        let param_types: HashMap<String, PhpType> = parameter_list
+            .parameters
+            .iter()
+            .filter_map(|param| {
+                let hint = param.hint.as_ref()?;
+                let name = bytes_to_str(param.variable.name).to_string();
+                let ty = crate::util::resolve_source_php_type_names(
+                    &crate::parser::extract_hint_type(hint),
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
+                Some((name, ty))
             })
+            .collect();
+
+        let resolved = if param_types.is_empty() {
+            resolve_rhs_expression(ret_expr, ctx)
+        } else {
+            let param_aware_resolver = |name: &str| -> Vec<ResolvedType> {
+                match param_types.get(name) {
+                    Some(ty) => vec![ResolvedType::from_type_string(ty.clone())],
+                    None => resolve_var_types(name, ctx, ctx.cursor_offset),
+                }
+            };
+            let mut param_ctx = ctx.clone();
+            param_ctx.scope_var_resolver = Some(&param_aware_resolver);
+            resolve_rhs_expression(ret_expr, &param_ctx)
+        };
+
+        if resolved.is_empty() {
+            None
+        } else {
+            Some(ResolvedType::types_joined(&resolved))
         }
-        _ => None,
+    };
+
+    let inferred_return = match explicit_or_yield {
+        // A closure really returns what its body produces narrowed by
+        // what it declares: an explicit `: ReturnType` only wins when
+        // the body does not resolve to something narrower (e.g. a bare
+        // `: Closure` on a closure whose body returns a closure with a
+        // known signature).
+        Some(declared) => {
+            let declared = crate::util::resolve_source_php_type_names(
+                &declared,
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            let narrowed = body_return().filter(|body| {
+                crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+            });
+            Some(narrowed.unwrap_or(declared))
+        }
+        None => body_return().or_else(|| match expr {
+            // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
+            // `ClassName::method(...)`.  Resolve the underlying function/method's
+            // return type from the callable's own source text.
+            Expression::PartialApplication(_) => {
+                let span = expr.span();
+                let start = (span.start.offset as usize).min(ctx.content.len());
+                let end = (span.end.offset as usize).min(ctx.content.len());
+                ctx.content.get(start..end).and_then(|text| {
+                    let rctx = ctx.as_resolution_ctx();
+                    crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                        text, &rctx,
+                    )
+                })
+            }
+            _ => None,
+        }),
+    };
+
+    // `static` in a closure's declared return type binds to the class the
+    // closure is lexically declared in, the same way it does for a method.
+    // A closure has no receiver at the call site to bind it against later,
+    // so it must be bound once here, at the point the closure value is
+    // created.
+    let inferred_return = inferred_return.map(|t| {
+        if ctx.current_class.name.is_empty() {
+            t
+        } else {
+            t.resolve_self_refs_bounded(
+                &ctx.current_class.fqn(),
+                ctx.current_class.parent_class.as_deref(),
+            )
+        }
     });
 
     let params = declared_closure_params(expr, ctx);
@@ -818,8 +622,9 @@ pub(crate) fn infer_closure_literal_type(
 /// parameters makes it fail every declared `Closure(BrandView): …` it is
 /// handed to. A parameter with no native hint contributes `mixed`, which a
 /// contravariant check accepts from any expected parameter type; a hinted
-/// one goes through the class loader so the short name written in the
-/// literal matches the fully-qualified name in the expectation.
+/// one is qualified against the file's namespace before the global one,
+/// the way PHP reads the hint, so `Error` inside `namespace App` names
+/// `App\Error` and matches the fully-qualified name in the expectation.
 fn declared_closure_params(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -838,8 +643,10 @@ fn declared_closure_params(
                 .hint
                 .as_ref()
                 .map(|hint| {
-                    crate::util::resolve_php_type_names(
+                    crate::util::resolve_source_php_type_names(
                         &crate::parser::extract_hint_type(hint),
+                        ctx.current_class.file_namespace.as_deref(),
+                        ctx.all_classes,
                         ctx.class_loader,
                     )
                 })
@@ -1196,6 +1003,7 @@ pub(super) fn resolve_rhs_function_call<'b>(
                     params: &func_info.template_params,
                     bindings: &func_info.template_bindings,
                     arg_type_resolver: Some(&arg_ty_resolver),
+                    this_type: None,
                 };
                 crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
                     cond,
@@ -1335,14 +1143,9 @@ pub(super) fn resolve_rhs_function_call<'b>(
                 .map(|t| crate::util::resolve_php_type_names(&t, class_loader))
             && let Some(ret_type) = raw_type.callable_return_type()
         {
-            let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                ret_type,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
+            let resolved = callable_return_resolution(ret_type, ctx);
             if !resolved.is_empty() {
-                return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                return resolved;
             }
         }
 
@@ -1353,21 +1156,30 @@ pub(super) fn resolve_rhs_function_call<'b>(
         //    type covers `$fn = function(): T {}`, `$fn = fn(): T => …`,
         //    and `$fn = strlen(...)` / `$fn = $obj->method(...)` alike.
         let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        if let Some(ret_type) = joined_callable_return(&var_types) {
+            let resolved = callable_return_resolution(&ret_type, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         for rt in &var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    ret_type,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved = callable_return_resolution(ret_type, ctx);
                 if !resolved.is_empty() {
-                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+                    return resolved;
                 }
             }
         }
 
-        // 3. Check for __invoke().  When $f holds an object with an
+        // 3. An array callable, `[$obj, 'method']`, calls the method.
+        for rt in &var_types {
+            let resolved = array_callable_return(&rt.type_string, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
+
+        // 4. Check for __invoke().  When $f holds an object with an
         //    __invoke() method, $f() should return __invoke()'s return
         //    type.
         let var_classes = ResolvedType::into_arced_classes(var_types);
@@ -1433,24 +1245,17 @@ pub(super) fn resolve_rhs_function_call<'b>(
         // how a property or a method result annotated that way arrives
         // here.  Read it the same way the `$fn()` path does before falling
         // back to `__invoke()`.
+        if let Some(ret_type) = joined_callable_return(&callee_results) {
+            let resolved = callable_return_resolution(&ret_type, ctx);
+            if !resolved.is_empty() {
+                return resolved;
+            }
+        }
         for rt in &callee_results {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                    ret_type,
-                    current_class_name,
-                    all_classes,
-                    class_loader,
-                );
+                let resolved = callable_return_resolution(ret_type, ctx);
                 if !resolved.is_empty() {
-                    return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
-                }
-                if !ret_type.is_empty() {
-                    return vec![resolved_type_with_lookup(
-                        ret_type.clone(),
-                        current_class_name,
-                        all_classes,
-                        class_loader,
-                    )];
+                    return resolved;
                 }
             }
         }
@@ -1483,6 +1288,137 @@ pub(super) fn resolve_rhs_function_call<'b>(
     vec![]
 }
 
+/// What calling a value of one of `types` returns, when every alternative
+/// is callable by its type alone, or `None` when some alternative is not.
+///
+/// Each alternative contributes its own return type, so the answer is
+/// their join: `(Route&callable)|(callable(): Route)` can return anything,
+/// because the callable `Route` subclass declares no return type.  A
+/// callable spelled without a signature returns `mixed`.  An alternative
+/// that is callable only through a class's `__invoke()` is left to the
+/// callers' own lookup.
+fn joined_callable_return(types: &[ResolvedType]) -> Option<PhpType> {
+    fn member_return(member: &PhpType) -> Option<PhpType> {
+        match member.kind() {
+            TypeKind::Callable(c) => Some(c.return_type.clone().unwrap_or_else(PhpType::mixed)),
+            TypeKind::Named(_) if member.is_callable() => Some(PhpType::mixed()),
+            TypeKind::Intersection(parts) => parts.iter().find_map(member_return),
+            _ => None,
+        }
+    }
+    let mut returns: Vec<PhpType> = Vec::new();
+    for rt in types {
+        for member in rt.type_string.union_members() {
+            if member.is_null() {
+                continue;
+            }
+            returns.push(member_return(member)?);
+        }
+    }
+    // A single alternative already has its answer in the per-entry paths,
+    // which also know how to resolve the `Closure` stub's `__invoke()`.
+    if returns.len() < 2 {
+        return None;
+    }
+    Some(PhpType::join_runtime_value_types(returns))
+}
+
+/// What calling a value whose callable type returns `ret_type` produces.
+fn callable_return_resolution(ret_type: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let resolved = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        ret_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    if !resolved.is_empty() {
+        return ResolvedType::from_classes_with_hint(resolved, ret_type.clone());
+    }
+    if ret_type.is_empty() {
+        return vec![];
+    }
+    vec![resolved_type_with_lookup(
+        ret_type.clone(),
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    )]
+}
+
+/// What `(closure)->call($obj)` returns: whatever the closure literal does,
+/// run with `$this` bound to `$obj`.
+fn closure_call_return(
+    object: &Expression<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let closure = crate::parser::unwrap_parens(object);
+    if let Some(declared) = extract_closure_or_arrow_return_type(closure) {
+        let resolved = callable_return_resolution(&declared, ctx);
+        return (!resolved.is_empty()).then_some(resolved);
+    }
+    let Expression::ArrowFunction(arrow) = closure else {
+        return None;
+    };
+    let mut body_ctx = ctx.clone();
+    if let Some(new_this) = argument_list.arguments.first() {
+        let bound = resolve_rhs_expression(new_this.value(), ctx);
+        if !bound.is_empty() {
+            body_ctx
+                .match_arm_narrowing
+                .insert("$this".to_string(), bound);
+        }
+    }
+    let resolved = resolve_rhs_expression(arrow.expression, &body_ctx);
+    (!resolved.is_empty()).then_some(resolved)
+}
+
+/// What calling the array callable `callable` (`[$obj, 'method']`) returns.
+///
+/// Only an object in the first slot is read: `['Foo', 'bar']` calls `bar`
+/// statically, which is a different call with rules of its own.
+fn array_callable_return(callable: &PhpType, ctx: &VarResolutionCtx<'_>) -> Vec<ResolvedType> {
+    let Some([receiver, method]) = callable.shape_entries() else {
+        return vec![];
+    };
+    let positional = |entry: &crate::php_type::ShapeEntry, index: &str| {
+        !entry.optional && entry.key.as_deref().is_none_or(|k| k == index)
+    };
+    if !positional(receiver, "0") || !positional(method, "1") {
+        return vec![];
+    }
+    let TypeKind::Literal(literal) = method.value_type.kind() else {
+        return vec![];
+    };
+    let Some(method_name) = literal.string_content() else {
+        return vec![];
+    };
+    if !receiver.value_type.is_object_like() {
+        return vec![];
+    }
+    let owners = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+        &receiver.value_type,
+        &ctx.current_class.name,
+        ctx.all_classes,
+        ctx.class_loader,
+    );
+    for owner in &owners {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            owner,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        if let Some(ret) = merged
+            .get_method(&method_name)
+            .and_then(|m| m.return_type.as_ref())
+        {
+            let ret = ret.replace_self_bound(&owner.fqn(), None);
+            return callable_return_resolution(&ret, ctx);
+        }
+    }
+    vec![]
+}
+
 /// A method call's receiver, already resolved: the candidate owner classes
 /// plus the `ResolvedType` values they came from.
 ///
@@ -1497,7 +1433,7 @@ pub(super) type MethodReceiver = (Vec<Arc<ClassInfo>>, Vec<ResolvedType>);
 /// variable pipeline (honouring `match(true)` arm narrowing), and anything
 /// else — `(new Factory())`, `getService()`, a chain link — by resolving the
 /// expression.
-fn resolve_method_receiver<'b>(
+pub(super) fn resolve_method_receiver<'b>(
     object: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> MethodReceiver {
@@ -1574,12 +1510,36 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     receiver: Option<MethodReceiver>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    if any_argument_is_never(argument_list, ctx) {
+        return vec![ResolvedType::from_type_string(PhpType::never())];
+    }
+    resolve_member_call_on_receiver(object, method, argument_list, receiver, false, ctx)
+}
+
+/// [`resolve_method_call_on_receiver`] for either call form.
+///
+/// `is_static` marks `$obj::method()`, which PHP dispatches on the class of
+/// the object `$obj` holds: every rule of an instance call applies, except
+/// that a missing method falls back to `__callStatic` rather than `__call`.
+fn resolve_member_call_on_receiver<'b>(
+    object: &'b Expression<'b>,
+    method: &'b ClassLikeMemberSelector<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    receiver: Option<MethodReceiver>,
+    is_static: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
         // Variable method name (`$obj->$method()`) — see
         // `runtime_named_member_type`.
         _ => return super::runtime_named_member_type(),
     };
+    if method_name.eq_ignore_ascii_case("call")
+        && let Some(returned) = closure_call_return(object, argument_list, ctx)
+    {
+        return returned;
+    }
     let (owner_classes, receiver_resolved) =
         receiver.unwrap_or_else(|| resolve_method_receiver(object, ctx));
 
@@ -1726,6 +1686,14 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
 
     let is_union = owner_classes.len() > 1;
     let mut union_results: Vec<ResolvedType> = Vec::new();
+    // A receiver that is every one of its classes at once satisfies each of
+    // their declarations, so what they return is intersected, not unioned.
+    let receiver_is_intersection = is_union
+        && !receiver_resolved.is_empty()
+        && receiver_resolved
+            .iter()
+            .all(|rt| matches!(rt.type_string.kind(), TypeKind::Intersection(_)));
+    let mut intersected_results: Vec<Vec<ResolvedType>> = Vec::new();
 
     for (idx, owner) in owner_classes.iter().enumerate() {
         // Build class-level template substitutions from the receiver's
@@ -1770,7 +1738,7 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
             &method_name,
             argument_list,
             ctx,
-            false,
+            is_static,
             &template_subs,
             &self_replace,
         );
@@ -1784,7 +1752,16 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         if !is_union {
             return owner_results;
         }
+        if receiver_is_intersection {
+            if !owner_results.is_empty() {
+                intersected_results.push(owner_results);
+            }
+            continue;
+        }
         ResolvedType::extend_unique(&mut union_results, owner_results);
+    }
+    if receiver_is_intersection {
+        return intersect_owner_results(intersected_results);
     }
 
     // For intersection types, filter out `mixed` when concrete types exist.
@@ -1801,6 +1778,63 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     }
 
     union_results
+}
+
+/// Combine what each member of an intersection receiver returns for the same
+/// call into one intersection type.
+///
+/// Each entry of `per_owner` is one member's result.  A member returning
+/// `mixed` adds nothing a sibling's concrete type does not already say.
+/// When every remaining result is an object type the members are intersected
+/// (`Foo&AnotherFoo`), with each resulting entry carrying the whole
+/// intersection the way an intersection-typed variable does.  Anything else
+/// (a scalar, a union, a nullable) is joined as a union.
+fn intersect_owner_results(mut per_owner: Vec<Vec<ResolvedType>>) -> Vec<ResolvedType> {
+    let is_mixed = |group: &[ResolvedType]| group.iter().all(|rt| rt.type_string.is_mixed());
+    if per_owner.iter().any(|group| !is_mixed(group)) {
+        per_owner.retain(|group| !is_mixed(group));
+    }
+    if per_owner.len() < 2 {
+        return per_owner.pop().unwrap_or_default();
+    }
+
+    let mut members: Vec<PhpType> = Vec::new();
+    let mut all_objects = true;
+    for group in &per_owner {
+        let joined = ResolvedType::types_joined(group);
+        match joined.kind() {
+            TypeKind::Intersection(parts) => {
+                for part in parts.iter() {
+                    if !members.contains(part) {
+                        members.push(part.clone());
+                    }
+                }
+            }
+            TypeKind::Nullable(_) => {
+                all_objects = false;
+                break;
+            }
+            _ if joined.is_object_like() => {
+                if !members.contains(&joined) {
+                    members.push(joined);
+                }
+            }
+            _ => {
+                all_objects = false;
+                break;
+            }
+        }
+    }
+
+    let intersection = (all_objects && members.len() > 1).then(|| PhpType::intersection(members));
+    let mut results: Vec<ResolvedType> = Vec::new();
+    for mut rt in per_owner.into_iter().flatten() {
+        if let Some(ref intersection) = intersection {
+            rt.type_string = intersection.clone();
+        }
+        ResolvedType::push_unique(&mut results, rt);
+    }
+    results
 }
 
 /// Expand union generic receiver types into separate owner entries.
@@ -1963,7 +1997,7 @@ pub(super) fn resolve_conditional_return_for_call(
     text_args: &str,
     var_resolver: crate::type_engine::conditional_resolution::VarClassStringResolver<'_>,
     calling_class_name: &str,
-    declaring_class_name: &str,
+    owner: &ClassInfo,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_subs: &HashMap<String, PhpType>,
     arg_type_resolver: crate::type_engine::conditional_resolution::ArgTypeResolver<'_>,
@@ -1972,17 +2006,24 @@ pub(super) fn resolve_conditional_return_for_call(
     let method = method_ref?;
     let cond = method.conditional_return.as_ref()?;
     let params = method.parameters.as_slice();
+    let declaring_fqn = owner.fqn();
     let class_ctx = crate::type_engine::conditional_resolution::ConditionalClassContext {
         calling: Some(calling_class_name),
-        declaring: Some(declaring_class_name),
+        declaring: Some(declaring_fqn.as_str()),
     };
     let class_values =
         crate::inheritance::class_scoped_template_values(template_subs, &method.template_params);
+    let this_type = crate::type_engine::conditional_resolution::receiver_type_for_condition(
+        declaring_fqn.as_str(),
+        &owner.template_params,
+        template_subs,
+    );
     let tpl = crate::type_engine::conditional_resolution::TemplateContext {
         defaults: Some(class_values.as_ref()),
         params: method.template_params.as_slice(),
         bindings: method.template_bindings.as_slice(),
         arg_type_resolver,
+        this_type: Some(&this_type),
     };
     let resolved =
         crate::type_engine::conditional_resolution::resolve_conditional_with_text_args_and_defaults(
@@ -2011,6 +2052,7 @@ pub(super) fn resolve_conditional_return_for_call(
             params: method.template_params.as_slice(),
             bindings: method.template_bindings.as_slice(),
             arg_type_resolver,
+            this_type: Some(&this_type),
         };
         crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
             &substituted,
@@ -2024,7 +2066,7 @@ pub(super) fn resolve_conditional_return_for_call(
     } else {
         substituted
     };
-    if collapsed.is_uninformative_return() {
+    if collapsed.is_void() {
         None
     } else {
         Some(collapsed)
@@ -2272,14 +2314,15 @@ pub(super) fn resolve_owner_method_call(
     // docblock override (return_type == native_return_type).  The merged
     // method carries inherited types from interfaces/parents with template
     // substitutions already applied (e.g. `V|null` → `User|null` from
-    // `@implements Collection<string, User>`).
+    // `@implements Collection<string, User>`).  The effective type is
+    // stored name-resolved while the native hint keeps the spelling from
+    // the source, so the two are compared as types, not verbatim.
+    let echoes_native = |m: &MethodInfo| match (&m.return_type, &m.native_return_type) {
+        (Some(ret), Some(native)) => ret.equivalent(native),
+        (ret, native) => ret == native,
+    };
     let method_ref = match (owner_method, merged_method) {
-        (Some(om), Some(mm))
-            if om.return_type == om.native_return_type
-                && mm.return_type != mm.native_return_type =>
-        {
-            Some(mm)
-        }
+        (Some(om), Some(mm)) if echoes_native(om) && !echoes_native(mm) => Some(mm),
         (Some(om), _) => Some(om),
         (None, Some(mm)) => Some(mm),
         // Method not found — fall back to the magic method's return type.
@@ -2339,7 +2382,7 @@ pub(super) fn resolve_owner_method_call(
         &text_args,
         Some(&var_resolver),
         current_class_name,
-        owner.fqn().as_str(),
+        owner,
         ctx.class_loader,
         template_subs,
         Some(&arg_ty_resolver),
@@ -2364,6 +2407,7 @@ pub(super) fn resolve_owner_method_call(
                     .map(|m| m.template_bindings.as_slice())
                     .unwrap_or(&[]),
                 arg_type_resolver: Some(&arg_ty_resolver),
+                this_type: None,
             };
             crate::type_engine::conditional_resolution::evaluate_nested_conditionals_text(
                 &ty,
@@ -2512,10 +2556,15 @@ pub(super) fn resolve_rhs_static_call(
     );
 
     let class_name = match static_call.class {
-        Expression::Self_(_) => Some(current_class_name.to_string()),
-        Expression::Static(_) => Some(current_class_name.to_string()),
-        Expression::Parent(_) => ctx.current_class.parent_class.map(|a| a.to_string()),
-        Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
+        Expression::Self_(_)
+        | Expression::Static(_)
+        | Expression::Parent(_)
+        | Expression::Identifier(_) => crate::class_lookup::class_expression_name(
+            static_call.class,
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.class_loader,
+        ),
         // ── `$var::method()` where `$var` holds a class-string ──
         Expression::Variable(Variable::Direct(dv)) => {
             let var_name = bytes_to_str(dv.name).to_string();
@@ -2638,9 +2687,15 @@ pub(super) fn resolve_rhs_static_call(
                 // parameters typed as `@param class-string<Foo> $var`
                 // where there is no `$var = Foo::class` assignment.
                 let resolved = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
-                resolved
-                    .iter()
-                    .find_map(|rt| match &rt.type_string.kind() {
+                let class_string = resolved.iter().find_map(|rt| match &rt.type_string.kind() {
+                    TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+                    TypeKind::Nullable(inner) => match inner.kind() {
+                        TypeKind::ClassString(Some(cs_inner)) => {
+                            cs_inner.base_name().map(|s| s.to_string())
+                        }
+                        _ => None,
+                    },
+                    TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
                         TypeKind::ClassString(Some(inner)) => {
                             inner.base_name().map(|s| s.to_string())
                         }
@@ -2650,31 +2705,29 @@ pub(super) fn resolve_rhs_static_call(
                             }
                             _ => None,
                         },
-                        TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
-                            TypeKind::ClassString(Some(inner)) => {
-                                inner.base_name().map(|s| s.to_string())
-                            }
-                            TypeKind::Nullable(inner) => match inner.kind() {
-                                TypeKind::ClassString(Some(cs_inner)) => {
-                                    cs_inner.base_name().map(|s| s.to_string())
-                                }
-                                _ => None,
-                            },
-                            _ => None,
-                        }),
                         _ => None,
-                    })
-                    .or_else(|| {
-                        // Final fallback: `$var::method()` where `$var` is an
-                        // object instance (not a class-string). In PHP you can
-                        // call static methods on an instance reference.
-                        resolved
-                            .iter()
-                            .find_map(|rt| rt.type_string.base_name().map(|s| s.to_string()))
-                    })
+                    }),
+                    _ => None,
+                });
+                if class_string.is_none() && !resolved.is_empty() {
+                    return static_call_on_object(static_call, resolved, ctx);
+                }
+                class_string
             }
         }
-        _ => None,
+        // `$this->prop::method()`, `getFoo()::method()`: the class is the
+        // one a class-string names, or else the class of the object.
+        _ => {
+            let resolved = resolve_rhs_expression(static_call.class, ctx);
+            let class_string = resolved.iter().find_map(|rt| match rt.type_string.kind() {
+                TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+                _ => None,
+            });
+            if class_string.is_none() && !resolved.is_empty() {
+                return static_call_on_object(static_call, resolved, ctx);
+            }
+            class_string
+        }
     };
     if let Some(cls_name) = class_name
         && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
@@ -2697,6 +2750,21 @@ pub(super) fn resolve_rhs_static_call(
                 ctx.backend,
             );
             let owner = concrete_owner.as_ref().unwrap_or(owner);
+            // `parent::get()` (or `Foo::get()` written out) from inside a
+            // class that `@extends Foo<Dog>` reads the parent's `T` as the
+            // `Dog` the child bound it to, just as `$this->get()` does.
+            let bound_owner = (!owner.template_params.is_empty())
+                .then(|| crate::inheritance::extends_type_args(ctx.current_class, owner))
+                .flatten()
+                .map(|args| {
+                    crate::virtual_members::resolve_class_fully_with_type_args(
+                        owner,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                        &args,
+                    )
+                });
+            let owner = bound_owner.as_deref().unwrap_or(owner);
 
             if let Some(result) = try_resolve_config_method_type(
                 &owner.fqn(),
@@ -2729,9 +2797,13 @@ pub(super) fn resolve_rhs_static_call(
             // An explicit `A::` on a non-static method is PHP's pre-8
             // instance-forwarding form, which keeps `$this` (and with it late
             // static binding) bound, so only a `static` method written out
-            // fixes the class.
+            // fixes the class. That forwarding needs a `$this` to forward
+            // from, so it does not apply outside any class (global-scope
+            // code has no enclosing class to bind `static` open over).
             let target_is_static = method_is_static(owner, &method_name, ctx);
-            let lsb_class = (forwards_lsb || !target_is_static).then(|| ctx.current_class.fqn());
+            let lsb_class = (!ctx.current_class.name.is_empty()
+                && (forwards_lsb || !target_is_static))
+                .then(|| ctx.current_class.fqn());
             let self_replace =
                 |ty: &PhpType| ty.replace_self_bound(&owner_key, lsb_class.as_deref());
 
@@ -2766,6 +2838,30 @@ pub(super) fn resolve_rhs_static_call(
         }
     }
     vec![]
+}
+
+/// `$obj::method()` where `$obj` holds an object rather than a class-string.
+///
+/// PHP calls the method on the object's own class, so this resolves exactly
+/// like `$obj->method()` would: a union receiver unions the results, an
+/// intersection intersects them, and `static` binds to the receiver.
+fn static_call_on_object(
+    static_call: &StaticMethodCall<'_>,
+    resolved: Vec<ResolvedType>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let classes = ResolvedType::into_arced_classes(resolved.clone());
+    if classes.is_empty() {
+        return vec![];
+    }
+    resolve_member_call_on_receiver(
+        static_call.class,
+        &static_call.method,
+        &static_call.argument_list,
+        Some((classes, resolved)),
+        true,
+        ctx,
+    )
 }
 
 /// The array shape a Laravel `validated()` / `validate()` /

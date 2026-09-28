@@ -346,3 +346,33 @@ namespace PsalmTest_loop_foreach_20 {
     assertType('bool', $a);
 }
 
+// Test: nullableGenerator
+namespace PsalmTest_loop_foreach_21 {
+    /** @return Generator<int,int|null> */
+    function gen() : Generator {
+        yield null;
+        yield 1;
+    }
+    $gen = gen();
+    $a = "";
+    foreach ($gen as $i) {
+        $a = $i;
+    }
+
+    assertType('\'\'|int|null', $a);
+}
+
+// Test: nonNullableGenerator
+namespace PsalmTest_loop_foreach_22 {
+    /** @return Generator<int,int> */
+        function gen() : Generator {
+            yield 1;
+        }
+        $gen = gen();
+        $a = "";
+        foreach ($gen as $i) {
+    $a = $i;
+        }
+
+    assertType('\'\'|int', $a);
+}

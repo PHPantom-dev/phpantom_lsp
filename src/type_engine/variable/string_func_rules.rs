@@ -42,6 +42,22 @@ pub(in crate::type_engine) fn string_func_literal_type(
     // bare name.
     let name = func_name.trim_start_matches('\\').to_ascii_lowercase();
 
+    // The length is an `int`, so it is folded apart from the transforms.
+    // On the ASCII input that gets this far bytes and characters agree.
+    if matches!(name.as_str(), "strlen" | "mb_strlen") && !args.has_arg(1) {
+        let mut lengths: Vec<PhpType> = Vec::new();
+        for subject in literal_alternatives(args, 0)? {
+            let length = PhpType::literal_int(subject.len().to_string());
+            if !lengths.contains(&length) {
+                lengths.push(length);
+            }
+        }
+        return Some(match lengths.len() {
+            1 => lengths.remove(0),
+            _ => PhpType::union(lengths),
+        });
+    }
+
     let folded: Vec<String> = match name.as_str() {
         // `mb_*` agrees with the ASCII mapping on ASCII input, which is
         // the only input that gets this far.
@@ -259,6 +275,8 @@ pub(in crate::type_engine) fn is_foldable_string_func(func_name: &str) -> bool {
             | "chop"
             | "str_repeat"
             | "str_replace"
+            | "strlen"
+            | "mb_strlen"
     )
 }
 

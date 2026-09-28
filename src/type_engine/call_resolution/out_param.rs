@@ -15,15 +15,17 @@
 //! the reading stands on its own.
 //!
 //! The walk goes through [`resolve_variable_php_type`] — the same forward
-//! walker every other consumer asks — so branch merging, early returns
-//! and narrowing are accounted for by the shared pipeline rather than by
-//! a second one written here.
+//! walker every other consumer asks — at each point the body can be left
+//! through, so branch merging and narrowing are accounted for by the
+//! shared pipeline rather than by a second one written here.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use mago_syntax::cst::Program;
+use mago_syntax::cst::argument::ArgumentList;
+use mago_syntax::cst::block::Block;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::statement::Statement;
@@ -31,8 +33,12 @@ use mago_syntax::cst::statement::Statement;
 use crate::Backend;
 use crate::atom::{Atom, atom};
 use crate::parser::with_parsed_program;
-use crate::php_type::PhpType;
-use crate::type_engine::resolver::Loaders;
+use crate::php_type::{PhpType, TypeKind};
+use crate::type_engine::conditional_resolution::{
+    ConditionalClassContext, TemplateContext, VarClassStringResolver,
+    resolve_conditional_with_text_args_and_defaults,
+};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx};
 use crate::types::{ClassInfo, FunctionInfo, ParameterInfo};
 
 // ─── Callee identity ────────────────────────────────────────────────────────
@@ -67,6 +73,16 @@ impl OutParamCallee {
         }
     }
 
+    /// The receiver's FQN, for resolving `self`/`static` inside a
+    /// `@param-out` conditional's own text. `None` for a plain function,
+    /// which has no such receiver.
+    fn declaring_fqn(&self) -> Option<Atom> {
+        match self {
+            Self::Function(_) => None,
+            Self::Method(cls, _) => Some(cls.fqn()),
+        }
+    }
+
     /// The memo key identifying one parameter of this callee.
     ///
     /// Built from interned names the symbol tables already hold, so it
@@ -75,7 +91,12 @@ impl OutParamCallee {
     /// function.
     fn key(&self, param_index: usize) -> OutTypeKey {
         match self {
-            Self::Function(fi) => (Atom::default(), fi.name, param_index as u16),
+            // Two namespaces can each declare a function of the same name.
+            Self::Function(fi) => (
+                fi.namespace.as_deref().map(atom).unwrap_or_default(),
+                fi.name,
+                param_index as u16,
+            ),
             Self::Method(cls, name) => (atom(cls.fqn().as_ref()), *name, param_index as u16),
         }
     }
@@ -153,31 +174,13 @@ thread_local! {
     static OUT_TYPE_DEPTH: Cell<u8> = const { Cell::new(0) };
 }
 
-/// RAII guard that clears [`OUT_TYPE_MEMO`] on drop.
-pub(crate) struct OutTypeMemoGuard {
-    owns: bool,
-}
-
-impl Drop for OutTypeMemoGuard {
-    fn drop(&mut self) {
-        if self.owns {
-            OUT_TYPE_MEMO.with(|cell| {
-                *cell.borrow_mut() = None;
-            });
-        }
-    }
-}
-
 /// Activate the out-parameter memo for the current thread.
+/// The guard [`with_out_type_memo`] hands back.
+pub(crate) type OutTypeMemoGuard =
+    crate::type_engine::MemoGuard<HashMap<OutTypeKey, Option<PhpType>>>;
+
 pub(super) fn with_out_type_memo() -> OutTypeMemoGuard {
-    let already_active = OUT_TYPE_MEMO.with(|cell| cell.borrow().is_some());
-    if already_active {
-        return OutTypeMemoGuard { owns: false };
-    }
-    OUT_TYPE_MEMO.with(|cell| {
-        *cell.borrow_mut() = Some(HashMap::new());
-    });
-    OutTypeMemoGuard { owns: true }
+    crate::type_engine::activate_memo(&OUT_TYPE_MEMO)
 }
 
 /// How deep a chain of out-parameter readings may go.
@@ -218,6 +221,56 @@ pub(crate) fn effective_out_type(
     }
 }
 
+/// Decide a PHPStan conditional out type against the arguments *this*
+/// call actually supplied.
+///
+/// [`effective_out_type`] answers for the declaration, which is shared by
+/// every call site, so a conditional (`@param-out ($arg is null ? A&I :
+/// A) $arg`) survives it unevaluated — only the call site knows what was
+/// passed, so only the call site can pick a branch. Returns `hint`
+/// unchanged when it isn't a conditional, or when the condition can't be
+/// decided from this call's arguments.
+pub(crate) fn resolve_out_type_for_call(
+    hint: PhpType,
+    parameters: &[ParameterInfo],
+    callee: &OutParamCallee,
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    resolution_ctx: &ResolutionCtx<'_>,
+    var_resolver: VarClassStringResolver<'_>,
+) -> PhpType {
+    if !matches!(hint.kind(), TypeKind::Conditional(_)) {
+        return hint;
+    }
+    let text_args = super::super::variable::raw_type_inference::extract_arg_texts_from_ast(
+        argument_list,
+        content,
+    )
+    .join(", ");
+    let arg_type_resolver = |text: &str| Backend::resolve_arg_text_to_type(text, resolution_ctx);
+    let tpl = TemplateContext {
+        defaults: None,
+        params: &[],
+        bindings: &[],
+        arg_type_resolver: Some(&arg_type_resolver),
+        this_type: None,
+    };
+    let declaring_fqn = callee.declaring_fqn();
+    resolve_conditional_with_text_args_and_defaults(
+        &hint,
+        parameters,
+        &text_args,
+        var_resolver,
+        ConditionalClassContext {
+            calling: resolution_ctx.current_class.map(|c| c.name.as_str()),
+            declaring: declaring_fqn.as_deref(),
+        },
+        resolution_ctx.class_loader,
+        &tpl,
+    )
+    .unwrap_or(hint)
+}
+
 /// Read the callee's body for the type it leaves in `param`, memoized and
 /// bounded.
 fn infer_out_type(
@@ -228,80 +281,48 @@ fn infer_out_type(
 ) -> Option<PhpType> {
     let key = callee.key(param_index);
 
-    // Checked before the depth cap so a chain that ran out of budget still
-    // benefits from a reading an earlier, shallower call completed.
-    let memoized =
-        OUT_TYPE_MEMO.with(|cell| cell.borrow().as_ref().and_then(|m| m.get(&key).cloned()));
-    if let Some(cached) = memoized {
-        return cached;
-    }
-
-    let depth = OUT_TYPE_DEPTH.with(Cell::get);
-    if depth >= MAX_OUT_TYPE_DEPTH {
-        return None;
-    }
-
-    let already_visiting = OUT_TYPE_VISITED.with(|cell| !cell.borrow_mut().insert(key));
-    if already_visiting {
-        return None;
-    }
-    OUT_TYPE_DEPTH.with(|cell| cell.set(depth + 1));
-
-    let result = callee
-        .declaration_site(backend)
-        .and_then(|(uri, name_offset)| read_out_type(backend, &uri, name_offset, &param.name))
-        .filter(|ty| !ty.is_untyped() && !ty.is_mixed());
-
-    OUT_TYPE_DEPTH.with(|cell| cell.set(depth));
-    OUT_TYPE_VISITED.with(|cell| {
-        cell.borrow_mut().remove(&key);
-    });
-
-    // Only completed runs are memoized; the guards above return early
-    // without storing, so a cut-off `None` cannot shadow a later reading.
-    OUT_TYPE_MEMO.with(|cell| {
-        if let Some(memo) = cell.borrow_mut().as_mut() {
-            memo.insert(key, result.clone());
-        }
-    });
-
-    result
+    crate::type_engine::memoized_bounded_inference(
+        &OUT_TYPE_MEMO,
+        &OUT_TYPE_VISITED,
+        &OUT_TYPE_DEPTH,
+        MAX_OUT_TYPE_DEPTH,
+        key,
+        key,
+        || {
+            callee
+                .declaration_site(backend)
+                .and_then(|(uri, name_offset)| {
+                    read_out_type(backend, &uri, name_offset, &param.name)
+                })
+                .filter(|ty| !ty.is_untyped() && !ty.is_mixed())
+        },
+    )
 }
 
-/// Resolve `param_name` at the closing brace of the body declared at
-/// `name_offset` in `uri`.
+/// Resolve `param_name` at every point the body declared at `name_offset`
+/// in `uri` can leave through, and join the readings.
 ///
 /// The closing brace is where the fall-through paths have all merged, so
 /// a parameter every path assigns reads back as what they assigned and one
 /// only some paths touch reads back as the join with its declared type.
+/// A `return` leaves the parameter holding whatever it held there, which
+/// the closing brace never sees, so each one is read too.
 fn read_out_type(
     backend: &Backend,
     uri: &str,
     name_offset: u32,
     param_name: &str,
 ) -> Option<PhpType> {
-    let content = backend.get_file_content(uri)?;
-    let body_end = with_parsed_program(&content, "out_param_body", |program, _| {
-        body_close_offset(program, name_offset)
-    })?;
-
-    let local_classes: Vec<Arc<ClassInfo>> = backend
-        .symbols
-        .uri_classes_index
-        .read()
-        .get(uri)
-        .cloned()
-        .unwrap_or_default();
-    let file_use_map = backend.file_use_map(uri);
-    let file_namespace = backend.first_file_namespace(uri);
-    let class_loader = backend.class_loader_with(&local_classes, &file_use_map, &file_namespace);
-    let function_loader = backend.function_loader_with(None, &file_use_map, &file_namespace);
-
-    let enclosing_class = local_classes.iter().find(|c| {
-        !c.name.starts_with("__anonymous@")
-            && body_end >= c.start_offset
-            && body_end <= c.end_offset
-    });
+    let content = backend.get_file_content_arc(uri)?;
+    let file_ctx = backend.file_context(uri);
+    // A file may declare several `namespace` blocks; the callee's names
+    // resolve against the namespace and imports of the one its declaration
+    // sits in.
+    let namespace = file_ctx.namespace_at(name_offset);
+    let use_map = file_ctx.use_map_at(name_offset);
+    let class_loader = backend.class_loader_with(&file_ctx.classes, use_map, namespace);
+    let function_loader =
+        backend.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
 
     // The scope cache and the chain cache both key on offsets alone, and
     // the offsets below belong to another file. Neither may answer, nor
@@ -311,33 +332,84 @@ fn read_out_type(
         crate::type_engine::resolver::with_isolated_chain_cache(),
     );
 
-    crate::type_engine::variable::resolution::resolve_variable_php_type(
-        param_name,
-        &content,
-        body_end,
-        enclosing_class.map(Arc::as_ref),
-        &local_classes,
-        &class_loader,
-        Some(backend),
-        Loaders::with_function(Some(&function_loader)),
-    )
+    // The request's parse cache holds only the request's own file, so this
+    // one parse serves both finding the body and walking it.
+    let types = with_parsed_program(&content, "out_param_body", |program, content| {
+        let Some(body) = body_block(program, name_offset) else {
+            return Vec::new();
+        };
+        let body_end = body.right_brace.start.offset;
+        let enclosing_class = file_ctx.classes.iter().find(|c| {
+            !c.name.starts_with("__anonymous@")
+                && body_end >= c.start_offset
+                && body_end <= c.end_offset
+        });
+        let placeholder;
+        let current_class = match enclosing_class {
+            Some(cls) => cls.as_ref(),
+            None => {
+                placeholder = crate::class_lookup::class_context_placeholder(content, body_end);
+                &placeholder
+            }
+        };
+        let loaders = Loaders::with_function(Some(&function_loader));
+
+        let mut returns = Vec::new();
+        crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
+        let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
+            current_class,
+            all_classes: &file_ctx.classes,
+            class_loader: &class_loader,
+            function_loader: loaders.function_loader,
+            resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
+            var_types: None,
+            receiver_resolver: None,
+        };
+        // The walker reads a position no path reaches as the state before
+        // the statement that left, so a body whose every path returns
+        // would add a stale reading from its closing brace.
+        let falls_through = !body.statements.iter().any(|stmt| {
+            crate::type_engine::types::narrowing::statement_unconditionally_exits(stmt, &exit_ctx)
+        });
+        let exits = returns
+            .iter()
+            .map(|&(_, _, _, return_keyword)| return_keyword as u32)
+            .chain(falls_through.then_some(body_end));
+
+        exits
+            .flat_map(|exit| {
+                crate::type_engine::variable::resolution::resolve_variable_types_in_program(
+                    program,
+                    param_name,
+                    current_class,
+                    &file_ctx.classes,
+                    content,
+                    exit,
+                    &class_loader,
+                    Some(backend),
+                    loaders,
+                )
+            })
+            .collect()
+    });
+    (!types.is_empty()).then(|| crate::types::ResolvedType::types_joined(&types))
 }
 
-/// The offset of the closing brace of the function or method whose name
-/// token starts at `name_offset`.
+/// The body of the function or method whose name token starts at
+/// `name_offset`.
 ///
 /// `None` for a declaration with no body (abstract, interface) and for an
 /// offset that names nothing in this file, which is what a stale index
 /// entry looks like.
-fn body_close_offset(program: &Program<'_>, name_offset: u32) -> Option<u32> {
+fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Block<'a>> {
     fn in_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         name_offset: u32,
-    ) -> Option<u32> {
+    ) -> Option<&'a Block<'a>> {
         for stmt in statements {
             let found = match stmt {
                 Statement::Function(func) if func.name.span.start.offset == name_offset => {
-                    Some(func.body.right_brace.start.offset)
+                    Some(&func.body)
                 }
                 Statement::Class(class) => in_members(class.members.iter(), name_offset),
                 Statement::Trait(tr) => in_members(tr.members.iter(), name_offset),
@@ -357,13 +429,13 @@ fn body_close_offset(program: &Program<'_>, name_offset: u32) -> Option<u32> {
     fn in_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         name_offset: u32,
-    ) -> Option<u32> {
+    ) -> Option<&'a Block<'a>> {
         for member in members {
             if let ClassLikeMember::Method(method) = member
                 && method.name.span.start.offset == name_offset
                 && let MethodBody::Concrete(block) = &method.body
             {
-                return Some(block.right_brace.start.offset);
+                return Some(block);
             }
         }
         None

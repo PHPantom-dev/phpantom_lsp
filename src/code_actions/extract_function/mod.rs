@@ -288,7 +288,7 @@ impl Backend {
             enclosing_docblock_return.as_ref(),
             &typed_returns,
         );
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, start as u32);
         let class_loader = self.class_loader(&ctx);
         let docblock = build_docblock_for_extraction(
             &typed_params,

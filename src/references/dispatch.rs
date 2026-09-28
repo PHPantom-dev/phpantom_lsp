@@ -8,7 +8,7 @@ use super::*;
 
 use tower_lsp::lsp_types::{Location, Position};
 
-use crate::references::push_unique_location;
+use crate::references::push_location;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
@@ -20,29 +20,15 @@ impl Backend {
     /// Returns all locations where the symbol under the cursor is
     /// referenced.  When `include_declaration` is true the declaration
     /// site itself is included in the results.
+    ///
+    /// Waits for the initial workspace index but does not refresh it.  A
+    /// user command that should also discover files created without a
+    /// watcher event runs [`Self::ensure_workspace_indexed_for_request`]
+    /// itself, *before* it reads `content`: a refresh that parses new files
+    /// re-infers Blade templates, which can rewrite their virtual PHP, so a
+    /// template's `content` and `position` read ahead of it would no longer
+    /// be the text its symbol map describes.
     pub fn find_references(
-        &self,
-        uri: &str,
-        content: &str,
-        position: Position,
-        include_declaration: bool,
-    ) -> Option<Vec<Location>> {
-        // Refresh once for the user command so files created without a
-        // watcher event remain discoverable. The per-symbol scanners below
-        // only wait for/reuse that completed index.
-        self.ensure_workspace_indexed_for_request();
-        self.find_references_inner(
-            uri,
-            content,
-            position,
-            include_declaration,
-            ReferenceSearchMode::References,
-        )
-    }
-
-    /// Resolve declaration annotations against the completed index without
-    /// turning every CodeLens item into another workspace refresh.
-    pub(crate) fn find_references_from_workspace_index(
         &self,
         uri: &str,
         content: &str,
@@ -68,7 +54,7 @@ impl Backend {
         position: Position,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        self.ensure_workspace_indexed_for_request();
+        self.ensure_workspace_index_ready_for_request();
         self.find_references_inner(
             uri,
             content,
@@ -105,7 +91,7 @@ impl Backend {
                 sym.kind,
                 sym.start
             );
-            let locations = self.dispatch_symbol_references(
+            let mut locations = self.dispatch_symbol_references(
                 &sym.kind,
                 uri,
                 content,
@@ -113,6 +99,25 @@ impl Backend {
                 include_declaration,
                 mode,
             );
+            // A YAML/XML occurrence of a class or namespace is a reference
+            // the user can be shown, but not one a PHP-shaped edit can be
+            // written over: its text may be the escaped `App\\Handler` form
+            // the document's own quoting requires.  Rename rewrites those
+            // through the framework resource index, which keeps each
+            // occurrence's spelling, so they are left out here.  A member
+            // occurrence (`Controller::action`) covers the bare member name,
+            // which the PHP edit replaces as written.
+            if mode == ReferenceSearchMode::Rename
+                && !matches!(
+                    sym.kind,
+                    SymbolKind::MemberAccess { .. } | SymbolKind::MemberDeclaration { .. }
+                )
+            {
+                locations.retain(|location| {
+                    !crate::resource_navigation::is_resource_document(location.uri.as_str())
+                });
+            }
+            sort_locations_for_references(&mut locations);
             tracing::info!(
                 "Find References: total time for {:?}: {:?}",
                 sym.kind,
@@ -123,14 +128,24 @@ impl Backend {
             }
         }
 
-        // Fallback for declaration sites in config/*.php
+        // Fallback for declaration sites in config/*.php and routes/*.php
         let start_laravel = std::time::Instant::now();
         if self.resolved_class_cache.read().is_laravel()
-            && let Some(locations) =
+            && let Some(mut locations) =
                 laravel::find_config_references(self, uri, content, position, include_declaration)
+                    .or_else(|| {
+                        laravel::find_route_registration_references(
+                            self,
+                            uri,
+                            content,
+                            position,
+                            include_declaration,
+                        )
+                    })
         {
+            sort_locations_for_references(&mut locations);
             tracing::info!(
-                "Find References: found Laravel config references in {:?}",
+                "Find References: found Laravel declaration-site references in {:?}",
                 start_laravel.elapsed()
             );
             tracing::info!(
@@ -157,22 +172,6 @@ impl Backend {
             start_total.elapsed()
         );
         None
-    }
-
-    pub(crate) fn find_framework_references_for_rename(
-        &self,
-        uri: &str,
-        content: &str,
-        position: Position,
-        include_declaration: bool,
-    ) -> Option<Vec<Location>> {
-        self.find_framework_references_at(
-            uri,
-            content,
-            position,
-            include_declaration,
-            ReferenceSearchMode::Rename,
-        )
     }
 
     fn find_framework_references_at(
@@ -255,17 +254,15 @@ impl Backend {
                         });
 
                     // Resolve the enclosing class to scope the search.
-                    let hierarchy = self.resolve_member_declaration_hierarchy(
-                        uri, span_start, name, is_static, mode,
-                    );
-                    let declaration_scope = self
-                        .resolve_member_declaration_scope(uri, span_start, name, is_static, mode);
+                    let (hierarchy, declaration_scope) = self
+                        .resolve_member_declaration_scopes(uri, span_start, name, is_static, mode)
+                        .unzip();
                     return self.find_member_references(
                         name,
                         is_static,
                         include_declaration,
                         hierarchy.as_ref(),
-                        declaration_scope.as_ref(),
+                        declaration_scope.flatten().as_ref(),
                     );
                 }
                 self.find_variable_references(uri, content, name, span_start, include_declaration)
@@ -281,7 +278,7 @@ impl Backend {
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
-                let fqn = build_fqn(name, ctx.namespace.as_deref());
+                let fqn = build_fqn(name, ctx.namespace_at(span_start).as_deref());
                 self.find_class_references(&fqn, include_declaration)
             }
             SymbolKind::MemberAccess {
@@ -291,11 +288,15 @@ impl Backend {
                 is_method_call,
                 ..
             } => {
+                let Some(source) = self.symbol_map_source(uri, content) else {
+                    return Vec::new();
+                };
+
                 // Resolve the subject to determine the class hierarchy
                 // so we only return references on related classes.
                 let (hierarchy, declaration_scope) = self.resolve_member_access_scopes(
                     uri,
-                    subject_text.as_str(content),
+                    subject_text.as_str(source),
                     *is_static,
                     span_start,
                     member_name,
@@ -312,7 +313,7 @@ impl Backend {
                         .reference_file_content(uri)
                         .map(|file_content| {
                             self.resolve_subject_to_fqns(
-                                subject_text.as_str(&file_content),
+                                subject_text.as_str(source),
                                 *is_static,
                                 &self.file_context(uri),
                                 span_start,
@@ -347,7 +348,7 @@ impl Backend {
                                 end = offset_to_position(&def_content, def_span.end as usize);
                             }
                         }
-                        push_unique_location(&mut locations, &def.uri, start, end);
+                        push_location(&mut locations, &def.uri, start, end);
                     }
                     self.append_laravel_macro_registration_locations(
                         &mut locations,
@@ -393,23 +394,30 @@ impl Backend {
                     let ctx = self.file_context(uri);
                     let seeds: Vec<String> =
                         crate::class_lookup::find_class_at_offset(&ctx.classes, span_start)
-                            .map(|cc| vec![build_fqn(&cc.name, ctx.namespace.as_deref())])
+                            .map(|cc| vec![cc.fqn().to_string()])
                             .unwrap_or_default();
                     return self.find_constructor_references(&seeds, include_declaration);
                 }
 
                 // Resolve the enclosing class to scope the search.
-                let hierarchy = self
-                    .resolve_member_declaration_hierarchy(uri, span_start, name, *is_static, mode);
-                let declaration_scope =
-                    self.resolve_member_declaration_scope(uri, span_start, name, *is_static, mode);
-                self.find_member_references(
+                let (hierarchy, declaration_scope) = self
+                    .resolve_member_declaration_scopes(uri, span_start, name, *is_static, mode)
+                    .unzip();
+                let mut locations = self.find_member_references(
                     name,
                     *is_static,
                     include_declaration,
                     hierarchy.as_ref(),
-                    declaration_scope.as_ref(),
-                )
+                    declaration_scope.flatten().as_ref(),
+                );
+                if let Some(magic) = self.eloquent_magic_member_at(uri, span_start, name) {
+                    locations.extend(
+                        self.eloquent_magic_references_batch(&[&magic], None)
+                            .into_iter()
+                            .flatten(),
+                    );
+                }
+                locations
             }
             SymbolKind::SelfStaticParent(ssp_kind) => {
                 // `$this` is a file-local variable, not a cross-file class search.
@@ -426,13 +434,13 @@ impl Backend {
                 let ctx = self.file_context(uri);
                 let current_class =
                     crate::class_lookup::find_class_at_offset(&ctx.classes, span_start);
-                let fqn = match ssp_kind {
-                    SelfStaticParentKind::Parent => {
-                        current_class.and_then(|cc| cc.parent_class.map(|a| a.to_string()))
-                    }
-                    _ => current_class.map(|cc| build_fqn(&cc.name, ctx.namespace.as_deref())),
+                let keyword = match ssp_kind {
+                    SelfStaticParentKind::Parent => "parent",
+                    _ => "self",
                 };
-                if let Some(fqn) = fqn {
+                if let Some(fqn) =
+                    crate::class_lookup::resolve_class_keyword(keyword, current_class)
+                {
                     self.find_class_references(&fqn, include_declaration)
                 } else {
                     Vec::new()
@@ -445,18 +453,12 @@ impl Backend {
                 if !self.resolved_class_cache.read().is_laravel() {
                     return Vec::new();
                 }
-                let snapshot = if include_declaration
-                    && matches!(kind, crate::symbol_map::LaravelStringKind::Config)
-                {
-                    self.user_file_symbol_maps()
-                } else {
-                    self.user_file_symbol_maps_for_reference_keys(&[
-                        ReferenceIndexKey::LaravelString {
-                            kind: kind.clone(),
-                            key: key.to_string(),
-                        },
-                    ])
-                };
+                // Config resources and their generic config spelling share a
+                // canonical index identity. Declaration lookup is independent
+                // of this usage snapshot, so every request stays narrow.
+                let reference_key =
+                    crate::reference_index::laravel_string_reference_key(*kind, key);
+                let snapshot = self.user_file_symbol_maps_for_reference_keys(&[reference_key]);
                 laravel::find_laravel_string_key_references(
                     self,
                     kind,

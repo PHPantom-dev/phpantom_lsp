@@ -1,0 +1,13 @@
+// test: isset() on an integer-numeric string offset keeps string
+// feature: hover
+// `isset('abc'['01'])` is true: PHP reads the offset as the integer 1.
+// expect: string|
+---
+<?php
+
+/** @param string|array{'01'?: string} $e */
+function f($e): void {
+    if (isset($e['01'])) {
+        echo $<>e;
+    }
+}

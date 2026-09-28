@@ -1,0 +1,15 @@
+// test: past a guard of negated isset() calls the value is not a string
+// feature: hover
+// Falling through proves one of the keys is set, and a string sets none.
+// expect: $c = array{a?: int, b?: int}
+// expect_absent: string
+---
+<?php
+
+/** @param string|array{a?: int, b?: int} $s */
+function f($s): void {
+    if (!isset($s['a']) && !isset($s['b'])) {
+        return;
+    }
+    $<>c = $s;
+}

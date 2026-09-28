@@ -1,0 +1,13 @@
+// test: array_push() appends to the array the way $a[] = … does
+// feature: hover
+// expect: $result = list<int>
+---
+<?php
+
+function test(int $max): void {
+    $result = [];
+    for ($i = 0; $i < $max; $i++) {
+        array_push($result, $i);
+    }
+    $<>result;
+}

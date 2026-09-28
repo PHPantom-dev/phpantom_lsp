@@ -22,6 +22,7 @@
 //!   1 or 2-3 arguments, `mt_rand` accepts 0 or 2) that the
 //!   phpstorm-stubs format cannot express with a single declaration.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 
 use tower_lsp::lsp_types::*;
@@ -251,8 +252,12 @@ impl Backend {
         // `is_position_independent_call_expression`). Variable-based
         // calls (`$purchaseFile->save`) and `self::`/`static::`/
         // `parent::` calls are resolved fresh every time because their
-        // target depends on the call site's position.
-        let mut call_cache: HashMap<String, Option<ResolvedCallableTarget>> = HashMap::new();
+        // target depends on the call site's position. There is one cache
+        // per `namespace` block, since the same text can name a different
+        // target under another block's imports.
+        let call_caches = file_ctx.per_block(|_, _| {
+            RefCell::new(HashMap::<String, Option<ResolvedCallableTarget>>::new())
+        });
 
         // ── Walk every call site ────────────────────────────────────
         for call_site in &symbol_map.call_sites {
@@ -266,7 +271,9 @@ impl Backend {
 
             // Look up or populate the call expression cache.
             let resolved = if is_position_independent_call_expression(expr) {
-                call_cache
+                call_caches
+                    .at(call_site.args_start)
+                    .borrow_mut()
                     .entry(expr.clone())
                     .or_insert_with(|| {
                         self.resolve_callable_target_at_offset(

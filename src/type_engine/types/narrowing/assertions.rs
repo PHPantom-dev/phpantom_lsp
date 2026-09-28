@@ -99,34 +99,20 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 ctx,
             )
         }
-        Call::Method(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(
-                &class_info,
-                method_name,
-                &method_call.argument_list,
-                expr_to_subject_key(method_call.object),
-                ctx,
-            )
-        }
-        Call::NullSafeMethod(method_call) => {
-            let method_name = match &method_call.method {
-                ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value),
-                _ => return None,
-            };
-            let class_info = resolve_instance_receiver_class(method_call.object, ctx)?;
-            build_method_assertion_info(
-                &class_info,
-                method_name,
-                &method_call.argument_list,
-                expr_to_subject_key(method_call.object),
-                ctx,
-            )
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which says nothing about its assertions.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_method_assertion_info(object, method, argument_list, ctx),
     }
 }
 
@@ -177,6 +163,26 @@ fn resolve_instance_receiver_class(
     let resolver = ctx.scope_var_resolver?;
     let first = resolver(name).into_iter().next()?;
     (ctx.class_loader)(&first.type_string.to_string())
+}
+
+/// The assertions an instance method call carries, for either arrow.
+fn instance_method_assertion_info<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallAssertionInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class_info = resolve_instance_receiver_class(object, ctx)?;
+    build_method_assertion_info(
+        &class_info,
+        bytes_to_str(ident.value),
+        argument_list,
+        expr_to_subject_key(object),
+        ctx,
+    )
 }
 
 /// Build [`CallAssertionInfo`] for a method call once the receiver class
@@ -238,6 +244,27 @@ pub(in crate::type_engine) fn find_assertion_method_in_chain(
     )
 }
 
+/// Rewrite a definition found on `ancestor` in terms of `class`, which
+/// binds the ancestor's templates through `@extends` / `@implements`.
+///
+/// The walk loads classes raw, so a tag written against the ancestor's own
+/// template (`@phpstan-assert-if-true T $id` on `Fetcher<T>`) reaches the
+/// call site still naming `T`; `PostFetcher`'s `@implements
+/// Fetcher<PostId>` is what says it means `PostId` there.
+fn bind_ancestor_templates(
+    class: &ClassInfo,
+    ancestor: &ClassInfo,
+    (mut method, declaring): (crate::types::MethodInfo, Atom),
+) -> (crate::types::MethodInfo, Atom) {
+    if !ancestor.template_params.is_empty() {
+        let subs = crate::inheritance::build_substitution_map(class, ancestor, &Default::default());
+        if !subs.is_empty() {
+            crate::inheritance::apply_substitution_to_method(&mut method, &subs);
+        }
+    }
+    (method, declaring)
+}
+
 /// [`find_assertion_method_in_chain`] generalised over what makes a
 /// definition the interesting one: assertion tags for the assert
 /// narrowing, a conditional return type for the `never`-branch one.
@@ -293,7 +320,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     // Parent class chain.
     if let Some(parent) = class.parent_class.as_ref()
         && let Some(parent_class) = class_loader(parent)
-        && let Some(method) = find_method_in_chain_where(
+        && let Some(found) = find_method_in_chain_where(
             &parent_class,
             method_name,
             class_loader,
@@ -302,7 +329,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
             depth + 1,
         )
     {
-        return Some(method);
+        return Some(bind_ancestor_templates(class, &parent_class, found));
     }
 
     // Implemented interfaces, last: a class that redeclares the method
@@ -311,7 +338,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
     // them and `MutatingScope` implements them).
     for interface_name in &class.interfaces {
         if let Some(interface) = class_loader(interface_name)
-            && let Some(method) = find_method_in_chain_where(
+            && let Some(found) = find_method_in_chain_where(
                 &interface,
                 method_name,
                 class_loader,
@@ -320,7 +347,7 @@ pub(in crate::type_engine) fn find_method_in_chain_where(
                 depth + 1,
             )
         {
-            return Some(method);
+            return Some(bind_ancestor_templates(class, &interface, found));
         }
     }
 
@@ -596,41 +623,85 @@ fn resolve_assertion_template_type(
     info: &CallAssertionInfo<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
-    // Check if the asserted type is a template parameter.
     let tpl_name = match asserted_type.kind() {
         TypeKind::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
         _ => return asserted_type.clone(),
     };
+    template_argument_at_call(
+        tpl_name,
+        &info.template_bindings,
+        &info.parameters,
+        info.argument_list,
+        ctx,
+    )
+    .unwrap_or_else(|| asserted_type.clone())
+}
 
+/// `asserted` with each of the callee's own `@template` parameters replaced
+/// by the class the call binds it to through a `class-string<T>` argument.
+///
+/// [`resolve_assertion_template_type`] answers the case where the tag names
+/// the template bare; a tag can also name it inside another type
+/// (`@phpstan-assert-if-true ReflectionClass<T> $this`), and the argument
+/// binds it just the same.  A template the call leaves unbound stays as
+/// written.
+pub(in crate::type_engine) fn bind_call_templates(
+    asserted: &PhpType,
+    template_params: &[Atom],
+    template_bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> PhpType {
+    if template_params.is_empty() {
+        return asserted.clone();
+    }
+    let mut subs = std::collections::HashMap::new();
+    for tpl in template_params {
+        if !asserted.references_any_template_param(&[tpl.to_string()]) {
+            continue;
+        }
+        if let Some(bound) =
+            template_argument_at_call(tpl, template_bindings, parameters, argument_list, ctx)
+        {
+            subs.insert(tpl.to_string(), bound);
+        }
+    }
+    if subs.is_empty() {
+        asserted.clone()
+    } else {
+        asserted.substitute(&subs)
+    }
+}
+
+/// The class a call binds the template `tpl_name` to, read off the
+/// `class-string<T>` argument its binding names.
+fn template_argument_at_call(
+    tpl_name: &str,
+    template_bindings: &[(Atom, Atom)],
+    parameters: &[ParameterInfo],
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<PhpType> {
     // Find the parameter name that binds this template param.
-    let bound_param = info
-        .template_bindings
+    let bound_param = template_bindings
         .iter()
         .find(|(tpl, _)| tpl == tpl_name)
-        .map(|(_, param)| param.as_str());
-
-    let bound_param = match bound_param {
-        Some(p) => p,
-        None => return asserted_type.clone(),
-    };
+        .map(|(_, param)| param.as_str())?;
 
     // Find the positional index of that parameter.
-    let param_idx = match info.parameters.iter().position(|p| p.name == bound_param) {
-        Some(idx) => idx,
-        None => return asserted_type.clone(),
-    };
+    let param_idx = parameters.iter().position(|p| p.name == bound_param)?;
 
     // Get the call-site argument at that position.
-    let arg_expr = match info.argument_list.arguments.iter().nth(param_idx) {
-        Some(Argument::Positional(pos)) => pos.value,
-        Some(Argument::Named(named)) => named.value,
-        None => return asserted_type.clone(),
+    let arg_expr = match argument_list.arguments.iter().nth(param_idx)? {
+        Argument::Positional(pos) => pos.value,
+        Argument::Named(named) => named.value,
     };
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
         let fqn = crate::util::resolve_name_via_loader(&class_name, ctx.class_loader);
-        return PhpType::named(atom(&fqn));
+        return Some(PhpType::named(atom(&fqn)));
     }
 
     if let Expression::Variable(Variable::Direct(dv)) = arg_expr {
@@ -651,7 +722,7 @@ fn resolve_assertion_template_type(
                     .unwrap_class_string_inner()
                     .map(PhpType::kind)
                 {
-                    return PhpType::named(*name);
+                    return Some(PhpType::named(*name));
                 }
             }
         }
@@ -675,11 +746,11 @@ fn resolve_assertion_template_type(
                 ctx.backend,
             );
         if let Some(first) = targets.into_iter().next() {
-            return PhpType::named(atom(first.name.as_ref()));
+            return Some(PhpType::named(atom(first.name.as_ref())));
         }
     }
 
-    asserted_type.clone()
+    None
 }
 
 /// Unwrap parentheses and a single `!` prefix from a condition,
@@ -711,23 +782,17 @@ pub(in crate::type_engine) fn unwrap_condition_negation<'b>(
 pub(in crate::type_engine) fn fold_negation_pairs<'b>(
     expr: &'b Expression<'b>,
 ) -> &'b Expression<'b> {
-    fn strip_parens<'b>(expr: &'b Expression<'b>) -> &'b Expression<'b> {
-        match expr {
-            Expression::Parenthesized(inner) => strip_parens(inner.expression),
-            other => other,
-        }
-    }
     /// The operand of `expr` when it is a logical `!`.
     fn not_operand<'b>(expr: &'b Expression<'b>) -> Option<&'b Expression<'b>> {
         match expr {
             Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-                Some(strip_parens(prefix.operand))
+                Some(crate::parser::unwrap_parens(prefix.operand))
             }
             _ => None,
         }
     }
 
-    let mut current = strip_parens(expr);
+    let mut current = crate::parser::unwrap_parens(expr);
     while let Some(once) = not_operand(current) {
         match not_operand(once) {
             Some(twice) => current = twice,
@@ -737,13 +802,6 @@ pub(in crate::type_engine) fn fold_negation_pairs<'b>(
     current
 }
 
-/// Given a function's argument list and a parameter name (with `$`
-/// prefix), find the subject key passed at that parameter's position.
-///
-/// Returns the subject key for a direct variable (`$var`), a property
-/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
-/// assertion narrowing applies to non-variable subjects, not just plain
-/// variables.
 /// The subject key an assertion tag names at the call site.
 ///
 /// Most tags name a parameter (`@phpstan-assert Foo $value`), so the
@@ -774,6 +832,13 @@ pub(in crate::type_engine) fn assertion_subject_key(
     Some(format!("{base}{rest}"))
 }
 
+/// Given a function's argument list and a parameter name (with `$`
+/// prefix), find the subject key passed at that parameter's position.
+///
+/// Returns the subject key for a direct variable (`$var`), a property
+/// path (`$arg->value`), or an array access (`$stmts["0"]`) so that
+/// assertion narrowing applies to non-variable subjects, not just plain
+/// variables.
 pub(in crate::type_engine) fn find_assertion_arg_variable(
     argument_list: &ArgumentList<'_>,
     param_name: &str,
@@ -790,6 +855,38 @@ pub(in crate::type_engine) fn find_assertion_arg_variable(
     };
 
     expr_to_subject_key(arg_expr)
+}
+
+/// Every subject key a tag on `param_name` names at the call site.
+///
+/// A variadic parameter collects every positional argument from its
+/// position on, so an assertion about it is an assertion about each of
+/// them. Anything else names at most the one argument
+/// [`find_assertion_arg_variable`] finds.
+pub(in crate::type_engine) fn find_assertion_arg_variables(
+    argument_list: &ArgumentList<'_>,
+    param_name: &str,
+    parameters: &[crate::types::ParameterInfo],
+) -> Vec<String> {
+    let Some(param_idx) = parameters.iter().position(|p| p.name == param_name) else {
+        return Vec::new();
+    };
+    if !parameters[param_idx].is_variadic {
+        return find_assertion_arg_variable(argument_list, param_name, parameters)
+            .into_iter()
+            .collect();
+    }
+    // An unpacked `...$rest` hands over a whole array, not one value the
+    // tag could speak for.
+    argument_list
+        .arguments
+        .iter()
+        .skip(param_idx)
+        .filter_map(|arg| match arg {
+            Argument::Positional(pos) if pos.ellipsis.is_none() => expr_to_subject_key(pos.value),
+            _ => None,
+        })
+        .collect()
 }
 
 // ── `never` branches of a conditional return type ────────────────────
@@ -847,31 +944,36 @@ pub(in crate::type_engine) fn extract_conditional_return_call<'a>(
                 ctx,
             )
         }
-        Call::Method(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
-        Call::NullSafeMethod(method_call) => {
-            let ClassLikeMemberSelector::Identifier(ident) = &method_call.method else {
-                return None;
-            };
-            let class = resolve_instance_receiver_class(method_call.object, ctx)?;
-            conditional_return_from_chain(
-                &class,
-                bytes_to_str(ident.value),
-                &method_call.argument_list,
-                ctx,
-            )
-        }
+        // `->` and `?->` reach the same method; only the receiver's
+        // nullability differs, which the conditional return does not read.
+        Call::Method(MethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        })
+        | Call::NullSafeMethod(NullSafeMethodCall {
+            object,
+            method,
+            argument_list,
+            ..
+        }) => instance_conditional_return(object, method, argument_list, ctx),
     }
+}
+
+/// The conditional return an instance method call carries, for either
+/// arrow.
+fn instance_conditional_return<'a>(
+    object: &Expression<'_>,
+    selector: &ClassLikeMemberSelector<'_>,
+    argument_list: &'a ArgumentList<'a>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<CallReturnInfo<'a>> {
+    let ClassLikeMemberSelector::Identifier(ident) = selector else {
+        return None;
+    };
+    let class = resolve_instance_receiver_class(object, ctx)?;
+    conditional_return_from_chain(&class, bytes_to_str(ident.value), argument_list, ctx)
 }
 
 /// Find the definition of `method_name` whose return type is conditional,

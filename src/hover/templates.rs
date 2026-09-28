@@ -29,8 +29,9 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<String> {
         // Only bare named types can be template params.
-        let name = match ty.kind() {
-            TypeKind::Named(n) if is_bare_identifier(n) => n.as_str(),
+        let name = match (ty.as_template_param(), ty.kind()) {
+            (Some((n, _)), _) => n.as_str(),
+            (None, TypeKind::Named(n)) if is_bare_identifier(n) => n.as_str(),
             _ => return None,
         };
 

@@ -8,11 +8,12 @@
 
 use super::*;
 
-use tower_lsp::lsp_types::{Location, Range};
+use std::cell::OnceCell;
 
-use crate::references::push_unique_location;
+use tower_lsp::lsp_types::Location;
+
+use crate::atom::Atom;
 use crate::symbol_map::{ClassRefContext, SelfStaticParentKind, SymbolKind};
-use crate::text_position::offset_to_position;
 use crate::types::ClassInfo;
 use crate::util::build_fqn;
 
@@ -26,138 +27,86 @@ impl Backend {
         target_fqn: &str,
         include_declaration: bool,
     ) -> Vec<Location> {
-        let mut locations = Vec::new();
-
         // Normalise: strip leading backslash if present.
         let target = strip_fqn_prefix(target_fqn);
         let target_short = crate::util::short_name(target);
 
         let candidate_keys = class_candidate_keys(target, target_short);
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
-        self.begin_request_scan_window(snapshot.len(), "Scanning for class references");
+        let mut locations = self.scan_reference_candidates(
+            &candidate_keys,
+            "Scanning for class references",
+            |file, symbol_map, locations| {
+                // Prefer mago-names resolved_names for FQN resolution
+                // (byte-offset based, applies PHP's full name resolution
+                // rules).  Falls back to the legacy use_map lazily for
+                // identifiers not tracked by mago-names (e.g. docblock-sourced
+                // references).
+                let fqn_resolver = SpanFqnResolver::new(self, file.uri());
 
-        for (file_uri, symbol_map) in &snapshot {
-            self.request_scan_file_done();
-            // Prefer mago-names resolved_names for FQN resolution (byte-offset
-            // based, applies PHP's full name resolution rules).  Falls back to
-            // the legacy use_map lazily for identifiers not tracked by
-            // mago-names (e.g. docblock-sourced references).
-            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
-            let file_namespace = self.first_file_namespace(file_uri);
-            let file_use_map = std::cell::OnceCell::new();
-            let class_matches = |resolved: &str| {
-                class_names_match(strip_fqn_prefix(resolved), target, target_short)
-            };
-
-            // First pass: resolved-name check to avoid unnecessary content work.
-            // Aliased imports (`use Foo as Bar; new Bar`) must still reach the
-            // full matching loop, because the textual span name is the alias.
-            let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
-                SymbolKind::ClassReference { name, .. } => {
-                    if crate::util::short_name(name).eq_ignore_ascii_case(target_short) {
-                        true
-                    } else {
-                        let resolved = if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn.to_string()
+                // First pass: resolved-name check to avoid unnecessary content
+                // work.  Aliased imports (`use Foo as Bar; new Bar`) must still
+                // reach the full matching loop, because the textual span name
+                // is the alias.
+                let has_potential_match = symbol_map.spans.iter().any(|span| match &span.kind {
+                    SymbolKind::ClassReference { name, .. } => {
+                        if crate::util::short_name(name).eq_ignore_ascii_case(target_short) {
+                            true
                         } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
-                        class_matches(&resolved)
-                    }
-                }
-                SymbolKind::ClassDeclaration { name } => {
-                    include_declaration && name.eq_ignore_ascii_case(target_short)
-                }
-                SymbolKind::SelfStaticParent(ssp_kind) => *ssp_kind != SelfStaticParentKind::This,
-                _ => false,
-            });
-
-            if !has_potential_match {
-                continue;
-            }
-
-            let parsed_uri = match Url::parse(file_uri) {
-                Ok(u) => u,
-                Err(_) => continue,
-            };
-
-            // Lazily load file content only if we find a true FQN match.
-            let mut file_content: Option<Arc<String>> = None;
-
-            for span in &symbol_map.spans {
-                let matched = match &span.kind {
-                    SymbolKind::ClassReference { name, is_fqn, .. } => {
-                        let resolved = if *is_fqn {
-                            name.to_string()
-                        } else if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn.to_string()
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
-                        class_matches(&resolved)
-                    }
-                    SymbolKind::ClassDeclaration { name } if include_declaration => {
-                        if !name.eq_ignore_ascii_case(target_short) {
-                            false
-                        } else {
-                            let fqn = build_fqn(name, file_namespace.as_deref());
-                            class_names_match(&fqn, target, target_short)
+                            let resolved = fqn_resolver.fqn(name, false, span.start);
+                            class_names_match(strip_fqn_prefix(&resolved), target, target_short)
                         }
                     }
-                    SymbolKind::SelfStaticParent(ssp_kind)
-                        if *ssp_kind != SelfStaticParentKind::This =>
-                    {
-                        if let Some(fqn) = self.resolve_keyword_to_fqn(
-                            ssp_kind,
-                            file_uri,
-                            &file_namespace,
-                            span.start,
-                        ) {
-                            class_names_match(&fqn, target, target_short)
-                        } else {
-                            false
-                        }
+                    SymbolKind::ClassDeclaration { name } => {
+                        include_declaration && name.eq_ignore_ascii_case(target_short)
+                    }
+                    SymbolKind::SelfStaticParent(ssp_kind) => {
+                        *ssp_kind != SelfStaticParentKind::This
                     }
                     _ => false,
-                };
+                });
+                if !has_potential_match {
+                    return;
+                }
 
-                if matched {
-                    if file_content.is_none() {
-                        file_content = self.reference_file_content_arc(file_uri);
-                    }
-                    if let Some(ref content) = file_content {
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        locations.push(Location {
-                            uri: parsed_uri.clone(),
-                            range: Range { start, end },
-                        });
+                // Content is loaded only once a true FQN match needs a position.
+                for span in &symbol_map.spans {
+                    let matched = match &span.kind {
+                        SymbolKind::ClassReference { name, is_fqn, .. } => {
+                            let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
+                            class_names_match(strip_fqn_prefix(&resolved), target, target_short)
+                        }
+                        SymbolKind::ClassDeclaration { name } if include_declaration => {
+                            if !name.eq_ignore_ascii_case(target_short) {
+                                false
+                            } else {
+                                let fqn = build_fqn(
+                                    name,
+                                    fqn_resolver.namespace_at(span.start).as_deref(),
+                                );
+                                class_names_match(&fqn, target, target_short)
+                            }
+                        }
+                        SymbolKind::SelfStaticParent(ssp_kind)
+                            if *ssp_kind != SelfStaticParentKind::This =>
+                        {
+                            if let Some(fqn) =
+                                self.resolve_keyword_to_fqn(ssp_kind, file.uri(), span.start)
+                            {
+                                class_names_match(&fqn, target, target_short)
+                            } else {
+                                false
+                            }
+                        }
+                        _ => false,
+                    };
+
+                    if matched && let Some(location) = file.location(span.start, span.end) {
+                        locations.push(location);
                     }
                 }
-            }
-        }
-
-        for loc in self.framework_class_reference_locations(target) {
-            push_unique_location(&mut locations, &loc.uri, loc.range.start, loc.range.end);
-        }
+            },
+        );
+        locations.extend(self.framework_class_reference_locations(target));
         sort_locations_for_references(&mut locations);
         locations
     }
@@ -192,7 +141,6 @@ impl Backend {
             return Vec::new();
         }
 
-        let mut locations = Vec::new();
         let mut candidate_keys = Vec::new();
         for fqn in &scoped {
             candidate_keys.extend(class_candidate_keys(fqn, crate::util::short_name(fqn)));
@@ -207,159 +155,116 @@ impl Backend {
                 is_static: false,
             },
         ]);
-        let snapshot = self.user_file_symbol_maps_for_reference_keys(&candidate_keys);
-        self.begin_request_scan_window(snapshot.len(), "Scanning for constructor references");
+        self.scan_reference_candidates(
+            &candidate_keys,
+            "Scanning for constructor references",
+            |file, symbol_map, locations| {
+                let file_uri = file.uri();
+                let fqn_resolver = SpanFqnResolver::new(self, file_uri);
 
-        for (file_uri, symbol_map) in &snapshot {
-            self.request_scan_file_done();
-            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
-            let file_namespace = self.first_file_namespace(file_uri);
-            let file_use_map = std::cell::OnceCell::new();
-            let file_ctx = std::cell::OnceCell::new();
-
-            let Some(parsed_uri) = Url::parse(file_uri).ok() else {
-                continue;
-            };
-
-            let mut file_content: Option<Arc<String>> = None;
-
-            for span in &symbol_map.spans {
-                let matched = match &span.kind {
-                    // `new ClassName(...)` carries `ClassRefContext::New`;
-                    // `#[ClassName(...)]` attribute usages carry
-                    // `ClassRefContext::Attribute`.  Both invoke the
-                    // constructor.
-                    SymbolKind::ClassReference {
-                        name,
-                        is_fqn,
-                        context: ClassRefContext::New | ClassRefContext::Attribute,
-                    } => {
-                        let resolved = if *is_fqn {
-                            name
-                        } else if let Some(fqn) =
-                            resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                        {
-                            fqn
-                        } else {
-                            let use_map = file_use_map.get_or_init(|| {
-                                self.file_imports
-                                    .read()
-                                    .get(file_uri)
-                                    .cloned()
-                                    .unwrap_or_default()
-                            });
-                            &Self::resolve_to_fqn(name, use_map, &file_namespace)
-                        };
-                        scoped.contains(&fold_class_fqn(resolved))
-                    }
-                    // `new self()` / `new static()` / `new parent()` carry
-                    // `SelfStaticParent` spans rather than `ClassReference`,
-                    // so they need the same enclosing-class resolution as
-                    // `self::__construct()` below.  The same span kind is
-                    // also emitted for `parent::__construct()`'s subject
-                    // (handled by the `MemberAccess` arm below), so this
-                    // only fires when the keyword is actually the operand
-                    // of `new`.
-                    SymbolKind::SelfStaticParent(ssp_kind)
-                        if *ssp_kind != SelfStaticParentKind::This =>
-                    {
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        match &file_content {
-                            Some(content) if is_new_operand(content, span.start) => {
-                                match self.resolve_keyword_to_fqn(
-                                    ssp_kind,
-                                    file_uri,
-                                    &file_namespace,
-                                    span.start,
-                                ) {
-                                    Some(fqn) => scoped.contains(&fold_class_fqn(&fqn)),
-                                    None => false,
-                                }
-                            }
-                            _ => false,
-                        }
-                    }
-                    // Explicit constructor delegation written as
-                    // `parent::__construct()`, `self::__construct()`, or
-                    // `Foo::__construct()` lands here.  Resolve the subject
-                    // class and keep the call when it falls within the
-                    // constructor's owning hierarchy.
-                    SymbolKind::MemberAccess {
-                        subject_text,
-                        member_name,
-                        is_static,
-                        ..
-                    } if is_constructor_name(member_name) => {
-                        if file_content.is_none() {
-                            file_content = self.reference_file_content_arc(file_uri);
-                        }
-                        match &file_content {
-                            Some(content) => {
-                                let ctx = file_ctx.get_or_init(|| self.file_context(file_uri));
-                                self.resolve_subject_to_fqns(
-                                    subject_text.as_str(content),
-                                    *is_static,
-                                    ctx,
-                                    span.start,
-                                    content,
-                                )
-                                .iter()
-                                .any(|fqn| scoped.contains(&fold_class_fqn(fqn)))
-                            }
-                            None => false,
-                        }
-                    }
-                    _ => false,
+                // `parent::__construct()` and its siblings are member
+                // accesses, so their receivers go through the same pass (and
+                // the same recorded answers) as every other member search.
+                let receivers = OnceCell::new();
+                let constructor_receivers = || {
+                    receivers
+                        .get_or_init(|| {
+                            let names: Vec<Atom> = symbol_map
+                                .member_access_indices
+                                .keys()
+                                .filter(|name| is_constructor_name(name))
+                                .copied()
+                                .collect();
+                            self.member_receivers_for(file, symbol_map, &names)
+                        })
+                        .clone()
                 };
 
-                if matched {
-                    if file_content.is_none() {
-                        file_content = self.reference_file_content_arc(file_uri);
-                    }
-                    if let Some(content) = &file_content {
-                        let start = offset_to_position(content, span.start as usize);
-                        let end = offset_to_position(content, span.end as usize);
-                        push_unique_location(&mut locations, &parsed_uri, start, end);
+                for (span_index, span) in symbol_map.spans.iter().enumerate() {
+                    let matched = match &span.kind {
+                        // `new ClassName(...)` carries `ClassRefContext::New`;
+                        // `#[ClassName(...)]` attribute usages carry
+                        // `ClassRefContext::Attribute`.  Both invoke the
+                        // constructor.
+                        SymbolKind::ClassReference {
+                            name,
+                            is_fqn,
+                            context: ClassRefContext::New | ClassRefContext::Attribute,
+                        } => {
+                            let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
+                            scoped.contains(&fold_class_fqn(&resolved))
+                        }
+                        // `new self()` / `new static()` / `new parent()` carry
+                        // `SelfStaticParent` spans rather than `ClassReference`,
+                        // so they need the same enclosing-class resolution as
+                        // `self::__construct()` below.  The same span kind is
+                        // also emitted for `parent::__construct()`'s subject
+                        // (handled by the `MemberAccess` arm below), so this
+                        // only fires when the keyword is actually the operand
+                        // of `new`.
+                        SymbolKind::SelfStaticParent(ssp_kind)
+                            if *ssp_kind != SelfStaticParentKind::This =>
+                        {
+                            match file.content() {
+                                Some(content) if is_new_operand(content, span.start) => {
+                                    match self
+                                        .resolve_keyword_to_fqn(ssp_kind, file_uri, span.start)
+                                    {
+                                        Some(fqn) => scoped.contains(&fold_class_fqn(&fqn)),
+                                        None => false,
+                                    }
+                                }
+                                _ => false,
+                            }
+                        }
+                        // Explicit constructor delegation written as
+                        // `parent::__construct()`, `self::__construct()`, or
+                        // `Foo::__construct()` lands here.  Resolve the subject
+                        // class and keep the call when it falls within the
+                        // constructor's owning hierarchy.
+                        SymbolKind::MemberAccess { member_name, .. }
+                            if is_constructor_name(member_name) =>
+                        {
+                            constructor_receivers()
+                                .and_then(|file| {
+                                    file.resolved_access(span_index).map(|(_, targets)| {
+                                        targets
+                                            .iter()
+                                            .any(|fqn| scoped.contains(&fold_class_fqn(fqn)))
+                                    })
+                                })
+                                .unwrap_or(false)
+                        }
+                        _ => false,
+                    };
+
+                    if matched && let Some(location) = file.location(span.start, span.end) {
+                        locations.push(location);
                     }
                 }
-            }
 
-            // Optionally include the constructor declaration site(s).
-            if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
-                for class in &classes {
-                    if !scoped.contains(&fold_class_fqn(&class.fqn())) {
-                        continue;
-                    }
+                // Optionally include the constructor declaration site(s).
+                if include_declaration && let Some(classes) = self.get_classes_for_uri(file_uri) {
+                    for class in &classes {
+                        if !scoped.contains(&fold_class_fqn(&class.fqn())) {
+                            continue;
+                        }
 
-                    for method in class.methods.iter() {
-                        if is_constructor_name(&method.name) && method.name_offset != 0 {
-                            if file_content.is_none() {
-                                file_content = self.reference_file_content_arc(file_uri);
+                        for method in class.methods.iter() {
+                            if is_constructor_name(&method.name) && method.name_offset != 0 {
+                                let offset = method.name_offset;
+                                let Some(location) =
+                                    file.location(offset, offset + method.name.len() as u32)
+                                else {
+                                    break;
+                                };
+                                locations.push(location);
                             }
-                            let Some(content) = &file_content else {
-                                break;
-                            };
-                            let offset = method.name_offset as usize;
-                            let start = offset_to_position(content, offset);
-                            let end = offset_to_position(content, offset + method.name.len());
-                            push_unique_location(&mut locations, &parsed_uri, start, end);
                         }
                     }
                 }
-            }
-        }
-
-        locations.sort_by(|a, b| {
-            a.uri
-                .as_str()
-                .cmp(b.uri.as_str())
-                .then(a.range.start.line.cmp(&b.range.start.line))
-                .then(a.range.start.character.cmp(&b.range.start.character))
-        });
-        locations.dedup();
-        locations
+            },
+        )
     }
 
     /// Expand the constructor owner class(es) into the full set of classes
@@ -414,11 +319,12 @@ impl Backend {
         result
     }
 
+    /// The class a `self`/`static`/`parent` keyword at `offset` names, by
+    /// the enclosing class's own FQN.
     fn resolve_keyword_to_fqn(
         &self,
         ssp_kind: &SelfStaticParentKind,
         uri: &str,
-        namespace: &Option<String>,
         offset: u32,
     ) -> Option<String> {
         let classes: Vec<Arc<ClassInfo>> = self
@@ -428,16 +334,12 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-
-        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset)?;
-
-        match ssp_kind {
-            SelfStaticParentKind::Parent => current_class.parent_class.map(|a| a.to_string()),
-            _ => {
-                // self / static → current class FQN
-                Some(build_fqn(&current_class.name, namespace.as_deref()))
-            }
-        }
+        let current_class = crate::class_lookup::find_class_at_offset(&classes, offset);
+        let keyword = match ssp_kind {
+            SelfStaticParentKind::Parent => "parent",
+            _ => "self",
+        };
+        crate::class_lookup::resolve_class_keyword(keyword, current_class)
     }
 }
 
@@ -446,8 +348,13 @@ impl Backend {
 /// (`self::__construct()`), which the same `SelfStaticParent` span kind is
 /// also used for.
 fn is_new_operand(content: &str, start: u32) -> bool {
-    let bytes = content.as_bytes();
-    let mut i = start as usize;
+    // The content is read after the symbol map was snapshotted, so a file
+    // that shrank on disk in between can place `start` past its end.
+    let Some(before) = content.get(..start as usize) else {
+        return false;
+    };
+    let bytes = before.as_bytes();
+    let mut i = bytes.len();
     while i > 0 && bytes[i - 1].is_ascii_whitespace() {
         i -= 1;
     }

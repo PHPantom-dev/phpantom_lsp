@@ -6,39 +6,9 @@
 //! `@coversDefaultClass`, `@uses`), including the bare `::functionName`
 //! shape that names a global function.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-async fn goto_definition(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Option<GotoDefinitionResponse> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    backend.goto_definition(params).await.unwrap()
-}
-
-async fn open_file(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
 
 fn assert_line(response: Option<GotoDefinitionResponse>, expected_line: u32) {
     match response {
@@ -85,10 +55,10 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // Cursor on `Calculator` inside `#[CoversClass(Calculator::class)]`.
-    let response = goto_definition(&backend, &uri, 6, 18).await;
+    let response = goto_definition_at(&backend, &uri, 6, 18).await;
     assert_line(response, 3);
 }
 
@@ -109,9 +79,9 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    let response = goto_definition(&backend, &uri, 6, 13).await;
+    let response = goto_definition_at(&backend, &uri, 6, 13).await;
     assert_line(response, 3);
 }
 
@@ -132,9 +102,9 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    let response = goto_definition(&backend, &uri, 6, 25).await;
+    let response = goto_definition_at(&backend, &uri, 6, 25).await;
     assert_line(response, 5);
 }
 
@@ -153,12 +123,12 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // The class portion of the reference.
-    assert_line(goto_definition(&backend, &uri, 4, 16).await, 3);
+    assert_line(goto_definition_at(&backend, &uri, 4, 16).await, 3);
     // The method portion, with the trailing `()` PHPUnit allows.
-    assert_line(goto_definition(&backend, &uri, 4, 29).await, 5);
+    assert_line(goto_definition_at(&backend, &uri, 4, 29).await, 5);
 }
 
 #[tokio::test]
@@ -178,9 +148,9 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    assert_line(goto_definition(&backend, &uri, 6, 11).await, 3);
+    assert_line(goto_definition_at(&backend, &uri, 6, 11).await, 3);
 }
 
 #[tokio::test]
@@ -198,9 +168,9 @@ class HelperTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    let response = goto_definition(&backend, &uri, 5, 14).await;
+    let response = goto_definition_at(&backend, &uri, 5, 14).await;
     assert_line(response, 2);
 }
 
@@ -222,12 +192,12 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // `@coversDefaultClass` names the class itself.
-    assert_line(goto_definition(&backend, &uri, 6, 24).await, 3);
+    assert_line(goto_definition_at(&backend, &uri, 6, 24).await, 3);
     // `::add` resolves against that default, not as a global function.
-    assert_line(goto_definition(&backend, &uri, 7, 13).await, 5);
+    assert_line(goto_definition_at(&backend, &uri, 7, 13).await, 5);
 }
 
 #[tokio::test]
@@ -251,9 +221,9 @@ class CalculatorTest
     }
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    assert_line(goto_definition(&backend, &uri, 9, 17).await, 5);
+    assert_line(goto_definition_at(&backend, &uri, 9, 17).await, 5);
 }
 
 #[tokio::test]
@@ -272,10 +242,10 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // Cursor inside the `'add'` literal.
-    assert_line(goto_definition(&backend, &uri, 6, 36).await, 5);
+    assert_line(goto_definition_at(&backend, &uri, 6, 36).await, 5);
 }
 
 #[tokio::test]
@@ -293,9 +263,9 @@ class HelperTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    assert_line(goto_definition(&backend, &uri, 6, 20).await, 4);
+    assert_line(goto_definition_at(&backend, &uri, 6, 20).await, 4);
 }
 
 #[tokio::test]
@@ -311,9 +281,9 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    assert_line(goto_definition(&backend, &uri, 3, 55).await, 3);
+    assert_line(goto_definition_at(&backend, &uri, 3, 55).await, 3);
 }
 
 #[tokio::test]
@@ -334,9 +304,9 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
-    assert_eq!(goto_definition(&backend, &uri, 5, 36).await, None);
+    assert_eq!(goto_definition_at(&backend, &uri, 5, 36).await, None);
 }
 
 #[tokio::test]
@@ -356,12 +326,12 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     // The class still navigates.
-    assert_line(goto_definition(&backend, &uri, 6, 13).await, 3);
+    assert_line(goto_definition_at(&backend, &uri, 6, 13).await, 3);
     // PHPUnit 4's visibility selector is not a member name.
-    assert_eq!(goto_definition(&backend, &uri, 6, 27).await, None);
+    assert_eq!(goto_definition_at(&backend, &uri, 6, 27).await, None);
 }
 
 #[tokio::test]
@@ -388,7 +358,7 @@ class CalculatorTest
 {
 }
 "#;
-    open_file(&backend, &uri, source).await;
+    open_php(&backend, &uri, source).await;
 
     let params = RenameParams {
         text_document_position: TextDocumentPositionParams {

@@ -1549,3 +1549,163 @@ async fn test_closure_param_type_hint_in_anonymous_class_static_call() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// Two files whose anonymous class opens at the same byte offset must not
+/// share one resolution.  Boilerplate-identical files make this ordinary:
+/// every Laravel migration is `return new class extends Migration {` after
+/// the same header, so they all put the brace at the same offset.
+#[tokio::test]
+async fn test_anonymous_classes_at_same_offset_in_two_files_do_not_collide() {
+    let backend = create_test_backend();
+
+    let first = Url::parse("file:///anon_offset_first.php").unwrap();
+    let second = Url::parse("file:///anon_offset_second.php").unwrap();
+
+    // Identical up to the method name, so both left braces land on the
+    // same offset.
+    let text = |method: &str| {
+        format!(
+            concat!(
+                "<?php\n",
+                "$a = new class {{\n",
+                "    public function {}(): string {{ return ''; }}\n",
+                "}};\n",
+                "$a->\n",
+            ),
+            method
+        )
+    };
+
+    for (uri, method) in [(&first, "alpha"), (&second, "betaa")] {
+        backend
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "php".to_string(),
+                    version: 1,
+                    text: text(method),
+                },
+            })
+            .await;
+    }
+
+    for (uri, own, other) in [(&first, "alpha", "betaa"), (&second, "betaa", "alpha")] {
+        let result = backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position {
+                        line: 4,
+                        character: 4,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap();
+
+        let CompletionResponse::Array(items) = result.expect("completion results") else {
+            panic!("Expected CompletionResponse::Array");
+        };
+        let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+        assert!(
+            labels.iter().any(|l| l.starts_with(own)),
+            "{uri} should offer its own {own}(), got: {labels:?}"
+        );
+        assert!(
+            !labels.iter().any(|l| l.starts_with(other)),
+            "{uri} must not offer the other file's {other}(), got: {labels:?}"
+        );
+    }
+}
+
+/// An edit that leaves the anonymous class's opening brace on the same
+/// offset keeps its synthetic name, so the resolved-class cache entry from
+/// the previous parse has to be evicted or it answers for the old body.
+#[tokio::test]
+async fn test_anonymous_class_edited_in_place_is_not_served_from_cache() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///anon_edit_in_place.php").unwrap();
+    let text = |method: &str| {
+        format!(
+            concat!(
+                "<?php\n",
+                "$a = new class {{\n",
+                "    public function {}(): string {{ return ''; }}\n",
+                "}};\n",
+                "$a->\n",
+            ),
+            method
+        )
+    };
+
+    let complete = async |version: i32| {
+        backend
+            .completion(CompletionParams {
+                text_document_position: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position {
+                        line: 4,
+                        character: 4,
+                    },
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+                partial_result_params: PartialResultParams::default(),
+                context: None,
+            })
+            .await
+            .unwrap()
+            .map(|r| match r {
+                CompletionResponse::Array(items) => {
+                    items.into_iter().map(|i| i.label).collect::<Vec<_>>()
+                }
+                _ => panic!("Expected CompletionResponse::Array"),
+            })
+            .unwrap_or_else(|| panic!("completion results for version {version}"))
+    };
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text("alpha"),
+            },
+        })
+        .await;
+
+    // Resolve once so the anonymous class lands in the resolved-class cache.
+    let before = complete(1).await;
+    assert!(
+        before.iter().any(|l| l.starts_with("alpha")),
+        "should offer alpha() before the edit, got: {before:?}"
+    );
+
+    backend
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: text("betaa"),
+            }],
+        })
+        .await;
+
+    let after = complete(2).await;
+    assert!(
+        after.iter().any(|l| l.starts_with("betaa")),
+        "should offer the renamed betaa() after the edit, got: {after:?}"
+    );
+    assert!(
+        !after.iter().any(|l| l.starts_with("alpha")),
+        "must not still offer the pre-edit alpha(), got: {after:?}"
+    );
+}

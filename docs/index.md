@@ -7,8 +7,8 @@
 ## Welcome to PHPantom's documentation!
 
 A fast, lightweight PHP language server written in Rust. Ready in
-seconds, uses a fraction of the RAM other language servers need, and
-stays responsive throughout. No indexing phase, no waiting.
+seconds, keeps memory use modest even on large codebases, and
+stays responsive throughout. Indexing happens in the background, so you're never left waiting on it.
 
 !!! note
     PHPantom is in active development. The core editing features are solid and used daily on production codebases.
@@ -22,7 +22,7 @@ You may want to jump to:
 
 - **Deep type intelligence.** Generics, conditional return types, closure parameter inference, array shapes, PHPStan types.
 - **Laravel support.** Eloquent relationships, scopes, accessors, casts, Builder chains, macros, Blade templates -- no ide-helper or database access required.
-- **Fast.** 5 seconds to ready on a 21K-file codebase. 360 MB RAM. No disk cache.
+- **Fast.** Ready in 2 seconds on a 30K-file Laravel codebase, cold or warm. No disk cache.
 - **PHPStan, PHPCS, and Mago integration.** Run external tools on save and surface their diagnostics in the editor.
 - **CLI tools.** Batch diagnostics (`analyze`) and automated fixes (`fix`) for CI and bulk cleanup.
 - **Refactoring.** Rename, extract method/function/variable/constant/interface, implement interface methods, promote constructor parameters, modernize syntax.
