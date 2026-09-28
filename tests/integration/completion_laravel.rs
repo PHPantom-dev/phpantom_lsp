@@ -7017,6 +7017,125 @@ class User extends Model {
 }
 
 #[tokio::test]
+async fn test_class_based_casts_return_the_value_not_the_cast_class() {
+    let status_enum_php = "\
+<?php
+namespace App\\Models;
+enum Status: string {
+    case Active = 'active';
+    public function label(): string { return $this->value; }
+}
+";
+    let castable_php = "\
+<?php
+namespace Illuminate\\Contracts\\Database\\Eloquent;
+interface Castable {}
+";
+    let as_enum_collection_php = "\
+<?php
+namespace Illuminate\\Database\\Eloquent\\Casts;
+use Illuminate\\Contracts\\Database\\Eloquent\\Castable;
+class AsEnumCollection implements Castable {}
+";
+    let user_php = "\
+<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Casts\\AsArrayObject;
+use Illuminate\\Database\\Eloquent\\Casts\\AsCollection;
+use Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection;
+use Illuminate\\Database\\Eloquent\\Model;
+class User extends Model {
+    protected function casts(): array {
+        return [
+            'statuses' => AsEnumCollection::of(Status::class),
+            'options' => AsArrayObject::class,
+            'toppings' => AsCollection::of(Status::class),
+        ];
+    }
+    public function props() {
+        $user = new User();
+        $user->
+    }
+    public function members() {
+        $user = new User();
+        $statuses = $user->statuses;
+        $statuses->
+    }
+}
+";
+    let (backend, dir) = make_workspace(&[
+        ("vendor/illuminate/Contracts/Castable.php", castable_php),
+        (
+            "vendor/illuminate/Eloquent/Casts/AsEnumCollection.php",
+            as_enum_collection_php,
+        ),
+        ("src/Models/Status.php", status_enum_php),
+        ("src/Models/User.php", user_php),
+    ]);
+
+    let props_at = crate::common::position_after(user_php, "$user->");
+    let items = complete_at(
+        &backend,
+        &dir,
+        "src/Models/User.php",
+        user_php,
+        props_at.line,
+        props_at.character,
+    )
+    .await;
+    let detail = |name: &str| {
+        items
+            .iter()
+            .find(|i| i.kind == Some(CompletionItemKind::PROPERTY) && i.label == name)
+            .and_then(|i| i.detail.clone())
+            .unwrap_or_default()
+    };
+    assert!(
+        detail("statuses").contains("Collection") && detail("statuses").contains("Status"),
+        "AsEnumCollection::of should be a collection of the enum, got: {}",
+        detail("statuses")
+    );
+    assert!(
+        !detail("statuses").contains("AsEnumCollection"),
+        "the cast class itself is not the property type, got: {}",
+        detail("statuses")
+    );
+    assert!(
+        detail("options").contains("ArrayObject"),
+        "AsArrayObject should be an ArrayObject, got: {}",
+        detail("options")
+    );
+    assert!(
+        detail("toppings").contains("Collection") && detail("toppings").contains("Status"),
+        "AsCollection::of should be a collection of the item class, got: {}",
+        detail("toppings")
+    );
+
+    let at = crate::common::position_after(user_php, "$statuses->");
+    let members = complete_at(
+        &backend,
+        &dir,
+        "src/Models/User.php",
+        user_php,
+        at.line,
+        at.character,
+    )
+    .await;
+    let methods = method_names(&members);
+    assert!(
+        methods.contains(&"first"),
+        "first should be found on the enum collection at {}:{}, got: {methods:?} labels: {:?}",
+        at.line,
+        at.character,
+        crate::common::labels(&members)
+    );
+    assert!(
+        methods.contains(&"each"),
+        "each should be found on the enum collection, got: {methods:?}"
+    );
+}
+
+#[tokio::test]
 async fn test_casts_enum_and_builtin_coexist() {
     let status_enum_php = "\
 <?php

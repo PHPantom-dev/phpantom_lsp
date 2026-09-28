@@ -201,7 +201,7 @@ today and what is still missing.
 
 | Source | Type info | Notes |
 |--------|-----------|-------|
-| `$casts` / `casts()` | Rich (built-in map, custom cast `get()` return type, enum, `Castable`, `CastsAttributes<TGet>` generics fallback) | |
+| `$casts` / `casts()` | Rich (built-in map, framework `As*` class casts with `of()` / `using()` generics, custom cast `get()` return type, enum, `Castable`, `CastsAttributes<TGet>` generics fallback) | |
 | `$attributes` defaults | Literal type inference (string, bool, int, float, null, array) | Fallback when no `$casts` entry |
 | `$fillable`, `$guarded`, `$hidden`, `$visible` | `mixed` | Last-resort column name fallback |
 | Legacy accessors (`getXAttribute()`) | Method's return type | |
