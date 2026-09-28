@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1790546359333,
+  "lastUpdate": 1790609738268,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34339,6 +34339,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 78.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "committer": {
+            "email": "cdwhite3@pm.me",
+            "name": "Caleb White",
+            "username": "calebdw"
+          },
+          "distinct": true,
+          "id": "8623d9b1f831a8bcf841438c6a2266a61cb57427",
+          "message": "fix(laravel): type class-based casts as the value they return\n\nAsEnumCollection implements Castable, so a cast written as\nAsEnumCollection::of(Status::class) was typed as the cast class.\npluck() was reported missing, and the enum never appeared as the\nitem type.\n\nThe property is now Collection<array-key, Status>. The other\nframework As* casts resolve to the value they return, including\nof() and using() generics.",
+          "timestamp": "2026-09-28T10:17:40-05:00",
+          "tree_id": "534963ea0b3b92f8e212ab8e095cc5c61ea7f775",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/8623d9b1f831a8bcf841438c6a2266a61cb57427"
+        },
+        "date": 1790609714771,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 79,
             "unit": "MiB"
           }
         ]
