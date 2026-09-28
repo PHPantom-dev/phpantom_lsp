@@ -21,10 +21,9 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 
-use super::helpers::{
-    FileDiagnosticContext, compute_existence_guards, compute_use_line_ranges, is_offset_in_ranges,
-    make_diagnostic,
-};
+use super::existence_guards::compute_existence_guards;
+use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic};
+use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for unknown-function diagnostics.
 pub(crate) const UNKNOWN_FUNCTION_CODE: &str = "unknown_function";
@@ -86,7 +85,6 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let file_use_map = &ctx.file.use_map;
 
         // ── Compute byte ranges of `use` statement lines ────────────────
         let use_line_ranges = compute_use_line_ranges(content);
@@ -164,7 +162,7 @@ impl Backend {
                     name,
                     ctx.file.resolved_names.as_deref(),
                     span.start,
-                    file_use_map,
+                    ctx.file.use_map_at(span.start),
                     ctx.file.namespace_at(span.start),
                 )
                 .is_some()

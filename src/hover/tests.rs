@@ -65,6 +65,7 @@ fn format_params_with_types() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -76,6 +77,7 @@ fn format_params_with_types() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         },
     ];
     assert_eq!(
@@ -96,6 +98,7 @@ fn format_params_variadic() {
         is_variadic: true,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }];
     assert_eq!(format_native_params(&params), "string ...$items");
 }
@@ -112,6 +115,7 @@ fn format_params_reference() {
         is_variadic: false,
         is_reference: true,
         closure_this_type: None,
+        param_out_type: None,
     }];
     assert_eq!(format_native_params(&params), "array &$arr");
 }
@@ -471,6 +475,7 @@ fn format_property_source_relationship_plain() {
     let source = PropertySource::Relationship {
         method: "roles".to_string(),
         kind: "collection".to_string(),
+        pivot_accessor: None,
         pivot_using: None,
         pivot_columns: Vec::new(),
     };
@@ -485,6 +490,7 @@ fn format_property_source_relationship_with_pivot() {
     let source = PropertySource::Relationship {
         method: "roles".to_string(),
         kind: "collection".to_string(),
+        pivot_accessor: Some(crate::atom::atom("membership")),
         pivot_using: Some("App\\Models\\RoleUser".to_string()),
         pivot_columns: vec!["expires_at".to_string(), "active".to_string()],
     };
@@ -492,6 +498,7 @@ fn format_property_source_relationship_with_pivot() {
         format_property_source(&source),
         vec![
             "source: relationship `roles` (collection)".to_string(),
+            "pivot accessor: `$membership`".to_string(),
             "pivot: `App\\Models\\RoleUser`".to_string(),
             "pivot columns: expires_at, active".to_string(),
         ]
@@ -522,7 +529,7 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     backend.update_ast(uri, provider);
     {
         let mut index = backend.laravel_gates.write();
-        index.set_file(
+        index.files.set_file(
             uri.to_string(),
             crate::virtual_members::laravel::scan_gate_registrations(provider),
         );

@@ -1,31 +1,57 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows reference counts plus clickable inheritance, implementation, Symfony,
-//! and Doctrine relationship annotations.
+//! Shows reference and implementation counts plus override/implement,
+//! Symfony, and Doctrine relationship annotations.
 
 use std::collections::HashSet;
+use std::sync::Arc;
+
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
 use crate::class_lookup::find_class_at_offset;
+use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
 use crate::framework::{FrameworkReferenceKind, SymfonySymbolKind};
+use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
 use crate::references::{
     doctrine_repository_matches_entity_convention, looks_like_doctrine_repository,
 };
-use crate::symbol_map::SymbolKind;
-use crate::text_position::offset_to_position;
+use crate::symbol_map::{SymbolKind, SymbolMap};
+use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
 use crate::util::short_name;
 
-fn line_indent(content: &str, byte_offset: usize) -> u32 {
-    let line_start = content[..byte_offset]
-        .rfind('\n')
-        .map(|i| i + 1)
-        .unwrap_or(0);
-    content[line_start..]
+/// Shown while a declaration's references are being counted, so the lens
+/// keeps its line instead of vanishing and shifting the file, and reads as
+/// the count it is about to become.
+const PENDING_COUNT_TITLE: &str = "- references";
+
+/// The offset of the class' own name, so the reference lens sits on the
+/// declaration line rather than on a preceding attribute or docblock.
+fn class_declaration_name_offset(symbol_map: Option<&SymbolMap>, class: &ClassInfo) -> u32 {
+    let Some(map) = symbol_map else {
+        return class.keyword_offset;
+    };
+    map.spans
+        .iter()
+        .find(|span| {
+            matches!(
+                &span.kind,
+                SymbolKind::ClassDeclaration { name } if *name == class.name
+            ) && span.start >= class.decl_start_offset
+                && span.start <= class.start_offset
+        })
+        .map(|span| span.start)
+        .unwrap_or(class.keyword_offset)
+}
+
+/// The column the line containing `byte_offset` starts its content at,
+/// so a lens sits above the declaration rather than in the left margin.
+fn line_indent(index: &LineIndex, line: usize) -> u32 {
+    index.content()[index.line_start(line)..]
         .chars()
         .take_while(|c| *c == ' ' || *c == '\t')
         .count() as u32
@@ -46,41 +72,67 @@ struct Prototype {
 impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
-    /// Returns reference, inheritance, implementation, and indexed framework
-    /// relationship lenses for PHP declarations.
+    /// Returns reference lenses for PHP declarations, implementation
+    /// lenses for interfaces and abstract classes and their methods,
+    /// navigation lenses for methods that override or implement an
+    /// ancestor declaration, and indexed Symfony and Doctrine relationship
+    /// lenses.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
             map.get(uri).cloned().unwrap_or_default()
         };
+        let symbol_map = self.symbol_maps.read().get(uri).cloned();
+
+        // One line table for the whole request: every lens converts at
+        // least one offset from this content, and `offset_to_position` is
+        // O(offset) on each call.
+        let index = LineIndex::new(content);
 
         let mut lenses = Vec::new();
+        let class_loader = |name: &str| self.find_or_load_class(name);
         let mut seen = HashSet::new();
-        let ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&ctx);
 
         for class in &classes {
             let class_fqn = class.fqn();
+            let name_offset = class_declaration_name_offset(symbol_map.as_deref(), class);
 
             if let Some(lens) = self.build_declaration_reference_lens(
                 uri,
-                content,
-                self.class_declaration_name_offset(uri, class),
+                &index,
+                name_offset,
                 &ReferenceIndexKey::class(&class_fqn),
             ) {
                 lenses.push(lens);
             }
 
-            if let Some(lens) = self.build_covers_lens(class, uri, content) {
+            let descendants = self.implementation_lens_descendants(class, &class_loader);
+            if let Some(descendants) = &descendants {
+                let count = descendants.iter().filter(|d| !d.is_abstract).count();
+                lenses.extend(Self::build_implementation_lens(
+                    uri,
+                    &index,
+                    name_offset,
+                    count,
+                    class_fqn,
+                    None,
+                ));
+            }
+
+            if let Some(lens) = self.build_covers_lens(class, uri, &index) {
                 lenses.push(lens);
             }
             self.push_framework_class_lenses(
                 uri,
                 content,
+                &index,
                 class,
                 &class_loader,
                 (&mut lenses, &mut seen),
             );
+            // The ancestors a framework route may name a method through, built
+            // on the first method some framework resource mentions.
+            let framework_scope = std::cell::OnceCell::new();
             for method in &class.methods {
                 if method.name_offset == 0
                     || method.is_virtual
@@ -89,25 +141,22 @@ impl Backend {
                     continue;
                 }
 
-                let pos = offset_to_position(content, method.name_offset as usize);
-                let indent = line_indent(content, method.name_offset as usize);
+                let line = index.line_of(method.name_offset as usize);
+                let indent = line_indent(&index, line);
+                let position = Position {
+                    line: line as u32,
+                    character: indent,
+                };
                 let range = Range {
-                    start: Position {
-                        line: pos.line,
-                        character: indent,
-                    },
-                    end: Position {
-                        line: pos.line,
-                        character: indent,
-                    },
+                    start: position,
+                    end: position,
                 };
 
-                let proto = self.find_prototype(class, &class_fqn, &method.name, uri, content);
+                let proto = self.find_prototype(class, &method.name, uri, content);
                 if !method.name.starts_with("__")
-                    && proto.is_none()
                     && let Some(lens) = self.build_member_reference_lens(
                         uri,
-                        content,
+                        &index,
                         method.name_offset,
                         class_fqn,
                         method.name,
@@ -115,6 +164,26 @@ impl Backend {
                     )
                 {
                     lenses.push(lens);
+                }
+                if let Some(descendants) = &descendants {
+                    let count = member_implementation_providers(
+                        &class_fqn,
+                        &method.name,
+                        MemberKind::Method,
+                        descendants,
+                        &class_loader,
+                    )
+                    .len();
+                    if count > 0 {
+                        lenses.extend(Self::build_implementation_lens(
+                            uri,
+                            &index,
+                            method.name_offset,
+                            count,
+                            class_fqn,
+                            Some(method.name),
+                        ));
+                    }
                 }
                 if let Some(proto) = proto {
                     let icon = if proto.is_interface { "◆" } else { "↑" };
@@ -140,8 +209,9 @@ impl Backend {
 
                 self.push_framework_method_lenses(
                     uri,
-                    content,
+                    &index,
                     class,
+                    &framework_scope,
                     method,
                     (&mut lenses, &mut seen),
                 );
@@ -157,7 +227,7 @@ impl Backend {
                 let member_name = property.name.strip_prefix('$').unwrap_or(&property.name);
                 if let Some(lens) = self.build_member_reference_lens(
                     uri,
-                    content,
+                    &index,
                     property.name_offset,
                     class_fqn,
                     crate::atom::atom(member_name),
@@ -173,7 +243,7 @@ impl Backend {
                 }
                 if let Some(lens) = self.build_member_reference_lens(
                     uri,
-                    content,
+                    &index,
                     constant.name_offset,
                     class_fqn,
                     constant.name,
@@ -184,7 +254,7 @@ impl Backend {
             }
         }
 
-        if let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() {
+        if let Some(symbol_map) = &symbol_map {
             for span in &symbol_map.spans {
                 let key = match &span.kind {
                     SymbolKind::FunctionCall {
@@ -199,23 +269,30 @@ impl Backend {
                     _ => continue,
                 };
                 if let Some(lens) =
-                    self.build_declaration_reference_lens(uri, content, span.start, &key)
+                    self.build_declaration_reference_lens(uri, &index, span.start, &key)
                 {
                     lenses.push(lens);
                 }
             }
         }
 
-        self.push_symfony_route_attribute_lenses(uri, content, &classes, &mut lenses, &mut seen);
+        self.push_symfony_route_attribute_lenses(
+            uri,
+            content,
+            &index,
+            &classes,
+            &mut lenses,
+            &mut seen,
+        );
         self.push_doctrine_get_repository_lenses(
             uri,
             content,
-            &ctx,
+            &index,
             &class_loader,
             &mut lenses,
             &mut seen,
         );
-        self.push_symfony_resource_lenses(uri, content, &mut lenses, &mut seen);
+        self.push_symfony_resource_lenses(uri, content, &index, &mut lenses, &mut seen);
 
         lenses.sort_by(|a, b| {
             a.range
@@ -241,7 +318,7 @@ impl Backend {
     fn build_declaration_reference_lens(
         &self,
         origin_uri: &str,
-        content: &str,
+        index: &LineIndex,
         declaration_offset: u32,
         key: &ReferenceIndexKey,
     ) -> Option<CodeLens> {
@@ -251,7 +328,7 @@ impl Backend {
 
         let candidate_count = self.indexed_reference_count(key)?;
         let origin_url = Url::parse(origin_uri).ok()?;
-        let position = offset_to_position(content, declaration_offset as usize);
+        let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
             Position::new(position.line, 0),
@@ -282,7 +359,7 @@ impl Backend {
     fn build_member_reference_lens(
         &self,
         origin_uri: &str,
-        content: &str,
+        index: &LineIndex,
         declaration_offset: u32,
         class_fqn: Atom,
         member: Atom,
@@ -291,19 +368,15 @@ impl Backend {
         if declaration_offset == 0 {
             return None;
         }
-        let member_name = member.to_string();
-        let candidate_count = self.indexed_reference_count_for_keys(&[
-            ReferenceIndexKey::Member {
-                name: member_name.clone(),
-                is_static,
-            },
-            ReferenceIndexKey::Member {
-                name: member_name,
-                is_static: !is_static,
-            },
-        ])?;
+        let mut candidate_count = self.indexed_member_reference_count(&member)?;
+        // A scope or an accessor is used under a name of its own, which
+        // the search counts too.
+        if let Some(magic) = self.eloquent_magic_member_at(origin_uri, declaration_offset, &member)
+        {
+            candidate_count += self.indexed_member_reference_count(&magic.use_name)?;
+        }
         let origin_url = Url::parse(origin_uri).ok()?;
-        let position = offset_to_position(content, declaration_offset as usize);
+        let position = index.position(declaration_offset as usize);
         let range = Range::new(
             Position::new(position.line, 0),
             Position::new(position.line, 0),
@@ -350,11 +423,23 @@ impl Backend {
             });
         }
 
-        // Clients with refresh support can re-pull once the shared background
-        // worker fills the exact cache.  Omitting the cold lens avoids an
-        // eager resolve burst merely to obtain titles for the viewport.
+        // Clients with refresh support re-pull once the shared background
+        // worker fills the exact cache, so the lens holds its line with a
+        // placeholder rather than being omitted: a lens that comes and goes
+        // moves every line of the file under the reader on each keystroke.
+        // Resolving it eagerly instead would put the whole viewport's
+        // searches back on the request.
         if supports_refresh {
-            return None;
+            return Some(CodeLens {
+                range,
+                command: Some(Command {
+                    title: PENDING_COUNT_TITLE.to_string(),
+                    // No handler: the placeholder is text, not an action.
+                    command: String::new(),
+                    arguments: None,
+                }),
+                data: None,
+            });
         }
 
         Some(CodeLens {
@@ -372,39 +457,46 @@ impl Backend {
         })
     }
 
-    fn class_declaration_name_offset(&self, uri: &str, class: &ClassInfo) -> u32 {
-        let maps = self.symbol_maps.read();
-        let Some(map) = maps.get(uri) else {
-            return class.keyword_offset;
-        };
-        map.spans
-            .iter()
-            .find(|span| {
-                matches!(
-                    &span.kind,
-                    SymbolKind::ClassDeclaration { name } if *name == class.name
-                ) && span.start >= class.decl_start_offset
-                    && span.start <= class.start_offset
-            })
-            .map(|span| span.start)
-            .unwrap_or(class.keyword_offset)
-    }
-
     fn reference_lens_command(
         origin_uri: Url,
         origin_position: Position,
         locations: Vec<Location>,
     ) -> Command {
+        Self::locations_lens_command(
+            origin_uri,
+            origin_position,
+            locations,
+            "reference",
+            "references",
+        )
+    }
+
+    fn implementation_lens_command(
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+    ) -> Command {
+        Self::locations_lens_command(
+            origin_uri,
+            origin_position,
+            locations,
+            "implementation",
+            "implementations",
+        )
+    }
+
+    /// A lens command titled with the number of `locations`, which opens
+    /// them as a list when clicked.
+    fn locations_lens_command(
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+        singular: &str,
+        plural: &str,
+    ) -> Command {
         let count = locations.len();
         Command {
-            title: format!(
-                "{count} {}",
-                if count == 1 {
-                    "reference"
-                } else {
-                    "references"
-                }
-            ),
+            title: format!("{count} {}", if count == 1 { singular } else { plural }),
             command: "editor.action.showReferences".to_string(),
             arguments: Some(vec![
                 serde_json::json!(origin_uri),
@@ -414,7 +506,107 @@ impl Backend {
         }
     }
 
-    pub(crate) fn resolve_code_lens_item(&self, mut lens: CodeLens) -> CodeLens {
+    /// The classes the implementation lenses of `class` count, or `None`
+    /// when it gets none: only an interface or an abstract class does, and
+    /// only once the workspace index can answer.
+    fn implementation_lens_descendants(
+        &self,
+        class: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Option<Vec<Arc<ClassInfo>>> {
+        if !(class.kind == ClassLikeKind::Interface || class.is_abstract)
+            || class.keyword_offset == 0
+            || !self
+                .workspace_indexed
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return None;
+        }
+        Some(self.implementation_descendants(class, &class.fqn(), class_loader, true))
+    }
+
+    /// Build the implementation lens for a class, or for one of its
+    /// methods when `member` is given.
+    ///
+    /// `count` is worked out from class metadata alone.  Locating each
+    /// implementation means reading the file that declares it, so a
+    /// non-zero lens leaves that to the resolve request, which only the
+    /// lenses the editor actually shows receive.
+    fn build_implementation_lens(
+        origin_uri: &str,
+        index: &LineIndex,
+        declaration_offset: u32,
+        count: usize,
+        class_fqn: Atom,
+        member: Option<Atom>,
+    ) -> Option<CodeLens> {
+        if declaration_offset == 0 {
+            return None;
+        }
+        let position = index.position(declaration_offset as usize);
+        let range = Range::new(
+            Position::new(position.line, 0),
+            Position::new(position.line, 0),
+        );
+        if count == 0 {
+            return Some(CodeLens {
+                range,
+                command: Some(Self::implementation_lens_command(
+                    Url::parse(origin_uri).ok()?,
+                    position,
+                    Vec::new(),
+                )),
+                data: None,
+            });
+        }
+
+        Some(CodeLens {
+            range,
+            command: None,
+            data: Some(serde_json::json!({
+                "kind": "phpImplementations",
+                "uri": origin_uri,
+                "position": position,
+                "classFqn": class_fqn.as_str(),
+                "member": member.as_ref().map(Atom::as_str),
+            })),
+        })
+    }
+
+    /// The locations an implementation lens lists, recomputed from the
+    /// class and member it was built for.
+    fn implementation_lens_locations(
+        &self,
+        uri: &str,
+        content: &str,
+        class_fqn: &str,
+        member: Option<&str>,
+    ) -> Option<Vec<Location>> {
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let class = class_loader(class_fqn)?;
+        let descendants = self.implementation_descendants(&class, class_fqn, &class_loader, true);
+        Some(match member {
+            None => self.class_implementation_locations(uri, content, &class, &descendants),
+            Some(member) => {
+                let providers = member_implementation_providers(
+                    class_fqn,
+                    member,
+                    MemberKind::Method,
+                    &descendants,
+                    &class_loader,
+                );
+                self.member_implementation_locations(
+                    uri,
+                    content,
+                    member,
+                    MemberKind::Method,
+                    &providers,
+                )
+            }
+        })
+    }
+
+    pub fn resolve_code_lens_item(&self, mut lens: CodeLens) -> CodeLens {
         if lens.command.is_some() {
             return lens;
         }
@@ -434,54 +626,48 @@ impl Backend {
         else {
             return lens;
         };
-        let locations = match kind {
-            "phpReferences" => {
-                let Some(content) = self.get_file_content(uri) else {
-                    return lens;
-                };
-                let Some(locations) =
-                    self.find_references_from_workspace_index(uri, &content, position, false)
-                else {
-                    return lens;
-                };
-                locations
-            }
-            "phpMemberReferences" => {
-                let Some(offset) = data
-                    .get("offset")
-                    .and_then(serde_json::Value::as_u64)
-                    .and_then(|offset| u32::try_from(offset).ok())
-                else {
-                    return lens;
-                };
-                let Some(class_fqn) = data.get("classFqn").and_then(serde_json::Value::as_str)
-                else {
-                    return lens;
-                };
-                let Some(member) = data.get("member").and_then(serde_json::Value::as_str) else {
-                    return lens;
-                };
-                let Some(is_static) = data.get("isStatic").and_then(serde_json::Value::as_bool)
-                else {
-                    return lens;
-                };
-                self.resolve_member_ref_locations(
-                    uri,
-                    offset,
-                    crate::atom::atom(class_fqn),
-                    crate::atom::atom(member),
-                    is_static,
-                )
-            }
-            _ => return lens,
+        // Resolving references needs the type engine, the chain cache and
+        // a parse of the file. Going through the shared request helper
+        // installs all of them (and the panic guard) once, and hands over
+        // the buffer without copying it.
+        let locations =
+            self.with_file_content("codeLens/resolve", uri, None, |content, _| match kind {
+                "phpReferences" => self.find_references(uri, content, position, false),
+                "phpMemberReferences" => {
+                    let offset = data
+                        .get("offset")
+                        .and_then(serde_json::Value::as_u64)
+                        .and_then(|offset| u32::try_from(offset).ok())?;
+                    let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
+                    let member = data.get("member").and_then(serde_json::Value::as_str)?;
+                    let is_static = data.get("isStatic").and_then(serde_json::Value::as_bool)?;
+                    Some(self.resolve_member_ref_locations(
+                        uri,
+                        offset,
+                        crate::atom::atom(class_fqn),
+                        crate::atom::atom(member),
+                        is_static,
+                    ))
+                }
+                "phpImplementations" => {
+                    let class_fqn = data.get("classFqn").and_then(serde_json::Value::as_str)?;
+                    let member = data.get("member").and_then(serde_json::Value::as_str);
+                    self.implementation_lens_locations(uri, content, class_fqn, member)
+                }
+                _ => None,
+            });
+        let Some(locations) = locations.flatten() else {
+            return lens;
         };
         let Ok(origin_uri) = Url::parse(uri) else {
             return lens;
         };
 
-        lens.command = Some(Self::reference_lens_command(
-            origin_uri, position, locations,
-        ));
+        lens.command = Some(if kind == "phpImplementations" {
+            Self::implementation_lens_command(origin_uri, position, locations)
+        } else {
+            Self::reference_lens_command(origin_uri, position, locations)
+        });
         lens
     }
 
@@ -494,7 +680,12 @@ impl Backend {
     /// classes that do can be located on disk any more.  Also `None` while
     /// the workspace is still indexing, since
     /// [`Backend::find_covering_test_classes`] cannot answer until then.
-    fn build_covers_lens(&self, class: &ClassInfo, uri: &str, content: &str) -> Option<CodeLens> {
+    fn build_covers_lens(
+        &self,
+        class: &ClassInfo,
+        uri: &str,
+        index: &LineIndex,
+    ) -> Option<CodeLens> {
         if class.keyword_offset == 0 {
             return None;
         }
@@ -503,8 +694,7 @@ impl Backend {
             .find_covering_test_classes(&class.fqn())
             .into_iter()
             .filter_map(|(test_fqn, test_uri)| {
-                let location =
-                    self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, content)?;
+                let location = self.covers_lens_target(test_fqn.as_str(), &test_uri, uri, index)?;
                 Some((test_fqn, location))
             })
             .collect();
@@ -512,17 +702,14 @@ impl Backend {
             return None;
         }
 
-        let pos = offset_to_position(content, class.keyword_offset as usize);
-        let indent = line_indent(content, class.keyword_offset as usize);
+        let line = index.line_of(class.keyword_offset as usize);
+        let position = Position {
+            line: line as u32,
+            character: line_indent(index, line),
+        };
         let range = Range {
-            start: Position {
-                line: pos.line,
-                character: indent,
-            },
-            end: Position {
-                line: pos.line,
-                character: indent,
-            },
+            start: position,
+            end: position,
         };
 
         let command = if let [(test_fqn, location)] = locations.as_slice() {
@@ -559,7 +746,7 @@ impl Backend {
         test_fqn: &str,
         test_uri: &str,
         current_uri: &str,
-        current_content: &str,
+        current_index: &LineIndex,
     ) -> Option<Location> {
         let test_class = self.find_or_load_class(test_fqn)?;
         if test_class.keyword_offset == 0 {
@@ -568,12 +755,12 @@ impl Backend {
 
         // The search already told us which file declares it, so read that
         // rather than looking the class up by name a second time.
-        let file_content = if test_uri == current_uri {
-            current_content.to_string()
+        let offset = test_class.keyword_offset as usize;
+        let position = if test_uri == current_uri {
+            current_index.position(offset)
         } else {
-            self.get_file_content(test_uri)?
+            offset_to_position(&self.get_file_content(test_uri)?, offset)
         };
-        let position = offset_to_position(&file_content, test_class.keyword_offset as usize);
         let uri: Url = test_uri.parse().ok()?;
 
         Some(Location {
@@ -589,6 +776,7 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
+        index: &LineIndex,
         lenses: &mut Vec<CodeLens>,
         seen: &mut HashSet<String>,
     ) {
@@ -615,7 +803,7 @@ impl Backend {
                 continue;
             }
 
-            let pos = offset_to_position(content, declaration.start as usize);
+            let pos = index.position(declaration.start as usize);
             let usages = self.framework_symfony_symbol_locations(*kind, name, false, true);
             if !usages.is_empty() {
                 let title = format!(
@@ -707,13 +895,14 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
+        index: &LineIndex,
         class: &ClassInfo,
-        class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         output: (&mut Vec<CodeLens>, &mut HashSet<String>),
     ) {
         let (lenses, seen) = output;
         let class_fqn = class.fqn();
-        let Some(source_pos) = class_lens_position(content, class) else {
+        let Some(source_pos) = class_lens_position(index, class) else {
             return;
         };
 
@@ -770,24 +959,29 @@ impl Backend {
     fn push_framework_method_lenses(
         &self,
         uri: &str,
-        content: &str,
+        index: &LineIndex,
         class: &ClassInfo,
+        scope: &std::cell::OnceCell<crate::references::MemberScope>,
         method: &MethodInfo,
         output: (&mut Vec<CodeLens>, &mut HashSet<String>),
     ) {
         let (lenses, seen) = output;
-        let pos = offset_to_position(content, method.name_offset as usize);
-        let mut hierarchy = HashSet::new();
-        hierarchy.insert(class.fqn().to_string());
-        for fqn in self.class_hierarchy_names(class) {
-            hierarchy.insert(fqn);
+        let method_name = method.name.as_str();
+        if !self.has_framework_member_references(method_name) {
+            return;
         }
+        let scope = scope.get_or_init(|| {
+            let mut hierarchy = HashSet::new();
+            hierarchy.insert(class.fqn().to_string());
+            hierarchy.extend(self.class_hierarchy_names(class));
+            crate::references::MemberScope::exact(hierarchy)
+        });
 
-        let route_locations =
-            self.framework_member_reference_locations(&method.name, Some(&hierarchy));
+        let route_locations = self.framework_member_reference_locations(method_name, Some(scope));
         if route_locations.is_empty() {
             return;
         }
+        let pos = index.position(method.name_offset as usize);
 
         let title = if route_locations.len() == 1 {
             "Symfony route config: 1 ref".to_string()
@@ -801,21 +995,25 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
-        classes: &[std::sync::Arc<ClassInfo>],
+        index: &LineIndex,
+        classes: &[Arc<ClassInfo>],
         lenses: &mut Vec<CodeLens>,
         seen: &mut HashSet<String>,
     ) {
-        let declarations = code_lens_declarations(content, classes);
+        let attributes = route_attributes(content);
+        if attributes.is_empty() {
+            return;
+        }
+        let declarations = code_lens_declarations(index, classes);
         if declarations.is_empty() {
             return;
         }
 
-        for attr in route_attributes(content) {
-            let Some(decl) = declarations
-                .iter()
-                .filter(|decl| decl.offset > attr.end)
-                .min_by_key(|decl| decl.offset)
-            else {
+        for attr in attributes {
+            // `declarations` is sorted by offset, so the first one past the
+            // attribute is the declaration it decorates.
+            let next = declarations.partition_point(|decl| decl.offset <= attr.end);
+            let Some(decl) = declarations.get(next) else {
                 continue;
             };
             if decl.offset.saturating_sub(attr.end) > 1024 {
@@ -848,18 +1046,24 @@ impl Backend {
         &self,
         uri: &str,
         content: &str,
-        ctx: &crate::types::FileContext,
-        class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+        index: &LineIndex,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
         lenses: &mut Vec<CodeLens>,
         seen: &mut HashSet<String>,
     ) {
-        for call in get_repository_calls(content) {
+        let calls = get_repository_calls(content);
+        if calls.is_empty() {
+            return;
+        }
+        let ctx = self.file_context(uri);
+        for call in calls {
+            let offset = call.offset as u32;
             let Some(entity_fqn) = class_expr_arg_to_fqn(
                 &call.first_arg,
-                &ctx.use_map,
-                &ctx.namespace,
+                ctx.use_map_at(offset),
+                ctx.namespace_at(offset),
                 &ctx.classes,
-                call.offset as u32,
+                offset,
             ) else {
                 continue;
             };
@@ -888,7 +1092,7 @@ impl Backend {
             let Some(title) = title else {
                 continue;
             };
-            let pos = offset_to_position(content, call.offset);
+            let pos = index.position(call.offset);
             self.push_locations_lens(uri, pos, title, locations, lenses, seen);
         }
     }
@@ -962,7 +1166,7 @@ impl Backend {
     fn doctrine_entities_for_repository(
         &self,
         repository_fqn: &str,
-        class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     ) -> Vec<String> {
         let mut out = self.framework_doctrine_entity_fqns_for_repository(repository_fqn);
         let repository = normalize_class_name(repository_fqn);
@@ -1012,239 +1216,58 @@ impl Backend {
     }
 
     fn class_hierarchy_names(&self, class: &ClassInfo) -> Vec<String> {
-        let mut out = Vec::new();
-        let mut current = class.clone();
+        let mut out: Vec<String> = Vec::new();
+        let mut parent_name = class.parent_class;
         for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(parent_name) = current.parent_class else {
+            let Some(name) = parent_name else {
                 break;
             };
-            let parent_fqn = parent_name.to_string();
-            if !out
+            let parent_fqn = name.to_string();
+            if out
                 .iter()
-                .any(|known: &String| known.eq_ignore_ascii_case(&parent_fqn))
+                .any(|known| known.eq_ignore_ascii_case(&parent_fqn))
             {
-                out.push(parent_fqn.clone());
+                break;
             }
-            let Some(parent) = self.find_or_load_class(&parent_name) else {
+            out.push(parent_fqn);
+            let Some(parent) = self.find_or_load_class(&name) else {
                 break;
             };
-            current = ClassInfo::clone(&parent);
+            parent_name = parent.parent_class;
         }
         out
     }
 
-    /// Search the inheritance hierarchy for the closest ancestor that
-    /// declares a method with the given name.
+    /// The closest ancestor that declares a method with the given name,
+    /// as a navigation target.
     ///
-    /// Priority order: parent class chain, then used traits, then
-    /// implemented interfaces. Returns `None` when no ancestor
-    /// declares the method.
+    /// Returns `None` when no ancestor declares the method.
     fn find_prototype(
         &self,
         class: &ClassInfo,
-        _class_fqn: &str,
         method_name: &str,
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
-        // ── 1. Walk the parent class chain ──────────────────────────────
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => break,
-            };
-            // Check methods declared directly on this parent (not
-            // inherited) so we find the actual declaration site.
-            if parent
+        let class_loader = |name: &str| self.find_or_load_class(name);
+        let declares = |candidate: &ClassInfo| {
+            candidate
                 .methods
                 .iter()
                 .any(|m| m.name == method_name && !m.is_virtual)
-                && let Some(proto) = self.build_prototype(
-                    &parent_name,
-                    &parent,
-                    method_name,
-                    false,
-                    current_uri,
-                    current_content,
-                )
-            {
-                return Some(proto);
-            }
-            current = parent;
-        }
-
-        // ── 2. Check used traits ────────────────────────────────────────
-        if let Some(proto) = self.find_prototype_in_traits(
-            &class.used_traits,
+        };
+        let (ancestor_name, ancestor) = find_declaring_ancestor(class, &class_loader, &declares)?;
+        self.build_prototype(
+            &ancestor_name,
+            &ancestor,
             method_name,
             current_uri,
             current_content,
-            0,
-        ) {
-            return Some(proto);
-        }
-
-        // ── 3. Check implemented interfaces ─────────────────────────────
-        if let Some(proto) =
-            self.find_prototype_in_interfaces(class, method_name, current_uri, current_content)
-        {
-            return Some(proto);
-        }
-
-        None
+        )
     }
 
-    /// Search a list of traits for a method declaration.
-    ///
-    /// Recursively checks traits used by each trait, up to a depth limit.
-    fn find_prototype_in_traits(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-        depth: usize,
-    ) -> Option<Prototype> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let trait_info = match self.find_or_load_class(trait_name) {
-                Some(t) => t,
-                None => continue,
-            };
-            if trait_info
-                .methods
-                .iter()
-                .any(|m| m.name == method_name && !m.is_virtual)
-                && let Some(proto) = self.build_prototype(
-                    trait_name,
-                    &trait_info,
-                    method_name,
-                    false,
-                    current_uri,
-                    current_content,
-                )
-            {
-                return Some(proto);
-            }
-            if let Some(proto) = self.find_prototype_in_traits(
-                &trait_info.used_traits,
-                method_name,
-                current_uri,
-                current_content,
-                depth + 1,
-            ) {
-                return Some(proto);
-            }
-        }
-
-        None
-    }
-
-    /// Search implemented interfaces (including those inherited from
-    /// parents) for a method declaration.
-    fn find_prototype_in_interfaces(
-        &self,
-        class: &ClassInfo,
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-    ) -> Option<Prototype> {
-        // Collect all interface names from the class and its parent chain.
-        let mut all_iface_names: Vec<crate::atom::Atom> = class.interfaces.clone();
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => break,
-            };
-            for iface in &parent.interfaces {
-                if !all_iface_names.contains(iface) {
-                    all_iface_names.push(*iface);
-                }
-            }
-            current = parent;
-        }
-
-        for iface_name in &all_iface_names {
-            if let Some(proto) = self.find_prototype_in_interface(
-                iface_name,
-                method_name,
-                current_uri,
-                current_content,
-            ) {
-                return Some(proto);
-            }
-        }
-
-        None
-    }
-
-    /// Check a single interface (and its own extends chain) for the
-    /// method declaration.
-    fn find_prototype_in_interface(
-        &self,
-        iface_name: &str,
-        method_name: &str,
-        current_uri: &str,
-        current_content: &str,
-    ) -> Option<Prototype> {
-        let iface = self.find_or_load_class(iface_name)?;
-        if iface
-            .methods
-            .iter()
-            .any(|m| m.name == method_name && !m.is_virtual)
-            && let Some(proto) = self.build_prototype(
-                iface_name,
-                &iface,
-                method_name,
-                true,
-                current_uri,
-                current_content,
-            )
-        {
-            return Some(proto);
-        }
-
-        // Walk the interface's own extends chain (interfaces can extend
-        // other interfaces via `parent_class` and `interfaces`).
-        for parent_iface in &iface.interfaces {
-            if let Some(proto) = self.find_prototype_in_interface(
-                parent_iface,
-                method_name,
-                current_uri,
-                current_content,
-            ) {
-                return Some(proto);
-            }
-        }
-        if let Some(parent_name) = iface.parent_class
-            && let Some(proto) = self.find_prototype_in_interface(
-                &parent_name,
-                method_name,
-                current_uri,
-                current_content,
-            )
-        {
-            return Some(proto);
-        }
-
-        None
-    }
-
-    /// Build the LSP `Command` for a code lens that navigates to a target
-    /// location.
+    /// Build the LSP `Command` that navigates to (or opens) a target
+    /// location, for a code lens or a resolved code action alike.
     ///
     /// LSP has no standard "go to this location" command, so the client
     /// decides which of the two shapes it can act on:
@@ -1258,7 +1281,12 @@ impl Backend {
     ///   established, which such clients resolve on their own without a
     ///   round trip.  Zed is the notable one: it recognises the command
     ///   name but never answers `window/showDocument`.
-    fn build_code_lens_command(&self, title: String, uri: Url, position: Position) -> Command {
+    pub(crate) fn build_code_lens_command(
+        &self,
+        title: String,
+        uri: Url,
+        position: Position,
+    ) -> Command {
         if self
             .supports_show_document
             .load(std::sync::atomic::Ordering::Acquire)
@@ -1313,7 +1341,6 @@ impl Backend {
         ancestor_fqn: &str,
         ancestor_class: &ClassInfo,
         method_name: &str,
-        is_interface: bool,
         current_uri: &str,
         current_content: &str,
     ) -> Option<Prototype> {
@@ -1329,13 +1356,9 @@ impl Backend {
             name_offset,
         )?;
 
-        // Determine whether to treat this as an interface based on the
-        // ancestor's kind (the caller's hint is a fallback).
-        let is_iface = ancestor_class.kind == ClassLikeKind::Interface || is_interface;
-
         Some(Prototype {
             ancestor_name: ancestor_class.name.to_string(),
-            is_interface: is_iface,
+            is_interface: ancestor_class.kind == ClassLikeKind::Interface,
             file_uri,
             position,
         })
@@ -1367,26 +1390,26 @@ struct GetRepositoryCall {
     first_arg: String,
 }
 
-fn class_lens_position(content: &str, class: &ClassInfo) -> Option<Position> {
+fn class_lens_position(index: &LineIndex, class: &ClassInfo) -> Option<Position> {
     let offset = if class.keyword_offset > 0 {
         class.keyword_offset
     } else {
         class.decl_start_offset
     };
-    if offset == 0 || offset as usize > content.len() {
+    if offset == 0 || offset as usize > index.content().len() {
         None
     } else {
-        Some(offset_to_position(content, offset as usize))
+        Some(index.position(offset as usize))
     }
 }
 
 fn code_lens_declarations(
-    content: &str,
-    classes: &[std::sync::Arc<ClassInfo>],
+    index: &LineIndex,
+    classes: &[Arc<ClassInfo>],
 ) -> Vec<CodeLensDeclaration> {
     let mut declarations = Vec::new();
     for class in classes {
-        if let Some(position) = class_lens_position(content, class) {
+        if let Some(position) = class_lens_position(index, class) {
             let offset = if class.keyword_offset > 0 {
                 class.keyword_offset
             } else {
@@ -1404,7 +1427,7 @@ fn code_lens_declarations(
             }
             declarations.push(CodeLensDeclaration {
                 offset: method.name_offset as usize,
-                position: offset_to_position(content, method.name_offset as usize),
+                position: index.position(method.name_offset as usize),
                 kind: RouteDeclarationKind::Method,
             });
         }
@@ -1641,7 +1664,7 @@ fn class_expr_arg_to_fqn(
     first_arg: &str,
     use_map: &std::collections::HashMap<String, String>,
     namespace: &Option<String>,
-    local_classes: &[std::sync::Arc<ClassInfo>],
+    local_classes: &[Arc<ClassInfo>],
     access_offset: u32,
 ) -> Option<String> {
     let class_expr = first_arg.trim().strip_suffix("::class")?.trim();

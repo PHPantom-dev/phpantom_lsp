@@ -1,0 +1,16 @@
+// test: an assignment inside an array literal passed to `new` is applied
+// feature: hover
+// expect: $inArray = 1
+---
+<?php
+
+class Foo
+{
+    public function __construct(array $a) {}
+}
+
+function test(): void
+{
+    new Foo([$inArray = 1]);
+    echo $in<>Array;
+}

@@ -1,0 +1,20 @@
+// test: arithmetic with a mixed operand is a number, or an array for +
+// feature: hover
+// expect_hover: $sum => array|int|float
+// expect_hover: $difference => int|float
+// expect_hover: $plusOne => int|float
+---
+<?php
+
+/**
+ * @param mixed $a
+ * @param mixed $b
+ */
+function test($a, $b): void {
+    $sum = $a + $b;
+    $difference = $a - $b;
+    $plusOne = $a + 1;
+    $<>sum;
+    $difference;
+    $plusOne;
+}

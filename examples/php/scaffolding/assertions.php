@@ -292,6 +292,8 @@ function runDemoAssertions(): void
     assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
     $sparse = array_filter([3, 4, 5], fn($v) => $v > 3);
     assert(array_keys($sparse) === [1, 2], 'array_filter() keeps the key of every entry it keeps, so filtering a list leaves gaps rather than another list');
+    $kit = ['sketcher' => new Scaffolding\Pencil(), ...[new Scaffolding\Pen(), new Scaffolding\Pen()]];
+    assert($kit['sketcher'] instanceof Scaffolding\Pencil && array_keys($kit) === ['sketcher', 0, 1], 'an entry written beside a spread keeps its key and value, and the spread\'s integer keys follow it');
     $collected = [];
     foreach ([['ink'], ['gel']] as $batch) {
         $collected = array_merge($collected, $batch);
@@ -2077,6 +2079,25 @@ function runDemoAssertions(): void
     assert($reconstructed->eitherPrefix($plainName, $qualifiedName) === 'App\\', 'ruling the first flag out leaves what the second proved');
     assert($reconstructed->eitherPrefix($qualifiedName, $plainName) === 'App\\', 'the first flag holding proves its own subject');
     assert($reconstructed->eitherPrefix($plainName, $plainName) === '', 'neither flag holding leaves the guard');
+
+    // ── Member visibility ───────────────────────────────────────────────
+    // The diagnostics demo claims which members of ScaffoldingVault are out
+    // of reach from outside; reflection is what makes that claim checkable
+    // without writing code PHP would fatal on.
+    $vault = new \ReflectionClass(Scaffolding\ScaffoldingVault::class);
+    assert($vault->getProperty('pin')->isPrivate(), '$pin is private, so an outside read is fatal');
+    assert($vault->getProperty('branch')->isProtected(), '$branch is protected, so a subclass may read it');
+    assert($vault->getProperty('label')->isPublic(), '$label is public and always reachable');
+    assert($vault->getProperty('openCount')->isPrivate(), '$openCount is a private static property');
+    assert($vault->getMethod('rotate')->isPrivate(), 'rotate() is private');
+    assert($vault->getMethod('open')->isPublic(), 'open() is the public way in');
+    assert($vault->getReflectionConstant('MASTER_KEY')->isPrivate(), 'MASTER_KEY is a private constant');
+    assert($vault->getReflectionConstant('REGION')->isPublic(), 'REGION is a public constant');
+
+    $branchVault = new \ReflectionClass(Scaffolding\ScaffoldingBranchVault::class);
+    assert($branchVault->getProperty('ledger')->isPrivate(), '$ledger is private to the subclass that declares it');
+    assert($branchVault->isSubclassOf(Scaffolding\ScaffoldingVault::class), 'the branch vault descends from the vault');
+    assert(!$branchVault->hasProperty('pin') || $branchVault->getProperty('pin')->getDeclaringClass()->getName() === Scaffolding\ScaffoldingVault::class, 'a private parent property is not inherited into the subclass scope');
 
     echo "All assertions passed.\n";
 }

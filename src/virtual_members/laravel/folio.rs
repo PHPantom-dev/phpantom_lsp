@@ -354,7 +354,13 @@ fn collect_page_files(base: &Path, dir: &Path, out: &mut Vec<(PathBuf, PathBuf)>
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        // Recurse only into real directories: following a link back up the
+        // tree would re-enter it until the kernel's symlink limit stops the
+        // walk.  A linked page is still recorded, through the link.
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
             collect_page_files(base, &path, out);
             continue;
         }

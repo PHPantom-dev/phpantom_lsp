@@ -8,8 +8,11 @@ pipeline so it produces correct data. Downstream consumers
 to second-guess upstream output.
 
 Each entry below carries an **Impact · Complexity** rating using the same
-scale defined in [`docs/todo.md`](../todo.md); that table is also where
-each bug's row lives in the current sprint/backlog.
+scale defined in [`docs/todo.md`](../todo.md), but a bug's row lives
+**here only** — do not add or link a bug entry to `docs/todo.md`'s sprint
+or backlog tables. This file is its own list, not a domain document
+sprint items draw from: whenever it holds anything, that is actively
+addressed, independently of sprint planning.
 
 Bugs land here from wherever they surface: found while working on another
 task, or sweeps of the sample projects under `projects/`. Entries are
@@ -42,13 +45,66 @@ No outstanding items.
 
 ## Symbol resolution
 
-No outstanding items.
+### B542. Import edits treat a file with several `namespace` blocks as having one `use` list
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace A {
+    use X\Foo;
+    function a(): Foo {}
+}
+namespace B {
+    // `B\Foo` is unknown, but block A's import makes `Foo` look
+    // already imported, so no "import class" action is offered.
+    function b(Foo $f) {}
+}
+```
+
+Name resolution is per block (each `NamespaceSpan` carries its own
+`use_map`), but everything that *writes* imports still works on the
+file-wide `file_imports` table and `first_file_namespace`: the import-class
+and qualified-name-to-import code actions, the PHPStan `add_throws` /
+`add_override` / `remove_throws` fixes, and class rename/move rewriting
+(`rename/class/rewrite.rs`). They check for an existing import against every
+block's imports at once, and work out where a new one goes from the first
+block, so an edit in a later block is skipped because another block
+imports the name, or is placed against the wrong block. Fixing it means locating the target block by offset and
+reading, inserting into, and rewriting that block's own `use` statements.
+
+### B543. Unused-import detection pools the imports of every `namespace` block
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace A {
+    use X\Foo;              // unused in A, but not reported
+}
+namespace B {
+    use X\Foo;
+    function b(Foo $f) {}
+}
+```
+
+`diagnostics/unused_imports.rs` checks declared imports against the merged
+file-wide import table, so an import used only in another block counts as
+used, and two blocks importing the same alias collapse into one entry.
+It needs to track each block's imports (and their source ranges) and match
+references against the block they are written in.
 
 ## Array types
 
 No outstanding items.
 
-## Docblock handling
+## Laravel
+
+No outstanding items.
+
+## Blade
+
+No outstanding items.
+
+## Templates
 
 No outstanding items.
 

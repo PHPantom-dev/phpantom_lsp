@@ -1,0 +1,13 @@
+// test: the body of isset() on a non-numeric offset holds no string
+// feature: hover
+// expect: $e = array{message: string}
+// expect_absent: string|
+---
+<?php
+
+/** @param string|array{message?: string} $e */
+function f($e): void {
+    if (isset($e['message'])) {
+        echo $<>e;
+    }
+}

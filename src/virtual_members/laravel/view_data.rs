@@ -20,9 +20,9 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::const_eval::{Scope, const_string};
-use super::provider_resources::is_app_container_expr;
 use crate::atom::bytes_to_str;
 use crate::names::OwnedResolvedNames;
+use crate::symbol_map::extraction::laravel::is_laravel_container_expr;
 
 /// A variable a service provider puts into template scope: its name, and
 /// where the expression that gives it a value sits.
@@ -146,13 +146,15 @@ pub(crate) fn composer_class_vars(content: &str, file_path: &Path) -> Vec<Shared
     vars
 }
 
-/// Whether a static call's class expression names the `View` facade.
-fn is_view_facade(class: &Expression<'_>) -> bool {
+/// Whether a static call's class expression names the `View` facade,
+/// either by its short name or fully qualified.
+pub(crate) fn is_view_facade(class: &Expression<'_>) -> bool {
     let Expression::Identifier(ident) = class else {
         return false;
     };
     let subject = crate::util::strip_fqn_prefix(bytes_to_str(ident.value()));
     subject.eq_ignore_ascii_case("View")
+        || subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\View")
 }
 
 /// Whether an expression hands back Laravel's view factory: the container
@@ -161,7 +163,7 @@ fn is_view_facade(class: &Expression<'_>) -> bool {
 fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
     match expr {
         Expression::ArrayAccess(access) => {
-            is_app_container_expr(access.array) && is_view_key(access.index)
+            is_laravel_container_expr(access.array) && is_view_key(access.index)
         }
         Expression::Call(Call::Function(fc)) => {
             let Expression::Identifier(ident) = fc.function else {
@@ -181,7 +183,7 @@ fn is_view_factory_expr(expr: &Expression<'_>) -> bool {
                 return false;
             };
             method.value.eq_ignore_ascii_case(b"make")
-                && is_app_container_expr(mc.object)
+                && is_laravel_container_expr(mc.object)
                 && mc
                     .argument_list
                     .arguments

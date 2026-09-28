@@ -15,7 +15,7 @@
 //! - **Class names, member names, function names, constants** are
 //!   file-global — all occurrences in the file are highlighted.
 
-use std::collections::HashMap;
+use crate::types::FileContext;
 
 use tower_lsp::lsp_types::*;
 
@@ -67,12 +67,12 @@ impl Backend {
                 } else {
                     ctx.resolve_name_at(name, span.start)
                 };
-                self.highlight_class(symbol_map, content, &fqn, &ctx.use_map, &ctx.namespace)
+                self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
-                let fqn = build_fqn(name, ctx.namespace.as_deref());
-                self.highlight_class(symbol_map, content, &fqn, &ctx.use_map, &ctx.namespace)
+                let fqn = build_fqn(name, ctx.namespace_at(span.start).as_deref());
+                self.highlight_class(symbol_map, content, &fqn, &ctx)
             }
             SymbolKind::MemberAccess { member_name, .. } => {
                 self.highlight_member_name(symbol_map, content, member_name)
@@ -216,8 +216,7 @@ impl Backend {
         symbol_map: &SymbolMap,
         content: &str,
         target_fqn: &str,
-        use_map: &HashMap<String, String>,
-        namespace: &Option<String>,
+        ctx: &FileContext,
     ) -> Vec<DocumentHighlight> {
         let mut highlights = Vec::new();
 
@@ -227,10 +226,16 @@ impl Backend {
                     if *is_fqn {
                         name.to_string()
                     } else {
-                        Self::resolve_to_fqn(name, use_map, namespace)
+                        Self::resolve_to_fqn(
+                            name,
+                            ctx.use_map_at(span.start),
+                            ctx.namespace_at(span.start),
+                        )
                     }
                 }
-                SymbolKind::ClassDeclaration { name } => build_fqn(name, namespace.as_deref()),
+                SymbolKind::ClassDeclaration { name } => {
+                    build_fqn(name, ctx.namespace_at(span.start).as_deref())
+                }
                 _ => continue,
             };
 

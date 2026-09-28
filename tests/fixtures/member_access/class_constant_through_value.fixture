@@ -1,0 +1,14 @@
+// test: $value::CONST reads the constant off the class the value holds
+// feature: hover
+// expect: 100
+---
+<?php
+
+class Pen {
+    const LIMIT = 100;
+}
+
+function test(Pen $pen): void {
+    $limit = $pen::LIMIT;
+    $<>limit;
+}

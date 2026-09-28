@@ -1,0 +1,17 @@
+// test: extract() with EXTR_PREFIX_ALL writes every key under the prefix
+// feature: hover
+// expect_hover: $ry => $ry = true
+// expect_hover: $rpy => $rpy = 's'
+// expect_hover: $rp0 => $rp0 = int
+---
+<?php
+
+/** @param array{0: int} $list */
+function test(array $list): void {
+    $y = true;
+    extract(['y' => 's'], EXTR_PREFIX_ALL, 'p');
+    extract($list, EXTR_PREFIX_ALL | EXTR_REFS, 'p');
+    $ry = $y;
+    $rpy = $p_y;
+    $rp0 = $p_0;<>
+}

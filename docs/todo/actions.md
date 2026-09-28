@@ -54,6 +54,44 @@ cheaper to add: write one function, append it to an array.
 
 ---
 
+## A47. Member actions are missing when the range starts in the indentation
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+final class ProbeSubject
+{
+    private Greeter $greeter;   // request range (15,0)-(16,0): no actions
+}                               // request range (15,4)-(16,0): getter/setter, hooks, visibility
+```
+
+Every collector that works on the member under the cursor (generate
+getter/setter, property hooks, change visibility, promote constructor
+parameter, and so on) calls `find_cursor_context` with the single offset
+`params.range.start`. It matches that offset against the member's span,
+which starts at the first token (`private`). A range that starts in the
+leading whitespace therefore finds the class body but no member, and every
+member action disappears. This covers a cursor at column 0, a whole-line
+selection, and a selection that starts on the line above. Clients send all
+three routinely. The php-typing-conformance code-action probe asks exactly
+this way and gets an empty answer from PHPantom, where Phpactor and
+DEVSENSE offer their property actions.
+
+Resolve the position once, in `handle_code_action`: when the range starts
+in whitespace, advance it to the first non-whitespace byte inside the
+range (or, for a collapsed range, on the same line). All collectors then
+see the member. A selection that spans several members should keep
+matching none, as it does today.
+
+(The same probe used to get *Extract interface* from 0.10.0. That action
+is now correctly withheld from clients that don't advertise the `create`
+resource operation, which the probe client doesn't. Fixing this item
+makes the probe answer again, this time with the property actions.)
+
+**Where to look:** `find_cursor_context` in
+`src/code_actions/cursor_context.rs` and its callers in
+`src/code_actions/`.
+
 ## A46. Honor `context.only` in code action responses
 
 **Impact: Medium · Complexity: Medium**

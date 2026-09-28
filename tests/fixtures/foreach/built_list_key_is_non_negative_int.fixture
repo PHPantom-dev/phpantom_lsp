@@ -1,0 +1,15 @@
+// test: the key of a foreach over a list built by appends is a non-negative int
+// feature: hover
+// expect: $k = int<0, max>
+---
+<?php
+
+function f(): void {
+    $out = [];
+    foreach (['a', 'b'] as $s) {
+        $out[] = $s . 'x';
+    }
+    foreach ($out as $k => $v) {
+        echo $<>k;
+    }
+}

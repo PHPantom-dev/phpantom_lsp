@@ -1,0 +1,21 @@
+// test: a catch for an ancestor of a declared exception is joined after the try
+// feature: hover
+// expect: caught
+---
+<?php
+
+class ValidationError extends \Exception {}
+class EmailValidationError extends ValidationError {}
+
+/** @throws EmailValidationError */
+function validate(): void {}
+
+function test(): void {
+    $s = 1;
+    try {
+        validate();
+    } catch (ValidationError $e) {
+        $s = 'caught';
+    }
+    echo $<>s;
+}

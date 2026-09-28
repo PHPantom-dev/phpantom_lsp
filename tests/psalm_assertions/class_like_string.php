@@ -22,4 +22,3 @@ namespace PsalmTest_class_like_string_1 {
 
     assertType('class-string<A>', $r);
 }
-
