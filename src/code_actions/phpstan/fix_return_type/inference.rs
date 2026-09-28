@@ -5,7 +5,6 @@
 //! resolution pipeline (the same one hover, completion, and
 //! diagnostics use).
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use mago_syntax::cst::expression::Expression;
@@ -79,8 +78,8 @@ impl Backend {
             .get(uri)
             .cloned()
             .unwrap_or_default();
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let func_offset = line_start_byte_offset(content, func_line) as u32;
+        let (file_use_map, file_namespace) = self.use_map_and_namespace_at(uri, func_offset);
         let class_loader = self.class_loader_with(&local_classes, &file_use_map, &file_namespace);
         let function_loader = self.function_loader_with(None, &file_use_map, &file_namespace);
 
@@ -190,21 +189,16 @@ pub(crate) fn infer_return_type(
                 }
 
                 let ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class: &enclosing_class,
-                    all_classes: local_classes,
-                    content,
-                    cursor_offset: start as u32,
-                    class_loader,
                     backend,
                     loaders: Loaders::with_function(function_loader),
-                    resolved_class_cache: None,
-                    enclosing_return_type: None,
-                    branch_aware: true,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        &enclosing_class,
+                        local_classes,
+                        content,
+                        start as u32,
+                        class_loader,
+                    )
                 };
 
                 let ty = resolve_expression_type(expr, &ctx).unwrap_or_else(PhpType::mixed);

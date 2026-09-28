@@ -162,6 +162,7 @@ impl Backend {
                         see_refs,
                         func_template_params,
                         func_template_param_bounds,
+                        func_template_param_defaults,
                         func_template_bindings,
                         throws,
                     ) = if let Some(ctx) = doc_ctx {
@@ -206,6 +207,14 @@ impl Backend {
                                     bound.as_ref().map(|b| (atom(name), b.clone()))
                                 })
                                 .collect();
+                        let tpl_param_defaults: Box<
+                            [(crate::atom::Atom, crate::php_type::PhpType)],
+                        > = params_full
+                            .iter()
+                            .filter_map(|(name, _, _, default)| {
+                                default.as_ref().map(|d| (atom(name), d.clone()))
+                            })
+                            .collect();
                         let tpl_bindings: Vec<(crate::atom::Atom, crate::atom::Atom)> =
                             if !tpl_params.is_empty() {
                                 info.as_ref()
@@ -289,6 +298,7 @@ impl Backend {
                             see_refs,
                             tpl_params,
                             tpl_param_bounds,
+                            tpl_param_defaults,
                             tpl_bindings,
                             throws,
                         )
@@ -309,6 +319,7 @@ impl Backend {
                             Vec::new(),
                             Vec::new(),
                             crate::atom::AtomMap::<crate::php_type::PhpType>::default(),
+                            Box::default(),
                             Vec::new(),
                             Vec::new(),
                         )
@@ -317,99 +328,28 @@ impl Backend {
                     // Merge `@param` docblock types into parameter type
                     // hints and populate per-parameter descriptions.
                     if let Some(ref info) = info {
-                        for param in &mut parameters {
-                            let param_doc_type =
-                                docblock::extract_param_raw_type_from_info(info, &param.name);
-                            if let Some(ref doc_type) = param_doc_type {
-                                let effective = docblock::resolve_effective_type_typed(
-                                    param.type_hint.as_ref(),
-                                    Some(doc_type),
-                                );
-                                if effective.is_some() {
-                                    param.type_hint = effective;
-                                }
-                            }
-                            param.description =
-                                docblock::extract_param_description_from_info(info, &param.name);
-                        }
-
-                        // Positional fallback for `@param` tags that omit
-                        // the parameter name (common in phpstorm-stubs,
-                        // e.g. `@param callable(TValue, TKey): bool`
-                        // without `$callback`).  When the name-based merge
-                        // above didn't enrich a parameter's type hint, try
-                        // matching unnamed `@param` tags by position.
-                        let positional_tags =
-                            docblock::extract_param_types_positional_from_info(info);
-                        for (idx, param) in parameters.iter_mut().enumerate() {
-                            // Skip parameters that already got a richer
-                            // docblock type from the name-based merge.
-                            let already_enriched =
-                                docblock::extract_param_raw_type_from_info(info, &param.name)
-                                    .is_some();
-                            if already_enriched {
-                                continue;
-                            }
-                            // Find the positional @param tag at this index.
-                            if let Some((None, doc_type)) = positional_tags.get(idx) {
-                                let effective = docblock::resolve_effective_type_typed(
-                                    param.type_hint.as_ref(),
-                                    Some(doc_type),
-                                );
-                                if effective.is_some() {
-                                    param.type_hint = effective;
-                                }
-                            }
-                        }
-
-                        // Populate `closure_this_type` from
-                        // `@param-closure-this` tags so that `$this`
-                        // inside a closure argument resolves to the
-                        // declared type instead of the lexical class.
-                        for (this_type, param_name) in
-                            docblock::extract_param_closure_this_from_info(info)
-                        {
-                            if let Some(param) =
-                                parameters.iter_mut().find(|p| p.name == param_name)
-                            {
-                                param.closure_this_type = Some(this_type);
-                            }
-                        }
-
-                        // Append extra `@param` tags that don't match any
-                        // native parameter.  These document parameters
-                        // accessed via `func_get_args()` or similar
-                        // mechanisms and should appear in hover/signature.
-                        for (tag_name, tag_type) in docblock::extract_all_param_tags_from_info(info)
-                        {
-                            if !parameters.iter().any(|p| p.name == tag_name) {
-                                let description =
-                                    docblock::extract_param_description_from_info(info, &tag_name);
-                                parameters.push(ParameterInfo {
-                                    name: atom(&tag_name),
-                                    is_required: false,
-                                    type_hint: Some(tag_type),
-                                    native_type_hint: None,
-                                    description,
-                                    default_value: None,
-                                    is_variadic: false,
-                                    is_reference: false,
-                                    closure_this_type: None,
-                                });
-                            }
-                        }
+                        docblock::merge_param_docblock_into_parameters(
+                            info,
+                            &mut parameters,
+                            &func_template_param_bounds,
+                        );
                     }
 
                     // A docblock `@param` merge above may have overwritten
                     // `type_hint` with a non-nullable docblock type. Re-fold
                     // null for parameters whose default value is `null`.
                     for param in &mut parameters {
-                        param.apply_null_default();
+                        param.apply_null_default(|name| {
+                            func_template_params.iter().any(|t| t == name)
+                        });
                     }
 
                     // `@pure` promises the call changes nothing, which is what
-                    // lets a check recorded about an argument survive it.
+                    // lets a check recorded about an argument survive it;
+                    // `@impure` promises it changes something even though it
+                    // returns a value.
                     let is_pure = info.as_ref().is_some_and(docblock::declares_pure);
+                    let is_impure = info.as_ref().is_some_and(docblock::declares_impure);
 
                     let func_tpl_atoms: Vec<crate::atom::Atom> =
                         func_template_params.iter().map(|s| atom(s)).collect();
@@ -448,10 +388,12 @@ impl Backend {
                             template_params: func_tpl_atoms,
                             template_param_bounds: func_template_param_bounds,
                             template_bindings: func_template_bindings,
+                            template_param_defaults: func_template_param_defaults,
                             throws,
                             is_polyfill: false,
                             overloads: Vec::new(),
                             is_pure,
+                            is_impure,
                         });
                     }
                 }

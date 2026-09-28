@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{PhpType, TypeKind};
-use crate::types::ClassInfo;
+use crate::types::{ClassInfo, ResolvedType};
 
 use mago_syntax::cst::*;
 
@@ -219,21 +219,26 @@ pub(in crate::type_engine) fn apply_instanceof_inclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let narrowed: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
-        .into_iter()
-        .map(Arc::unwrap_or_clone)
-        .collect();
+    include_resolved_classes(
+        super::resolve::resolve_narrowing_target(ty, ctx),
+        exact,
+        ctx,
+        results,
+    )
+}
+
+/// [`apply_instanceof_inclusion`] over classes already resolved.
+fn include_resolved_classes(
+    resolved: Vec<Arc<ClassInfo>>,
+    exact: bool,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+) -> bool {
+    let narrowed: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
     if narrowed.is_empty() {
-        // The instanceof target class could not be resolved (e.g. it
-        // lives inside a phar that we cannot index).  The developer
-        // wrote an explicit instanceof guard, so they clearly expect
-        // the variable to have that type in this branch.  Rather than
-        // keeping the un-narrowed type (which would cause false-
-        // positive "unknown member" diagnostics for members that only
-        // exist on the unresolvable subclass), clear the results so
-        // the variable appears untyped.  Untyped subjects are
-        // suppressed by the diagnostic engine, eliminating the false
-        // positives without losing any information we actually had.
+        // No class for the check to name, and a class list has no way to
+        // hold one it cannot load.  Callers that track type strings go
+        // through [`include_instance_of`], which keeps the name instead.
         results.clear();
         return true;
     }
@@ -328,10 +333,20 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<ClassInfo>,
 ) -> bool {
-    let excluded: Vec<ClassInfo> = super::resolve::resolve_narrowing_target(ty, ctx)
-        .into_iter()
-        .map(Arc::unwrap_or_clone)
-        .collect();
+    exclude_resolved_classes(
+        super::resolve::resolve_narrowing_target(ty, ctx),
+        ctx,
+        results,
+    )
+}
+
+/// [`apply_instanceof_exclusion`] over classes already resolved.
+fn exclude_resolved_classes(
+    resolved: Vec<Arc<ClassInfo>>,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ClassInfo>,
+) -> bool {
+    let excluded: Vec<ClassInfo> = resolved.into_iter().map(Arc::unwrap_or_clone).collect();
     if !excluded.is_empty() {
         results.retain(|r| {
             !excluded.iter().any(|e| {
@@ -345,6 +360,126 @@ pub(in crate::type_engine) fn apply_instanceof_exclusion(
         });
     }
     false
+}
+
+/// Narrow `results` to what passes `instanceof ty`, the type-string
+/// counterpart of [`apply_instanceof_inclusion`].
+///
+/// A class that cannot be loaded still has a name, and the check proves
+/// the value carries it: the alternatives naming it are kept, and when
+/// none does the value is that class, with no `ClassInfo` behind it.
+/// Clearing the subject instead, as the class-list form has to, would
+/// leave the branch untyped and empty the variable once branches join.
+pub(in crate::type_engine) fn include_instance_of(
+    ty: &PhpType,
+    exact: bool,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    let resolved = super::resolve::resolve_narrowing_target(ty, ctx);
+    if let Some(name) = unloadable_check_target(ty, &resolved) {
+        let mut kept: Vec<ResolvedType> = Vec::new();
+        for rt in results.iter() {
+            if rt.class_info.as_ref().is_some_and(|c| {
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.class_loader)
+            }) {
+                ResolvedType::push_unique(&mut kept, rt.clone());
+                continue;
+            }
+            let naming: Vec<PhpType> = rt
+                .type_string
+                .union_members()
+                .into_iter()
+                .filter_map(|m| m.non_null_type().unwrap_or_else(|| m.clone()).into())
+                .filter(|m: &PhpType| names_class(m, name))
+                .collect();
+            if !naming.is_empty() {
+                ResolvedType::push_unique(
+                    &mut kept,
+                    ResolvedType::from_type_string(PhpType::union(naming)),
+                );
+            }
+        }
+        if kept.is_empty() {
+            kept.push(ResolvedType::from_type_string(ty.clone()));
+        }
+        *results = kept;
+        return;
+    }
+    ResolvedType::apply_narrowing(results, |classes| {
+        include_resolved_classes(resolved, exact, ctx, classes)
+    });
+}
+
+/// Remove what fails `instanceof ty` from `results`, the type-string
+/// counterpart of [`apply_instanceof_exclusion`].
+///
+/// A class that cannot be loaded is ruled out by name, along with every
+/// loaded class that names it as an ancestor.
+pub(in crate::type_engine) fn exclude_instance_of(
+    ty: &PhpType,
+    ctx: &VarResolutionCtx<'_>,
+    results: &mut Vec<ResolvedType>,
+) {
+    let resolved = super::resolve::resolve_narrowing_target(ty, ctx);
+    if let Some(name) = unloadable_check_target(ty, &resolved) {
+        results.retain_mut(|rt| {
+            if rt.class_info.as_ref().is_some_and(|c| {
+                crate::class_lookup::is_subtype_of_names(&c.fqn(), name, ctx.class_loader)
+            }) {
+                return false;
+            }
+            let members = rt.type_string.union_members();
+            let kept: Vec<PhpType> = members
+                .iter()
+                .filter(|m| !names_class(&m.non_null_type().unwrap_or_else(|| (**m).clone()), name))
+                .map(|m| (*m).clone())
+                .collect();
+            if kept.len() == members.len() {
+                return true;
+            }
+            if kept.is_empty() {
+                return false;
+            }
+            rt.type_string = PhpType::union(kept);
+            true
+        });
+        return;
+    }
+    ResolvedType::apply_narrowing(results, |classes| {
+        exclude_resolved_classes(resolved, ctx, classes)
+    });
+}
+
+/// The class `ty` names when it resolved to no class, or `None` when it
+/// resolved or is not a class name at all.
+fn unloadable_check_target<'t>(ty: &'t PhpType, resolved: &[Arc<ClassInfo>]) -> Option<&'t str> {
+    if !resolved.is_empty() || ty.is_keyword() {
+        return None;
+    }
+    match ty.kind() {
+        TypeKind::Named(name) => Some(name.as_ref()),
+        _ => None,
+    }
+}
+
+/// Whether `member` is the class `name`, allowing either spelling to be
+/// the short name of the other: the check may name the class as written
+/// while the subject's type carries it resolved.
+fn names_class(member: &PhpType, name: &str) -> bool {
+    let TypeKind::Named(member_name) = member.kind() else {
+        return false;
+    };
+    let a = member_name.trim_start_matches('\\');
+    let b = name.trim_start_matches('\\');
+    let short_of = |long: &str, short: &str| {
+        long.len() > short.len()
+            && long.as_bytes()[long.len() - short.len() - 1] == b'\\'
+            && long[long.len() - short.len()..].eq_ignore_ascii_case(short)
+    };
+    a.eq_ignore_ascii_case(b)
+        || (!b.contains('\\') && short_of(a, b))
+        || (!a.contains('\\') && short_of(b, a))
 }
 
 /// If `expr` is `$var instanceof <value>` — an `instanceof` whose
@@ -381,6 +516,35 @@ pub(in crate::type_engine) fn try_extract_dynamic_instanceof<'b>(
                 | Expression::Parent(_) => None,
                 rhs => Some((rhs, false)),
             }
+        }
+        // `is_a($x, $class)` is the same check spelled as a call.  With
+        // `allow_string` it also admits a class name, which is not an
+        // object check at all, so only the two-argument form counts; a
+        // written `Foo::class` is `try_extract_instanceof_with_negation`'s.
+        Expression::Call(Call::Function(call)) => {
+            let Expression::Identifier(ident) = call.function else {
+                return None;
+            };
+            if !bytes_to_str(ident.value())
+                .trim_start_matches('\\')
+                .eq_ignore_ascii_case("is_a")
+            {
+                return None;
+            }
+            let args: Vec<_> = call.argument_list.arguments.iter().collect();
+            if args.len() < 2 || args.get(2).is_some_and(|a| !argument_value(a).is_false()) {
+                return None;
+            }
+            if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
+                return None;
+            }
+            let class = argument_value(args[1]);
+            if extract_class_string_from_expr(class).is_some()
+                || string_literal_value(class).is_some()
+            {
+                return None;
+            }
+            Some((class, false))
         }
         _ => None,
     }
@@ -1059,8 +1223,10 @@ fn collect_negated_and_instanceof_classes<'b>(
 /// Each member of the union answers on its own: one that already names a
 /// subtype of the checked class is the more specific of the two and
 /// stays as it is, one the checked class is a subtype of narrows to the
-/// class, and one that is unrelated (or not an object at all) cannot
-/// pass and is dropped.
+/// class, one that could share an instance with it (a class that can
+/// still be extended, checked against an interface) becomes the
+/// intersection of the two, and one that is unrelated (or not an object
+/// at all) cannot pass and is dropped.
 ///
 /// Returns `None` when nothing can be said — no class loader, a class
 /// name that does not resolve, a `self`/`static`/`parent` reference the
@@ -1103,8 +1269,12 @@ pub(in crate::type_engine) fn narrow_type_by_instanceof(
 }
 
 /// The alternatives a value of `ty` can take, with `?T` spelled out as
-/// the `T|null` it stands for so each half is judged separately.
+/// the `T|null` it stands for and `iterable` as `array|Traversable`, so
+/// each half is judged separately.
 fn instanceof_union_members(ty: &PhpType) -> Vec<PhpType> {
+    if let Some(split) = ty.split_iterable() {
+        return split.union_members().into_iter().cloned().collect();
+    }
     match ty.kind() {
         TypeKind::Nullable(inner) => vec![inner.clone(), PhpType::null()],
         TypeKind::Union(members) => members.to_vec(),
@@ -1179,6 +1349,50 @@ fn instanceof_member(
     if crate::class_lookup::is_subtype_of_named(member, class_name, loader) {
         return Some(member.clone());
     }
-    crate::class_lookup::is_subtype_of_names(class_name, member_name, loader)
-        .then(|| extraction.class_type.clone())
+    if crate::class_lookup::is_subtype_of_names(class_name, member_name, loader) {
+        return Some(extraction.class_type.clone());
+    }
+    let member_cls = loader(member_name)?;
+    let checked_cls = loader(class_name)?;
+    can_share_instance(&member_cls, &checked_cls).then(|| {
+        class_first_intersection(
+            (member.clone(), &member_cls),
+            (extraction.class_type.clone(), &checked_cls),
+        )
+    })
+}
+
+/// Whether one object can be an instance of both `a` and `b` when neither
+/// extends the other.
+///
+/// That takes an interface on at least one side: a subclass of a class
+/// that can still be extended may implement any interface, and one object
+/// may implement any two.  Two classes never share an instance, and a
+/// final class or an enum already lists every interface it will have.
+pub(in crate::type_engine) fn can_share_instance(a: &ClassInfo, b: &ClassInfo) -> bool {
+    use crate::types::ClassLikeKind;
+    let extendable = |c: &ClassInfo| match c.kind {
+        ClassLikeKind::Interface => true,
+        ClassLikeKind::Class => !c.is_final,
+        ClassLikeKind::Trait | ClassLikeKind::Enum => false,
+    };
+    (a.kind == ClassLikeKind::Interface || b.kind == ClassLikeKind::Interface)
+        && extendable(a)
+        && extendable(b)
+}
+
+/// `a&b` with a class ahead of an interface, which is how the value is
+/// usually described (`Model&HasFactory`), and `a` first otherwise.
+pub(in crate::type_engine) fn class_first_intersection(
+    a: (PhpType, &ClassInfo),
+    b: (PhpType, &ClassInfo),
+) -> PhpType {
+    use crate::types::ClassLikeKind;
+    let (first, second) =
+        if a.1.kind == ClassLikeKind::Interface && b.1.kind != ClassLikeKind::Interface {
+            (b.0, a.0)
+        } else {
+            (a.0, b.0)
+        };
+    PhpType::intersection(vec![first, second])
 }

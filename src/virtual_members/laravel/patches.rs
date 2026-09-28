@@ -96,6 +96,15 @@
 //!     from.  The patch appends both as extra generic arguments so that
 //!     member access on the proxy can be resolved.  See
 //!     [`super::higher_order_proxy`].
+//!
+//! 11. **Eloquent Builder `chunk*()` callback parameter.**  The shared
+//!     `BuildsQueries` trait types the callback of `chunk()`,
+//!     `chunkById()`, `chunkByIdDesc()` and `orderedChunkById()` as
+//!     `callable(Support\Collection<int, TValue>, int)`, but each hands the
+//!     callback what `get()` returns on the builder using the trait.  On
+//!     the Eloquent builder that is the model's collection, so the patch
+//!     names `Eloquent\Collection` there, which the call site then
+//!     narrows to the model's custom collection like any other.
 
 use crate::atom::atom;
 use std::sync::Arc;
@@ -201,6 +210,7 @@ pub fn apply_laravel_patches(class: &mut ClassInfo, fqn: &str) {
         // Builder uses Conditionable, so patch when/unless too.
         patch_conditionable_when_unless(class);
         patch_eloquent_builder_paginate_element_type(class);
+        patch_eloquent_builder_chunk_callbacks(class);
     } else if fqn == CONDITIONABLE_FQN || class_uses_conditionable(class) {
         patch_conditionable_when_unless(class);
     }
@@ -485,6 +495,68 @@ fn patch_eloquent_builder_paginate_element_type(class: &mut ClassInfo) {
         );
         Arc::make_mut(method).return_type = Some(element_type);
     }
+}
+
+/// FQN of the collection `Query\Builder::get()` returns, which the
+/// `BuildsQueries` trait names for every builder using it.
+const SUPPORT_COLLECTION_FQN: &str = "Illuminate\\Support\\Collection";
+
+/// Type the collection the Eloquent builder's `chunk*()` methods hand
+/// their callback as the one its `get()` returns.
+///
+/// `BuildsQueries::chunk()` calls `$this->…->get()` and passes the result
+/// straight to the callback, so the argument is whatever `get()` returns
+/// on the class using the trait: a `Support\Collection` of rows on the
+/// query builder, the model's collection on the Eloquent builder. The
+/// trait can only spell the common supertype, which makes a callback
+/// typed with the model's collection look like it demands more than it
+/// is given.
+fn patch_eloquent_builder_chunk_callbacks(class: &mut ClassInfo) {
+    for method in class.methods.make_mut().iter_mut() {
+        if !matches!(
+            method.name.as_str(),
+            "chunk" | "chunkById" | "chunkByIdDesc" | "orderedChunkById"
+        ) {
+            continue;
+        }
+        let Some(idx) = method
+            .parameters
+            .iter()
+            .position(|p| p.name.as_str() == "$callback")
+        else {
+            continue;
+        };
+        let Some(patched) = method.parameters[idx]
+            .type_hint
+            .as_ref()
+            .and_then(callback_with_eloquent_collection)
+        else {
+            continue;
+        };
+        Arc::make_mut(method).parameters.make_mut()[idx].type_hint = Some(patched);
+    }
+}
+
+/// `callable(Support\Collection<…>, …)` with its first parameter renamed to
+/// the Eloquent collection, keeping the generic arguments. `None` when the
+/// type is not of that shape.
+fn callback_with_eloquent_collection(hint: &PhpType) -> Option<PhpType> {
+    let TypeKind::Callable(callable) = hint.kind() else {
+        return None;
+    };
+    let first = callable.params.first()?;
+    let TypeKind::Generic(collection) = first.type_hint.kind() else {
+        return None;
+    };
+    if collection.name.trim_start_matches('\\') != SUPPORT_COLLECTION_FQN {
+        return None;
+    }
+    let mut patched = (**callable).clone();
+    patched.params[0].type_hint = PhpType::generic(
+        crate::types::ELOQUENT_COLLECTION_FQN,
+        collection.args.to_vec(),
+    );
+    Some(TypeKind::Callable(Box::new(patched)).into())
 }
 
 /// Correct `Storage::fake()` and `Storage::persistentFake()` return

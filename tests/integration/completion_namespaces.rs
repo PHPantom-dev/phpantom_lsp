@@ -684,3 +684,39 @@ namespace App {
         );
     }
 }
+
+/// Two `namespace` blocks importing the same short name from different
+/// namespaces each complete the members of their own class.
+#[tokio::test]
+async fn test_completion_resolves_through_the_blocks_own_import() {
+    let text = r#"<?php
+namespace X {
+    class Foo { public function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    function a(Foo $f): void {
+        $f->
+    }
+}
+namespace B {
+    use Y\Foo;
+    function b(Foo $f): void {
+        $f->
+    }
+}
+"#;
+    for (line, own, other) in [(10, "fromX", "fromY"), (16, "fromY", "fromX")] {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///blocks.php").unwrap();
+        let labels = crate::common::complete_labels_at(&backend, &uri, text, line, 12).await;
+        assert!(
+            labels.iter().any(|l| l.starts_with(own))
+                && !labels.iter().any(|l| l.starts_with(other)),
+            "line {line} should offer `{own}` only, got: {labels:?}"
+        );
+    }
+}

@@ -1,0 +1,11 @@
+// test: $value::class on an unknown object is a bare class-string
+// feature: hover
+// expect: class-string
+// expect_absent: class-string<
+---
+<?php
+
+function test(object $value): void {
+    $class = $value::class;
+    $<>class;
+}

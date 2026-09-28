@@ -48,6 +48,15 @@ impl Backend {
         &self,
         candidates: &[&str],
     ) -> Option<Option<String>> {
+        // The stubs record the version of the PHP build they were generated
+        // on (`PHP_VERSION_ID` 50306); the one the project runs on is the
+        // configured version, down to the minor.
+        for name in candidates {
+            if let Some(value) = self.php_version_constant(name) {
+                return Some(value);
+            }
+        }
+
         // Phase 1: already-parsed constants.
         {
             let dmap = self.symbols.global_defines.read();
@@ -130,6 +139,22 @@ impl Backend {
         }
 
         None
+    }
+
+    /// The value of a constant that describes the running PHP version, or
+    /// `None` when `name` is not one.
+    ///
+    /// The major and minor versions are the configured ones.  The rest
+    /// depend on the patch release, which nothing configures, so they exist
+    /// with an unknown value (`Some(None)`).
+    fn php_version_constant(&self, name: &str) -> Option<Option<String>> {
+        let version = || self.php_version();
+        match name {
+            "PHP_MAJOR_VERSION" => Some(Some(version().major.to_string())),
+            "PHP_MINOR_VERSION" => Some(Some(version().minor.to_string())),
+            _ if unversioned_php_version_constant_type(name).is_some() => Some(None),
+            _ => None,
+        }
     }
 
     /// The initializer text of a global constant, looked up only where it
@@ -281,4 +306,18 @@ fn find_balanced_close_paren(s: &str) -> Option<usize> {
         prev = b;
     }
     None
+}
+
+/// The type of a PHP version constant whose value depends on the patch
+/// release (see `Backend::php_version_constant`), or `None` for any other
+/// name.
+pub(crate) fn unversioned_php_version_constant_type(
+    name: &str,
+) -> Option<crate::php_type::PhpType> {
+    use crate::php_type::PhpType;
+    match name {
+        "PHP_VERSION_ID" | "PHP_RELEASE_VERSION" => Some(PhpType::int()),
+        "PHP_VERSION" | "PHP_EXTRA_VERSION" => Some(PhpType::string()),
+        _ => None,
+    }
 }

@@ -287,7 +287,7 @@ fn try_resolve_include(
 /// Try to statically evaluate an expression to a path string.
 ///
 /// Returns `None` for dynamic expressions that cannot be resolved.
-fn try_evaluate_path_expr(expr: &Expression<'_>, file_dir: &Path) -> Option<String> {
+pub(crate) fn try_evaluate_path_expr(expr: &Expression<'_>, file_dir: &Path) -> Option<String> {
     match expr {
         // Simple string literal: 'file.php' or "file.php"
         Expression::Literal(literal::Literal::String(s)) => {

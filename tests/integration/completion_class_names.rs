@@ -1,6 +1,6 @@
 use crate::common::{
-    create_psr4_workspace, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs, create_test_backend_with_stubs,
+    class_items, complete_at, create_psr4_workspace, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs, create_test_backend_with_stubs, items_of_kind, labels,
 };
 use phpantom_lsp::Backend;
 use phpantom_lsp::composer::parse_autoload_classmap;
@@ -11,58 +11,6 @@ use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Open a file in the backend and request completion at the given position.
-async fn complete_at(
-    backend: &Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
-
-/// Filter completion items to only those with kind == CLASS.
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
-        .collect()
-}
-
-/// Extract labels from a list of completion items.
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
 
 /// Find a completion item by its FQN (stored in the `detail` field).
 fn find_by_fqn<'a>(items: &[&'a CompletionItem], fqn: &str) -> Option<&'a CompletionItem> {
@@ -78,17 +26,11 @@ fn fqns<'a>(items: &'a [&'a CompletionItem]) -> Vec<&'a str> {
 }
 
 fn function_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::FUNCTION))
-        .collect()
+    items_of_kind(items, CompletionItemKind::FUNCTION)
 }
 
 fn constant_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CONSTANT))
-        .collect()
+    items_of_kind(items, CompletionItemKind::CONSTANT)
 }
 
 #[tokio::test]
@@ -4069,10 +4011,7 @@ async fn test_fqn_mode_user_typed_leading_backslash_unaffected() {
 
 /// Helper: extract MODULE-kind items from a completion list.
 fn module_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::MODULE))
-        .collect()
+    items_of_kind(items, CompletionItemKind::MODULE)
 }
 
 #[tokio::test]

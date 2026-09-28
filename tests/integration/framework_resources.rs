@@ -334,3 +334,42 @@ async fn symfony_namespace_prefix_rename_updates_yaml_and_php_namespace() {
         edit_texts_for_uri(&edit, &mailer_uri)
     );
 }
+
+#[tokio::test]
+async fn renaming_a_controller_action_from_php_updates_the_route() {
+    let controller_php = "<?php\nnamespace App\\Controller;\nclass HomeController {\n    public function index(): void {}\n}\n";
+    let routes_yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("config/routes.yaml", routes_yaml),
+        ],
+    );
+
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let routes_uri = uri_for(&dir, "config/routes.yaml");
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+    open_doc(&backend, routes_uri.clone(), "yaml", routes_yaml).await;
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: controller_uri.clone(),
+                },
+                position: Position::new(3, 21),
+            },
+            new_name: "dashboard".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("method rename should produce edits");
+
+    assert_eq!(edit_texts_for_uri(&edit, &routes_uri), vec!["dashboard"]);
+    assert_eq!(
+        edit_texts_for_uri(&edit, &controller_uri),
+        vec!["dashboard"]
+    );
+}

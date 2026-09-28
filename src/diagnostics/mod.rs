@@ -104,6 +104,11 @@
 //! - **Type mismatch diagnostics** — report argument, return, and
 //!   property-assignment values whose type does not satisfy the
 //!   declared/inferred type.
+//! - **Member visibility diagnostics** — report a `private` or
+//!   `protected` property, method, or class constant reached from a
+//!   scope PHP does not let see it.  Emitted from the unknown-member
+//!   walk, which has already resolved the subject.  Suppressed when the
+//!   class declares a magic handler that would answer for the member.
 //! - **Readonly write diagnostics** — report writes to a `readonly`
 //!   property from outside the class that declares it, and second
 //!   writes from inside it once the constructor has initialized the
@@ -213,7 +218,9 @@
 
 mod argument_count;
 mod blade_call_site;
+mod blade_component_tags;
 mod blade_directives;
+mod blade_imbalance;
 mod blade_sections;
 mod blade_signature;
 pub(crate) mod class_case_mismatch;
@@ -222,13 +229,17 @@ pub(crate) mod cross_file;
 mod deprecated;
 mod docblock_native_mismatch;
 mod enum_errors;
+pub(crate) mod existence_guards;
 mod external;
 pub(crate) mod helpers;
 pub(crate) mod ignore_rules;
 mod implementation_errors;
 mod incompatible_override;
 mod invalid_class_kind;
+mod laravel_string_keys;
 mod match_type_errors;
+pub(crate) mod member_lookup;
+pub(crate) mod member_visibility;
 pub(crate) mod namespace_mismatch;
 mod property_type_errors;
 mod pull;
@@ -247,6 +258,7 @@ pub(crate) mod unknown_members;
 pub(crate) mod unresolved_member_access;
 mod unused_imports;
 pub(crate) mod unused_variables;
+pub(crate) mod use_statements;
 pub(crate) mod workspace;
 
 use std::sync::Arc;
@@ -255,6 +267,7 @@ use std::sync::atomic::Ordering;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::type_engine::resolver::LendsLoaders;
 
 /// Callback invoked after each Phase 2 collector in
 /// [`Backend::collect_slow_diagnostics_observed`]: receives the
@@ -262,26 +275,6 @@ use crate::Backend;
 /// remaining collectors.
 pub(crate) type SlowDiagnosticObserver<'a> =
     &'a mut dyn FnMut(&'static str, std::time::Duration) -> bool;
-
-/// The [`crate::symbol_map::LaravelStringKind`]s
-/// [`Backend::collect_invalid_laravel_string_key_diagnostics`] can judge.
-///
-/// The kinds it cannot are dropped when the spans are gathered rather than
-/// carried to the check and skipped there, so the reason each one is left
-/// alone is written once: a Blade section or stack name is judged by the
-/// Blade pass, which knows the templates around the one it is written in,
-/// and a container binding key is judged by nothing at all, since anything
-/// can be bound at runtime.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CheckedStringKind {
-    Route,
-    Config,
-    View,
-    Trans,
-    Command,
-    MorphAlias,
-    GateAbility,
-}
 
 // ── Shared helpers ──────────────────────────────────────────────────────────
 
@@ -437,23 +430,14 @@ impl Backend {
         let file_ctx = helpers::FileDiagnosticContext::gather(self, uri_str);
 
         if let Some(ctx) = &file_ctx {
-            let class_loader = self.class_loader(&ctx.file);
-            let function_loader_cl = self.function_loader(&ctx.file);
-            let constant_loader_cl = self.constant_loader(&ctx.file);
-            let config_resolver = |key: &str| self.resolve_config_type(key);
-            let trans_resolver = |key: &str| self.resolve_trans_type(key);
-            let loaders = crate::type_engine::resolver::Loaders {
-                function_loader: Some(&function_loader_cl),
-                constant_loader: Some(&constant_loader_cl),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let class_loaders = self.class_loaders(&ctx.file);
+            let owned_loaders = self.diagnostic_loaders(&ctx.file);
             crate::type_engine::variable::forward_walk::build_diagnostic_scopes(
                 content,
                 &ctx.file.classes,
-                &class_loader,
+                &class_loaders.as_dyn(),
                 Some(self),
-                loaders,
+                owned_loaders.loaders(),
                 Some(&self.resolved_class_cache),
             );
         }
@@ -579,530 +563,19 @@ impl Backend {
                 self.collect_blade_directive_diagnostics(uri_str, out)
             );
             step!(
+                "blade_component_tag_balance",
+                self.collect_blade_component_tag_diagnostics(uri_str, out)
+            );
+            step!(
                 "blade_section",
                 self.collect_blade_section_diagnostics(uri_str, out)
             );
         }
     }
-
-    /// Emit a warning for each `$this->argument('x')` / `$this->option('x')`
-    /// whose name is not a parameter of the enclosing command's `$signature`.
-    fn collect_invalid_command_param_diagnostics(
-        &self,
-        uri: &str,
-        content: &str,
-        out: &mut Vec<Diagnostic>,
-    ) {
-        use crate::symbol_map::SymbolKind;
-
-        // (name, is_option, start, end) for each own-param span.
-        let spans: Vec<(String, bool, u32, u32)> = {
-            let maps = self.symbol_maps.read();
-            let Some(symbol_map) = maps.get(uri) else {
-                return;
-            };
-            symbol_map
-                .spans
-                .iter()
-                .filter_map(|span| {
-                    if let SymbolKind::CommandOwnParam { name, is_option } = &span.kind {
-                        Some((name.clone(), *is_option, span.start, span.end))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-        if spans.is_empty() {
-            return;
-        }
-
-        for (name, is_option, start, end) in &spans {
-            // Resolve the enclosing command signature at the span offset.  If
-            // the class declares no `$signature` (e.g. a `$name`-only or
-            // dynamically-built command), skip — there is nothing to validate.
-            let Some(signature) = crate::virtual_members::laravel::command_signature_at_offset(
-                content,
-                *start as usize,
-            ) else {
-                continue;
-            };
-            let known = if *is_option {
-                signature.option(name).is_some()
-            } else {
-                signature.argument(name).is_some()
-            };
-            if !known
-                && let Some(range) =
-                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
-            {
-                let label = if *is_option { "option" } else { "argument" };
-                out.push(helpers::make_diagnostic(
-                    range,
-                    DiagnosticSeverity::WARNING,
-                    "invalid_command_parameter",
-                    format!("Unknown command {}: '{}'", label, name),
-                ));
-            }
-        }
-    }
-
-    /// Emit a warning for each `LaravelStringKey` span whose key does
-    /// not resolve to any declaration (typo in route name, config key,
-    /// view name, or translation key).
-    ///
-    /// Only the kinds this pass can judge reach the check itself; see
-    /// [`CheckedStringKind`].
-    fn collect_invalid_laravel_string_key_diagnostics(
-        &self,
-        uri: &str,
-        content: &str,
-        out: &mut Vec<Diagnostic>,
-    ) {
-        use crate::symbol_map::{LaravelStringKind, SymbolKind};
-        use std::collections::HashSet;
-
-        // Extract the LaravelStringKey spans we need and determine which
-        // kinds are present, then DROP the read lock before calling
-        // enumeration functions.  Those functions call
-        // `user_file_symbol_maps()` → `ensure_workspace_indexed()` →
-        // `parse_files_parallel()` → `update_ast()` which acquires a
-        // WRITE lock on `symbol_maps`.  Holding a read lock here while
-        // that write is attempted would deadlock.
-        let mut has_route = false;
-        let mut has_config = false;
-        let mut has_view = false;
-        let mut has_trans = false;
-        let mut has_command = false;
-        let mut has_morph_alias = false;
-        let mut has_gate_ability = false;
-        let key_spans: Vec<(CheckedStringKind, String, u32, u32)> = {
-            let Some(symbol_map) = self.symbol_maps.read().get(uri).cloned() else {
-                return;
-            };
-            let extra = self.typed_receiver_view_spans_for(uri, &symbol_map);
-            symbol_map
-                .spans
-                .iter()
-                .chain(extra.iter())
-                .filter_map(|span| {
-                    if let SymbolKind::LaravelStringKey {
-                        kind,
-                        key,
-                        is_write,
-                        is_optional,
-                    } = &span.kind
-                    {
-                        // A write declares the key it names, so there is
-                        // nothing to check it against, and an optional key
-                        // is one the call is written to do without: an
-                        // `@includeFirst` candidate that names nothing is
-                        // why the directive takes a list at all.
-                        if *is_write || *is_optional {
-                            return None;
-                        }
-                        let checked = match kind {
-                            LaravelStringKind::Route => {
-                                has_route = true;
-                                CheckedStringKind::Route
-                            }
-                            LaravelStringKind::Config => {
-                                has_config = true;
-                                CheckedStringKind::Config
-                            }
-                            LaravelStringKind::View => {
-                                has_view = true;
-                                CheckedStringKind::View
-                            }
-                            LaravelStringKind::Trans => {
-                                has_trans = true;
-                                CheckedStringKind::Trans
-                            }
-                            LaravelStringKind::Command => {
-                                has_command = true;
-                                CheckedStringKind::Command
-                            }
-                            LaravelStringKind::MorphAlias => {
-                                has_morph_alias = true;
-                                CheckedStringKind::MorphAlias
-                            }
-                            LaravelStringKind::GateAbility => {
-                                has_gate_ability = true;
-                                CheckedStringKind::GateAbility
-                            }
-                            // A section or stack name is judged against the
-                            // templates that render the one it is written
-                            // in, which the Blade pass below has and this
-                            // one does not.  And anything at all can be bound
-                            // at runtime, so an unrecognised container key
-                            // proves nothing — nor does an environment
-                            // variable absent from `.env`, since the
-                            // environment a process runs with is not on disk.
-                            LaravelStringKind::Section
-                            | LaravelStringKind::Stack
-                            | LaravelStringKind::ContainerBinding
-                            | LaravelStringKind::Env => return None,
-                        };
-                        Some((checked, key.clone(), span.start, span.end))
-                    } else {
-                        None
-                    }
-                })
-                .collect()
-        };
-
-        if !has_route
-            && !has_config
-            && !has_view
-            && !has_trans
-            && !has_command
-            && !has_morph_alias
-            && !has_gate_ability
-        {
-            return;
-        }
-
-        // Enumerate valid keys once per kind (lazy), using the cached
-        // enumerations.  Safe to call now that the `symbol_maps` read
-        // lock has been released.
-        let mut project_registers_routes = false;
-        let (route_keys, route_open_prefixes, route_open_suffixes): (
-            HashSet<String>,
-            Vec<String>,
-            Vec<String>,
-        ) = if has_route {
-            let discovery = self.cached_routes();
-            project_registers_routes = discovery.routes.iter().any(|route| !route.from_vendor);
-            (
-                discovery
-                    .routes
-                    .iter()
-                    .map(|route| route.name.clone())
-                    .collect(),
-                discovery.open_prefixes.clone(),
-                discovery.open_suffixes.clone(),
-            )
-        } else {
-            (HashSet::new(), Vec::new(), Vec::new())
-        };
-        let config_keys: HashSet<String> = if has_config {
-            self.cached_config_keys().into_iter().collect()
-        } else {
-            HashSet::new()
-        };
-        // The config files we managed to enumerate keys from, by name.  A
-        // key whose root segment names none of them lives in a file we
-        // cannot see (a library whose config is supplied by the host
-        // application), so nothing about it is knowable.
-        let config_roots: HashSet<&str> = config_keys
-            .iter()
-            .map(|key| key.split('.').next().unwrap_or(key.as_str()))
-            .collect();
-        let view_keys: HashSet<String> = if has_view {
-            self.cached_view_names().into_iter().collect()
-        } else {
-            HashSet::new()
-        };
-        let trans_keys: HashSet<String> = if has_trans {
-            self.cached_trans_keys().into_iter().collect()
-        } else {
-            HashSet::new()
-        };
-        // An application whose strings live in a database still has `vendor/`'s
-        // own `lang/` files on disk, so the enumerated set is non-empty while
-        // covering none of the application's own keys.  Once a provider has
-        // rebound the translator away from Laravel's file loader, what is valid
-        // is unknowable.
-        let trans_source_is_unknowable = has_trans
-            && self
-                .laravel_provider_resources
-                .read()
-                .custom_translation_loader;
-        let command_names: HashSet<String> = if has_command {
-            self.laravel_commands
-                .read()
-                .all_names()
-                .into_iter()
-                .collect()
-        } else {
-            HashSet::new()
-        };
-        // A morph alias is only checkable when the project calls
-        // `Relation::enforceMorphMap()` / `requireMorphMap()`.  Without that,
-        // an unmapped model still morphs under its class name, so the set of
-        // valid `*_type` values is open and an unknown alias proves nothing.
-        let morph_aliases: Option<HashSet<String>> = if has_morph_alias {
-            let index = self.laravel_morph_map.read();
-            index
-                .is_enforced()
-                .then(|| index.all_aliases().into_iter().collect())
-        } else {
-            None
-        };
-
-        // Abilities are only checkable when the project defines some: an
-        // empty set means gate discovery found nothing (a project that
-        // authorizes entirely through runtime-registered callbacks, or one
-        // that is not really using Laravel's gate), not that every ability
-        // referenced is wrong.
-        //
-        // A `Gate::before()` callback, or a package that answers checks from a
-        // permission table, grants abilities that appear nowhere in source.  A
-        // single unrelated `Gate::define()` call is enough to make the
-        // enumerated set non-empty, so emptiness alone does not catch this: the
-        // ability space is open and the whole check has to stand down —
-        // including the walk of every policy class that would enumerate it.
-        let gate_ability_space_is_open =
-            has_gate_ability && self.laravel_gates.read().ability_space_is_open();
-        let gate_abilities: HashSet<String> = if has_gate_ability && !gate_ability_space_is_open {
-            self.cached_gate_abilities().into_iter().collect()
-        } else {
-            HashSet::new()
-        };
-
-        for (kind, key, start, end) in &key_spans {
-            let (valid, label, code) = match kind {
-                // An ability is judged against the model the check names, so
-                // it reports which model rather than the shared
-                // "Unknown <kind>: '<key>'" message the others share.
-                CheckedStringKind::GateAbility => {
-                    if !gate_ability_space_is_open
-                        && !gate_abilities.is_empty()
-                        && let Some(message) =
-                            self.gate_ability_problem(uri, content, key, *start, &gate_abilities)
-                        && let Some(range) = self.offset_range_to_lsp_range(
-                            uri,
-                            content,
-                            *start as usize,
-                            *end as usize,
-                        )
-                    {
-                        out.push(helpers::make_diagnostic(
-                            range,
-                            DiagnosticSeverity::WARNING,
-                            "invalid_laravel_ability",
-                            message,
-                        ));
-                    }
-                    continue;
-                }
-                CheckedStringKind::Route => {
-                    // A package with no routes of its own, whose names are
-                    // registered by the host application, cannot be judged:
-                    // the valid set is unknown, not empty.  Installed
-                    // packages register routes of their own, so the question
-                    // is whether *this project* contributed any, not whether
-                    // the set is empty.
-                    if !project_registers_routes {
-                        continue;
-                    }
-                    // A group whose `->name()` argument was not a string
-                    // literal (e.g. Filament's `Route::name($panelId . '.')`
-                    // has children we cannot enumerate statically.  Any route
-                    // that falls under such a prefix is unjudgeable, and so
-                    // is any route ending in one of the names such a group
-                    // registers, even when it recorded no known prefix at all
-                    // (e.g. a group with no enclosing literal group whose own
-                    // name is entirely a variable).
-                    if route_open_prefixes
-                        .iter()
-                        .any(|prefix| key.starts_with(prefix))
-                        || route_open_suffixes
-                            .iter()
-                            .any(|suffix| key.ends_with(suffix))
-                    {
-                        continue;
-                    }
-                    // A `Route::is('admin.*')` check names a pattern rather
-                    // than one route, and matches whatever the project has
-                    // under it.
-                    let valid = if key.contains('*') {
-                        route_keys.iter().any(|name| {
-                            crate::virtual_members::laravel::route_name_matches(key, name)
-                        })
-                    } else {
-                        route_keys.contains(key)
-                    };
-                    (valid, "route", "invalid_laravel_route")
-                }
-                CheckedStringKind::Config => {
-                    // Only judge a key whose config file we actually read.
-                    // An unknown root means the file never reached us, so
-                    // the key cannot be wrong as far as we can tell, while
-                    // a typo inside a file we did read is still caught.
-                    if !config_roots.contains(key.split('.').next().unwrap_or(key.as_str())) {
-                        continue;
-                    }
-                    // Config keys may be partial prefixes (e.g. `config('app')`)
-                    // which are valid even without a direct match.
-                    let valid = config_keys.contains(key)
-                        || config_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
-                    (valid, "config key", "invalid_laravel_config")
-                }
-                CheckedStringKind::View => {
-                    (view_keys.contains(key), "view", "invalid_laravel_view")
-                }
-                CheckedStringKind::Trans => {
-                    // When no translation files are found at all, skip trans
-                    // diagnostics entirely.  This avoids false positives in
-                    // non-Laravel projects (WordPress, GetText) that also use
-                    // `__()` or `trans()` as function names.
-                    if trans_keys.is_empty() || trans_source_is_unknowable {
-                        continue;
-                    }
-                    let valid = trans_keys.contains(key)
-                        || trans_keys
-                            .iter()
-                            .any(|k| k.starts_with(&format!("{}.", key)));
-                    (valid, "translation key", "invalid_laravel_trans")
-                }
-                CheckedStringKind::Command => {
-                    // When no commands were indexed at all, skip command
-                    // diagnostics entirely.  The scan is heuristic (it relies
-                    // on the `*Command` naming convention), so an empty index
-                    // likely means discovery failed rather than that every
-                    // referenced command is invalid.
-                    if command_names.is_empty() {
-                        continue;
-                    }
-                    (
-                        command_names.contains(key),
-                        "command",
-                        "invalid_laravel_command",
-                    )
-                }
-                CheckedStringKind::MorphAlias => {
-                    let Some(aliases) = &morph_aliases else {
-                        continue;
-                    };
-                    (
-                        aliases.contains(key),
-                        "morph type",
-                        "invalid_laravel_morph_alias",
-                    )
-                }
-            };
-            if !valid
-                && let Some(range) =
-                    self.offset_range_to_lsp_range(uri, content, *start as usize, *end as usize)
-            {
-                out.push(helpers::make_diagnostic(
-                    range,
-                    DiagnosticSeverity::WARNING,
-                    code,
-                    format!("Unknown {}: '{}'", label, key),
-                ));
-            }
-        }
-    }
-
-    /// Judge one authorization ability, returning the diagnostic message when
-    /// it is wrong and `None` when it checks out.
-    ///
-    /// A check that names a model (`$user->can('update', $post)`,
-    /// `Gate::allows('update', Post::class)`) is judged against *that model's*
-    /// policy, so a real ability used on the wrong model is caught and named
-    /// as such.  A `Gate::define()` registration applies to any subject, so it
-    /// satisfies a model-bound check too.  When the model cannot be resolved —
-    /// or the call names none — the ability only has to exist somewhere.
-    fn gate_ability_problem(
-        &self,
-        uri: &str,
-        content: &str,
-        ability: &str,
-        span_start: u32,
-        known_abilities: &std::collections::HashSet<String>,
-    ) -> Option<String> {
-        let is_defined = self.laravel_gates.read().definition(ability).is_some();
-        if is_defined {
-            return None;
-        }
-
-        if let Some(model_fqn) = self.gate_subject_model(uri, content, span_start)
-            && let Some((policy, abilities)) =
-                crate::virtual_members::laravel::model_policy_abilities(self, &model_fqn)
-        {
-            if abilities
-                .iter()
-                .any(|name| name.eq_ignore_ascii_case(ability))
-            {
-                return None;
-            }
-            return Some(format!(
-                "Ability '{}' is not defined for '{}' (policy {})",
-                ability,
-                model_fqn,
-                policy.fqn()
-            ));
-        }
-
-        if known_abilities.contains(ability) {
-            return None;
-        }
-        Some(format!("Unknown ability: '{}'", ability))
-    }
-
-    /// The FQN of the model a gate check named, when the symbol map recorded
-    /// one and it resolves to a class.
-    fn gate_subject_model(&self, uri: &str, content: &str, span_start: u32) -> Option<String> {
-        // A Blade file's symbol map is built from the preprocessed virtual
-        // PHP, so every offset in it — including the subject's — indexes that
-        // text rather than the template the caller handed us.
-        let virtual_php = self.blade_virtual_php(uri);
-        let content = virtual_php.as_deref().unwrap_or(content);
-
-        let (subject_text, is_static) = {
-            let maps = self.symbol_maps.read();
-            let map = maps.get(uri)?;
-            // The subject is stored as a range into the text the map was
-            // built from, so a map built from older text would slice the
-            // wrong bytes (or none at all).
-            if !map.matches_source(content) {
-                return None;
-            }
-            let subject = map.gate_subject(span_start)?;
-            (
-                subject.subject_text.as_str(content).to_string(),
-                subject.is_static,
-            )
-        };
-
-        let ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&ctx);
-        let function_loader = self.function_loader(&ctx);
-        let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
-            local_classes: &ctx.classes,
-            use_map: &ctx.use_map,
-            namespace: &ctx.namespace,
-            content,
-            class_loader: &class_loader,
-            backend: Some(self),
-            function_loader: &function_loader,
-        };
-        let name = crate::type_engine::subject_resolution::resolve_subject_type(
-            &subject_text,
-            is_static,
-            span_start,
-            &resolution_ctx,
-        )?
-        .top_level_class_names()
-        .into_iter()
-        .next()?;
-        // The resolved type carries the name as written, so run it back
-        // through the loader to canonicalize a short name against the file's
-        // imports before looking up the model's policy.
-        Some(class_loader(&name)?.fqn().to_string())
-    }
 }
 
 /// How long to wait after the last keystroke before publishing diagnostics.
 const DIAGNOSTIC_DEBOUNCE_MS: u64 = 500;
-
-/// How long to wait for a client to acknowledge a diagnostic refresh
-/// before giving up on it.
-const REFRESH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 impl Backend {
     /// Deliver diagnostics for a single file.
@@ -1142,9 +615,8 @@ impl Backend {
             let content = content.to_string();
             crate::server::run_blocking_cancel_safe("fast diagnostics", move || {
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_fast_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_fast_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1181,9 +653,8 @@ impl Backend {
                     &backend.resolved_class_cache,
                 );
                 let mut out = Vec::new();
-                let effective_owned = backend.blade_virtual_content.read().get(&uri).cloned();
-                let effective = effective_owned.as_deref().unwrap_or(&content);
-                backend.collect_slow_diagnostics(&uri, effective, &mut out);
+                let effective = backend.analysable_content_or(&uri, &content);
+                backend.collect_slow_diagnostics(&uri, &effective, &mut out);
                 out
             })
             .await
@@ -1407,20 +878,34 @@ impl Backend {
     /// directly.  LSP has no per-document refresh, so this invalidates
     /// the client's whole workspace result set: only call it when
     /// something actually changed (see [`Self::assemble_and_push`]).
+    ///
+    /// The refresh is signalled to a pump task rather than sent here.
+    /// `workspace/diagnostic/refresh` is a server-to-client *request*,
+    /// and tower-lsp panics the serve loop — killing the whole server —
+    /// if the client's response arrives after the future awaiting it was
+    /// dropped, so it must never be raced against a timeout or awaited
+    /// from anything cancellable.  The pump owns each request from send
+    /// to response; callers return immediately, a busy client parks
+    /// nothing but the pump itself, and signals landing while a refresh
+    /// is in flight coalesce into a single follow-up.
     pub(crate) async fn request_diagnostic_refresh(&self) {
         if !self.supports_pull_diagnostics.load(Ordering::Acquire) {
             return;
         }
-        if let Some(client) = &self.client {
-            // A server-to-client request, so a client that is busy (or
-            // that never answers at all) would otherwise park this task
-            // indefinitely, and the background workspace pass awaits
-            // this as it streams results.  A refresh is best-effort
-            // (the editor re-pulls on its own schedule too), so timing
-            // out costs nothing.
-            let _ =
-                tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh()).await;
+        let Some(client) = &self.client else {
+            return;
+        };
+        if !self.diag.refresh_pump_started.swap(true, Ordering::AcqRel) {
+            let client = client.clone();
+            let notify = std::sync::Arc::clone(&self.diag.refresh_notify);
+            tokio::spawn(async move {
+                loop {
+                    notify.notified().await;
+                    let _ = client.workspace_diagnostic_refresh().await;
+                }
+            });
         }
+        self.diag.refresh_notify.notify_one();
     }
 
     /// Assemble a URI's diagnostics and ask the editor to re-pull when
@@ -1751,24 +1236,11 @@ impl Backend {
         // Always push empty diagnostics to clear any Phase 1 snapshot.
         client.publish_diagnostics(uri, Vec::new(), None).await;
 
-        if self.supports_pull_diagnostics.load(Ordering::Acquire) {
-            // Tell the editor to re-pull diagnostics.  We spawn this
-            // as a detached task instead of awaiting it because
-            // workspace_diagnostic_refresh is a server-to-client
-            // *request* that blocks until the client responds.  When
-            // the editor closes many files in a burst, each didClose
-            // handler would await a response while the client is busy
-            // sending more messages, deadlocking the tower-lsp
-            // service loop.  The detached task still gets the same cap
-            // as `request_diagnostic_refresh`, so a client that never
-            // answers leaves no task parked for the session.
-            let client = client.clone();
-            tokio::spawn(async move {
-                let _ =
-                    tokio::time::timeout(REFRESH_TIMEOUT, client.workspace_diagnostic_refresh())
-                        .await;
-            });
-        }
+        // Tell the editor to re-pull diagnostics.  Signalling the pump
+        // returns immediately, so a burst of didClose notifications
+        // cannot deadlock the service loop the way awaiting each
+        // response here would.
+        self.request_diagnostic_refresh().await;
 
         // Recompute the file's workspace diagnostics from disk so the
         // closed file's entry reflects the saved state (the startup
@@ -1943,71 +1415,6 @@ mod tests {
             !backend.diag.last_full.lock().contains_key(uri),
             "pull must not compute diagnostics inline on the request path"
         );
-    }
-
-    /// Regression test: `collect_invalid_laravel_string_key_diagnostics`
-    /// must not hold a `symbol_maps` read lock while calling enumeration
-    /// functions that reach `ensure_workspace_indexed()` →
-    /// `parse_files_parallel()` → `update_ast()` → `symbol_maps.write()`.
-    ///
-    /// Before the fix, this deadlocked because the read lock was held
-    /// for the entire function body.  The fix extracts the needed spans
-    /// into an owned `Vec` and drops the lock before enumerating keys.
-    ///
-    /// To trigger the deadlock path, we create a workspace with an
-    /// unindexed PHP file so `ensure_workspace_indexed` must parse it
-    /// (acquiring a write lock).  A 5-second timeout catches the
-    /// deadlock as a test failure instead of an infinite hang.
-    #[test]
-    fn laravel_string_key_diagnostics_no_deadlock() {
-        // Set up a temp workspace with an unindexed PHP file so that
-        // ensure_workspace_indexed() will call parse_files_parallel()
-        // which needs a write lock on symbol_maps.
-        let tmp = std::env::temp_dir().join("phpantom_deadlock_test");
-        let _ = std::fs::create_dir_all(&tmp);
-        let unindexed_file = tmp.join("Unindexed.php");
-        std::fs::write(&unindexed_file, "<?php\nclass Unindexed {}\n").unwrap();
-
-        let backend = crate::Backend::new_test_with_workspace(tmp.clone(), vec![]);
-
-        // Register the unindexed file in fqn_uri_index so
-        // ensure_workspace_indexed Phase 1 will try to parse it.
-        let unindexed_uri = format!("file://{}", unindexed_file.to_str().unwrap());
-        backend
-            .symbols
-            .fqn_uri_index
-            .write()
-            .insert("Unindexed".to_string(), unindexed_uri);
-
-        // Parse a file with Laravel string key spans.
-        let uri = "file:///app/Http/test.php";
-        let php = "<?php\nconfig('app.name');\nroute('home');\n";
-        backend.update_ast(uri, php);
-
-        // Run the diagnostics in a thread with a timeout so a deadlock
-        // is caught as a failure rather than an infinite hang.
-        let (tx, rx) = std::sync::mpsc::channel();
-        let backend = std::sync::Arc::new(backend);
-        let bc = std::sync::Arc::clone(&backend);
-        std::thread::spawn(move || {
-            let mut out = Vec::new();
-            bc.collect_slow_diagnostics(uri, php, &mut out);
-            let _ = tx.send(out);
-        });
-
-        match rx.recv_timeout(std::time::Duration::from_secs(5)) {
-            Ok(_diags) => { /* success — no deadlock */ }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                panic!(
-                    "collect_slow_diagnostics deadlocked: symbol_maps read lock \
-                     was likely held while enumeration functions tried to write"
-                );
-            }
-            Err(e) => panic!("collect_slow_diagnostics failed: {:?}", e),
-        }
-
-        // Clean up.
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// Regression test: the `analyse` CLI times each Phase 2 collector

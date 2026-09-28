@@ -538,7 +538,8 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<SignatureHelp> {
-        let ctx = self.file_context(uri);
+        let cursor_offset = position_to_offset(content, position);
+        let ctx = self.file_context_at(uri, cursor_offset);
 
         // ── Early bail-out: cursor inside a closure/arrow-fn body ───
         // When the cursor is inside a closure or arrow function body
@@ -549,13 +550,11 @@ impl Backend {
         // This check runs once, before both detection paths, so it
         // covers the AST-based path and the text-based fallback alike.
         let symbol_map = self.symbol_maps.read().get(uri).cloned();
-        if let Some(ref sm) = symbol_map {
-            let cursor_offset = position_to_offset(content, position);
-            if let Some(call) = sm.find_enclosing_call_site(cursor_offset)
-                && sm.is_inside_nested_scope_of_call(cursor_offset, call)
-            {
-                return None;
-            }
+        if let Some(ref sm) = symbol_map
+            && let Some(call) = sm.find_enclosing_call_site(cursor_offset)
+            && sm.is_inside_nested_scope_of_call(cursor_offset, call)
+        {
+            return None;
         }
 
         // ── Primary path: AST-based detection via symbol map ────────

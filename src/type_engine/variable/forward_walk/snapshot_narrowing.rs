@@ -107,6 +107,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                     }
                 }
             }
+            restore_after_branches(expr, scope);
         }
         Expression::Conditional(conditional) => {
             // Each arm is evaluated under its own polarity of the condition,
@@ -124,6 +125,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
             let mut else_scope = scope.clone();
             apply_condition_narrowing_inverse(conditional.condition, &mut else_scope, ctx);
             record_branch_snapshots(conditional.r#else, &else_scope, ctx);
+            restore_after_branches(expr, scope);
         }
         Expression::Assignment(assignment) => {
             record_match_ternary_snapshots(assignment.rhs, scope, ctx);
@@ -212,9 +214,20 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                     _ => record_branch_snapshots(arm_expr, scope, ctx),
                 }
             }
+            restore_after_branches(expr, scope);
         }
         _ => {}
     }
+}
+
+/// Put the enclosing scope back where a ternary or `match` ends.
+///
+/// A lookup reads the nearest snapshot at or before its offset, so without
+/// this the code after the expression (the next argument of
+/// `f($x instanceof A ? 1 : 2, $x->a())`) would read the last branch's
+/// narrowing as its own.
+fn restore_after_branches(expr: &Expression<'_>, scope: &ScopeState) {
+    record_scope_snapshot(expr.span().end.offset, scope);
 }
 
 /// Record every snapshot a branch body needs, given the scope that body
@@ -407,7 +420,10 @@ fn descend_for_short_circuit<'b>(
                 }
                 Call::NullSafeMethod(mc) => {
                     visit(mc.object);
-                    &mc.argument_list
+                    if !mc.argument_list.arguments.is_empty() {
+                        record_nullsafe_argument_snapshots(mc, scope, ctx);
+                    }
+                    return;
                 }
                 Call::StaticMethod(sc) => &sc.argument_list,
             };
@@ -437,6 +453,26 @@ fn descend_for_short_circuit<'b>(
         }
         _ => {}
     }
+}
+
+/// Record the scope the arguments of a `?->` call run under: the receiver
+/// is not null there, or the call would have short-circuited before
+/// reaching them.
+fn record_nullsafe_argument_snapshots<'b>(
+    call: &'b NullSafeMethodCall<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut narrowed = scope.clone();
+    narrow_nullsafe_call_receiver(call.object, &mut narrowed, ctx);
+    for arg in call.argument_list.arguments.iter() {
+        let value = argument_value(arg);
+        record_scope_snapshot(value.span().start.offset, &narrowed);
+        record_scope_snapshot_recursive(value, &narrowed);
+        record_short_circuit_snapshots_inner(value, &narrowed, ctx);
+    }
+    // What follows the call reads the receiver as it was.
+    record_scope_snapshot(call.argument_list.span().end.offset, scope);
 }
 
 /// The expression an argument carries, whether it was passed

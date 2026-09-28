@@ -1,0 +1,23 @@
+// test: a class assertion drops the null of a union of classes and null
+// feature: hover
+// expect: $x = A
+// expect_absent: null
+---
+<?php
+
+class A
+{
+    /** @return A|B|null */
+    public function next() { return null; }
+}
+class B {}
+
+/** @psalm-assert A $value */
+function assertA($value): void {}
+
+function f(A $a): void
+{
+    $x = $a->next();
+    assertA($x);
+    echo $<>x;
+}

@@ -1,0 +1,12 @@
+// test: a word offset read off string|array takes nothing from the string
+// feature: hover
+// A string has only integer offsets, so `$s['count']` names none of its
+// characters and `??` falls back to the default for it.
+// expect: $c = int
+---
+<?php
+
+/** @param string|array{count?: int} $s */
+function f($s): void {
+    $<>c = $s['count'] ?? 1;
+}

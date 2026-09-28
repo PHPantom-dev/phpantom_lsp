@@ -96,11 +96,9 @@ impl Backend {
 
     /// The source every offset in a file's symbol map indexes: a Blade
     /// template's virtual PHP, and any other file's own text.
-    fn effective_content(&self, uri: &str) -> Option<String> {
-        if let Some(virtual_php) = self.blade_virtual_content.read().get(uri) {
-            return Some(virtual_php.clone());
-        }
-        self.get_file_content(uri)
+    fn effective_content(&self, uri: &str) -> Option<Arc<String>> {
+        self.blade_virtual_php_arc(uri)
+            .or_else(|| self.get_file_content_arc(uri))
     }
 
     /// Resolve the receiver of every candidate site and keep the spans of
@@ -115,9 +113,8 @@ impl Backend {
             sites.iter().map(|site| (site.start, site)).collect();
 
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_typed_receiver", |program, content| {
             let mut calls: Vec<ReceiverCall<'_, '_, '_>> = Vec::new();
@@ -131,27 +128,26 @@ impl Backend {
             let mut confirmed = Vec::new();
             for call in calls {
                 let offset = call.receiver.span().start.offset;
+                let class_loader = class_loaders.at(offset);
+                let function_loader = function_loaders.at(offset);
+                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let current_class =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset)
                         .unwrap_or(&default_class);
                 let var_ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class,
-                    all_classes: &file_ctx.classes,
-                    content,
-                    // The receiver is resolved where the call is written, so
-                    // a local reassigned earlier reads as it does there.
-                    cursor_offset: offset,
-                    class_loader: &class_loader,
                     backend: Some(self),
                     loaders: Loaders::with_function(Some(&function_loader_cl)),
                     resolved_class_cache: Some(&self.resolved_class_cache),
-                    enclosing_return_type: None,
-                    branch_aware: false,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    // The receiver is resolved where the call is written, so
+                    // a local reassigned earlier reads as it does there.
+                    ..VarResolutionCtx::new(
+                        "",
+                        current_class,
+                        &file_ctx.classes,
+                        content,
+                        offset,
+                        class_loader,
+                    )
                 };
                 let Some(ty) =
                     crate::type_engine::variable::foreach_resolution::resolve_expression_type(
@@ -162,9 +158,12 @@ impl Backend {
                     continue;
                 };
                 for site in call.sites {
-                    if site.receiver.fqns().iter().any(|fqn| {
-                        crate::class_lookup::is_subtype_of_named(&ty, fqn, &class_loader)
-                    }) {
+                    if site
+                        .receiver
+                        .fqns()
+                        .iter()
+                        .any(|fqn| crate::class_lookup::is_subtype_of_named(&ty, fqn, class_loader))
+                    {
                         confirmed.push(site.to_span());
                     }
                 }

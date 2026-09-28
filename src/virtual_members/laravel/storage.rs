@@ -43,6 +43,7 @@ use crate::php_type::PhpType;
 use crate::types::{ClassInfo, MethodInfo};
 
 use super::config_values::ConfigNode;
+use super::file_contributions::FileContributions;
 use super::macros::{
     closure_signature, expr_source_text, resolve_hint_target_fqn, resolve_target_fqn,
     string_literal_value,
@@ -324,34 +325,17 @@ fn build_driver_registration(
 /// driver name.
 ///
 /// Stored on [`Backend`] and built alongside the macro index (both are
-/// recovered from the same service-provider scan). `by_uri` is the source of
+/// recovered from the same service-provider scan). `files` is the source of
 /// truth, so an edit to one file replaces just that file's registrations;
 /// `merged` is the derived lookup consulted when a disk's driver is
 /// classified.
 #[derive(Default)]
 pub(crate) struct LaravelStorageDriverIndex {
-    by_uri: HashMap<String, Vec<StorageDriverRegistration>>,
+    pub(crate) files: FileContributions<Vec<StorageDriverRegistration>>,
     merged: HashMap<String, PhpType>,
 }
 
 impl LaravelStorageDriverIndex {
-    /// Replace the registrations contributed by `uri`.  Passing an empty
-    /// vector removes the file's contributions.  Call [`Self::rebuild`]
-    /// afterwards to refresh the merged lookup map (deferred so a bulk build
-    /// rebuilds once rather than per file).
-    pub(crate) fn set_file(&mut self, uri: String, regs: Vec<StorageDriverRegistration>) {
-        if regs.is_empty() {
-            self.by_uri.remove(&uri);
-        } else {
-            self.by_uri.insert(uri, regs);
-        }
-    }
-
-    /// Whether `uri` currently contributes any registrations.
-    pub(crate) fn has_uri(&self, uri: &str) -> bool {
-        self.by_uri.contains_key(uri)
-    }
-
     /// Whether the merged map holds no drivers at all.
     pub(crate) fn is_empty(&self) -> bool {
         self.merged.is_empty()
@@ -371,11 +355,8 @@ impl LaravelStorageDriverIndex {
     /// the first URI in sort order, so a rebuild never flips the disk type
     /// on hash-iteration order alone.
     pub(crate) fn rebuild(&mut self) {
-        let mut uris: Vec<&String> = self.by_uri.keys().collect();
-        uris.sort_unstable();
-
         let mut merged: HashMap<String, PhpType> = HashMap::new();
-        for regs in uris.iter().filter_map(|uri| self.by_uri.get(*uri)) {
+        for (_, regs) in self.files.iter_sorted() {
             for reg in regs {
                 let Some(ty) = reg.return_type.as_ref() else {
                     continue;

@@ -13,15 +13,13 @@
 //! callable to obtain parameter metadata, and emits [`InlayHint`]
 //! entries for arguments that would benefit from a label.
 
-use std::sync::atomic::Ordering;
 use tower_lsp::jsonrpc;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
-use crate::reference_index::ReferenceIndexKey;
-use crate::symbol_map::{CallSite, SymbolKind, SymbolMap, UntypedClosureSite};
-use crate::text_position::{offset_to_position, position_to_offset};
-use crate::types::{ClassInfo, ClassLikeKind, FileContext, MAX_INHERITANCE_DEPTH, Visibility};
+use crate::symbol_map::{CallSite, UntypedClosureSite};
+use crate::text_position::{LineIndex, position_to_offset};
+use crate::types::FileContext;
 
 impl Backend {
     /// Entry point for the `textDocument/inlayHint` request.
@@ -46,11 +44,6 @@ impl Backend {
         .await
         .flatten();
 
-        // Declarations whose reference count is missing or stale were
-        // queued while the hints were built; they are counted off the
-        // request path and delivered by a refresh.
-        self.schedule_member_ref_counts();
-
         Ok(result.flatten())
     }
 
@@ -67,20 +60,17 @@ impl Backend {
         let symbol_map = self.symbol_maps.read().get(uri).cloned()?;
         let ctx = self.file_context(uri);
 
-        // If this is a Blade file, the `range` is in Blade coordinates.
-        // We must translate it to virtual PHP coordinates before comparing
-        // against offsets in the symbol map.
-        let virtual_range = if self.is_blade_file(uri) {
-            Range {
-                start: self.translate_blade_to_php(uri, range.start),
-                end: self.translate_blade_to_php(uri, range.end),
-            }
-        } else {
-            range
-        };
+        // A template's request range arrives in Blade coordinates; the
+        // symbol map's offsets are in the virtual PHP.
+        let virtual_range = self.translate_blade_range_to_php(uri, range);
 
         let range_start = position_to_offset(content, virtual_range.start);
         let range_end = position_to_offset(content, virtual_range.end);
+
+        // One line table for the whole request: every hint converts an
+        // offset from this content, and `offset_to_position` is O(offset)
+        // on each call.
+        let index = LineIndex::new(content);
 
         let mut hints = Vec::new();
 
@@ -96,7 +86,7 @@ impl Backend {
 
             self.emit_parameter_hints(
                 call_site,
-                content,
+                &index,
                 (range_start, range_end),
                 &ctx,
                 &mut hints,
@@ -106,7 +96,7 @@ impl Backend {
         // ── Closure / arrow function hints ──────────────────────────
         if !symbol_map.untyped_closure_sites.is_empty() {
             self.emit_closure_hints(
-                content,
+                &index,
                 &symbol_map.untyped_closure_sites,
                 &symbol_map.call_sites,
                 (range_start, range_end),
@@ -114,14 +104,6 @@ impl Backend {
                 &mut hints,
             );
         }
-
-        self.emit_declaration_count_hints(
-            uri,
-            content,
-            &symbol_map,
-            (range_start, range_end),
-            &mut hints,
-        );
 
         // Translate hints back to Blade if needed.  A hint anchored in the
         // injected prologue has no template text to attach to.
@@ -140,369 +122,6 @@ impl Backend {
         Some(hints)
     }
 
-    fn emit_declaration_count_hints(
-        &self,
-        uri: &str,
-        content: &str,
-        symbol_map: &SymbolMap,
-        range: (u32, u32),
-        hints: &mut Vec<InlayHint>,
-    ) {
-        if !self.workspace_indexed.load(Ordering::Acquire) {
-            return;
-        }
-
-        // A standalone function belongs to no class, so the class walk
-        // below never reaches one.  These go first, or a file holding
-        // nothing but functions would leave at the `else` below with no
-        // hints at all.
-        self.emit_function_count_hints(uri, content, symbol_map, range, hints);
-
-        let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
-            return;
-        };
-        let ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&ctx);
-
-        for class in &classes {
-            let class_fqn = class.fqn();
-
-            if class.keyword_offset != 0 && offset_in_range(class.keyword_offset, range) {
-                let ref_count = self.ref_count(&ReferenceIndexKey::class(&class_fqn));
-                let mut label = reference_label(ref_count);
-
-                if class.kind == ClassLikeKind::Interface || class.is_abstract {
-                    let impls = self.find_implementors(
-                        &class.name,
-                        &class_fqn,
-                        &class_loader,
-                        false,
-                        false,
-                        true,
-                    );
-                    label.push_str(" | ");
-                    label.push_str(&implementation_label(impls.len()));
-                }
-
-                push_count_hint(
-                    hints,
-                    line_end_position(content, class.keyword_offset as usize),
-                    label,
-                );
-            }
-
-            for method in &class.methods {
-                if method.name_offset == 0
-                    || method.is_virtual
-                    || method.name.starts_with("__")
-                    || method.visibility == Visibility::Private
-                    || !offset_in_range(method.name_offset, range)
-                    || self.method_has_prototype(class, &method.name)
-                {
-                    continue;
-                }
-
-                let Some(ref_count) = self.member_ref_count_cached(
-                    uri,
-                    method.name_offset,
-                    class_fqn,
-                    method.name,
-                    method.is_static,
-                ) else {
-                    continue;
-                };
-                push_count_hint(
-                    hints,
-                    line_end_position(content, method.name_offset as usize),
-                    reference_label(ref_count as usize),
-                );
-            }
-
-            for prop in &class.properties {
-                if prop.name_offset == 0
-                    || prop.is_virtual
-                    || prop.visibility == Visibility::Private
-                    || !offset_in_range(prop.name_offset, range)
-                    || self.traits_have_property(&class.used_traits, &prop.name, 0)
-                    || self.ancestor_has_property(class, &prop.name)
-                {
-                    continue;
-                }
-
-                let member = match prop.name.strip_prefix('$') {
-                    Some(stripped) => crate::atom::atom(stripped),
-                    None => prop.name,
-                };
-                let Some(ref_count) = self.member_ref_count_cached(
-                    uri,
-                    prop.name_offset,
-                    class_fqn,
-                    member,
-                    prop.is_static,
-                ) else {
-                    continue;
-                };
-                push_count_hint(
-                    hints,
-                    line_end_position(content, prop.name_offset as usize),
-                    reference_label(ref_count as usize),
-                );
-            }
-
-            for constant in &class.constants {
-                if constant.name_offset == 0
-                    || constant.visibility == Visibility::Private
-                    || !offset_in_range(constant.name_offset, range)
-                    || self.traits_have_constant(&class.used_traits, &constant.name, 0)
-                    || self.ancestor_has_constant(class, &constant.name)
-                {
-                    continue;
-                }
-
-                let Some(ref_count) = self.member_ref_count_cached(
-                    uri,
-                    constant.name_offset,
-                    class_fqn,
-                    constant.name,
-                    true,
-                ) else {
-                    continue;
-                };
-                push_count_hint(
-                    hints,
-                    line_end_position(content, constant.name_offset as usize),
-                    reference_label(ref_count as usize),
-                );
-            }
-        }
-    }
-
-    /// Emit a reference count beside every standalone function the file
-    /// declares.
-    ///
-    /// Methods are counted through `member_ref_count_cached`, which
-    /// exists because a method name has to be attributed to a class and
-    /// followed up an inheritance chain.  A function has neither, so its
-    /// count is a single lookup in the reference index, the way a class
-    /// declaration's is.
-    fn emit_function_count_hints(
-        &self,
-        uri: &str,
-        content: &str,
-        symbol_map: &SymbolMap,
-        range: (u32, u32),
-        hints: &mut Vec<InlayHint>,
-    ) {
-        for span in &symbol_map.spans {
-            let SymbolKind::FunctionCall {
-                name,
-                is_definition: true,
-                ..
-            } = &span.kind
-            else {
-                continue;
-            };
-
-            if !offset_in_range(span.start, range) {
-                continue;
-            }
-
-            let key = self.function_reference_key(uri, span.start, name);
-            push_count_hint(
-                hints,
-                line_end_position(content, span.start as usize),
-                reference_label(self.ref_count(&key)),
-            );
-        }
-    }
-
-    fn method_has_prototype(&self, class: &ClassInfo, method_name: &str) -> bool {
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => break,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => break,
-            };
-            if parent
-                .methods
-                .iter()
-                .any(|m| m.name == method_name && !m.is_virtual)
-                || self.traits_have_method(&parent.used_traits, method_name, 0)
-            {
-                return true;
-            }
-            current = parent;
-        }
-
-        self.traits_have_method(&class.used_traits, method_name, 0)
-            || self.interfaces_have_method(class, method_name)
-    }
-
-    fn traits_have_method(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        method_name: &str,
-        depth: usize,
-    ) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info
-                .methods
-                .iter()
-                .any(|m| m.name == method_name && !m.is_virtual)
-                || self.traits_have_method(&trait_info.used_traits, method_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn interfaces_have_method(&self, class: &ClassInfo, method_name: &str) -> bool {
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(cls) = current else {
-                break;
-            };
-            for iface_name in &cls.interfaces {
-                if self.interface_has_method(iface_name, method_name, 0) {
-                    return true;
-                }
-            }
-            current = cls.parent_class.as_deref().and_then(|parent| {
-                self.find_or_load_class(parent)
-                    .map(|p| ClassInfo::clone(&p))
-            });
-        }
-        false
-    }
-
-    fn interface_has_method(&self, iface_name: &str, method_name: &str, depth: usize) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-        let Some(iface) = self.find_or_load_class(iface_name) else {
-            return false;
-        };
-        iface
-            .methods
-            .iter()
-            .any(|m| m.name == method_name && !m.is_virtual)
-            || iface
-                .interfaces
-                .iter()
-                .any(|parent| self.interface_has_method(parent, method_name, depth + 1))
-    }
-
-    fn ancestor_has_property(&self, class: &ClassInfo, prop_name: &str) -> bool {
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => return false,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => return false,
-            };
-            if parent.properties.iter().any(|p| p.name == prop_name)
-                || self.traits_have_property(&parent.used_traits, prop_name, 0)
-            {
-                return true;
-            }
-            current = parent;
-        }
-        false
-    }
-
-    fn traits_have_property(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        prop_name: &str,
-        depth: usize,
-    ) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info.properties.iter().any(|p| p.name == prop_name)
-                || self.traits_have_property(&trait_info.used_traits, prop_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn ancestor_has_constant(&self, class: &ClassInfo, constant_name: &str) -> bool {
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let parent_name = match current.parent_class {
-                Some(name) => name,
-                None => return false,
-            };
-            let parent = match self.find_or_load_class(&parent_name) {
-                Some(p) => ClassInfo::clone(&p),
-                None => return false,
-            };
-            if parent.constants.iter().any(|c| c.name == constant_name)
-                || self.traits_have_constant(&parent.used_traits, constant_name, 0)
-            {
-                return true;
-            }
-            current = parent;
-        }
-        false
-    }
-
-    fn traits_have_constant(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        constant_name: &str,
-        depth: usize,
-    ) -> bool {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return false;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = self.find_or_load_class(trait_name) else {
-                continue;
-            };
-            if trait_info.constants.iter().any(|c| c.name == constant_name)
-                || self.traits_have_constant(&trait_info.used_traits, constant_name, depth + 1)
-            {
-                return true;
-            }
-        }
-
-        false
-    }
-
-    fn ref_count(&self, key: &ReferenceIndexKey) -> usize {
-        self.reference_index
-            .read()
-            .get(key)
-            .map(|entries| entries.values().map(|&count| count as usize).sum())
-            .unwrap_or(0)
-    }
-
     /// Emit parameter-name and by-reference hints for a single call site.
     ///
     /// `range` is the requested viewport as byte offsets, already
@@ -511,11 +130,13 @@ impl Backend {
     fn emit_parameter_hints(
         &self,
         call_site: &CallSite,
-        content: &str,
+        index: &LineIndex,
         range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,
     ) {
+        let content = index.content();
+
         // The call site's start offset gives the resolver its cursor context.
         let resolved = match self.resolve_callable_target_at_offset(
             &call_site.call_expression,
@@ -631,7 +252,7 @@ impl Backend {
                 continue;
             }
 
-            let hint_position = offset_to_position(content, arg_offset as usize);
+            let hint_position = index.position(arg_offset as usize);
 
             hints.push(InlayHint {
                 position: hint_position,
@@ -653,13 +274,14 @@ impl Backend {
     /// arrow functions whose types can be inferred from the callable context.
     fn emit_closure_hints(
         &self,
-        content: &str,
+        index: &LineIndex,
         sites: &[UntypedClosureSite],
         call_sites: &[CallSite],
         range: (u32, u32),
         ctx: &FileContext,
         hints: &mut Vec<InlayHint>,
     ) {
+        let content = index.content();
         let (range_start, range_end) = range;
         for site in sites {
             // Quick range check: use close_paren_offset if available,
@@ -736,7 +358,7 @@ impl Backend {
                             continue;
                         }
 
-                        let hint_position = offset_to_position(content, param_offset as usize);
+                        let hint_position = index.position(param_offset as usize);
 
                         hints.push(InlayHint {
                             position: hint_position,
@@ -759,7 +381,7 @@ impl Backend {
                 let shortened = ret_type.shorten();
                 let type_str = shortened.to_string();
                 if !type_str.is_empty() && !shortened.is_mixed() {
-                    let hint_position = offset_to_position(content, close_paren as usize);
+                    let hint_position = index.position(close_paren as usize);
 
                     hints.push(InlayHint {
                         position: hint_position,
@@ -775,51 +397,6 @@ impl Backend {
             }
         }
     }
-}
-
-fn push_count_hint(hints: &mut Vec<InlayHint>, position: Position, label: String) {
-    hints.push(InlayHint {
-        position,
-        label: InlayHintLabel::String(format!(" {label}")),
-        kind: None,
-        text_edits: None,
-        tooltip: None,
-        padding_left: None,
-        padding_right: None,
-        data: None,
-    });
-}
-
-fn reference_label(count: usize) -> String {
-    if count == 1 {
-        "1 reference".to_string()
-    } else {
-        format!("{count} references")
-    }
-}
-
-fn implementation_label(count: usize) -> String {
-    if count == 1 {
-        "1 implementation".to_string()
-    } else {
-        format!("{count} implementations")
-    }
-}
-
-fn offset_in_range(offset: u32, range: (u32, u32)) -> bool {
-    offset >= range.0 && offset <= range.1
-}
-
-fn line_end_position(content: &str, byte_offset: usize) -> Position {
-    let line_end = content[byte_offset..]
-        .find('\n')
-        .map(|i| byte_offset + i)
-        .unwrap_or(content.len());
-
-    // Delegate to the canonical converter so the `character` column is
-    // counted in UTF-16 code units (per the LSP spec), consistent with
-    // every other position the server emits.
-    offset_to_position(content, line_end)
 }
 
 /// Check whether the argument at `arg_offset` is a simple variable whose
@@ -1079,203 +656,6 @@ fn is_obvious_single_param(call_expression: &str, _param_name: &str) -> bool {
 mod tests {
     use super::*;
 
-    /// Open a file and return its hints once the member reference counts
-    /// the first request queued have been computed.
-    fn declaration_hints(backend: &Backend, uri: &str, content: &str) -> Vec<InlayHint> {
-        backend
-            .open_files
-            .write()
-            .insert(uri.to_string(), std::sync::Arc::new(content.to_string()));
-        backend.update_ast(uri, content);
-        backend.workspace_indexed.store(true, Ordering::Release);
-
-        let range = Range {
-            start: Position {
-                line: 0,
-                character: 0,
-            },
-            end: Position {
-                line: content.lines().count() as u32,
-                character: 0,
-            },
-        };
-        backend.handle_inlay_hints(uri, content, range);
-        backend.compute_pending_member_ref_counts();
-        backend
-            .handle_inlay_hints(uri, content, range)
-            .unwrap_or_default()
-    }
-
-    /// The label of the hint on `line`, if any.
-    fn hint_on_line(hints: &[InlayHint], line: u32) -> Option<String> {
-        hints
-            .iter()
-            .find(|hint| hint.position.line == line)
-            .map(|hint| match &hint.label {
-                InlayHintLabel::String(label) => label.clone(),
-                InlayHintLabel::LabelParts(parts) => {
-                    parts.iter().map(|part| part.value.as_str()).collect()
-                }
-            })
-    }
-
-    #[test]
-    fn function_count_includes_unqualified_calls_from_a_namespaced_file() {
-        let backend = Backend::new_test();
-        backend.update_ast(
-            "file:///app/Service.php",
-            "<?php\nnamespace App;\nfunction run(): void {\n    helper();\n    helper();\n}\n",
-        );
-
-        let hints = declaration_hints(
-            &backend,
-            "file:///helpers.php",
-            "<?php\nfunction helper(): void {}\n",
-        );
-
-        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 2 references"));
-    }
-
-    #[test]
-    fn function_count_ignores_the_case_a_call_is_spelled_with() {
-        let backend = Backend::new_test();
-        backend.update_ast(
-            "file:///app/Service.php",
-            "<?php\nnamespace App;\nfunction run(): void {\n    HELPER();\n}\n",
-        );
-
-        let hints = declaration_hints(
-            &backend,
-            "file:///helpers.php",
-            "<?php\nfunction helper(): void {}\n",
-        );
-
-        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 1 reference"));
-    }
-
-    #[test]
-    fn declaration_count_hints_skip_magic_methods() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-class User {
-    public function __construct() {}
-    public function save(): void {}
-}
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert!(hints.iter().any(|hint| hint.position.line == 1));
-        assert!(hints.iter().any(|hint| hint.position.line == 3));
-        assert!(!hints.iter().any(|hint| hint.position.line == 2));
-    }
-
-    #[test]
-    fn member_count_ignores_a_member_of_the_same_name_on_another_class() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-class User {
-    public int $id = 0;
-    public function save(): void {}
-}
-class Order {
-    public int $id = 0;
-    public function save(): void {}
-}
-function persist(Order $order): void {
-    echo $order->id;
-    $order->save();
-}
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert_eq!(hint_on_line(&hints, 2).as_deref(), Some(" 0 references"));
-        assert_eq!(hint_on_line(&hints, 3).as_deref(), Some(" 0 references"));
-        assert_eq!(hint_on_line(&hints, 6).as_deref(), Some(" 1 reference"));
-        assert_eq!(hint_on_line(&hints, 7).as_deref(), Some(" 1 reference"));
-    }
-
-    #[test]
-    fn member_count_includes_references_through_a_subclass() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-class Model {
-    public function save(): void {}
-}
-class Order extends Model {
-}
-function persist(Order $order, Model $model): void {
-    $order->save();
-    $model->save();
-}
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert_eq!(hint_on_line(&hints, 2).as_deref(), Some(" 2 references"));
-    }
-
-    #[test]
-    fn class_count_ignores_a_class_of_the_same_name_in_another_namespace() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-class Widget {}
-namespace App;
-class Widget {}
-function build(): void {
-    $first = new \App\Widget();
-    $second = new \App\Widget();
-}
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert_eq!(hint_on_line(&hints, 1).as_deref(), Some(" 0 references"));
-        assert_eq!(hint_on_line(&hints, 3).as_deref(), Some(" 2 references"));
-    }
-
-    #[test]
-    fn declaration_count_hint_column_uses_utf16_units() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        // The declaration line ends with a non-BMP character (2 UTF-16
-        // code units, 1 Unicode scalar), so a chars-based column would be
-        // one short of the LSP-mandated UTF-16 column.
-        let content = "<?php\nclass User {} // \u{1F600}\n";
-
-        backend.update_ast(uri, content);
-        backend.workspace_indexed.store(true, Ordering::Release);
-
-        let hints = backend
-            .handle_inlay_hints(
-                uri,
-                content,
-                Range {
-                    start: Position {
-                        line: 0,
-                        character: 0,
-                    },
-                    end: Position {
-                        line: 2,
-                        character: 0,
-                    },
-                },
-            )
-            .unwrap_or_default();
-
-        let class_hint = hints
-            .iter()
-            .find(|hint| hint.position.line == 1)
-            .expect("expected a reference-count hint on the class declaration line");
-        // "class User {} // " is 17 UTF-16 units; the emoji adds 2 → 19.
-        assert_eq!(class_hint.position.character, 19);
-    }
-
     #[test]
     fn test_should_suppress_simple_variable_match() {
         let content = "$needle, $haystack";
@@ -1340,45 +720,5 @@ function build(): void {
         assert!(is_obvious_single_param("json_encode", "value"));
         assert!(!is_obvious_single_param("customFunc", "value"));
         assert!(!is_obvious_single_param("new Foo", "bar"));
-    }
-
-    #[test]
-    fn a_standalone_function_gets_a_reference_count() {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-function helper(): void {}
-
-helper();
-helper();
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert_eq!(
-            hint_on_line(&hints, 1).as_deref(),
-            Some(" 2 references"),
-            "a function declared outside a class is counted like a class is"
-        );
-    }
-
-    #[test]
-    fn a_file_of_only_functions_still_gets_hints() {
-        // The declaration walk starts from the file's classes, and a
-        // function belongs to none, so a file holding nothing else used
-        // to leave that walk before emitting anything.
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        let content = r#"<?php
-function unused(): void {}
-"#;
-
-        let hints = declaration_hints(&backend, uri, content);
-
-        assert_eq!(
-            hint_on_line(&hints, 1).as_deref(),
-            Some(" 0 references"),
-            "a file with no classes at all still reports its functions"
-        );
     }
 }

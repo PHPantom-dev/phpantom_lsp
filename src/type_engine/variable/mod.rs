@@ -10,6 +10,7 @@
 /// - **foreach_resolution**: Iterable element/key type extraction from generic annotations
 /// - **closure_resolution**: Closure `$this` binding and callable parameter inference helpers
 pub(crate) mod array_func_rules;
+pub(crate) mod array_shape_writes;
 pub(crate) mod callback_narrowing;
 pub(crate) mod class_string_resolution;
 pub(crate) mod closure_resolution;

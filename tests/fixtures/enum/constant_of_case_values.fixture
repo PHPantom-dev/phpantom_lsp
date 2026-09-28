@@ -1,0 +1,19 @@
+// test: a constant built from enum case values folds to their literals
+// feature: hover
+// expect: list{'hearts', 'spades'}
+---
+<?php
+
+enum Suit: string {
+    case Hearts = 'hearts';
+    case Spades = 'spades';
+}
+
+class Deck {
+    const SUITS = [Suit::Hearts->value, Suit::Spades->value];
+}
+
+function test(): void {
+    $suits = Deck::SUITS;
+    $<>suits;
+}
