@@ -109,7 +109,7 @@ impl Backend {
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
         let (owner, method) = php_item_owner_method(item)?;
-        let owner = self.canonical_metadata_class(owner);
+        let owner = normalize_fqn(owner);
         let (sites, subscriptions) = self.symfony_event_snapshot();
         let config = self.config().symfony.events;
         let publishers: Vec<_> = sites
@@ -164,15 +164,13 @@ impl Backend {
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
         let (owner, method) = php_item_owner_method(item)?;
-        let owner = self.canonical_metadata_class(owner);
+        let owner = normalize_fqn(owner);
         let (sites, subscriptions) = self.symfony_event_snapshot();
         let mut events: Vec<(String, String, Option<&EventSite>)> = subscriptions
             .iter()
             .filter(|subscription| {
-                same_class(
-                    &self.canonical_metadata_class(&subscription.listener_fqn),
-                    &owner,
-                ) && subscription.method.eq_ignore_ascii_case(method)
+                same_class(&normalize_fqn(&subscription.listener_fqn), &owner)
+                    && subscription.method.eq_ignore_ascii_case(method)
             })
             .map(|subscription| {
                 (
@@ -226,7 +224,7 @@ impl Backend {
                 && event_mode(&subscription.event, &config) == mode
         }) {
             if let Some(location) = self.symfony_class_member_declaration_location(
-                &self.canonical_metadata_class(&subscription.listener_fqn),
+                &normalize_fqn(&subscription.listener_fqn),
                 &subscription.method,
             ) && let Some(target) = self.call_hierarchy_item_at_location(&location)
             {
@@ -433,7 +431,7 @@ impl Backend {
             let Some(owner) = class_at_method(&classes, method_start) else {
                 continue;
             };
-            let owner_fqn = self.canonical_metadata_class(&owner.fqn());
+            let owner_fqn = normalize_fqn(&owner.fqn());
             let method = content[method_start..method_end].to_string();
             let arguments = attribute
                 .args
@@ -507,7 +505,7 @@ impl Backend {
         let mut lenses = Vec::new();
 
         for class in classes {
-            let owner = self.canonical_metadata_class(&class.fqn());
+            let owner = normalize_fqn(&class.fqn());
             for method in &class.methods {
                 if method.is_virtual || method.name_offset == 0 {
                     continue;
@@ -524,10 +522,8 @@ impl Backend {
                 let subscriber_events: Vec<&str> = subscriptions
                     .iter()
                     .filter(|subscription| {
-                        same_class(
-                            &self.canonical_metadata_class(&subscription.listener_fqn),
-                            &owner,
-                        ) && subscription.method.eq_ignore_ascii_case(method_name)
+                        same_class(&normalize_fqn(&subscription.listener_fqn), &owner)
+                            && subscription.method.eq_ignore_ascii_case(method_name)
                     })
                     .map(|subscription| subscription.event.as_str())
                     .chain(sites.iter().filter_map(|site| {
@@ -552,7 +548,7 @@ impl Backend {
                         })
                         .filter_map(|subscription| {
                             self.symfony_class_member_declaration_location(
-                                &self.canonical_metadata_class(&subscription.listener_fqn),
+                                &normalize_fqn(&subscription.listener_fqn),
                                 &subscription.method,
                             )
                         })
@@ -628,7 +624,7 @@ impl Backend {
                             })
                             .filter_map(|subscription| {
                                 self.symfony_class_member_declaration_location(
-                                    &self.canonical_metadata_class(&subscription.listener_fqn),
+                                    &normalize_fqn(&subscription.listener_fqn),
                                     &subscription.method,
                                 )
                             }),
@@ -692,7 +688,7 @@ impl Backend {
                     .filter(|subscription| event_names_match(&event, &subscription.event, &config))
                     .filter_map(|subscription| {
                         self.symfony_class_member_declaration_location(
-                            &self.canonical_metadata_class(&subscription.listener_fqn),
+                            &normalize_fqn(&subscription.listener_fqn),
                             &subscription.method,
                         )
                     }),
@@ -732,15 +728,13 @@ impl Backend {
             .collect();
 
         if let Some((owner, method)) = method_name_at_offset(self, uri, offset) {
-            let owner = self.canonical_metadata_class(&owner);
+            let owner = normalize_fqn(&owner);
             subjects.extend(
                 subscriptions
                     .iter()
                     .filter(|subscription| {
-                        same_class(
-                            &self.canonical_metadata_class(&subscription.listener_fqn),
-                            &owner,
-                        ) && subscription.method.eq_ignore_ascii_case(&method)
+                        same_class(&normalize_fqn(&subscription.listener_fqn), &owner)
+                            && subscription.method.eq_ignore_ascii_case(&method)
                     })
                     .map(|subscription| (subscription.event.clone(), EventRole::Subscriber)),
             );
@@ -758,13 +752,6 @@ impl Backend {
     fn symfony_event_snapshot(&self) -> (Vec<EventSite>, Vec<EventSubscription>) {
         let index = self.symfony_events.read();
         (index.source_sites(), index.subscriptions.clone())
-    }
-
-    fn canonical_metadata_class(&self, fqn: &str) -> String {
-        self.metadata_class_family(fqn)
-            .into_iter()
-            .next()
-            .unwrap_or_else(|| normalize_fqn(fqn))
     }
 
     fn source_site_location(&self, site: &EventSite) -> Option<Location> {
@@ -1348,7 +1335,7 @@ mod tests {
     }
 
     #[test]
-    fn proxy_publishers_flow_through_synthetic_event_nodes() {
+    fn publishers_flow_through_synthetic_event_nodes() {
         let backend = Backend::new_test();
         *backend.workspace.config.lock() = toml::from_str(
             r#"
@@ -1373,19 +1360,11 @@ transport-cases = { ASYNC = ".async" }
 "#,
         )
         .unwrap();
-        backend.replace_proxy_relations(
-            "test",
-            vec![crate::proxy_metadata::ProxyRelation {
-                proxy_fqn: "Generated\\JobProxy".to_string(),
-                target_fqn: "App\\Job".to_string(),
-            }],
-        );
-
-        let publisher_uri = "file:///generated_proxy.php";
+        let publisher_uri = "file:///job.php";
         let publisher = r#"<?php
-namespace Generated;
+namespace App;
 use Acme\Event\Publish;
-class JobProxy extends \App\Job implements \Acme\TransparentProxy {
+class Job {
     #[Publish(name: 'job.done')]
     public function execute(): void {}
 }
@@ -1437,10 +1416,7 @@ class JobListener {
         let publishers = backend.incoming_calls_impl(&event_call.to).unwrap();
         assert_eq!(publishers.len(), 1);
         assert_eq!(publishers[0].from.name, "execute");
-        assert_eq!(
-            publishers[0].from.detail.as_deref(),
-            Some("Generated\\JobProxy")
-        );
+        assert_eq!(publishers[0].from.detail.as_deref(), Some("App\\Job"));
 
         let subscriber_offset =
             backend.symbols.uri_classes_index.read()[subscriber_uri][0].methods[0].name_offset;

@@ -56,7 +56,6 @@ impl Backend {
     ) -> bool {
         let mut composer_changed = false;
         let mut config_changed = false;
-        let mut proxy_index_rebuild = false;
         let mut symfony_metadata_rebuild = false;
         let mut schema_full_rebuild = false;
         let mut migration_changes: Vec<(PathBuf, FileChangeType)> = Vec::new();
@@ -66,7 +65,6 @@ impl Backend {
             crate::virtual_members::laravel::database_schema::MigrationDiscovery::default();
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         let current_config = self.config();
-        let proxy_rules = current_config.php.proxies.clone();
         let symfony_container = current_config.symfony.container;
         let has_symfony_event_rules = !current_config.symfony.events.publishers.is_empty()
             || !current_config.symfony.events.subscribers.is_empty();
@@ -189,16 +187,6 @@ impl Backend {
                     continue;
                 };
 
-                // Generated proxies are opt-in metadata inputs, not ordinary
-                // project classes, and usually live in a cache directory the
-                // exclusions below would drop. Rebuild their small relation
-                // index rather than parsing them into the workspace symbol
-                // maps.
-                if crate::proxy_metadata::is_configured_proxy_path(root, &file_path, &proxy_rules) {
-                    proxy_index_rebuild = true;
-                    continue;
-                }
-
                 // Compiled containers are metadata inputs. Never parse them
                 // into the project symbol index, and never execute them.
                 if crate::symfony::container::path_may_be_compiled_container(
@@ -247,7 +235,6 @@ impl Backend {
             && resource_changes.is_empty()
             && !composer_changed
             && !config_changed
-            && !proxy_index_rebuild
             && !symfony_metadata_rebuild
             && !schema_full_rebuild
             && migration_changes.is_empty()
@@ -259,7 +246,6 @@ impl Backend {
         if config_changed {
             tracing::info!("PHPantom: .phpantom.toml changed, reloading configuration");
             self.reload_config(root);
-            proxy_index_rebuild = true;
             symfony_metadata_rebuild = true;
             // Schema/migration settings live in the same file, and the
             // cheapest correct response to "something in here changed" is
@@ -318,12 +304,6 @@ impl Backend {
         if composer_changed {
             tracing::info!("PHPantom: composer files changed, rescanning vendor");
             self.rescan_composer_indexes(root);
-        }
-
-        if proxy_index_rebuild {
-            let count = self.rebuild_configured_proxy_index(root);
-            tracing::info!("PHPantom: indexed {} transparent proxies", count);
-            self.refresh_indexed_resource_symbols();
         }
 
         if !resource_changes.is_empty() {
@@ -643,10 +623,7 @@ impl Backend {
             let metadata_backend = self.clone_for_blocking();
             let metadata_root = root.clone();
             crate::server::run_blocking_cancel_safe("reload_project_metadata", move || {
-                let proxy_count = metadata_backend.rebuild_configured_proxy_index(&metadata_root);
-                metadata_backend.refresh_indexed_resource_symbols();
-                let event_count = metadata_backend.rebuild_symfony_metadata(&metadata_root);
-                (proxy_count, event_count)
+                metadata_backend.rebuild_symfony_metadata(&metadata_root)
             })
             .await;
         }
