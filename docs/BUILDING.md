@@ -18,6 +18,29 @@ The stubs are downloaded on first build and cached in `stubs/`. To update to the
 
 For details on how symbol resolution and stub loading work, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
+### Optional features
+
+Both are off by default, so an editor build compiles neither.
+
+`offline-stubs` keeps the build script from reaching the network: when
+the stubs are missing or stale it embeds an empty stub index and
+continues instead of downloading them. Stubs already present in
+`stubs/` are still embedded, so a machine that has built once keeps its
+standard library. A build without them resolves only the project's own
+code, so use it when the build must not make network calls rather than
+to save time.
+
+`semantic-export` compiles `phpantom_lsp::semantic_export`, an API for
+programs that embed PHPantom as a library rather than talking to it
+over LSP. The caller supplies PHP documents as strings, and gets back
+declarations, occurrences, calls, byte ranges, and diagnostics as owned
+values that outlive the backend they came from. Nothing is read from
+disk and no server is started.
+
+```bash
+cargo build --features semantic-export,offline-stubs
+```
+
 ### Matching the released binary
 
 The Linux binaries we publish are static musl builds using mimalloc as
@@ -68,6 +91,8 @@ Before submitting changes, run exactly what CI runs:
 cargo test
 cargo clippy -- -D warnings
 cargo clippy --tests -- -D warnings
+cargo clippy --all-targets --features semantic-export -- -D warnings
+cargo test --features semantic-export semantic_export
 cargo fmt --check
 find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php
@@ -80,7 +105,7 @@ CI additionally builds the WebAssembly target and runs
 if your change touches dependencies, `Cargo.toml`, or anything in the
 per-file request path. See [wasm.md](wasm.md).
 
-All eight must pass with zero warnings and zero failures, except the
+All ten must pass with zero warnings and zero failures, except the
 final `analyze` run: `app/Demo.php` carries three deliberate mistakes,
 each demonstrating a diagnostic. `Artisan::call('does:not-exist')`
 demonstrates `invalid_laravel_command`, and one `view('welcome', …)`

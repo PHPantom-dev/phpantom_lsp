@@ -1,0 +1,12 @@
+// test: `$this` inside a closure invoked through `->call()` is the argument
+// feature: hover
+// expect: stdClass
+// expect_absent: Bar
+---
+<?php
+
+class Bar {
+    public function arrow(\stdClass $foo) {
+        (fn () => $th<>is)->call($foo);
+    }
+}

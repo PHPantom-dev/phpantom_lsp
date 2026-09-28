@@ -6,6 +6,7 @@ use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use crate::atom::bytes_to_str;
+use crate::parser::unwrap_parens;
 
 use super::scope_map::*;
 
@@ -930,15 +931,6 @@ fn walk_member_selector_read(
             walk_expression(selector.expression, collector)
         }
     }
-}
-
-/// Unwrap parentheses to the inner expression.
-fn unwrap_parens<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
-    let mut current = expr;
-    while let Expression::Parenthesized(p) = current {
-        current = p.expression;
-    }
-    current
 }
 
 /// Walk arguments for an instance method call (`$obj->method(...)`),

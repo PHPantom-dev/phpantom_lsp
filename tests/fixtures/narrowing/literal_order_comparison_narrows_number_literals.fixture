@@ -1,0 +1,27 @@
+// test: an ordering comparison keeps the number literals that pass it
+// feature: hover
+// expect_hover: $big => 1.0
+// expect_hover: $small => 0
+---
+<?php
+
+function f(float $y, int $z): void
+{
+    $x = 0.0;
+    if ($y > 0) {
+        $x += 1;
+    }
+    if ($x > 0) {
+        $big = $x;
+        echo $b<>ig;
+    }
+    $n = 0;
+    if ($z > 0) {
+        $n = 1;
+    }
+    if (1 <= $n) {
+        return;
+    }
+    $small = $n;
+    echo $small;
+}

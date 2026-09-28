@@ -56,6 +56,30 @@ fn the_keyword_in_a_comment_is_not_a_declaration() {
 }
 
 #[test]
+fn a_line_comment_above_a_block_does_not_hide_it() {
+    let src = "<?php\n// Test: first\nnamespace A {\n}\n\n// Test: second http://x\nnamespace B {\n    function t() { | }\n}\n";
+    assert_eq!(ns_at_marker(src).as_deref(), Some("B"));
+}
+
+#[test]
+fn a_hash_comment_after_code_does_not_hide_the_declaration() {
+    let src = "<?php\nnamespace A {\n} # end of A\nnamespace B {\n    function t() { | }\n}\n";
+    assert_eq!(ns_at_marker(src).as_deref(), Some("B"));
+}
+
+#[test]
+fn a_block_comment_above_the_declaration_does_not_hide_it() {
+    let src = "<?php\n/**\n * File header.\n */\nnamespace App;\nfunction t() { | }\n";
+    assert_eq!(ns_at_marker(src).as_deref(), Some("App"));
+}
+
+#[test]
+fn the_keyword_on_its_own_line_inside_a_block_comment_is_not_a_declaration() {
+    let src = "<?php\nnamespace App;\n/* about\nnamespace Other;\n*/\nfunction t() { | }\n";
+    assert_eq!(ns_at_marker(src).as_deref(), Some("App"));
+}
+
+#[test]
 fn the_keyword_in_a_string_is_not_a_declaration() {
     let src = "<?php\nnamespace App;\n$s = \"namespace Other;\";\nfunction t() { | }\n";
     assert_eq!(ns_at_marker(src).as_deref(), Some("App"));

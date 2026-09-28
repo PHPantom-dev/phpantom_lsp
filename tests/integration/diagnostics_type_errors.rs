@@ -1,36 +1,34 @@
 use crate::common::{
-    create_test_backend, create_test_backend_with_full_stubs,
-    create_test_backend_with_function_stubs,
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
+    create_test_backend_with_function_stubs, messages_with_code,
 };
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn collect(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 fn collect_with_stubs(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend_with_function_stubs();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend_with_function_stubs(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend_with_full_stubs();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_argument_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_argument_type_diagnostics,
+    )
 }
 
 /// Collect diagnostics through the full slow-diagnostic pipeline so that
@@ -38,12 +36,11 @@ fn collect_with_full_stubs(php: &str) -> Vec<Diagnostic> {
 /// and LSP requests).  Needed for tests that exercise cross-call-site
 /// caching behaviour.
 fn collect_slow(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_slow_diagnostics,
+    )
 }
 
 fn has_type_error(diags: &[Diagnostic]) -> bool {
@@ -52,18 +49,6 @@ fn has_type_error(diags: &[Diagnostic]) -> bool {
             |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
         )
     })
-}
-
-fn type_error_messages(diags: &[Diagnostic]) -> Vec<String> {
-    diags
-        .iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
 }
 
 // ─── Basic: string passed to int parameter ──────────────────────────────────
@@ -83,7 +68,7 @@ function test(): void {
         has_type_error(&diags),
         "Expected a type error for string passed to int, got: {diags:?}"
     );
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.iter()
             .any(|m| m.contains("int") && m.contains("\"hello\"")),
@@ -886,7 +871,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     // Argument 2 ($b) should be flagged: array passed to string
     assert!(
         msgs.iter()
@@ -1066,7 +1051,7 @@ class Machine {
     }
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(
         msgs,
         vec!["Argument 1 ($other) expects Node, got Other".to_string()],
@@ -1113,7 +1098,7 @@ class Machine {
     }
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(
         msgs,
         vec!["Argument 1 ($p) expects Base, got Other".to_string()],
@@ -1141,7 +1126,7 @@ class Machine {
     }
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(
         msgs,
         vec!["Argument 1 ($p) expects Base, got Other".to_string()],
@@ -1246,7 +1231,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(!msgs.is_empty(), "Expected at least one type error");
     let msg = &msgs[0];
     assert!(
@@ -1282,7 +1267,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !msgs.is_empty(),
         "Expected a type error for different-FQN same-short-name classes"
@@ -1379,7 +1364,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.len() >= 2,
         "Expected at least 2 type errors, got {}: {msgs:?}",
@@ -1582,7 +1567,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "Every entry of the literal array is numeric, got: {}",
-        type_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
     );
 }
 
@@ -1603,7 +1588,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "The entry at index 2 is the numeric string '123', got: {}",
-        type_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
     );
 }
 
@@ -1646,7 +1631,7 @@ function test(string $k): void {
     assert!(
         !has_type_error(&diags),
         "Every value written into the shape is numeric, got: {}",
-        type_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
     );
 }
 
@@ -1670,7 +1655,7 @@ function test(string $k): void {
     assert!(
         !has_type_error(&diags),
         "Every entry of the constant table is numeric, got: {}",
-        type_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_argument").join("; ")
     );
 }
 
@@ -1693,7 +1678,7 @@ function test(): void {
     takesInt($values[$key]);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("1|1.5|'123'"), "{messages:?}");
 }
@@ -1991,6 +1976,23 @@ function test(): void {
 }
 
 #[test]
+fn no_diagnostic_for_object_literal_satisfying_object_shape_intersected_with_stdclass() {
+    let php = r#"<?php
+/** @param object{foo: int}&\stdClass $shape */
+function takesObjectShape(object $shape): void {}
+
+function test(): void {
+    takesObjectShape((object) ['foo' => 1]);
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !has_type_error(&diags),
+        "A non-empty array cast to object is a stdClass with those keys, so it should satisfy object{{foo: int}}&stdClass, got: {diags:?}"
+    );
+}
+
+#[test]
 fn diagnostic_for_class_with_mistyped_property_against_object_shape() {
     let php = r#"<?php
 final class Mistyped {
@@ -2087,7 +2089,7 @@ function test(?Carbon $c): void {
     takes_carbon($c);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("?Carbon"),
@@ -2104,7 +2106,7 @@ function test(?string $s): void {
     takes_string($s);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -2122,7 +2124,7 @@ function test($s): void {
     takes_string($s);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -2149,7 +2151,7 @@ function testUnion($s): void {
     takes_string($s);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -2169,7 +2171,7 @@ function test(?Color $color): void {
     render($color);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -2187,7 +2189,7 @@ function test(): void {
     takes_string(log_it("hi"));
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("void") && messages[0].contains("returns no value"),
@@ -2209,7 +2211,7 @@ function test(Logger $logger): void {
     takes_string($logger->write("hi"));
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -2226,7 +2228,7 @@ function test(): void {
     takes_nullable(log_it());
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -2243,7 +2245,7 @@ function test(): void {
     takes_string(fail("boom"));
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -2259,7 +2261,7 @@ function test(): void {
     takes_void("hi");
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -2721,7 +2723,7 @@ class ExplorerController {
     assert!(
         !has_type_error(&diags),
         "Should not flag a union of class-strings satisfying a template bound, got: {}",
-        type_error_messages(&diags).join(", ")
+        messages_with_code(&diags, "type_mismatch_argument").join(", ")
     );
 }
 
@@ -2754,7 +2756,7 @@ function demo(Builder $b, string $mockBuilder): void
     assert!(
         !has_type_error(&diags),
         "Should not flag class-string<A|B> passed to class-string<T>, got: {}",
-        type_error_messages(&diags).join(", ")
+        messages_with_code(&diags, "type_mismatch_argument").join(", ")
     );
 }
 
@@ -3109,7 +3111,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "Should not flag enum cases, variables, property access, or int literals \
@@ -3146,7 +3148,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "Untyped class constant argument should bind the template param to \
@@ -3182,7 +3184,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "Should not flag $var->prop passed to method-level @template param, got: {msgs:?}"
@@ -3215,7 +3217,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "Should not flag $this->helper->getText() passed to method-level @template param, got: {msgs:?}"
@@ -3257,7 +3259,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "Should not flag an argument against a parameter type substituted from that \
@@ -3296,7 +3298,7 @@ class MyTest extends TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         !has_type_error(&diags),
         "The unfilled second binding site is not an independent check, got: {msgs:?}"
@@ -4227,6 +4229,151 @@ function test(array $params): void {
         !has_type_error(&diags),
         "Guard clause with throw should narrow type before call site, got: {diags:?}"
     );
+}
+
+// ─── Nullability-only argument mismatches (downgrade-nullable-argument-mismatch) ───
+
+#[test]
+fn negated_and_guard_leaves_null_reachable_as_an_error_by_default() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {diags:?}");
+    assert!(
+        messages[0].contains("null does not satisfy string"),
+        "expected a nullability-only mismatch, got: {messages:?}"
+    );
+    let type_error = diags
+        .iter()
+        .find(|d| has_type_error(std::slice::from_ref(d)))
+        .unwrap();
+    assert_eq!(
+        type_error.severity,
+        Some(DiagnosticSeverity::ERROR),
+        "default severity must stay ERROR so existing projects see no change"
+    );
+}
+
+#[test]
+fn nullability_only_mismatch_can_be_downgraded_to_a_warning() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(mixed $password): void {
+    if ($password !== null && ! is_string($password)) {
+        throw new \Exception('bad');
+    }
+    takes_string($password);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::WARNING));
+}
+
+#[test]
+fn a_declared_nullable_argument_is_the_same_gap_as_the_union_spelling() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade_declared.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(?string $a, string|null $b, ?array $c): void {
+    takes_string($a);
+    takes_string($b);
+    takes_string($c);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let severities: Vec<Option<DiagnosticSeverity>> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .map(|d| d.severity)
+        .collect();
+    assert_eq!(
+        severities,
+        vec![
+            Some(DiagnosticSeverity::WARNING),
+            Some(DiagnosticSeverity::WARNING),
+            // `?array` fails on more than its nullability.
+            Some(DiagnosticSeverity::ERROR),
+        ],
+        "got {diags:?}"
+    );
+}
+
+#[test]
+fn a_declared_nullable_argument_stays_an_error_by_default() {
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(?string $a): void {
+    takes_string($a);
+}
+"#;
+    let diags = collect(php);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
+}
+
+#[test]
+fn a_genuine_type_mismatch_stays_an_error_even_when_downgrade_is_enabled() {
+    let backend = create_test_backend();
+    let uri = "file:///nullable_downgrade_control.php";
+    let php = r#"<?php
+function takes_string(string $s): void {}
+
+function test(array|string $val): void {
+    takes_string($val);
+}
+"#;
+    {
+        let mut cfg = backend.config();
+        cfg.diagnostics.downgrade_nullable_argument_mismatch = Some(true);
+        backend.set_config(cfg);
+    }
+    backend.update_ast(uri, php);
+    let mut diags = Vec::new();
+    backend.collect_argument_type_diagnostics(uri, php, &mut diags);
+    let type_errors: Vec<&Diagnostic> = diags
+        .iter()
+        .filter(|d| has_type_error(std::slice::from_ref(d)))
+        .collect();
+    assert_eq!(type_errors.len(), 1, "got {diags:?}");
+    assert_eq!(type_errors[0].severity, Some(DiagnosticSeverity::ERROR));
 }
 
 #[test]
@@ -5260,7 +5407,7 @@ takesIntBox(new Box(1));
 takesIntBox(new Box('x'));
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         msgs.len(),
         1,
@@ -5299,12 +5446,16 @@ function takesNamedBox(NamedBox $box): void {}
 takesNamedBox(new NamedBox(new User()));
 takesNamedBox(new NamedBox(new AnonymousUser()));
 "#;
+    // The constructor call that binds `T` to `AnonymousUser` is reported
+    // too, since the bound is what its argument has to satisfy.
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
-        msgs.len(),
-        1,
-        "Expected exactly one type error for NamedBox<AnonymousUser>, got: {msgs:?}"
+        msgs,
+        [
+            "Argument 1 ($box) expects NamedBox<User>, got NamedBox<AnonymousUser>",
+            "Argument 1 ($value) expects HasName, got AnonymousUser",
+        ],
     );
 }
 
@@ -5382,7 +5533,7 @@ function f(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         msgs.len(),
         1,
@@ -5411,7 +5562,7 @@ function takesStringBox(Box $box): void {}
 takesStringBox(new Box(1));
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         msgs.len(),
         1,
@@ -5652,7 +5803,7 @@ class PurchaseFileDeviationMessage
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Foreach key $type should be string when passed to from(), not DeviationType. Got: {msgs:?}"
@@ -5922,7 +6073,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Should not flag array_filter callback as wrong type, got: {msgs:?}"
@@ -5943,7 +6094,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Should not flag arrow function passed to callable param, got: {msgs:?}"
@@ -5964,7 +6115,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Should not flag closure passed to callable|null param, got: {msgs:?}"
@@ -6053,7 +6204,7 @@ class TestCase {
     let content = files[3].1;
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     // The argument to ClassNode::__construct is the return value of
     // getNodeForCallingTestCase which returns ASTNode.  The diagnostic
     // must NOT say "got ArtifactList" (the type of the argument passed
@@ -6091,7 +6242,7 @@ final class BonusCashItemResult extends ItemResult {
 class BonusCashItem {}
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Expected no type errors for parent::__construct with @extends generics, got: {msgs:?}"
@@ -6113,7 +6264,7 @@ function foo(array $params = []): void {
 function bar(string $s): void {}
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Expected no type errors for array access on bare array, got: {msgs:?}"
@@ -6153,7 +6304,7 @@ class MyException extends NativeException {}
 
     let mut out = Vec::new();
     backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
-    let msgs = type_error_messages(&out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Should not flag Exception subclass as incompatible with Throwable, got: {msgs:?}"
@@ -6181,7 +6332,7 @@ class Controller {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Should not flag bare array from method return as incompatible with typed array param, got: {msgs:?}"
@@ -6214,7 +6365,7 @@ class TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Property narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
@@ -6255,7 +6406,7 @@ class TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "A two-level property narrowed via instanceof keeps its declared class, got: {msgs:?}"
@@ -6293,7 +6444,7 @@ class TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Call narrowed via instanceof should be accepted as MockInterface, got: {msgs:?}"
@@ -6318,7 +6469,7 @@ function test(object $thing): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "A subject proven to be both classes should satisfy either one, got: {msgs:?}"
@@ -6342,7 +6493,7 @@ function test(object $thing): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         msgs.len(),
         1,
@@ -6375,7 +6526,7 @@ class Holder {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "A property proven to be both classes should satisfy either one, got: {msgs:?}"
@@ -6412,7 +6563,7 @@ class TestCase {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "An asserted mock satisfies both its class and the asserted interface, got: {msgs:?}"
@@ -6433,7 +6584,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "String literal 'desc' should match literal type 'desc' in union, got: {msgs:?}"
@@ -6468,7 +6619,7 @@ function test(bool $flag): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Ternary with literal branches should match 'asc'|'desc' (issue #180), got: {msgs:?}"
@@ -6493,7 +6644,7 @@ function test(bool $flag): void {
     takesNegative(-3);
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Canonical expression resolution should cover match, coalesce, parentheses, and signed literals: {msgs:?}"
@@ -6511,7 +6662,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Integer literal 2 should match literal type 2 in union, got: {msgs:?}"
@@ -6546,7 +6697,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Float literal 2.5 should match literal type 2.5 in union, got: {msgs:?}"
@@ -6589,7 +6740,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "Non-decimal int literals should match int param, got: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -6605,7 +6756,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Hex literal 0x2 should match decimal literal 2 in union, got: {msgs:?}"
@@ -6625,7 +6776,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Binary, octal, and underscored int literals should match decimal literal unions, got: {msgs:?}"
@@ -6643,7 +6794,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Scientific float literal 1e3 should match decimal literal 1000.0 in union, got: {msgs:?}"
@@ -6660,7 +6811,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Single-quoted string literal should match double-quoted literal union member, got: {msgs:?}"
@@ -6688,7 +6839,7 @@ function run(array $items): void {
 }
 "#;
     let diags = collect_with_stubs(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "array_map with scalar return type should infer list<string>, got: {msgs:?}"
@@ -6714,7 +6865,7 @@ function run(array $items): void {
 }
 "#;
     let diags = collect_with_stubs(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "array_map should infer return type from body expression, got: {msgs:?}"
@@ -6753,7 +6904,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Without strict_types, int passed to string should be allowed, got: {msgs:?}"
@@ -6774,7 +6925,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Under strict_types=1, int passed to float should still be allowed, got: {msgs:?}"
@@ -6822,7 +6973,7 @@ function test(): void {
 }
 "#;
     let diags = collect(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "Concatenation should not be affected by strict_types, got: {msgs:?}"
@@ -7082,7 +7233,7 @@ function check_finfo(): void
     assert!(
         !has_type_error(&diags),
         "finfo handle should resolve to finfo, not resource|false: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7111,7 +7262,7 @@ function check_pgsql(): void
     assert!(
         !has_type_error(&diags),
         "pg handles should resolve to their 8.1+ object types: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7135,7 +7286,7 @@ function test(array $items): void {
     assert!(
         !has_type_error(&diags),
         "int<0,max> should be compatible with non-negative-int (issue #170): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7160,7 +7311,7 @@ function test(int $n): void {
     assert!(
         !has_type_error(&diags),
         "positive-int should be compatible with non-negative-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7184,7 +7335,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "int<1,100> should be compatible with non-negative-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7206,7 +7357,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "literal 1 should satisfy non-negative-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7226,7 +7377,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "literal 1 should satisfy positive-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7246,7 +7397,7 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "literal 0 should violate positive-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7266,7 +7417,7 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "literal -1 should violate non-negative-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7286,7 +7437,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "literal 1 should satisfy non-zero-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7306,7 +7457,7 @@ function test(): void {
     assert!(
         has_type_error(&diags),
         "literal 0 should violate non-zero-int: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7330,7 +7481,7 @@ function normalizeBooleanString(string $value): bool
     assert!(
         !has_type_error(&diags),
         "Assignment in if-branch must not affect elseif condition (issue #167): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7352,7 +7503,7 @@ function make_array(\Iterator $iterator): array {
     assert!(
         !has_type_error(&diags),
         "iterator_to_array should return array, not Iterator (issue #173): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7370,7 +7521,7 @@ function make_array(\Iterator $iterator): array {
     assert!(
         !has_type_error(&diags),
         "iterator_to_array with scalar element should also return array: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7387,7 +7538,7 @@ $result = strtr('Hello :name', [
     assert!(
         !has_type_error(&diags),
         "strtr() with array replace_pairs should be valid (issue #165): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7411,7 +7562,7 @@ function test(string $value): void
     assert!(
         !has_type_error(&diags),
         "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7431,7 +7582,7 @@ function test(mixed $value): void
     assert!(
         !has_type_error(&diags),
         "is_numeric($value) should narrow to numeric-string|int|float, still valid for a string param: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7464,7 +7615,7 @@ function activate(array $config): void
     assert!(
         !has_type_error(&diags),
         "is_a($config['class'], Extension::class, true) guard should narrow to class-string<Extension>: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7499,7 +7650,7 @@ final class Sender {
     assert!(
         !has_type_error(&diags),
         "@phpstan-type Payload alias should be compatible with ?array (issue #166): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7522,7 +7673,7 @@ final class Filter {
     assert!(
         !has_type_error(&diags),
         "@phpstan-type Field alias should be compatible with string (issue #166): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7545,7 +7696,7 @@ function test(string $input): void
     assert!(
         !has_type_error(&diags),
         "After $value = $value[0], type should no longer be array|false (issue #169): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7576,7 +7727,7 @@ function test(mixed $value): void {
     assert!(
         !has_type_error(&diags),
         "A narrower intersection (AA&BB&CC) must satisfy a broader one (AA&BB): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7629,7 +7780,7 @@ namespace App {
     assert!(
         !has_type_error(&diags),
         "a mock of IRule must satisfy array<IRule> and IRule parameters: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7656,7 +7807,7 @@ function test(array $items): void
     assert!(
         !has_type_error(&diags),
         "A string literal naming a function must satisfy a ?callable parameter: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7701,7 +7852,7 @@ function test(Fac $f): void
     assert!(
         !has_type_error(&diags),
         "Conditional return through @mixin must resolve TAsync to its default (false): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7759,7 +7910,7 @@ function testFacade(): void
     assert!(
         !has_type_error(&diags),
         "A generic class's default template argument must decide its method's conditional return: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7824,7 +7975,7 @@ function testFacade(): void
     assert!(
         !has_type_error(&diags),
         "An explicitly selected template argument must beat the declared default, through a mixin and a facade as well as directly: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7866,7 +8017,7 @@ function test(Picker $picker): void
     assert!(
         !has_type_error(&diags),
         "A conditional keyed on the method's own @template must be decided by the argument that binds it: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7908,7 +8059,7 @@ function test(): void
     assert!(
         !has_type_error(&diags),
         "TMock must bind to Connector, not class-string<Connector>: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7946,7 +8097,7 @@ function test(): void
     assert!(
         !has_type_error(&diags),
         "TMock must bind to RealConnector when given an instance: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -7982,7 +8133,7 @@ function test(): void
     assert!(
         !has_type_error(&diags),
         "T must bind to Connector, not class-string<Connector>: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8040,7 +8191,7 @@ class Parser
     assert!(
         !has_type_error(&diags),
         "Template bindings leaked across call sites: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8083,7 +8234,7 @@ class Helper
 }
 "#;
     let diags = collect_slow(php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         msgs.len(),
         1,
@@ -8167,7 +8318,7 @@ class Caller {
     assert!(
         !has_type_error(&diags),
         "Imported type alias parameter must not be treated as a class, got: {}",
-        type_error_messages(&diags).join(", ")
+        messages_with_code(&diags, "type_mismatch_argument").join(", ")
     );
 }
 
@@ -8332,7 +8483,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "A string literal naming a valid property must satisfy model-property<Model>: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8383,7 +8534,7 @@ function test(string $col): void {
     assert!(
         !has_type_error(&diags),
         "A non-literal string must be accepted for model-property (MAYBE): {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8408,7 +8559,7 @@ class Outer {
     assert!(
         !has_type_error(&diags),
         "Passing model-property to model-property of the same model must not error: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8459,7 +8610,7 @@ function test(): void {
     assert!(
         !has_type_error(&diags),
         "Valid property names in an array should not be flagged: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8540,7 +8691,7 @@ function test(): void {
     assert!(
         !has_type_error(&out),
         "Enum case of a built-in must resolve to the enum, not the polyfill's int constant: {:?}",
-        type_error_messages(&out)
+        messages_with_code(&out, "type_mismatch_argument")
     );
 }
 
@@ -8732,7 +8883,7 @@ function test(Coll $c): void
     assert!(
         !has_type_error(&diags),
         "a conditional nested in the generic return must collapse against the call args, got: {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8757,7 +8908,7 @@ function test(Holder $h): void
 }
 "#;
     let diags = collect(php);
-    let messages = type_error_messages(&diags);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
     assert_eq!(
         messages.len(),
         1,
@@ -8818,7 +8969,7 @@ class Helper {
     assert!(
         !has_type_error(&out),
         "expected no type error, got {:?}",
-        type_error_messages(&out)
+        messages_with_code(&out, "type_mismatch_argument")
     );
 }
 
@@ -8839,7 +8990,7 @@ takesResults([1, 2]);
     assert!(
         !has_type_error(&diags),
         "expected no type error, got {:?}",
-        type_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_argument")
     );
 }
 
@@ -8901,7 +9052,7 @@ fn rekeyed_lookup_message(callback: &str, chained: bool) -> String {
     let php = format!(
         "{REKEYING_COLLECTION}\n/** @var Coll<int, Item> $c */\n$c = new Coll();\n{call}\n"
     );
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert_eq!(
         messages.len(),
         1,
@@ -9013,7 +9164,7 @@ fn standalone_var_docblock_narrows_echo_statement() {
          echo e( $byName->get([1]) );\n}}\n"
     );
     let diags = collect_slow(&php);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.iter().any(|m| m.contains("expects string|null")),
         "expected TKey to narrow to string, got {msgs:?}"
@@ -9052,7 +9203,7 @@ function names(): array { return []; }
 /// spells out what `TWrapValue` bound to.
 fn wrapped_push_message(arg: &str) -> String {
     let php = format!("{UNION_WRAP_COLLECTION}\n$w = Wrapper::wrap({arg});\n$w->push([1]);\n");
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert_eq!(
         messages.len(),
         1,
@@ -9122,7 +9273,7 @@ function names(): array { return []; }
 /// receiver is a call that binds a method-level template.
 fn factory_push_message(expr: &str) -> String {
     let php = format!("{METHOD_TEMPLATE_FACTORY}\n{expr}->push([1]);\n");
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert_eq!(
         messages.len(),
         1,
@@ -9140,9 +9291,12 @@ fn a_static_factory_binds_its_template_into_a_chained_call() {
 fn an_instance_method_binds_its_template_into_a_chained_call() {
     let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = new Wrapper();\n");
     assert!(
-        type_error_messages(&collect(&format!("{php}$w->rewrap(names())->push([1]);\n")))
-            .concat()
-            .contains("expects string")
+        messages_with_code(
+            &collect(&format!("{php}$w->rewrap(names())->push([1]);\n")),
+            "type_mismatch_argument"
+        )
+        .concat()
+        .contains("expects string")
     );
 }
 
@@ -9150,7 +9304,7 @@ fn an_instance_method_binds_its_template_into_a_chained_call() {
 fn a_static_factory_binds_its_template_through_a_variable() {
     let php = format!("{METHOD_TEMPLATE_FACTORY}\n$w = Wrapper::make(names());\n$w->push([1]);\n");
     assert!(
-        type_error_messages(&collect(&php))
+        messages_with_code(&collect(&php), "type_mismatch_argument")
             .concat()
             .contains("expects string")
     );
@@ -9171,7 +9325,7 @@ fn keyby_rebinds_the_key_template_on_an_extends_fixed_subclass() {
             "$keyed = $c->keyBy(fn (Item $i): string => $i->slug);\n$keyed->get([1]);".to_string()
         };
         let php = format!("{REKEYING_COLLECTION}\n$c = new ItemCollection();\n{call}\n");
-        let messages = type_error_messages(&collect(&php));
+        let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
         assert_eq!(messages.len(), 1, "chained={chained}, got {messages:?}");
         assert!(
             messages[0].contains("expects string|null"),
@@ -9189,7 +9343,7 @@ fn keyby_with_literal_key_still_correct_on_an_extends_fixed_subclass() {
     let php = format!(
         "{REKEYING_COLLECTION}\n$c = new ItemCollection();\n$keyed = $c->keyBy('slug');\n$keyed->get('x');\n"
     );
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert!(
         messages.is_empty(),
         "expected no type error, got {messages:?}"
@@ -9209,7 +9363,7 @@ fn mapwithkeys_binds_the_key_from_the_callback_body_when_the_annotation_is_bare(
     let php = format!(
         "{REKEYING_COLLECTION}\n$c = new Coll();\n$keyed = $c->mapWithKeys(fn (Item $i): array => $i->toPair());\n$keyed->get([1]);\n"
     );
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("expects string|null"), "{messages:?}");
 }
@@ -9222,7 +9376,7 @@ fn mapwithkeys_does_not_bind_the_key_to_the_whole_return_type() {
     let php = format!(
         "{REKEYING_COLLECTION}\n$c = new Coll();\n$keyed = $c->mapWithKeys(fn (Item $i): array => ['x' => $i]);\n$keyed->get('dk');\n"
     );
-    let messages = type_error_messages(&collect(&php));
+    let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
     assert!(
         messages.is_empty(),
         "expected no type error, got {messages:?}"
@@ -9245,7 +9399,7 @@ function acceptsDecimalIntString($value): void {}
 acceptsDecimalIntString('123');
 acceptsDecimalIntString(42);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         messages.is_empty(),
         "expected no type error for an unmodelled spelling, got {messages:?}"
@@ -9265,7 +9419,7 @@ function acceptsPureCallable($value): void {}
 acceptsPureCallable(static fn (int $v): int => $v + 1);
 acceptsPureCallable(1);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("callable"), "{messages:?}");
 }
@@ -9283,7 +9437,7 @@ function acceptsShapeValue($value): void {}
 acceptsShapeValue(1);
 acceptsShapeValue('a');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'a'"), "{messages:?}");
 }
@@ -9301,7 +9455,7 @@ acceptsShapeKey('name');
 acceptsShapeKey('age');
 acceptsShapeKey('missing');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'missing'"), "{messages:?}");
 }
@@ -9327,7 +9481,7 @@ acceptsConfigKey('anything');
 function acceptsInt(int $value): void {}
 acceptsInt(firstValue());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         messages.is_empty(),
         "expected no type error while the operand is unreadable, got {messages:?}"
@@ -9358,7 +9512,7 @@ takesInt(lookUp('immutable'));
 takesString(lookUp('mutable'));
 takesInt(lookUp('mutable'));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
@@ -9394,7 +9548,7 @@ takesInt(lookUp());
 takesString(lookUpString());
 takesInt(lookUpString());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
@@ -9431,7 +9585,7 @@ takesInt($ids->lookUp());
 takesString($ids->lookUpString());
 takesInt($ids->lookUpString());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
@@ -9456,7 +9610,7 @@ function takesInt(int $id): void {}
 takesInt(lookUp('immutable'));
 takesInt(lookUp('mutable'));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -9481,7 +9635,7 @@ function acceptsFlagName(string $flag): void {}
 acceptsFlagName(firstKey(['debug' => false, 'verbose' => true]));
 acceptsFlagName(firstKey(['other' => false]));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'other'"), "{messages:?}");
 }
@@ -9512,7 +9666,7 @@ acceptsMode(firstValue(['a' => 'on', 'b' => 'off']));
 acceptsLevel(firstValue(['high' => 99]));
 acceptsMode(firstValue(['a' => 'maybe']));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(messages[0].contains("99"), "{messages:?}");
     assert!(messages[1].contains("'maybe'"), "{messages:?}");
@@ -9535,7 +9689,7 @@ acceptsKey('immutable');
 acceptsKey('mutable');
 acceptsKey('nope');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'nope'"), "{messages:?}");
 }
@@ -9558,7 +9712,7 @@ function run(Ids $ids): void {
     $ids->pick('nope');
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'nope'"), "{messages:?}");
 }
@@ -9581,7 +9735,7 @@ function takesIntOrString(int|string $id): void {}
 takesIntOrString(anyValue());
 takesInt(anyValue());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'two'"), "{messages:?}");
 }
@@ -9605,7 +9759,7 @@ function acceptsKey(string $key): void {
     takesInt($key);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("'immutable'|'mutable'"),
@@ -9637,7 +9791,7 @@ class Ids {
     }
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
         messages.iter().all(|m| m.contains("'immutable'|'mutable'")),
@@ -9670,7 +9824,7 @@ acceptsInterfaceString(SomeEnum::class);
 acceptsInterfaceString('App\SomeClass');
 acceptsInterfaceString('App\SomeInterface');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 3, "got {messages:?}");
     assert!(
         messages.iter().all(|m| m.contains("interface-string")),
@@ -9694,7 +9848,7 @@ function forward(string $name): void {
     acceptsInterfaceString('App\Unindexed');
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9714,7 +9868,7 @@ function acceptsClassString(string $name): void {}
 acceptsString(returnsInterfaceString());
 acceptsClassString(returnsInterfaceString());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9735,7 +9889,7 @@ takesStringCallback(static fn (int $value): string => (string) $value);
 takesStringCallback(static fn (int $value): int => $value);
 takesStringCallback(static function (int $value): int { return $value; });
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
         messages
@@ -9761,7 +9915,7 @@ takesStringCallback(static function (int $value) { return $value; });
 takesStringCallback(strlen(...));
 takesStringCallback('strlen');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9789,8 +9943,175 @@ class Shelter
     }
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A closure parameter that cannot take the value the `callable(...)`
+/// spelling promises to pass fails on the first call.
+#[test]
+fn callable_spec_rejects_a_closure_whose_parameter_cannot_take_the_passed_value() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int): string $callback */
+function takesIntCallback(callable $callback): void {}
+
+takesIntCallback(static fn (string $value): string => $value);
+takesIntCallback(static function (int $key, string $value): string { return $value; });
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 1 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// Parameters are contravariant: a wider, untyped or surplus-ignoring
+/// closure parameter list takes everything the specification passes.
+#[test]
+fn callable_spec_accepts_a_closure_with_wider_or_untyped_parameters() {
+    let php = r#"<?php
+namespace App;
+
+class Animal {}
+class Cat extends Animal {}
+
+/** @param callable(Cat, int): void $callback */
+function takesCatCallback(callable $callback): void {}
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesCatCallback(static fn (Animal $a, int|string $i): null => null);
+takesCatCallback(static fn ($a, $i) => null);
+takesCatCallback(static fn (Cat $c) => null);
+takesCatCallback(static fn (Animal $a, int ...$rest) => null);
+takesCatCallback(strlen(...));
+takesInts(static fn (int ...$is) => null);
+takesInts(static fn (int $a, ?int $b = null) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A variadic specification parameter fills every closure parameter from
+/// its position on, so each of them has to take it.
+#[test]
+fn callable_spec_checks_every_parameter_a_variadic_fills() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace App;
+
+/** @param callable(int ...): void $callback */
+function takesInts(callable $callback): void {}
+
+takesInts(static fn (int $a, string $b) => null);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("parameter 2 accepts string, but is passed int"),
+        "{messages:?}"
+    );
+}
+
+/// A template in the specification binds from the closure itself, so the
+/// closure's parameter type is the binding rather than a mismatch.
+#[test]
+fn callable_spec_with_a_template_parameter_accepts_any_closure_parameter() {
+    let php = r#"<?php
+namespace App;
+
+/**
+ * @template T
+ * @param callable(T): void $callback
+ * @param T $value
+ */
+function apply(callable $callback, mixed $value): void {}
+
+apply(static fn (string $s) => null, 'a');
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A closure parameter's class hint is read against the file's namespace
+/// first, as PHP reads it, so it names the same class the specification
+/// does rather than a global class of the same short name.
+#[test]
+fn callable_spec_resolves_a_closure_parameter_hint_in_the_file_namespace() {
+    let php = r#"<?php
+namespace App;
+
+class Error {}
+
+/**
+ * @param list<Error> $errors
+ * @param callable(Error, Error): int $compare
+ */
+function sortErrors(array $errors, callable $compare): void {}
+
+sortErrors([], static fn (Error $a, Error $b): int => 0);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A call proxied through `@mixin` runs on the mixin object, so a
+/// `Closure(static)` parameter of the mixin's method hands the closure the
+/// mixin class, not the class the call was written on.
+#[test]
+fn callable_spec_binds_static_in_a_mixin_parameter_to_the_mixin() {
+    let php = r#"<?php
+namespace App;
+
+class Builder
+{
+    /**
+     * @param \Closure(static): mixed $column
+     * @return $this
+     */
+    public function where(\Closure $column): static { return $this; }
+}
+
+/** @mixin Builder */
+class Relation
+{
+    public function __call(string $method, array $args): mixed { return null; }
+}
+
+function f(Relation $relation): void {
+    $relation->where(function (Builder $query): void {});
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `array_filter` hands its callback the value, the key, or both depending
+/// on the mode, so a callback that fits any of those forms is accepted and
+/// one that fits none is not.
+#[test]
+fn array_filter_accepts_a_callback_for_whichever_mode_it_takes() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+/** @param array<int, string> $lines */
+function f(array $lines): void {
+    array_filter($lines, static fn (string $line): bool => $line !== '');
+    array_filter($lines, static fn (int $number): bool => $number > 3, ARRAY_FILTER_USE_KEY);
+    array_filter($lines, static fn (string $line, int $number): bool => $number > 3, ARRAY_FILTER_USE_BOTH);
+    array_filter($lines, static fn (array $nope): bool => true);
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("Closure(array)"), "{messages:?}");
 }
 
 // ─── Required array-shape keys ──────────────────────────────────────────────
@@ -9805,7 +10126,7 @@ function takesConfig(array $config): void {}
 
 takesConfig(['host' => 'localhost']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("missing required key 'port'"),
@@ -9823,7 +10144,7 @@ function takesConfig(array $config): void {}
 
 takesConfig([]);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("missing required keys 'host', 'port'"),
@@ -9839,7 +10160,7 @@ function takesConfig(array $config): void {}
 
 takesConfig(['port' => 3306]);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("missing required keys 'host', 'user'"),
@@ -9863,7 +10184,7 @@ takesConfig(['port' => 3306, 'host' => 'localhost']);
 takesConfig(['host' => 'localhost', 'port' => 3306, 'debug' => true]);
 takesOptional(['host' => 'localhost']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9878,7 +10199,7 @@ function takesPair(array $pair): void {}
 takesPair(['a', 'b']);
 takesPair([0 => 'a', 1 => 'b']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9903,7 +10224,7 @@ $partial = ['host' => 'localhost'];
 takesConfig($partial);
 takesConfig(build(true));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9921,7 +10242,7 @@ function takesConfig(array $config): void {}
 takesConfig(['host' => 'localhost', PORT_KEY => 3306]);
 takesConfig(['host' => 'localhost', ...['port' => 3306]]);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -9941,7 +10262,7 @@ function takesItems(array $items): void {}
 takesPair([1 => 'x', 0 => 'y']);
 takesItems([1 => 'x', 0 => 'y']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
         messages
@@ -9966,7 +10287,7 @@ function takesItems(array $items): void {}
 takesItems([0 => 'x', 2 => 'y']);
 takesItems(['first' => 'x', 'second' => 'y']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 2, "got {messages:?}");
 }
 
@@ -9986,7 +10307,7 @@ takesPair(['x', 'y']);
 takesItems([0 => 'x', 1 => 'y']);
 takesItems(['x', 'y']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10000,7 +10321,7 @@ function takesPair(array $pair): void {}
 
 takesPair([1 => 'x', 0 => 'y']);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10017,7 +10338,7 @@ $items[1] = 'x';
 $items[0] = 'y';
 takesItems($items);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10037,7 +10358,7 @@ $body = content() ?: '';
 useString($body);
 useString(content() ?: '');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10054,7 +10375,7 @@ function content() { return ''; }
 
 useString(content() ? content() : '');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -10075,7 +10396,7 @@ function pick() { return null; }
 useAOrB(pick() ?: new A());
 useA(pick() ?: new A());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -10094,7 +10415,7 @@ function content() { return ''; }
 $x = content();
 useString($x ? $x : '');
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10114,7 +10435,7 @@ function parseImage(array $fragments): bool|string { return false; }
 
 useInt(parseImage([]));
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("false|string"),
@@ -10136,7 +10457,7 @@ function widen(): bool|string { return ''; }
 
 useString(widen());
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("bool|string"),
@@ -10160,7 +10481,7 @@ function inspect($value): void {
     }
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10181,7 +10502,7 @@ if ($image !== false) {
     useString($image);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10200,7 +10521,7 @@ while ($line !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10219,7 +10540,7 @@ if ($line !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("null"),
@@ -10244,7 +10565,7 @@ function run(array $items): void {
     takesFoo($items[0]);
 }
 "#;
-    let messages = type_error_messages(&collect_slow(php));
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10262,7 +10583,7 @@ function run(array $items): void {
     takesFoo($items['main']);
 }
 "#;
-    let messages = type_error_messages(&collect_slow(php));
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10281,7 +10602,7 @@ function run(array $items): void {
     takesFoo($items['b']);
 }
 "#;
-    let messages = type_error_messages(&collect_slow(php));
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -10302,7 +10623,7 @@ function test(): void {
     takesString(tempnam(sys_get_temp_dir(), 'y'));
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10322,7 +10643,7 @@ function test(): void {
     takesString($value);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(
         messages.iter().any(|m| m.contains("false")),
         "expected the `false` branch to still be reported, got {messages:?}"
@@ -10341,7 +10662,7 @@ function test(): void {
     takesInt($pos);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(
         messages.iter().any(|m| m.contains("false")),
         "expected strpos's `false` to still be reported, got {messages:?}"
@@ -10364,7 +10685,7 @@ function test(): void {
     takesString($tmp);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 /// Rejoining after a branch says nothing about a value neither side
@@ -10402,7 +10723,7 @@ function afterWhile(bool $flag): void {
     takesString($tmp);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10424,7 +10745,7 @@ function test(bool $flag): void {
     takesString($value);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(
         messages.iter().any(|m| m.contains("false")),
         "expected the `false` branch to still be reported, got {messages:?}"
@@ -10478,7 +10799,7 @@ while ($line !== false) {
     $line = readLine();
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10498,7 +10819,7 @@ while ($line !== null) {
     $line = readLine();
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10519,7 +10840,7 @@ while ($line !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("string|false"),
@@ -10543,7 +10864,7 @@ while (($line = readLine()) !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10561,7 +10882,7 @@ while ($line = readLine()) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10579,7 +10900,7 @@ while (($line = readLine()) !== null) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10596,7 +10917,7 @@ if (($line = readLine()) !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10614,7 +10935,7 @@ if (($line = readLine()) !== false) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("null"),
@@ -10639,7 +10960,7 @@ for (; $line !== false; $line = readLine()) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10657,7 +10978,7 @@ for (; ($row = readRow()) !== false; ) {
     useCsvRow($row);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10676,7 +10997,7 @@ for (; $line !== false; $line = readLine()) {
     useString($line);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("null"),
@@ -10701,7 +11022,7 @@ $line = readLine();
 assert($line !== false);
 useString($line);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10718,7 +11039,7 @@ $line = readLine();
 assert($line !== null);
 useString($line);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10736,7 +11057,7 @@ $line = readLine();
 assert(is_string($line));
 useString($line);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10755,7 +11076,7 @@ assert($first !== false && $second !== false);
 useString($first);
 useString($second);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10775,7 +11096,7 @@ $line = readLine();
 \assert($line !== false);
 useString($line);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10793,7 +11114,7 @@ $line = readLine();
 assert($line !== false);
 useString($line);
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("null"),
@@ -10817,7 +11138,7 @@ function test(string $text): void {
     useString(substr_replace($text, 'b', 0, 1));
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10852,7 +11173,7 @@ function test(array $lines): void {
     useString(str_replace('a', 'b', $lines));
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
 }
 
@@ -10868,7 +11189,7 @@ function test(mixed $value): void {
     useString(json_encode($value, JSON_THROW_ON_ERROR));
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10894,7 +11215,7 @@ class Encoder {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10919,7 +11240,7 @@ class Encoder {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -10943,7 +11264,7 @@ function test(): void {
     useProvider(SiteCertificate::SELF_SIGNED);
 }
 "#;
-    let messages = type_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("'SelfSigned'"),
@@ -10967,7 +11288,7 @@ class Encoder {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("false"),
@@ -10985,7 +11306,7 @@ function test(mixed $value): void {
     useString(json_encode($value));
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("false"),
@@ -11021,7 +11342,7 @@ function upload(Request $request, ImageService $images): void {
     $images->store($file);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -11049,7 +11370,7 @@ function upload(Request $request, ImageService $images): void {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -11071,7 +11392,7 @@ function upload(UploadedFile|array|null $file, ImageService $images): void {
     $images->store($file);
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -11090,7 +11411,7 @@ function upload(UploadedFile|array|null $file, ImageService $images): void {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -11118,7 +11439,7 @@ function upload(Request $request, ImageService $images): void {
     }
 }
 "#;
-    let messages = type_error_messages(&collect_with_full_stubs(php));
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(
         messages[0].contains("array<UploadedFile>"),
@@ -11178,7 +11499,7 @@ $reducible->reduce(
     backend.update_ast(uri, php);
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(uri, php, &mut diags);
-    let messages = type_error_messages(&diags);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -11257,7 +11578,7 @@ function acceptsKey(string $key): void {{
 }}
 "#
         );
-        let messages = type_error_messages(&collect(&php));
+        let messages = messages_with_code(&collect(&php), "type_mismatch_argument");
         assert_eq!(messages.len(), 1, "`{operand}`: got {messages:?}");
         assert!(
             messages[0].contains("'immutable'|'mutable'"),
@@ -11285,7 +11606,7 @@ function plain(string $key): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect(php)),
+        messages_with_code(&collect(php), "type_mismatch_argument"),
         vec!["Argument 1 ($x) expects int, got string"],
         "a call in the second namespace block should still be checked"
     );
@@ -11314,7 +11635,7 @@ function run(): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect(php)),
+        messages_with_code(&collect(php), "type_mismatch_argument"),
         vec!["Argument 1 ($x) expects int, got string"]
     );
 }
@@ -11346,7 +11667,7 @@ function run(): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect(php)),
+        messages_with_code(&collect(php), "type_mismatch_argument"),
         vec!["Argument 1 ($c) expects Carbon, got ?Carbon"],
         "the inline call form should bind `?Carbon`, like the variable form does"
     );
@@ -11375,7 +11696,7 @@ function run(): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect(php)),
+        messages_with_code(&collect(php), "type_mismatch_argument"),
         vec!["Argument 1 ($c) expects Carbon, got Carbon|string (string does not satisfy Carbon)"]
     );
 }
@@ -11402,7 +11723,10 @@ function run(): void {
     takesCarbon(passthrough(Carbon::create(2024)));
 }
 "#;
-    assert_eq!(type_error_messages(&collect(php)), Vec::<String>::new());
+    assert_eq!(
+        messages_with_code(&collect(php), "type_mismatch_argument"),
+        Vec::<String>::new()
+    );
 }
 
 // ─── Narrowing inside an echoed expression ──────────────────────────────────
@@ -11420,7 +11744,7 @@ function render(?string $c): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect_slow(php)),
+        messages_with_code(&collect_slow(php), "type_mismatch_argument"),
         Vec::<String>::new()
     );
 }
@@ -11435,7 +11759,7 @@ function render(?string $c): void {
 }
 "#;
     assert_eq!(
-        type_error_messages(&collect_slow(php)),
+        messages_with_code(&collect_slow(php), "type_mismatch_argument"),
         Vec::<String>::new()
     );
 }
@@ -11455,7 +11779,10 @@ function render(Rule|string $rule): void {
     backend.update_ast(uri, php);
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri, php, &mut diags);
-    assert_eq!(type_error_messages(&diags), Vec::<String>::new());
+    assert_eq!(
+        messages_with_code(&diags, "type_mismatch_argument"),
+        Vec::<String>::new()
+    );
 }
 
 /// A `@return static` method called on an intersection-typed receiver
@@ -11484,7 +11811,7 @@ function test(IfaceA&IfaceB $scope): void
     needsBoth($filtered);
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "static on an IfaceA&IfaceB receiver should stay IfaceA&IfaceB, got: {msgs:?}"
@@ -11516,7 +11843,7 @@ namespace App {
     }
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "new self() must check App\\Error::__construct, not \\Error's, got: {msgs:?}"
@@ -11554,7 +11881,7 @@ namespace App\Sub {
     }
 }
 "#;
-    let msgs = type_error_messages(&collect(php));
+    let msgs = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "inline @var list<Error> must mean App\\Sub\\Error, got: {msgs:?}"
@@ -11624,7 +11951,7 @@ class Analyser
     backend.update_ast(&uri, content);
     let mut diags = Vec::new();
     backend.collect_argument_type_diagnostics(&uri, content, &mut diags);
-    let msgs = type_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
         msgs.is_empty(),
         "inline @var list<Error> must mean PHPStan\\Analyser\\Error, got: {msgs:?}"
@@ -11646,7 +11973,7 @@ function f(int $count): void {
     assert!(
         !has_type_error(&collect(php)),
         "PHP widens an int to a float on the way in, bounds and all: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11664,7 +11991,7 @@ function f(string $c): void {
     assert!(
         !has_type_error(&collect(php)),
         "A string that names a class always has content: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11684,7 +12011,7 @@ function f($k): void {
         !has_type_error(&collect(php)),
         "`array-key` is the key type of an array nobody described, so one \
          half fitting is the whole bargain: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11702,7 +12029,7 @@ function f(): void {
         !has_type_error(&collect(php)),
         "`&` over two strings produces a string, and neither operand rules \
          that out: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11721,7 +12048,7 @@ function f(array $placeholder): void {
         !has_type_error(&collect(php)),
         "`mixed - 1` is `int` or `float` depending on the value, and nothing \
          about the element rules either out: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11744,7 +12071,7 @@ function f(string $s): void {
         !has_type_error(&collect_with_full_stubs(php)),
         "The addition already answered `int|float` for want of a typed \
          operand; the subtraction must not turn that into a promise: {:?}",
-        type_error_messages(&collect_with_full_stubs(php))
+        messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument")
     );
 }
 
@@ -11781,7 +12108,7 @@ function f(array $json): void {
         !has_type_error(&collect_with_full_stubs(php)),
         "Summing values nobody typed is `int` or `float` by the same rule \
          adding two of them is: {:?}",
-        type_error_messages(&collect_with_full_stubs(php))
+        messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument")
     );
 }
 
@@ -11844,7 +12171,7 @@ class Factory
         "The body can also hand back an array or its own `mixed` argument, \
          so reading it as one of two classes states a narrower answer than \
          the truth: {:?}",
-        type_error_messages(&collect(php))
+        messages_with_code(&collect(php), "type_mismatch_argument")
     );
 }
 
@@ -11899,7 +12226,7 @@ class Caller
         !has_type_error(&collect_with_body(php)),
         "`keyFor` assigns `$key` on every path, so the `?string` it declares \
          is what may go in, not what comes back out: {:?}",
-        type_error_messages(&collect_with_body(php))
+        messages_with_code(&collect_with_body(php), "type_mismatch_argument")
     );
 }
 
@@ -11938,6 +12265,48 @@ class Caller
 }
 
 #[test]
+fn a_callee_in_a_later_namespace_block_reads_its_names_in_that_namespace() {
+    let php = r#"<?php
+namespace First {
+    class Widget {}
+}
+
+namespace Second {
+    class Widget {}
+
+    class Ops
+    {
+        public static function fill(&$out): void
+        {
+            $out = new Widget();
+        }
+    }
+
+    class Caller
+    {
+        public function run(): Widget
+        {
+            Ops::fill($widget);
+
+            return $this->takesWidget($widget);
+        }
+
+        private function takesWidget(Widget $w): Widget
+        {
+            return $w;
+        }
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect_with_body(php)),
+        "`fill` sits in the `Second` block, so the `Widget` it assigns is \
+         `Second\\Widget`, not the first block's: {:?}",
+        messages_with_code(&collect_with_body(php), "type_mismatch_argument")
+    );
+}
+
+#[test]
 fn a_body_that_contradicts_the_declared_out_type_does_not_replace_it() {
     let php = r#"<?php
 class Ops
@@ -11967,7 +12336,7 @@ class Caller
     assert!(
         !has_type_error(&collect_with_body(php)),
         "A reading of the body may sharpen the declaration, never overrule it: {:?}",
-        type_error_messages(&collect_with_body(php))
+        messages_with_code(&collect_with_body(php), "type_mismatch_argument")
     );
 }
 
@@ -11986,6 +12355,543 @@ function collectAll(string $text): void
         "On the second pass `$matches` still holds the offset-capture shape \
          the first left behind, and the declared `?array` describes what \
          `preg_match_all` writes, not what it accepts: {:?}",
-        type_error_messages(&collect_with_full_stubs(php))
+        messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument")
     );
+}
+
+/// A variable that takes a first-class callable of itself names itself as the
+/// callable to resolve, so the resolution has to stop rather than follow the
+/// name back to the same assignment forever.
+#[test]
+fn a_first_class_callable_assigned_from_itself_terminates() {
+    let php = r#"<?php
+function g($callback, $b) {
+    $callback = $callback(...);
+
+    return $callback($b);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// The cycle can be spread over two variables, so stopping only when the
+/// callable names the variable the resolution started from is not enough.
+#[test]
+fn a_first_class_callable_cycle_across_two_variables_terminates() {
+    let php = r#"<?php
+function g($a, $b, $value) {
+    $a = $b(...);
+    $b = $a(...);
+
+    return $a($value);
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// Breaking the cycle must not cost a first-class callable chain that does
+/// terminate: `$b` still resolves through `$a` to the function it names.
+#[test]
+fn a_first_class_callable_forwarded_through_another_variable_still_resolves() {
+    let php = r#"<?php
+function takesInt(int $value): void {}
+
+function g() {
+    $a = takesInt(...);
+    $b = $a(...);
+
+    $b('not an int');
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── Array shapes against typed arrays and other shapes ──────────────
+
+#[test]
+fn a_shape_key_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 'one']);
+f(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn a_list_shape_holding_the_wrong_type_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list{string} $b */
+function f(array $b): void {}
+f([null]);
+f(['x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_empty_array_is_not_a_non_empty_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param non-empty-list<int> $c */
+function f(array $c): void {}
+/** @param non-empty-array<string, int> $c */
+function g(array $c): void {}
+f([]);
+g([]);
+f([1]);
+g(['a' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_a_string_key_is_not_a_list() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param list<string> $d */
+function f(array $d): void {}
+/** @param array<int, string> $d */
+function g(array $d): void {}
+/** @param array<string, string> $d */
+function h(array $d): void {}
+f(['x', 'k' => 'y']);
+g(['x', 'k' => 'y']);
+h(['x', 'k' => 'y']);
+f(['x', 'y']);
+g([3 => 'x', 'y']);
+h(['k' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+}
+
+#[test]
+fn a_shape_with_extra_keys_still_satisfies_a_narrower_shape() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @param array{foo: int} $a */
+function f(array $a): void {}
+f(['foo' => 1, 'buz' => 'x']);
+"#;
+    assert!(!has_type_error(&collect(php)));
+}
+
+// ── A subclass binding its parent's template ────────────────────────
+
+#[test]
+fn a_subclass_that_binds_its_parents_template_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ class Box {}
+/** @extends Box<int> */ final class IntBox extends Box {}
+/** @extends Box<string> */ final class StringBox extends Box {}
+/** @param Box<string> $box */ function f(Box $box): void {}
+f(new IntBox());
+f(new StringBox());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_interface_binding_through_implements_is_judged_by_the_binding() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T */ interface Source {}
+/**
+ * @template T
+ * @extends Source<T>
+ */
+interface Named extends Source {}
+/** @implements Named<int> */ final class IntSource implements Named {}
+/** @param Source<string> $s */ function f(Source $s): void {}
+/** @param Source<int> $s */ function g(Source $s): void {}
+f(new IntSource());
+g(new IntSource());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+// ── A template's bound at the call that binds it ────────────────────
+
+#[test]
+fn an_argument_outside_a_function_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/**
+ * @template T of array
+ * @param T $a
+ */
+function g($a): void {}
+g(1);
+g([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_argument_outside_a_class_templates_bound_is_reported() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @template T of array */
+final class Collection {
+    /** @param T $items */
+    public function __construct(public $items) {}
+}
+new Collection(1);
+new Collection([1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
+#[test]
+fn an_enclosing_templates_class_string_satisfies_a_bounded_template() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {
+    /**
+     * @template T of Node
+     * @param class-string<T> $type
+     * @return T|null
+     */
+    public function first($type): ?Node {
+        return $this->first($type);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn a_bound_check_ignores_templates_another_argument_binds() {
+    let php = r#"<?php
+declare(strict_types=1);
+class Node {}
+/**
+ * @template TNode of Node
+ * @template TValue
+ */
+interface Collector {}
+final class Emitted {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function __construct(string $type, mixed $data) {}
+}
+final class Scope {
+    /**
+     * @template TNode of Node
+     * @template TValue
+     * @param class-string<Collector<TNode, TValue>> $type
+     * @param TValue $data
+     */
+    public function emit(string $type, mixed $data): void {
+        new Emitted($type, $data);
+    }
+}
+"#;
+    assert!(
+        !has_type_error(&collect(php)),
+        "got {:?}",
+        messages_with_code(&collect(php), "type_mismatch_argument")
+    );
+}
+
+/// The Eloquent builder's `chunk()` hands its callback the collection its
+/// `get()` builds, which is the model's own (custom) collection, even though
+/// the shared `BuildsQueries` trait spells the parameter as the base
+/// `Support\Collection`. A callback typed with the collection it really
+/// receives is fine; one typed with something unrelated is not. A
+/// parameter declared as the base collection still accepts one, since that
+/// is a demand on the caller rather than something Eloquent builds.
+#[test]
+fn eloquent_chunk_callback_receives_the_models_collection() {
+    let php = r#"<?php
+namespace Illuminate\Support {
+    /** @template TKey of array-key @template TValue */
+    class Collection {}
+}
+namespace Illuminate\Database\Concerns {
+    /** @template TValue */
+    trait BuildsQueries {
+        /**
+         * @param  int  $count
+         * @param  callable(\Illuminate\Support\Collection<int, TValue>, int): mixed  $callback
+         * @return bool
+         */
+        public function chunk($count, callable $callback) { return true; }
+    }
+}
+namespace Illuminate\Database\Eloquent {
+    abstract class Model {
+        /** @return \Illuminate\Database\Eloquent\Builder<static> */
+        public static function query() {}
+    }
+    /** @template TModel of \Illuminate\Database\Eloquent\Model */
+    class Builder {
+        /** @use \Illuminate\Database\Concerns\BuildsQueries<TModel> */
+        use \Illuminate\Database\Concerns\BuildsQueries;
+        /** @return \Illuminate\Database\Eloquent\Collection<int, TModel> */
+        public function get() {}
+    }
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends \Illuminate\Support\Collection<TKey, TModel>
+     */
+    class Collection extends \Illuminate\Support\Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+    use Illuminate\Database\Eloquent\Model;
+
+    class Order extends Model {}
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    class Product extends Model {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    function takesProducts(ProductCollection $p): void {}
+
+    class Keeper {
+        /** @param Collection<int, Product> $products */
+        public function keep(Collection $products): void {}
+    }
+
+    /** @param Collection<int, Product> $plain */
+    function f(Collection $plain): void {
+        (new Keeper())->keep($plain);
+        Order::query()->chunk(100, function (Collection $orders): void {});
+        Product::query()->chunk(100, function (ProductCollection $products): void {});
+        Product::query()->chunk(100, function (\Illuminate\Support\Collection $products): void {});
+        Order::query()->chunk(100, function (ProductCollection $wrong): void {});
+        Product::query()->chunk(100, function (Collection $products): void {
+            if (!$products instanceof ProductCollection) {
+                $products = new ProductCollection();
+            }
+            takesProducts($products);
+        });
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("ProductCollection"), "{messages:?}");
+}
+
+/// A parameter merely *declared* as the base `Collection<int, Product>`
+/// might be a plain collection the caller built itself, so it does not
+/// get the custom-collection treatment the way a `get()`/`chunk()` value
+/// Eloquent actually produced does (see
+/// `eloquent_chunk_callback_receives_the_models_collection` above). Once
+/// an `instanceof ProductCollection` check proves it really is the custom
+/// collection, though, narrowing must update the tracked type string
+/// along with the class, or a later argument check still compares
+/// against the pre-narrowing `Collection<int, Product>` and reports a
+/// spurious mismatch.
+#[test]
+fn instanceof_on_a_declared_base_collection_narrows_to_the_custom_collection() {
+    let php = r#"<?php
+namespace Illuminate\Database\Eloquent {
+    /** @template TKey of array-key @template TModel */
+    class Collection {}
+    /** @template TCollection */
+    trait HasCollection {}
+}
+namespace App {
+    use Illuminate\Database\Eloquent\Collection;
+    use Illuminate\Database\Eloquent\HasCollection;
+
+    class Product {
+        /** @use HasCollection<ProductCollection> */
+        use HasCollection;
+    }
+
+    /**
+     * @template TKey of array-key
+     * @template TModel
+     * @extends Collection<TKey, TModel>
+     */
+    class ProductCollection extends Collection {}
+
+    function takesProducts(ProductCollection $p): void {}
+
+    /** @param Collection<int, Product> $c */
+    function f(Collection $c): void {
+        if ($c instanceof ProductCollection) {
+            takesProducts($c);
+        }
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// `Event::class` inside `Acme\Model\Events` names the `Event` declared in
+/// that namespace, even when a global class of the same short name is
+/// loaded (the `event` extension's `Event`, say).
+#[test]
+fn class_constant_names_the_same_namespace_class_over_a_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nfinal class Event {}\n");
+    backend.update_ast(
+        "file:///Model.php",
+        "<?php\nnamespace Acme\\Model;\nabstract class Model {}\n",
+    );
+    backend.update_ast(
+        "file:///Event.php",
+        "<?php\nnamespace Acme\\Model\\Events;\nuse Acme\\Model\\Model;\nclass Event extends Model {}\n",
+    );
+    let php = r#"<?php
+namespace Acme\Model\Events;
+
+use Acme\Model\Model;
+
+final class EventSubcategory extends Model
+{
+    /** @param class-string<Model> $related */
+    public function belongsTo(string $related): void {}
+
+    public function takesModel(Model $model): void {}
+
+    public function event(): void
+    {
+        $this->belongsTo(Event::class);
+        $class = Event::class;
+        $this->belongsTo($class);
+        $this->takesModel(new $class());
+    }
+}
+"#;
+    let messages = messages_with_code(
+        &collect_diagnostics_with(&backend, php, Backend::collect_argument_type_diagnostics),
+        "type_mismatch_argument",
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A branch that `!== null` makes impossible, after an `instanceof` chain
+/// has ruled out every class the value could be, holds `never` there, so
+/// nothing used inside it is checked against the `null` already excluded.
+#[test]
+fn no_argument_error_in_branch_a_null_check_makes_impossible() {
+    let php = r#"<?php
+class A {}
+class B {}
+class Item {
+    /** @var A|B|null */
+    public $key;
+}
+function describe(object $o): string { return ''; }
+function f(Item $item, ?A $p): void {
+    if ($item->key instanceof A) {
+        return;
+    } elseif ($item->key instanceof B) {
+        return;
+    } elseif ($item->key !== null) {
+        describe($item->key);
+    }
+    if ($p instanceof A) {
+        return;
+    } elseif ($p !== null) {
+        describe($p);
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A loop over an array known to be empty never binds its value variable,
+/// so the body must not see what a same-named variable held before it.
+#[test]
+fn a_loop_over_an_empty_array_does_not_bind_the_outer_value() {
+    let php = r#"<?php
+final class GeneratedConfig { public const EXTENSIONS = []; }
+function maybe(): ?string { return null; }
+function probe(array $lookup): bool {
+    $package = maybe();
+    foreach (array_keys(GeneratedConfig::EXTENSIONS) as $package) {
+        if (array_key_exists($package, $lookup)) {
+            return true;
+        }
+    }
+    return false;
+}
+"#;
+    let slow = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    assert!(!has_type_error(&slow), "slow: {slow:#?}");
+    let diags = collect_with_full_stubs(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+}
+
+/// An override's narrower native return type wins over an interface method
+/// declared `: ?self` that reaches the class through an ancestor: binding
+/// that `self` to the interface must not make the inherited `?Node` look
+/// like a docblock type richer than the override's own `?Owner`.
+#[test]
+fn override_return_type_beats_an_inherited_interface_self() {
+    let php = r#"<?php
+interface Node { public function getParent(): ?self; }
+interface Artifact extends Node {}
+abstract class AbstractArtifact implements Artifact {
+    public function getParent(): ?Node { return null; }
+}
+abstract class AbstractCallable extends AbstractArtifact {}
+class Owner extends AbstractArtifact {}
+class Method extends AbstractCallable {
+    public function getParent(): ?Owner { return null; }
+}
+function takes_owner(Owner $o): void {}
+function probe(Method $m): void {
+    $parent = $m->getParent();
+    if ($parent) {
+        takes_owner($parent);
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
 }

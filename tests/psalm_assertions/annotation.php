@@ -75,3 +75,23 @@ namespace PsalmTest_annotation_4 {
     assertType('array{"foo\\bar\nbaz": "literal"}', $_arr);
 }
 
+// Test: multipleLineGenericArray2
+namespace PsalmTest_annotation_5 {
+    /**
+     * @psalm-type TRelAlternate =
+     * list<
+     *      array{
+     *          href: string,
+     *          lang: string
+     *      }
+     * >
+     */
+    class A {
+        /** @return TRelAlternate */
+        public function ret(): array { return []; }
+    }
+
+    $_ = (new A)->ret();
+
+    assertType('list<array{href: string, lang: string}>', $_);
+}

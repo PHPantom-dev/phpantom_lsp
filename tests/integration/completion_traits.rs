@@ -4698,6 +4698,78 @@ async fn test_completion_require_implements_this_members_same_file() {
     }
 }
 
+/// Ported from Mago issue_1070.php: `@require-implements` surfaces a
+/// property declared through a property hook (`{ get; set; }`) on the
+/// required interface via `$this->`, not just plain methods.
+#[tokio::test]
+async fn test_completion_require_implements_property_hook_member() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///require_implements_property_hook.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "interface HasQux {\n",
+        "    public int $qux {\n",
+        "        get;\n",
+        "        set;\n",
+        "    }\n",
+        "}\n",
+        "/** @require-implements HasQux */\n",
+        "trait Baz {\n",
+        "    public function process(): void {\n",
+        "        $this->\n",
+        "    }\n",
+        "}\n",
+    );
+
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    // `$this->` on line 10
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 15,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+
+    assert!(result.is_some(), "Completion should return results");
+    match result.unwrap() {
+        CompletionResponse::Array(items) => {
+            let property_names: Vec<&str> = items
+                .iter()
+                .filter(|i| i.kind == Some(CompletionItemKind::PROPERTY))
+                .map(|i| i.filter_text.as_deref().unwrap())
+                .collect();
+
+            assert!(
+                property_names.contains(&"qux"),
+                "$this-> inside a require-implements trait should offer the \
+                 required interface's hooked property 'qux', got: {:?}",
+                property_names
+            );
+        }
+        _ => panic!("Expected CompletionResponse::Array"),
+    }
+}
+
 // ─── Body-inferred `return $this` in trait methods ──────────────────────────
 
 /// A trait method whose body is `return $this;` (no declared return type)

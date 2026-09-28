@@ -1,0 +1,12 @@
+// test: the key of a foreach over a list is a non-negative int
+// feature: hover
+// expect: $k = int<0, max>
+---
+<?php
+
+/** @param list<string> $l */
+function f(array $l): void {
+    foreach ($l as $k => $v) {
+        echo $<>k;
+    }
+}

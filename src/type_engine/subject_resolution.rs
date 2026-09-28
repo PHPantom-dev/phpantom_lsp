@@ -51,15 +51,15 @@ pub(crate) fn resolve_subject_type(
 
     match trimmed {
         "self" => {
-            let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
+            let fqn = find_enclosing_class_fqn(ctx.local_classes, access_offset)?;
             Some(PhpType::named(atom(&fqn)))
         }
         "static" => {
-            let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
+            let fqn = find_enclosing_class_fqn(ctx.local_classes, access_offset)?;
             Some(PhpType::static_type(atom(&fqn)))
         }
         "$this" => {
-            let fqn = find_enclosing_class_fqn(ctx.local_classes, ctx.namespace, access_offset)?;
+            let fqn = find_enclosing_class_fqn(ctx.local_classes, access_offset)?;
             Some(PhpType::this_type(atom(&fqn)))
         }
         "parent" => {
@@ -128,11 +128,7 @@ pub(crate) fn resolve_subject_type(
 }
 
 /// Find the FQN of the class enclosing `offset`.
-fn find_enclosing_class_fqn(
-    local_classes: &[Arc<ClassInfo>],
-    namespace: &Option<String>,
-    offset: u32,
-) -> Option<String> {
+fn find_enclosing_class_fqn(local_classes: &[Arc<ClassInfo>], offset: u32) -> Option<String> {
     let cls = local_classes
         .iter()
         .find(|c| {
@@ -153,9 +149,5 @@ fn find_enclosing_class_fqn(
                 .find(|c| !c.name.starts_with("__anonymous@"))
         })?;
 
-    if let Some(ns) = namespace {
-        Some(format!("{}\\{}", ns, cls.name))
-    } else {
-        Some(cls.name.to_string())
-    }
+    Some(cls.fqn().to_string())
 }

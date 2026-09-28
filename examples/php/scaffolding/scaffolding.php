@@ -2865,3 +2865,47 @@ class ScaffoldingQualifiedName extends ScaffoldingNameNode
 {
     public string $namespacePrefix = '';
 }
+
+// ── Member visibility scaffolding ───────────────────────────────────────────
+
+class ScaffoldingVault
+{
+    public const REGION = 'eu';
+
+    protected const ROTATION = 'monthly';
+
+    private const MASTER_KEY = 'master';
+
+    public string $label = 'vault';
+
+    protected string $branch = 'main';
+
+    private string $pin = '0000';
+
+    private static int $openCount = 0;
+
+    public function open(): string
+    {
+        return $this->pin;
+    }
+
+    protected function audit(): string
+    {
+        return $this->branch;
+    }
+
+    private function rotate(): string
+    {
+        return self::MASTER_KEY;
+    }
+}
+
+class ScaffoldingBranchVault extends ScaffoldingVault
+{
+    private string $ledger = 'empty';
+
+    public function ledger(): string
+    {
+        return $this->ledger;
+    }
+}

@@ -233,6 +233,7 @@ fn insert_alphabetically_before_first() {
         existing: vec![(2, "app\\zoo".to_string())],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("App\\Alpha"),
@@ -250,6 +251,7 @@ fn insert_alphabetically_after_last() {
         existing: vec![(2, "app\\alpha".to_string())],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("App\\Zoo"),
@@ -268,6 +270,7 @@ fn insert_alphabetically_in_the_middle() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("App\\Middle"),
@@ -284,6 +287,7 @@ fn insert_uses_fallback_when_no_existing() {
         existing: vec![],
         fallback_line: 2,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("App\\Foo"),
@@ -302,6 +306,7 @@ fn insert_case_insensitive_comparison() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("APP\\MIDDLE"),
@@ -324,6 +329,7 @@ fn insert_among_three_existing() {
         ],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert_eq!(
         info.insert_position_for("D\\D"),
@@ -397,6 +403,7 @@ fn build_edit_inserts_at_correct_alpha_position() {
         existing: vec![(2, "app\\alpha".to_string()), (3, "app\\zoo".to_string())],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     let edits = build_use_edit("App\\Middle", &info, &Some("App".to_string()))
         .expect("should produce edit");
@@ -417,6 +424,7 @@ fn build_edit_skips_global_class_without_namespace() {
         existing: vec![],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert!(build_use_edit("PDO", &info, &None).is_none());
 }
@@ -427,6 +435,7 @@ fn build_edit_includes_global_class_with_namespace() {
         existing: vec![],
         fallback_line: 2,
         has_namespace: true,
+        template: None,
     };
     let edits =
         build_use_edit("PDO", &info, &Some("App".to_string())).expect("should produce edit");
@@ -525,6 +534,7 @@ fn build_function_edit_skips_global_function() {
         existing: vec![],
         fallback_line: 1,
         has_namespace: false,
+        template: None,
     };
     assert!(
         build_use_function_edit("array_map", &info).is_none(),
@@ -538,6 +548,7 @@ fn build_function_edit_namespaced_no_existing_imports() {
         existing: vec![],
         fallback_line: 2,
         has_namespace: false,
+        template: None,
     };
     let edits = build_use_function_edit("Illuminate\\Support\\enum_value", &info)
         .expect("namespaced function should produce edit");
@@ -650,11 +661,115 @@ fn build_function_edit_deeply_namespaced() {
         existing: vec![],
         fallback_line: 3,
         has_namespace: false,
+        template: None,
     };
     let edits = build_use_function_edit("Vendor\\Package\\Sub\\Module\\helper_func", &info)
         .expect("deeply namespaced function should produce edit");
     assert_eq!(
         edits[0].new_text,
         "use function Vendor\\Package\\Sub\\Module\\helper_func;\n"
+    );
+}
+
+// ── analyze_template_use_block + build_use_edit ─────────────────
+
+/// Apply the edits to the template they were planned against, which is
+/// what the editor does once the source map has moved them back.
+fn apply(template: &str, edits: &[TextEdit]) -> String {
+    let offset = |position: Position| {
+        template
+            .split_inclusive('\n')
+            .take(position.line as usize)
+            .map(str::len)
+            .sum::<usize>()
+            + position.character as usize
+    };
+    let mut result = template.to_string();
+    for edit in edits {
+        result.replace_range(
+            offset(edit.range.start)..offset(edit.range.end),
+            &edit.new_text,
+        );
+    }
+    result
+}
+
+/// A template with nothing to sort against takes the import at its top,
+/// written as the directive Blade imports with.
+#[test]
+fn a_templates_first_import_goes_to_the_top_as_a_use_directive() {
+    let template = "<h1>{{ $title }}</h1>\n";
+    let info = analyze_template_use_block(template, None);
+    let edits = build_use_edit("App\\Models\\Widget", &info, &None).expect("an import is needed");
+
+    assert_eq!(
+        apply(template, &edits),
+        "@use('App\\Models\\Widget')\n<h1>{{ $title }}</h1>\n"
+    );
+}
+
+/// The directives already in the template are the block the new one joins,
+/// and it is written at the end of the last line it sorts behind.
+#[test]
+fn a_template_import_sorts_among_the_directives_it_already_has() {
+    let template = "@use('App\\Models\\Account')\n@use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n";
+    let info = analyze_template_use_block(template, None);
+
+    let between = build_use_edit("App\\Models\\Widget", &info, &None).expect("an import is needed");
+    assert_eq!(
+        apply(template, &between),
+        "@use('App\\Models\\Account')\n@use('App\\Models\\Widget')\n\
+         @use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n"
+    );
+
+    let after = build_use_edit("App\\Models\\Zulu", &info, &None).expect("an import is needed");
+    assert_eq!(
+        apply(template, &after),
+        "@use('App\\Models\\Account')\n@use('App\\Models\\Zone')\n\
+         @use('App\\Models\\Zulu')\n<p>{{ $x }}</p>\n"
+    );
+
+    let before =
+        build_use_edit("App\\Models\\Aardvark", &info, &None).expect("an import is needed");
+    assert_eq!(
+        apply(template, &before),
+        "@use('App\\Models\\Aardvark')\n@use('App\\Models\\Account')\n\
+         @use('App\\Models\\Zone')\n<p>{{ $x }}</p>\n"
+    );
+}
+
+/// A function import keeps its modifier inside the directive's literal,
+/// which is how Blade spells one, and still sorts after the classes.
+#[test]
+fn a_template_function_import_keeps_the_modifier_in_the_literal() {
+    let template = "@use('App\\Models\\Widget')\n<p>{{ $x }}</p>\n";
+    let info = analyze_template_use_block(template, None);
+    let edits = build_use_function_edit("App\\Support\\format_price", &info)
+        .expect("a namespaced function needs an import");
+
+    assert_eq!(
+        apply(template, &edits),
+        "@use('App\\Models\\Widget')\n@use('function App\\Support\\format_price')\n\
+         <p>{{ $x }}</p>\n"
+    );
+}
+
+/// The modifier and the alias forms a template may already have are read
+/// as the imports they are, so an equal name is not imported twice.
+#[test]
+fn the_directive_forms_a_template_already_has_are_read_as_imports() {
+    let template = "@use('App\\Models\\Widget as Gadget')\n@use('function App\\Support\\helper')\n";
+    let info = analyze_template_use_block(template, None);
+
+    assert_eq!(
+        info.existing,
+        vec![
+            (0, "app\\models\\widget".to_string()),
+            (1, "function app\\support\\helper".to_string()),
+        ]
+    );
+    assert!(
+        build_use_function_edit("App\\Support\\helper", &info).is_none(),
+        "the function is already imported"
     );
 }

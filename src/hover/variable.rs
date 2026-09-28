@@ -130,7 +130,11 @@ pub(super) fn build_variable_hover_body(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     template_line: Option<&str>,
 ) -> String {
-    let members = ty.union_members();
+    // A template bounded by a union is still the one template.
+    let members = match ty.as_template_param() {
+        Some(_) => vec![ty],
+        None => ty.union_members(),
+    };
 
     // Count how many members are non-trivial class types (not scalars,
     // not `null`, not `void`, etc.).  Only render separate blocks when
@@ -183,6 +187,10 @@ fn resolve_type_namespace_structured(
     ty: &PhpType,
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
+    // A template's name is not in any namespace, whatever its bound is.
+    if ty.as_template_param().is_some() {
+        return None;
+    }
     let base = ty.base_name()?;
 
     if let Some(cls) = class_loader(base) {

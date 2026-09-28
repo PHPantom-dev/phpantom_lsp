@@ -1,6 +1,7 @@
 use phpantom_lsp::composer::{
     extract_path_repo_psr4_mappings, extract_require_once_paths, normalise_path,
-    parse_autoload_classmap, parse_autoload_files, parse_composer_json, resolve_class_path,
+    parse_autoload_classmap, parse_autoload_files, parse_autoload_namespaces, parse_composer_json,
+    resolve_class_path,
 };
 use std::fs;
 use std::path::Path;
@@ -1041,4 +1042,32 @@ fn test_path_repo_psr4_missing_dir_skipped() {
     );
 
     assert!(extract_path_repo_psr4_mappings(ws.root(), "vendor").is_empty());
+}
+
+/// A link inside a PSR-0 directory that points back up the tree must not
+/// send the scan round it until the kernel's symlink limit stops it.
+#[cfg(unix)]
+#[test]
+fn test_psr0_scan_does_not_follow_a_link_back_up_the_tree() {
+    let ws = TestWorkspace::new("{}");
+    ws.create_php_file(
+        "vendor/composer/autoload_namespaces.php",
+        "<?php\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'Legacy_' => array($vendorDir . '/legacy/lib'),\n);\n",
+    );
+    ws.create_php_file(
+        "vendor/legacy/lib/Legacy/Widget.php",
+        "<?php\nclass Legacy_Widget {}\n",
+    );
+    std::os::unix::fs::symlink(
+        ws.root().join("vendor/legacy/lib"),
+        ws.root().join("vendor/legacy/lib/Legacy/loop"),
+    )
+    .expect("failed to create symlink");
+
+    let classmap = parse_autoload_namespaces(ws.root(), "vendor");
+    assert_eq!(
+        classmap.get("Legacy_Widget"),
+        Some(&ws.root().join("vendor/legacy/lib/Legacy/Widget.php")),
+        "the class is found at its real path, not under the looping link: {classmap:?}"
+    );
 }

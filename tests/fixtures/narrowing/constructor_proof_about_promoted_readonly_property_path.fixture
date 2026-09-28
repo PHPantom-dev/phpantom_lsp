@@ -1,0 +1,29 @@
+// test: what the constructor proves about a readonly property of a promoted readonly property holds in other methods
+// feature: hover
+// expect_hover: $count => 3
+// expect_hover: $width => int
+---
+<?php
+
+class Size
+{
+    public function __construct(public readonly int $n, public int $w) {}
+}
+
+class Holder
+{
+    public function __construct(public readonly Size $size)
+    {
+        if ($this->size->n !== 3 || $this->size->w !== 3) {
+            throw new \LogicException();
+        }
+    }
+
+    public function read(): void
+    {
+        $count = $this->size->n;
+        $width = $this->size->w;
+        echo $<>count;
+        echo $width;
+    }
+}
