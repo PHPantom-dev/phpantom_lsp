@@ -197,7 +197,11 @@ pub(crate) fn request_fields_at_position(
     let cursor_offset = position_to_offset(content, position);
     let field_ctx = detect_request_field_context(content, cursor_offset as usize, code)?;
 
-    let class_loader = backend.class_loader(ctx);
+    let class_loader = backend.class_loader_with(
+        &ctx.classes,
+        ctx.use_map_at(cursor_offset),
+        ctx.namespace_at(cursor_offset),
+    );
     let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
 
     let loaded: Option<Arc<ClassInfo>>;

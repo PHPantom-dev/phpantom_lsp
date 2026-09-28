@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
@@ -18,15 +19,15 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
 use crate::return_collection::collect_returns;
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{CtxLoaders, LendsLoaders, Loaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
 use crate::types::ClassInfo;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
-use super::type_errors::{has_strict_types, is_type_compatible};
+use super::helpers::{collect_type_check, find_innermost_enclosing_class};
+use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for return type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_RETURN_CODE: &str = "type_mismatch_return";
@@ -164,86 +165,69 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let file_ctx = self.file_context(uri);
-
-        let _parse_guard = with_parse_cache(content);
-
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader(&file_ctx);
-
-        // Walk the AST, find return statements in method/function
-        // bodies, resolve their types, and pair them with the declared
-        // return type.
-        let results: Vec<ResolvedReturn> =
-            with_parsed_program(content, "return_type_diagnostics", |program, _content| {
-                let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
-
-                for stmt in program.statements.iter() {
-                    process_top_level_statement(
-                        stmt,
-                        uri,
-                        content,
-                        &file_ctx,
-                        &class_loader,
-                        &function_loader_cl,
-                        &constant_loader_cl,
-                        self,
-                        &mut resolved_returns,
-                    );
-                }
-
-                resolved_returns
-            });
-
-        // Emit diagnostics for incompatible returns.
-        let strict_types_for_check = with_parsed_program(content, "return_strict", |program, _| {
-            has_strict_types(program)
-        });
-
-        for ret in &results {
-            let range = match self.offset_range_to_lsp_range(uri, content, ret.start, ret.end) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            let message = match &ret.ty {
-                // Bare `return;` in a void function — OK.
-                None if ret.declared_type.is_void() => continue,
-                // Bare `return;` in a non-void function — error.
-                None => format!(
-                    "Function with return type {} must not return without a value",
-                    ret.declared_type,
-                ),
-                // `return $expr;` in a void function — error.
-                Some(_) if ret.declared_type.is_void() => {
-                    "Void function must not return a value".to_string()
-                }
-                // `return $expr;` with a compatible type — OK.
-                Some(ty)
-                    if is_type_compatible(
-                        ty,
-                        &ret.declared_type,
-                        &class_loader,
-                        strict_types_for_check,
-                    ) =>
-                {
-                    continue;
-                }
-                // `return $expr;` with an incompatible type — error.
-                Some(ty) => format!(
-                    "Return type {} is incompatible with declared return type {}",
-                    ty, ret.declared_type,
-                ),
-            };
-
-            out.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                TYPE_MISMATCH_RETURN_CODE,
-                message,
-            ));
-        }
+        collect_type_check(
+            self,
+            uri,
+            content,
+            TYPE_MISMATCH_RETURN_CODE,
+            out,
+            // Walk the AST, find return statements in method/function
+            // bodies, resolve their types, and pair them with the
+            // declared return type.
+            |ctx| {
+                with_parsed_program(content, "return_type_diagnostics", |program, _content| {
+                    let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
+                    for stmt in program.statements.iter() {
+                        // A top-level statement lies in one `namespace` block.
+                        let offset = stmt.span().start.offset;
+                        process_top_level_statement(
+                            stmt,
+                            uri,
+                            content,
+                            ctx.file_ctx,
+                            ctx.class_loader_at(offset),
+                            ctx.function_loader_at(offset),
+                            ctx.constant_loader_at(offset),
+                            self,
+                            &mut resolved_returns,
+                        );
+                    }
+                    resolved_returns
+                })
+            },
+            |ret, ctx| {
+                let message = match &ret.ty {
+                    // Bare `return;` in a void function — OK.
+                    None if ret.declared_type.is_void() => return None,
+                    // Bare `return;` in a non-void function — error.
+                    None => format!(
+                        "Function with return type {} must not return without a value",
+                        ret.declared_type,
+                    ),
+                    // `return $expr;` in a void function — error.
+                    Some(_) if ret.declared_type.is_void() => {
+                        "Void function must not return a value".to_string()
+                    }
+                    // `return $expr;` with a compatible type — OK.
+                    Some(ty)
+                        if is_type_compatible(
+                            ty,
+                            &ret.declared_type,
+                            ctx.class_loader_at(ret.start as u32),
+                            ctx.strict_types,
+                        ) =>
+                    {
+                        return None;
+                    }
+                    // `return $expr;` with an incompatible type — error.
+                    Some(ty) => format!(
+                        "Return type {} is incompatible with declared return type {}",
+                        ty, ret.declared_type,
+                    ),
+                };
+                Some(((ret.start, ret.end), message))
+            },
+        );
     }
 }
 
@@ -266,20 +250,13 @@ fn evaluate_declared_return(
     if !declared.contains_unevaluated_operator() {
         return declared;
     }
-    let ctx = crate::type_engine::resolver::ResolutionCtx {
-        current_class: Some(current_class),
+    let ctx = backend.resolution_ctx_at(
+        Some(current_class),
         all_classes,
         content,
-        cursor_offset: 0,
-        class_loader,
-        backend: Some(backend),
-        laravel_macro_this_resolver: None,
-        function_loader: Some(function_loader),
-        resolved_class_cache: Some(&backend.resolved_class_cache),
-        scope_var_resolver: None,
-        is_in_static_method: false,
-        preserve_static: false,
-    };
+        0,
+        CtxLoaders::without_macro_this(class_loader, function_loader),
+    );
     crate::type_engine::call_resolution::evaluate_constant_operands(&declared, &ctx)
         .unwrap_or(declared)
 }
@@ -297,6 +274,7 @@ fn resolve_return_and_push(
     end: usize,
     stmt_start: usize,
     declared_return: &PhpType,
+    template_bounds: &HashMap<String, PhpType>,
     current_class: &ClassInfo,
     content: &str,
     all_classes: &[Arc<ClassInfo>],
@@ -329,7 +307,12 @@ fn resolve_return_and_push(
             }
 
             let resolve_class_names = |ty: PhpType| {
-                ty.resolve_names(&|name: &str| {
+                let ty = if template_bounds.is_empty() {
+                    ty
+                } else {
+                    ty.substitute(template_bounds)
+                };
+                let ty = ty.resolve_names(&|name: &str| {
                     if name.contains("__anonymous@") {
                         return name.to_string();
                     }
@@ -338,7 +321,13 @@ fn resolve_return_and_push(
                     } else {
                         name.to_string()
                     }
-                })
+                });
+                // A Laravel model operator is a name for a class too, and
+                // this is where names become classes. Leaving it for the
+                // comparison alone would report the operator's own
+                // spelling back at the reader, who wrote a type that does
+                // name something.
+                crate::virtual_members::laravel::expand_model_type(&ty, class_loader)
             };
 
             // A standalone `/** @var Type */` docblock (no variable name)
@@ -362,21 +351,17 @@ fn resolve_return_and_push(
             }
 
             let var_ctx = VarResolutionCtx {
-                var_name: "",
-                top_level_scope: None,
-                current_class,
-                all_classes,
-                content,
-                cursor_offset: start as u32,
-                class_loader,
                 backend: Some(backend),
                 loaders,
                 resolved_class_cache: Some(&backend.resolved_class_cache),
-                enclosing_return_type: None,
-                branch_aware: true,
-                match_arm_narrowing: HashMap::new(),
-                scope_var_resolver: None,
-                scope_proofs: None,
+                ..VarResolutionCtx::new(
+                    "",
+                    current_class,
+                    all_classes,
+                    content,
+                    start as u32,
+                    class_loader,
+                )
             };
 
             let ty = resolve_expression_type(expr, &var_ctx).unwrap_or_else(PhpType::untyped);
@@ -416,8 +401,15 @@ fn indexed_return_type(
     uri: &str,
     func_name: &str,
     func_offset: u32,
-) -> Option<PhpType> {
+) -> Option<(PhpType, HashMap<String, PhpType>)> {
     let fqn = file_ctx.resolve_name_at(func_name, func_offset);
+    let with_bounds = |fi: &crate::types::FunctionInfo| {
+        let ret = fi.return_type.clone()?;
+        Some((
+            ret,
+            template_bounds(&fi.template_params, &fi.template_param_bounds),
+        ))
+    };
 
     {
         let fmap = backend.global_functions().read();
@@ -425,7 +417,7 @@ fn indexed_return_type(
             if let Some((decl_uri, fi)) = fmap.get(name)
                 && decl_uri == uri
             {
-                return fi.return_type.clone();
+                return with_bounds(fi);
             }
         }
     }
@@ -433,10 +425,29 @@ fn indexed_return_type(
     let dups = backend.symbols.duplicate_functions.read();
     for name in [fqn.as_str(), func_name] {
         if let Some(fi) = dups.get(name).and_then(|by_uri| by_uri.get(uri)) {
-            return fi.return_type.clone();
+            return with_bounds(fi);
         }
     }
     None
+}
+
+/// Map each template parameter to its bound, or `mixed` when it has none.
+///
+/// Template parameters are plain names in a `PhpType`, so left in place they
+/// would be looked up as classes and a same-named class would stand in for
+/// them.  A value that fails the bound fails the template too, so the bound is
+/// what a return is checked against.
+fn template_bounds(
+    params: &[crate::atom::Atom],
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> HashMap<String, PhpType> {
+    params
+        .iter()
+        .map(|param| {
+            let bound = bounds.get(param).cloned();
+            (param.to_string(), bound.unwrap_or_else(PhpType::mixed))
+        })
+        .collect()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -534,16 +545,25 @@ fn process_top_level_statement(
             // against `array<string, int>` rather than bare `array`.  Falling
             // back to the AST hint covers a function the index has not caught
             // up with yet.
-            let declared_return =
-                indexed_return_type(backend, file_ctx, uri, func_name, func_offset).or_else(|| {
-                    func.return_type_hint
-                        .as_ref()
-                        .map(|rth| crate::parser::extract_hint_type(&rth.hint))
-                });
+            let (declared_return, template_bounds) =
+                match indexed_return_type(backend, file_ctx, uri, func_name, func_offset) {
+                    Some((ret, bounds)) => (Some(ret), bounds),
+                    None => (
+                        func.return_type_hint
+                            .as_ref()
+                            .map(|rth| crate::parser::extract_hint_type(&rth.hint)),
+                        HashMap::new(),
+                    ),
+                };
 
             let declared_return = match declared_return {
                 Some(t) if !t.is_untyped() && !t.is_mixed() => t,
                 _ => return,
+            };
+            let declared_return = if template_bounds.is_empty() {
+                declared_return
+            } else {
+                declared_return.substitute(&template_bounds)
             };
 
             // Skip generators.
@@ -580,14 +600,8 @@ fn process_top_level_statement(
                 backend,
             );
 
-            let config_resolver = |key: &str| backend.resolve_config_type(key);
-            let trans_resolver = |key: &str| backend.resolve_trans_type(key);
-            let loaders = Loaders {
-                function_loader: Some(function_loader),
-                constant_loader: Some(constant_loader),
-                config_resolver: Some(&config_resolver),
-                trans_resolver: Some(&trans_resolver),
-            };
+            let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
+            let loaders = owned_loaders.loaders();
 
             for (maybe_expr, start, end, stmt_start) in returns {
                 resolve_return_and_push(
@@ -596,6 +610,7 @@ fn process_top_level_statement(
                     end,
                     stmt_start,
                     &declared_return,
+                    &template_bounds,
                     current_class,
                     content,
                     &file_ctx.classes,
@@ -679,13 +694,28 @@ fn process_class_member(
     };
 
     // Look up the method's declared return type from the parsed MethodInfo.
-    let declared_return = current_class
-        .get_method(method_name)
-        .and_then(|mi| mi.return_type.clone());
+    let method_info = current_class.get_method(method_name);
+    let declared_return = method_info.and_then(|mi| mi.return_type.clone());
 
     let declared_return = match declared_return {
         Some(t) if !t.is_untyped() && !t.is_mixed() => t,
         _ => return,
+    };
+    let mut bounds = template_bounds(
+        &current_class.template_params,
+        &current_class.template_param_bounds,
+    );
+    if let Some(mi) = method_info {
+        bounds.extend(template_bounds(
+            &mi.template_params,
+            &mi.template_param_bounds,
+        ));
+    }
+    let template_bounds = bounds;
+    let declared_return = if template_bounds.is_empty() {
+        declared_return
+    } else {
+        declared_return.substitute(&template_bounds)
     };
 
     // Skip generators.
@@ -729,15 +759,11 @@ fn process_class_member(
         function_loader,
         backend,
     );
+    let declared_return =
+        crate::virtual_members::laravel::expand_model_type(&declared_return, class_loader);
 
-    let config_resolver = |key: &str| backend.resolve_config_type(key);
-    let trans_resolver = |key: &str| backend.resolve_trans_type(key);
-    let loaders = Loaders {
-        function_loader: Some(function_loader),
-        constant_loader: Some(constant_loader),
-        config_resolver: Some(&config_resolver),
-        trans_resolver: Some(&trans_resolver),
-    };
+    let owned_loaders = backend.diagnostic_loaders_over(function_loader, constant_loader);
+    let loaders = owned_loaders.loaders();
 
     for (maybe_expr, start, end, stmt_start) in returns {
         resolve_return_and_push(
@@ -746,6 +772,7 @@ fn process_class_member(
             end,
             stmt_start,
             &declared_return,
+            &template_bounds,
             current_class,
             content,
             &file_ctx.classes,

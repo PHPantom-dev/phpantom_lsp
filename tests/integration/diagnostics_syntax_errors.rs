@@ -1,18 +1,15 @@
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
+    use crate::common::collect_diagnostics_with;
     use phpantom_lsp::Backend;
     use tower_lsp::lsp_types::*;
 
     fn collect(php: &str) -> Vec<Diagnostic> {
-        let backend = Backend::new_test();
-        let uri = "file:///test.php";
-        // update_ast populates parse_errors
-        backend.update_ast(uri, &Arc::new(php.to_string()));
-        let mut out = Vec::new();
-        backend.collect_syntax_error_diagnostics(uri, php, &mut out);
-        out
+        collect_diagnostics_with(
+            &Backend::new_test(),
+            php,
+            Backend::collect_syntax_error_diagnostics,
+        )
     }
 
     #[test]

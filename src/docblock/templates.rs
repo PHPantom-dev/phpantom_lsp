@@ -171,6 +171,30 @@ pub fn extract_template_param_bindings_from_info(
         collect_template_bindings(&parsed, template_params, &param_name, &mut results);
     }
 
+    if results.is_empty() {
+        return results;
+    }
+
+    // `@template T as (Closure(TValue): TMappedValue)` with `@param T $cb`
+    // binds `TMappedValue` from `$cb` as well, through `T`'s bound.
+    let bound_bindings: Vec<(String, String)> = extract_template_params_full_from_info(info)
+        .into_iter()
+        .filter_map(|(name, bound, ..)| Some((name, bound?)))
+        .flat_map(|(name, bound)| {
+            let mut through_bound = Vec::new();
+            for (template, param) in results.iter().filter(|(t, _)| *t == name) {
+                collect_template_bindings(&bound, template_params, param, &mut through_bound);
+                through_bound.retain(|(t, _)| t != template);
+            }
+            through_bound
+        })
+        .collect();
+    for binding in bound_bindings {
+        if !results.contains(&binding) {
+            results.push(binding);
+        }
+    }
+
     results
 }
 

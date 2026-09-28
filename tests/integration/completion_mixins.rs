@@ -2830,3 +2830,36 @@ async fn test_completion_mixin_return_self_resolves_to_consumer_class() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+/// A `@mixin T` whose `T` the constructor binds reaches the members of
+/// the class the argument names when the object is built inline in a
+/// chain, not only when it is first assigned to a variable.
+#[tokio::test]
+async fn test_completion_template_mixin_bound_by_inline_new() {
+    let backend = create_test_backend();
+
+    let uri = Url::parse("file:///mixin_inline_new.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                             // 0
+        "class Engine {\n",                                    // 1
+        "    public function start(): void {}\n",              // 2
+        "}\n",                                                 // 3
+        "/**\n",                                               // 4
+        " * @template T of object\n",                          // 5
+        " * @mixin T\n",                                       // 6
+        " */\n",                                               // 7
+        "class Proxy {\n",                                     // 8
+        "    /** @param T $inner */\n",                        // 9
+        "    public function __construct(object $inner) {}\n", // 10
+        "}\n",                                                 // 11
+        "function test(): void {\n",                           // 12
+        "    (new Proxy(new Engine()))->\n",                   // 13
+        "}\n",                                                 // 14
+    );
+
+    let labels = crate::common::complete_labels_at(&backend, &uri, text, 13, 32).await;
+    assert!(
+        labels.iter().any(|l| l.starts_with("start")),
+        "expected Engine::start() through the template mixin, got {labels:?}"
+    );
+}

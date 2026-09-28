@@ -224,3 +224,58 @@ fn missing_path_returns_none() {
     assert_eq!(tree.value_at(&["providers", "nope", "model"]), None);
     assert_eq!(tree.get(&["guards", "web", "provider", "deeper"]), None);
 }
+
+#[test]
+fn a_keyless_array_is_a_list_whose_positions_are_not_keys() {
+    let tree = parse_config_tree("<?php return ['handlers' => [A::class, B::class]];").unwrap();
+    assert!(matches!(tree.get(&["handlers"]), Some(ConfigNode::List(items)) if items.len() == 2));
+    let mut keys = Vec::new();
+    tree.collect_keys("pipeline", &mut keys);
+    assert_eq!(keys, vec!["pipeline.handlers".to_string()]);
+}
+
+#[test]
+fn a_duplicate_key_keeps_the_last_value() {
+    let tree = parse_config_tree("<?php return ['a' => 1, 'a' => 'two'];").unwrap();
+    assert_eq!(
+        tree.value_at(&["a"]),
+        Some(&ConfigValue::Str("two".to_string()))
+    );
+}
+
+#[test]
+fn array_merge_lets_a_later_argument_replace_a_key_whole() {
+    let content = "<?php return array_merge(['a' => ['x' => 1], 'b' => 1], ['a' => ['y' => 2]]);";
+    let tree = parse_config_tree(content).unwrap();
+    let mut keys = Vec::new();
+    tree.collect_keys("app", &mut keys);
+    keys.sort();
+    assert_eq!(keys, vec!["app.a", "app.a.y", "app.b"]);
+}
+
+#[test]
+fn a_group_merged_beneath_is_replaced_whole_unless_it_is_mergeable() {
+    let mut app =
+        parse_config_tree("<?php return ['connections' => ['mysql' => ['port' => 1]], 'redis' => ['client' => 'predis']];")
+            .unwrap();
+    let framework = parse_config_tree(
+        "<?php return ['default' => 'sqlite', 'connections' => ['sqlite' => [], 'mysql' => ['host' => 'h']], 'redis' => ['options' => []]];",
+    )
+    .unwrap();
+    app.merge_beneath(framework, &["connections"]);
+    let mut keys = Vec::new();
+    app.collect_keys("database", &mut keys);
+    keys.sort();
+    assert_eq!(
+        keys,
+        vec![
+            "database.connections",
+            "database.connections.mysql",
+            "database.connections.mysql.port",
+            "database.connections.sqlite",
+            "database.default",
+            "database.redis",
+            "database.redis.client",
+        ]
+    );
+}

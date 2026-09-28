@@ -7,10 +7,10 @@
 //! lock-and-unwrap boilerplate that used to be duplicated across the
 //! completion handler, definition resolver, and other consumers.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use tower_lsp::lsp_types::Url;
+use tower_lsp::lsp_types::{Position, Url};
 
 use crate::Backend;
 use crate::types::{ClassInfo, FileContext, NamespaceSpan};
@@ -70,6 +70,48 @@ impl Backend {
         std::fs::read_to_string(path).ok()
     }
 
+    /// The text a request against `uri` analyses: the virtual PHP a
+    /// template lowers to when one has been recorded, else the file's own
+    /// content.
+    ///
+    /// A template's symbol map and types describe the virtual PHP, so every
+    /// feature that reads them has to read the same text, and answer in the
+    /// template's coordinates through `src/blade/translate.rs` afterwards.
+    ///
+    /// Shared rather than copied: a template's virtual PHP is fetched on
+    /// every completion, hover, go-to-definition, code-action and
+    /// diagnostic request against it.
+    pub(crate) fn analysable_content(&self, uri: &str) -> Option<Arc<String>> {
+        self.blade_virtual_php_arc(uri)
+            .or_else(|| self.get_file_content_arc(uri))
+    }
+
+    /// [`Self::analysable_content`] with `position` carried into the text:
+    /// a template's position is translated into its virtual PHP.
+    pub(crate) fn analysable_content_at(
+        &self,
+        uri: &str,
+        position: Position,
+    ) -> Option<(Arc<String>, Position)> {
+        match self.blade_virtual_php_arc(uri) {
+            Some(virtual_php) => Some((virtual_php, self.translate_blade_to_php(uri, position))),
+            None => Some((self.get_file_content_arc(uri)?, position)),
+        }
+    }
+
+    /// [`Self::analysable_content`] for a caller that already holds the
+    /// file's content and only needs a template swapped for its virtual PHP.
+    pub(crate) fn analysable_content_or<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> AnalysableContent<'a> {
+        match self.blade_virtual_php_arc(uri) {
+            Some(virtual_php) => AnalysableContent::Shared(virtual_php),
+            None => AnalysableContent::Borrowed(content),
+        }
+    }
+
     /// Retrieve file content as a cheap `Arc<String>` reference when the
     /// file is in `open_files`.  Falls back to reading from disk (which
     /// wraps the result in a new `Arc`).
@@ -106,6 +148,24 @@ impl Backend {
             .read()
             .get(uri)
             .map(|classes| classes.iter().map(|c| ClassInfo::clone(c)).collect())
+    }
+
+    /// The classes `uri` declares, sharing the index's `Arc`s instead of
+    /// copying each body the way [`get_classes_for_uri`](Self::get_classes_for_uri)
+    /// does.  For the scanners that ask this of every candidate file.
+    pub(crate) fn shared_classes_for_uri(&self, uri: &str) -> Option<Vec<Arc<ClassInfo>>> {
+        self.symbols.uri_classes_index.read().get(uri).cloned()
+    }
+
+    /// The short names of the classes `uri` declares, for asking whether a
+    /// name is one of the file's own classes without cloning their bodies.
+    pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {
+        self.symbols
+            .uri_classes_index
+            .read()
+            .get(uri)
+            .map(|classes| classes.iter().map(|c| c.name.to_string()).collect())
+            .unwrap_or_default()
     }
 
     /// Gather the per-file context (classes, use-map, namespace) in one call.
@@ -153,39 +213,19 @@ impl Backend {
     }
 
     /// Like [`file_context`](Self::file_context) but resolves the namespace
-    /// for the namespace block that contains `byte_offset`.
+    /// and imports of the namespace block that contains `byte_offset`.
     ///
     /// In single-namespace files this returns the same result as
     /// `file_context`.  In multi-namespace files it picks the correct
     /// namespace block for the cursor position.
     pub(crate) fn file_context_at(&self, uri: &str, byte_offset: u32) -> FileContext {
-        let classes = self
-            .symbols
-            .uri_classes_index
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let use_map = self
-            .file_imports
-            .read()
-            .get(uri)
-            .cloned()
-            .unwrap_or_default();
-        let (first_namespace, namespace_spans) = self.namespace_and_spans(uri);
-        let namespace = match namespace_spans.as_ref() {
-            Some(_) => self.namespace_at_offset(uri, byte_offset),
-            None => first_namespace,
-        };
-        let resolved_names = self.resolved_names.read().get(uri).cloned();
-
-        FileContext {
-            classes,
-            use_map,
-            namespace,
-            namespace_spans,
-            resolved_names,
+        let ctx = self.file_context(uri);
+        // A file with only one namespace has nothing to pick between, so
+        // the namespace and imports `file_context` already found stand.
+        if ctx.namespace_spans.is_none() {
+            return ctx;
         }
+        ctx.at(byte_offset)
     }
 
     /// Subset of [`file_context_at`](Self::file_context_at) for callers
@@ -216,6 +256,15 @@ impl Backend {
         uri: &str,
         byte_offset: u32,
     ) -> (HashMap<String, String>, Option<String>) {
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+                && let Some(span) = NamespaceSpan::containing(spans, byte_offset)
+            {
+                return (span.use_map.clone(), span.namespace.clone());
+            }
+        }
         let use_map = self
             .file_imports
             .read()
@@ -311,12 +360,27 @@ impl Backend {
         self.symbol_maps.read().get(uri).cloned()
     }
 
+    /// Pair a file's cached symbol map with `content`, for a caller that
+    /// needs to slice a span but does not hold the map itself.
+    ///
+    /// `None` when the file has never been parsed, or when the map was
+    /// extracted from different text than `content` — see
+    /// [`MappedSource`](crate::symbol_map::MappedSource).
+    pub(crate) fn symbol_map_source<'a>(
+        &self,
+        uri: &str,
+        content: &'a str,
+    ) -> Option<crate::symbol_map::MappedSource<'a>> {
+        self.symbol_maps.read().get(uri)?.source(content)
+    }
+
     /// Remove a file's entries from every per-URI map populated while it
     /// was open (`uri_classes_index`, `symbol_maps`, `file_imports`,
     /// `resolved_names`, `file_namespaces`, `parse_errors`), plus the
     /// reference index.
     ///
-    /// Called from `did_close` to clean up state when a file is closed.
+    /// Called from `did_close` to clean up state when a file the workspace
+    /// index does not cover is closed.
     pub(crate) fn clear_file_maps(&self, uri: &str) {
         // uri_classes_index is redundant with fqn_class_index once indexing
         // is complete — GTD falls back to fqn_uri_index + parse_and_cache_file
@@ -333,11 +397,73 @@ impl Backend {
         // parse-error vector for every file ever opened (or deleted from
         // disk) stays resident for the whole session.
         self.parse_errors.write().remove(uri);
+        // A template's lowered PHP, source map, and injected variables are
+        // recorded for every indexed template, not just open ones, so a
+        // deleted or renamed template has to give them up here rather than
+        // only when the editor closes it.  Left behind, they stay in the
+        // template lists the Blade refresh passes enumerate.
+        self.blade_virtual_content.write().remove(uri);
+        self.blade_source_maps.write().remove(uri);
+        self.blade_uris.write().remove(uri);
+        self.blade_injected_vars.write().remove(uri);
+        // The config keys a file declares at runtime (`Config::set(...)`)
+        // are otherwise only refreshed when the file is re-parsed, which a
+        // deleted file never is.
+        self.laravel_runtime_config_keys.write().remove(uri);
         // NOTE: We intentionally keep fqn_uri_index and fqn_class_index intact.
         // fqn_uri_index maps FQN → URI so GTD can locate the file, and
         // fqn_class_index keeps the full ClassInfo for cross-file resolution.
         // The file will be re-parsed from disk on next access via
         // parse_and_cache_file when needed (issue #99).
+    }
+
+    /// The on-disk path of `uri` when it is a PHP file the workspace index
+    /// covers: inside the workspace root, outside the vendor directories,
+    /// not excluded by `[indexing] exclude`, and with a PHP extension.
+    ///
+    /// Such a file has to stay indexed after the editor closes it, since
+    /// the reference index and the reference-count lenses read it whether
+    /// or not it is open, and the completed workspace index is never walked
+    /// again to put it back.
+    pub(crate) fn workspace_index_path(&self, uri: &str) -> Option<std::path::PathBuf> {
+        let path = Url::parse(uri).ok()?.to_file_path().ok()?;
+        let root = self.workspace.workspace_root.read().clone()?;
+        if !path.starts_with(&root) {
+            return None;
+        }
+        if self
+            .workspace
+            .vendor_uri_prefixes
+            .lock()
+            .iter()
+            .any(|prefix| uri.starts_with(prefix.as_str()))
+        {
+            return None;
+        }
+        let filters = self.index_filters();
+        (filters.is_php_file(&path) && !filters.is_excluded_path(&path, false)).then_some(path)
+    }
+}
+
+/// The text a caller should analyse: either the buffer it already holds,
+/// or the shared virtual PHP a template lowers to.
+///
+/// Returned by [`Backend::analysable_content_or`] so that swapping a
+/// template for its virtual PHP costs an `Arc` bump rather than a copy of
+/// the whole lowered file. Deref to `&str` to read it.
+pub(crate) enum AnalysableContent<'a> {
+    Borrowed(&'a str),
+    Shared(Arc<String>),
+}
+
+impl std::ops::Deref for AnalysableContent<'_> {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            AnalysableContent::Borrowed(text) => text,
+            AnalysableContent::Shared(text) => text,
+        }
     }
 }
 
@@ -347,10 +473,5 @@ impl Backend {
 /// An offset past every block (code after the last closing brace) belongs
 /// to the last one.
 pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> Option<&str> {
-    for span in spans {
-        if byte_offset >= span.start && byte_offset <= span.end {
-            return span.namespace.as_deref();
-        }
-    }
-    spans.last().and_then(|s| s.namespace.as_deref())
+    NamespaceSpan::containing(spans, byte_offset).and_then(|s| s.namespace.as_deref())
 }

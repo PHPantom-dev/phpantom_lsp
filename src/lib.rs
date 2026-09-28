@@ -50,6 +50,8 @@
 //!     statement for unresolved class names)
 //!   - `code_actions::remove_unused_import` — Remove unused import quick-fix
 //!     (delete individual or all unused `use` statements)
+//!   - `code_actions::replace_fqcn` — Import qualified classes, functions,
+//!     and constants and replace their file-local usages with short names
 //!   - `code_actions::generate_constructor` — Generate a constructor from
 //!     non-static properties
 //!   - `code_actions::generate_getter_setter` — Generate `getX()`/`setX()`
@@ -128,6 +130,25 @@ pub(crate) type ParseErrorEntry = (String, u32, u32);
 /// `(function_fqns, define_names)`.  Stored per URI in
 /// [`Backend::uri_globals_index`] so a re-parse can evict what an edit removed.
 pub(crate) type UriGlobals = (Vec<String>, Vec<String>);
+
+/// What the last `workspace/didChangeWatchedFiles` registration pushed to
+/// the client was built from, so the next one can tell whether anything
+/// it watches has moved. See [`Backend::registered_watcher_state`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct WatchedFileInputs {
+    /// The `[indexing] extensions` set, one watcher each.
+    pub(crate) extra_extensions: Vec<String>,
+    /// Whether the project was classified as Laravel, which adds the
+    /// schema watchers.
+    pub(crate) is_laravel: bool,
+    /// Directory symlinks the index reached through, one relative-pattern
+    /// watcher each. Empty when the client cannot match a relative
+    /// pattern, since then there is nothing to ask it for.
+    pub(crate) followed_links: Vec<std::path::PathBuf>,
+}
+
+/// `None` until the first registration.
+pub(crate) type WatchedFileRegistrationState = Option<WatchedFileInputs>;
 
 // ─── Module declarations ────────────────────────────────────────────────────
 
@@ -222,6 +243,7 @@ mod backend;
 pub mod benevolent_builtins;
 pub mod blade;
 pub(crate) mod call_args;
+mod call_hierarchy;
 pub mod ci_map;
 pub(crate) mod class_loader_memo;
 pub(crate) mod class_lookup;
@@ -238,12 +260,14 @@ mod document_links;
 mod document_symbols;
 pub mod fix;
 mod folding;
-mod formatting;
+pub mod format_cli;
+pub mod formatting;
 mod framework;
 mod highlight;
 mod hover;
 mod indexing;
 pub(crate) mod inheritance;
+pub mod init_wizard;
 mod inlay_hints;
 /// LSP JSON-RPC dispatch for the wasm build, which has no tower-lsp transport.
 /// Kept free of any target-specific code so the marshalling in `wasm_wasi` is
@@ -253,7 +277,9 @@ mod lsp_dispatch;
 mod mago;
 #[cfg(feature = "mem-audit")]
 mod mem_audit;
+pub mod move_cli;
 pub(crate) mod names;
+mod parallel;
 mod parser;
 pub(crate) mod phar;
 pub mod php_type;
@@ -267,12 +293,15 @@ mod reference_index;
 mod references;
 mod rename;
 mod resolution;
+pub(crate) mod resolution_deps;
 mod resource_navigation;
 pub(crate) mod return_collection;
 pub(crate) mod scope_collector;
 mod selection_range;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod self_update;
+#[cfg(feature = "semantic-export")]
+pub mod semantic_export;
 mod semantic_tokens;
 mod server;
 mod signature_help;
@@ -339,9 +368,19 @@ pub(crate) struct LaravelStringKeyCache {
     /// `Arc` because both the name list and the parameter names of one route
     /// are read from it, and cloning the whole table per read would be waste.
     pub routes: Option<std::sync::Arc<crate::virtual_members::laravel::RouteDiscovery>>,
-    pub config_keys: Option<Vec<String>>,
-    pub view_names: Option<Vec<String>>,
-    pub trans_keys: Option<Vec<String>>,
+    /// The config keys `config/` declares, sorted, so a lookup is a binary
+    /// search rather than a set built per diagnostic pass.  Like the other
+    /// key lists, shared behind an `Arc` so a read does not copy it.
+    pub config_keys: Option<std::sync::Arc<[String]>>,
+    /// Every Blade view name the project ships, sorted.
+    pub view_names: Option<std::sync::Arc<[String]>>,
+    /// The Blade view roots `config/view.php` configures, each with its
+    /// canonical spelling.  Every template's view name is worked out
+    /// against them, which would otherwise re-read and re-parse the config
+    /// file once per template.
+    pub view_roots: Option<std::sync::Arc<Vec<crate::blade::view_paths::ViewRoot>>>,
+    /// Every translation key, sorted.
+    pub trans_keys: Option<std::sync::Arc<[String]>>,
     /// Every translation key mapped to whether it names a group (nested
     /// array) rather than a scalar entry.  Shared behind an `Arc` for the
     /// same reason as `routes`: consumers look up one key per call and
@@ -357,11 +396,16 @@ pub(crate) struct LaravelStringKeyCache {
     /// because an edit updates the entry of the one template that changed
     /// rather than replacing the whole index.
     pub blade_blocks: Option<std::sync::Arc<crate::blade::block_index::BladeBlockIndex>>,
+    /// The parsed tree of every config file, framework defaults merged in,
+    /// keyed by its prefix.  Shared behind an `Arc` because every
+    /// `config('…')` call the type engine resolves reads it.
     pub config_trees: Option<
-        Vec<(
-            String,
-            crate::virtual_members::laravel::config_values::ConfigNode,
-        )>,
+        std::sync::Arc<
+            Vec<(
+                String,
+                crate::virtual_members::laravel::config_values::ConfigNode,
+            )>,
+        >,
     >,
     /// The variables service providers share into every template, and the
     /// ones their view composers add to the templates they target, with each
@@ -370,8 +414,8 @@ pub(crate) struct LaravelStringKeyCache {
     /// that reach it.
     pub shared_view_vars: Option<std::sync::Arc<Vec<crate::blade::shared_vars::SharedVarGroup>>>,
     /// Every authorization ability the project knows: `Gate::define()`
-    /// registrations plus the methods of every policy class.
-    pub gate_abilities: Option<Vec<String>>,
+    /// registrations plus the methods of every policy class, sorted.
+    pub gate_abilities: Option<std::sync::Arc<[String]>>,
 }
 
 /// Compute-once guards for the entries of [`LaravelStringKeyCache`].
@@ -392,6 +436,7 @@ pub(crate) struct LaravelStringKeyBuildLocks {
     pub routes: parking_lot::Mutex<()>,
     pub config_keys: parking_lot::Mutex<()>,
     pub view_names: parking_lot::Mutex<()>,
+    pub view_roots: parking_lot::Mutex<()>,
     pub trans_keys: parking_lot::Mutex<()>,
     pub trans_key_shapes: parking_lot::Mutex<()>,
     pub config_trees: parking_lot::Mutex<()>,
@@ -435,11 +480,24 @@ impl LaravelStringKeyCache {
         // file may live outside `resources/views/`. Invalidate on any
         // Blade file, any path containing a `views/` directory, and on
         // `config/view.php` itself (which changes the set of roots).
-        if uri.ends_with(".blade.php")
-            || uri.contains("/views/")
-            || uri.contains("/config/view.php")
-        {
+        let looks_like_view_file = uri.ends_with(".blade.php") || uri.contains("/views/");
+        if looks_like_view_file || uri.contains("/config/view.php") {
             self.view_names = None;
+        }
+        // A file that is not covered by any already-known root may be the
+        // first one to land under a directory that has just appeared (a
+        // `resources/views` created after the roots were cached, or a
+        // custom root from `config/view.php` that didn't exist yet):
+        // recompute so the new directory is picked up without waiting for
+        // `config/view.php` itself to change.
+        if uri.contains("/config/view.php")
+            || (looks_like_view_file
+                && self
+                    .view_roots
+                    .as_deref()
+                    .is_some_and(|roots| !crate::blade::view_paths::view_root_covers(roots, uri)))
+        {
+            self.view_roots = None;
         }
         if uri.contains("/lang/") || uri.contains("/resources/lang/") {
             self.trans_keys = None;
@@ -587,7 +645,7 @@ pub struct Backend {
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
     /// subcommands, which parse every file but never issue a
-    /// find-references, rename, or inlay-hints request, so populating
+    /// find-references, rename, or CodeLens request, so populating
     /// the index would be pure wasted CPU and short-lived allocation.
     pub(crate) skip_reference_index: bool,
     /// Per-file parse errors from the Mago parser.
@@ -732,8 +790,8 @@ pub struct Backend {
     /// when the index holds at least one macro, so the hot class-load path
     /// skips the lock entirely for the common (no-macro) case.
     pub(crate) laravel_has_macros: Arc<std::sync::atomic::AtomicBool>,
-    /// Reverse index mapping a related-model FQN to the pivot type exposed on
-    /// its `$pivot` attribute when reached through a many-to-many relationship.
+    /// Reverse index mapping a related-model FQN to the pivot accessors exposed
+    /// when it is reached through a many-to-many relationship.
     /// Built lazily (and rebuilt when a pivot-bearing file changes) and
     /// consulted at class load; see [`virtual_members::laravel::pivots`].
     pub(crate) laravel_pivots: Arc<RwLock<virtual_members::laravel::LaravelPivotIndex>>,
@@ -770,6 +828,21 @@ pub struct Backend {
     /// `$user->can()`, `$this->authorize()`, and `@can` check.  Empty for
     /// non-Laravel projects.  See [`virtual_members::laravel::gates`].
     pub(crate) laravel_gates: Arc<RwLock<virtual_members::laravel::LaravelGateIndex>>,
+    /// Config keys the project declares at runtime rather than in a
+    /// `config/` file (`Config::set()`, the array form of the `config()`
+    /// helper, `Storage::fake()`), keyed by the file each write is written
+    /// in so an edit that removes one takes the key with it.  A test that
+    /// configures a disk in `setUp()` before exercising it is the common
+    /// shape.  Empty for non-Laravel projects.
+    pub(crate) laravel_runtime_config_keys: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// Whether the workspace is an application rather than a library.
+    ///
+    /// A library's configuration is supplied by whatever application
+    /// installs it, so the config keys it reads are declared in a file we
+    /// never see and none of them can be judged.  See
+    /// [`crate::composer::is_application_project`].  Starts `true` so a
+    /// workspace with no `composer.json` to classify behaves as before.
+    pub(crate) is_application: Arc<std::sync::atomic::AtomicBool>,
     /// Laravel macro seed files (service providers plus the app's provider
     /// registration files), mapped to the class references each contributed
     /// at the last macro-index build.  An edit that changes a seed's
@@ -809,6 +882,12 @@ pub struct Backend {
     /// The per-provider scans the merged table above was built from, so an
     /// edit to one provider rebuilds the merge without re-reading the rest.
     pub(crate) laravel_provider_scans: Arc<RwLock<virtual_members::laravel::ProviderScans>>,
+    /// The Blade directives the project's providers register, expanded from
+    /// the merged table's `custom_directives` into every name a template can
+    /// write.  Kept separate from the table because the Blade preprocessor
+    /// reads it on every keystroke in a template and must not pay for the
+    /// expansion each time.
+    pub(crate) blade_custom_directives: Arc<RwLock<blade::directives::CustomDirectives>>,
     /// Cached Laravel string key enumerations (route names, config keys,
     /// view names, translation keys).  `None` = not yet computed.
     /// Invalidated when a file in `routes/`, `config/`, `resources/views/`,
@@ -869,6 +948,11 @@ pub struct Backend {
     /// the rename response includes a `RenameFile` operation alongside the
     /// text edits so the file is renamed to match the new class name.
     pub(crate) supports_file_rename: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client supports file creation in workspace edits
+    /// (`workspace.workspaceEdit.resourceOperations` includes `create`).
+    /// The code actions that create a file (extract interface, create a
+    /// missing view) are only offered when it does.
+    pub(crate) supports_file_create: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports server-initiated work-done progress.
     ///
     /// Set during `initialize` based on the client's
@@ -878,6 +962,27 @@ pub struct Backend {
     pub(crate) supports_work_done_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Whether the client supports dynamic registration for type hierarchy.
     pub(crate) supports_type_hierarchy_dynamic_registration: Arc<std::sync::atomic::AtomicBool>,
+    /// Whether the client can match a watcher pattern against a base URI
+    /// (`workspace.didChangeWatchedFiles.relativePatternSupport`).
+    ///
+    /// A plain `**/*.php` pattern is matched against the files of the
+    /// workspace folders, which gives a client no reason to watch a
+    /// directory living outside them, and nothing obliges it to traverse a
+    /// symlink to find one. A relative pattern names the link outright,
+    /// which is the only way in the protocol to ask for those events;
+    /// without the capability, a tree reached through a link is indexed but
+    /// not watched.
+    pub(crate) supports_relative_pattern_watchers: Arc<std::sync::atomic::AtomicBool>,
+    /// The `[indexing] extensions` set and Laravel classification last
+    /// pushed to the client as a `workspace/didChangeWatchedFiles`
+    /// registration. `None` until `initialized` performs the first
+    /// registration.
+    ///
+    /// Compared on every config reload
+    /// ([`indexing::watch::reregister_watched_files_if_changed`]) so a
+    /// live `.phpantom.toml` edit that adds or removes an extension can
+    /// push a fresh registration instead of requiring a restart.
+    pub(crate) registered_watcher_state: Arc<RwLock<WatchedFileRegistrationState>>,
     /// Whether the client supports `window/showDocument`.
     ///
     /// Set during `initialize` based on the client's
@@ -904,12 +1009,12 @@ pub struct Backend {
     /// Whether the client supports `workspace/inlayHint/refresh`.
     ///
     /// Set during `initialize` from the client's
-    /// `workspace.inlayHint.refreshSupport` capability.  The reference
-    /// counts shown on declarations are computed in the background, so
-    /// without a refresh the editor keeps the hints it pulled before they
-    /// were ready.
+    /// `workspace.inlayHint.refreshSupport` capability.  Hints resolve
+    /// against the workspace index and a background parse, so without a
+    /// refresh the editor keeps the ones it pulled before either was
+    /// ready.
     pub(crate) supports_inlay_hint_refresh: Arc<std::sync::atomic::AtomicBool>,
-    /// Exact member references shared by declaration inlay hints and lenses.
+    /// Exact member references behind the declaration CodeLens.
     pub(crate) member_ref_counts: Arc<reference_counts::MemberRefCounts>,
     /// Set to `true` once `initialized` finishes indexing (PSR-4,
     /// classmap, stubs, vendor).  Background workers and the pull
@@ -925,10 +1030,25 @@ pub struct Backend {
     /// to 60 seconds.
     pub(crate) shutdown_flag: Arc<std::sync::atomic::AtomicBool>,
     /// Virtual PHP content generated from Blade files.
-    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, String>>>,
+    ///
+    /// Shared rather than owned: every request against a template reads
+    /// this text, and a template's virtual PHP is several times the size
+    /// of the template itself.
+    pub(crate) blade_virtual_content: Arc<RwLock<HashMap<String, Arc<String>>>>,
     /// Source maps from virtual PHP back to original Blade positions.
     pub(crate) blade_source_maps:
         Arc<RwLock<HashMap<String, crate::blade::source_map::BladeSourceMap>>>,
+    /// Held while a parse publishes a template's virtual PHP, source map,
+    /// and symbol map, which live behind three separate locks.
+    ///
+    /// Several threads can re-parse the same template at once (the
+    /// did-open and did-save call-site inference, the refresh a Find
+    /// References request runs, the workspace index), each with its own
+    /// lowering.  Publishing the three one after another without this
+    /// could leave the virtual PHP of one parse next to the symbol map of
+    /// another, and every offset in the map would then point at the wrong
+    /// text until the template is parsed again.
+    pub(crate) blade_publish_lock: Arc<Mutex<()>>,
     /// URIs opened with `languageId == "blade"` that don't have a `.blade.php` extension.
     /// Allows editors to signal Blade files via languageId alone.
     pub(crate) blade_uris: Arc<RwLock<std::collections::HashSet<String>>>,
@@ -1079,17 +1199,46 @@ fn new_alias_slot_and_cache() -> (
     (slot, cache)
 }
 
+/// The three stub indices a `Backend` starts life with.
+///
+/// [`StubIndices::embedded`] is the PHP standard library compiled into the
+/// binary; [`StubIndices::empty`] skips building it for test backends that
+/// never consult it.
+struct StubIndices {
+    classes: CiMap<&'static str>,
+    functions: CiMap<&'static str>,
+    constants: HashMap<&'static str, &'static str>,
+}
+
+impl StubIndices {
+    /// The full embedded standard library (1,455 classes, 5,023
+    /// functions, 8,119 constants).
+    fn embedded() -> Self {
+        Self {
+            classes: CiMap::from(stubs::build_stub_class_index()),
+            functions: CiMap::from(stubs::build_stub_function_index()),
+            constants: stubs::build_stub_constant_index(),
+        }
+    }
+
+    /// No stubs at all, avoiding the cost of building three large
+    /// `HashMap`s (14,597 entries total).
+    fn empty() -> Self {
+        Self {
+            classes: CiMap::new(),
+            functions: CiMap::new(),
+            constants: HashMap::new(),
+        }
+    }
+}
+
 impl Backend {
     /// Shared defaults for all Backend constructors.
     ///
-    /// Returns a `Backend` with no LSP client, empty maps, and the full
-    /// embedded stub indices.  Each public constructor customises only the
-    /// fields that differ.
-    ///
-    /// **Note:** This loads the full embedded stub indices (1,455 classes,
-    /// 5,023 functions, 8,119 constants).  Test code should use
-    /// [`test_defaults`] instead, which leaves stubs empty.
-    fn defaults() -> Self {
+    /// Returns a `Backend` with no LSP client and empty maps, reading its
+    /// workspace environment and standard library from the arguments.
+    /// Each public constructor customises only the fields that differ.
+    fn defaults_with(workspace: WorkspaceEnv, stubs: StubIndices) -> Self {
         let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
             name: "PHPantom".to_string(),
@@ -1103,7 +1252,7 @@ impl Backend {
             reference_index: reference_index::new_reference_index(),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new(),
+            workspace,
             parse_errors: Arc::new(RwLock::new(HashMap::new())),
             did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
             whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
@@ -1114,11 +1263,9 @@ impl Backend {
             phar_archives: Arc::new(RwLock::new(HashMap::new())),
             parsed_uris: Arc::new(RwLock::new(HashSet::new())),
             parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: Arc::new(RwLock::new(CiMap::from(stubs::build_stub_class_index()))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(
-                stubs::build_stub_function_index(),
-            ))),
-            stub_constant_index: Arc::new(RwLock::new(stubs::build_stub_constant_index())),
+            stub_index: Arc::new(RwLock::new(stubs.classes)),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(stubs.functions))),
+            stub_constant_index: Arc::new(RwLock::new(stubs.constants)),
             resolved_class_cache,
             auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
             storage_disk_type_cache: Arc::new(RwLock::new(None)),
@@ -1143,6 +1290,8 @@ impl Backend {
             laravel_gates: Arc::new(RwLock::new(
                 virtual_members::laravel::LaravelGateIndex::default(),
             )),
+            laravel_runtime_config_keys: Arc::new(RwLock::new(HashMap::new())),
+            is_application: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
             laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             laravel_date_class: Arc::new(RwLock::new(None)),
@@ -1152,6 +1301,9 @@ impl Backend {
             )),
             laravel_provider_scans: Arc::new(RwLock::new(
                 virtual_members::laravel::ProviderScans::default(),
+            )),
+            blade_custom_directives: Arc::new(RwLock::new(
+                blade::directives::CustomDirectives::default(),
             )),
             laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
             laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
@@ -1167,10 +1319,13 @@ impl Backend {
 
             supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_type_hierarchy_dynamic_registration: Arc::new(
                 std::sync::atomic::AtomicBool::new(false),
             ),
+            registered_watcher_state: Arc::new(RwLock::new(None)),
+            supports_relative_pattern_watchers: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -1180,6 +1335,7 @@ impl Backend {
             shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
             blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
+            blade_publish_lock: Arc::new(Mutex::new(())),
             blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
             blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
             typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -1192,115 +1348,34 @@ impl Backend {
         }
     }
 
-    /// Shared defaults for test Backend constructors.
+    /// The standard `Backend` every test constructor starts from.
     ///
-    /// Identical to [`defaults`] but with **empty** stub indices, avoiding
-    /// the cost of building three large `HashMap`s (14,597 entries total)
-    /// that most tests never consult.  Tests that need specific stubs
-    /// override the relevant fields after construction.
+    /// Identical to [`Backend::defaults`] but with **empty** stub indices,
+    /// so a test pays nothing for a standard library it never consults.
+    /// Tests that need specific stubs override the relevant fields after
+    /// construction.
     ///
     /// The workspace environment is also isolated from the global
     /// `.phpantom.toml`, so a test asserts against the project config it
     /// writes itself rather than against the config directory of whoever
     /// happens to be running the suite.
     fn test_defaults() -> Self {
-        let (laravel_aliases, resolved_class_cache) = new_alias_slot_and_cache();
         Self {
-            name: "PHPantom".to_string(),
-            version: env!("PHPANTOM_GIT_VERSION").to_string(),
-            client_name: Mutex::new(String::new()),
-            open_files: Arc::new(RwLock::new(HashMap::new())),
-            symbol_maps: Arc::new(RwLock::new(HashMap::new())),
-            framework_references: framework::new_framework_reference_index(),
-            framework_reference_lookup: framework::new_framework_reference_lookup_index(),
-            framework_doctrine_repositories: framework::new_doctrine_repository_index(),
-            reference_index: reference_index::new_reference_index(),
-            skip_reference_index: false,
-            symbols: SymbolIndex::new(),
-            workspace: WorkspaceEnv::new_isolated(),
-            parse_errors: Arc::new(RwLock::new(HashMap::new())),
-            did_change_parse_locks: Arc::new(Mutex::new(HashMap::new())),
-            whole_file_coalesce: Arc::new(WholeFileCoalesce::default()),
-            client: None,
-            file_imports: Arc::new(RwLock::new(HashMap::new())),
-            resolved_names: Arc::new(RwLock::new(HashMap::new())),
-            file_namespaces: Arc::new(RwLock::new(HashMap::new())),
-            phar_archives: Arc::new(RwLock::new(HashMap::new())),
-            parsed_uris: Arc::new(RwLock::new(HashSet::new())),
-            parse_inflight: Arc::new(resolution::ParseInflight::new()),
-            stub_index: Arc::new(RwLock::new(CiMap::new())),
-            stub_function_index: Arc::new(RwLock::new(CiMap::new())),
-            stub_constant_index: Arc::new(RwLock::new(HashMap::new())),
-            resolved_class_cache,
-            auth_user_type_cache: Arc::new(RwLock::new(HashMap::new())),
-            storage_disk_type_cache: Arc::new(RwLock::new(None)),
-            laravel_storage_drivers: Arc::new(RwLock::new(Default::default())),
-            laravel_aliases,
-            laravel_macros: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelMacroIndex::default(),
-            )),
-            laravel_has_macros: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_pivots: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelPivotIndex::default(),
-            )),
-            laravel_has_pivots: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_pivots_dirty: Arc::new(std::sync::atomic::AtomicBool::new(true)),
-            laravel_commands: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelCommandIndex::default(),
-            )),
-            laravel_has_commands: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            laravel_morph_map: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelMorphMapIndex::default(),
-            )),
-            laravel_gates: Arc::new(RwLock::new(
-                virtual_members::laravel::LaravelGateIndex::default(),
-            )),
-            laravel_macro_seeds: Arc::new(RwLock::new(HashMap::new())),
-            laravel_macro_mixin_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            laravel_date_class: Arc::new(RwLock::new(None)),
-            laravel_date_seed_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            laravel_provider_resources: Arc::new(RwLock::new(
-                virtual_members::laravel::ProviderResources::default(),
-            )),
-            laravel_provider_scans: Arc::new(RwLock::new(
-                virtual_members::laravel::ProviderScans::default(),
-            )),
-            laravel_string_key_cache: Arc::new(RwLock::new(LaravelStringKeyCache::default())),
-            laravel_string_key_build_locks: Arc::new(LaravelStringKeyBuildLocks::default()),
-            schema_index: Arc::new(RwLock::new(
-                virtual_members::laravel::database_schema::SchemaIndex::default(),
-            )),
-            member_completion_cache: Arc::new(Mutex::new(HashMap::new())),
-            diag: crate::diagnostics::state::DiagnosticState::new(),
-            phpstan_tool: ExternalToolWorker::new(),
-            phpcs_tool: ExternalToolWorker::new(),
-            mago_lint_tool: ExternalToolWorker::new(),
-            mago_analyze_tool: ExternalToolWorker::new(),
-            supports_pull_diagnostics: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_file_rename: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_work_done_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_type_hierarchy_dynamic_registration: Arc::new(
-                std::sync::atomic::AtomicBool::new(false),
-            ),
-            supports_show_document: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_semantic_tokens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_code_lens_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            supports_inlay_hint_refresh: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            member_ref_counts: reference_counts::new_member_ref_counts(),
-            init_complete: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            shutdown_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            blade_virtual_content: Arc::new(RwLock::new(HashMap::new())),
-            blade_source_maps: Arc::new(RwLock::new(HashMap::new())),
-            blade_uris: Arc::new(RwLock::new(std::collections::HashSet::new())),
-            blade_injected_vars: Arc::new(RwLock::new(HashMap::new())),
-            typed_receiver_view_spans_cache: Arc::new(RwLock::new(HashMap::new())),
-            workspace_indexed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            workspace_index_lock: Arc::new(Mutex::new(())),
-            full_index_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            workspace_index_status: Arc::new(Mutex::new(None)),
-            request_progress: None,
+            // Tests drive the backend without an `initialize` round-trip; a
+            // real client advertises this capability there.
+            supports_file_create: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            // A test asserts right after the edit that triggered the parse,
+            // so the parse has to have committed by the time the edit
+            // returns.
             sync_ast_updates: true,
+            ..Self::defaults_with(WorkspaceEnv::new_isolated(), StubIndices::empty())
         }
+    }
+
+    /// Shared defaults for the non-test `Backend` constructors: the real
+    /// workspace environment and the full embedded standard library.
+    fn defaults() -> Self {
+        Self::defaults_with(WorkspaceEnv::new(), StubIndices::embedded())
     }
 
     /// Create a new `Backend` connected to an LSP client.
@@ -1324,6 +1399,12 @@ impl Backend {
         }
     }
 
+    /// Create a headless backend for refactoring commands that need the
+    /// workspace-wide reference index.
+    pub fn new_headless_refactoring() -> Self {
+        Self::defaults()
+    }
+
     /// Create a `Backend` without an LSP client (for unit / integration tests).
     ///
     /// Uses empty stub indices for fast construction.  Tests that need
@@ -1344,10 +1425,7 @@ impl Backend {
     /// behaviour.
     pub fn new_test_with_full_stubs() -> Self {
         virtual_members::phpdoc::clear_mixin_cache();
-        let backend = Self {
-            workspace: WorkspaceEnv::new_isolated(),
-            ..Self::defaults()
-        };
+        let backend = Self::defaults_with(WorkspaceEnv::new_isolated(), StubIndices::embedded());
         backend.set_php_version(backend.php_version());
         backend
     }
@@ -1379,7 +1457,9 @@ impl Backend {
         virtual_members::phpdoc::clear_mixin_cache();
         let backend = Self {
             stub_index: Arc::new(RwLock::new(CiMap::from(stub_index))),
-            stub_function_index: Arc::new(RwLock::new(CiMap::from(stub_function_index))),
+            stub_function_index: Arc::new(RwLock::new(blade::with_marker_stubs(CiMap::from(
+                stub_function_index,
+            )))),
             stub_constant_index: Arc::new(RwLock::new(stub_constant_index)),
             ..Self::test_defaults()
         };
@@ -1422,6 +1502,13 @@ impl Backend {
     /// integration tests to diagnose the virtual content the way the
     /// live pipeline does).
     pub fn blade_virtual_php(&self, uri: &str) -> Option<String> {
+        self.blade_virtual_php_arc(uri)
+            .map(|php| String::clone(&php))
+    }
+
+    /// [`Self::blade_virtual_php`] without the copy, for the request paths
+    /// that only need to read the text.
+    pub(crate) fn blade_virtual_php_arc(&self, uri: &str) -> Option<Arc<String>> {
         self.blade_virtual_content.read().get(uri).cloned()
     }
 
@@ -1519,6 +1606,23 @@ impl Backend {
         &self.open_files
     }
 
+    /// Mark the workspace as indexed (used by integration tests that need
+    /// the state `ensure_workspace_indexed` leaves behind without running
+    /// a real workspace scan).
+    pub fn mark_workspace_indexed(&self) {
+        self.workspace_indexed
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Declare whether the client supports `workspace/codeLens/refresh`,
+    /// which decides whether a lens may be answered cold and refreshed
+    /// once its count lands (used by integration tests to pick the path
+    /// without going through `initialize`).
+    pub fn set_supports_code_lens_refresh(&self, supported: bool) {
+        self.supports_code_lens_refresh
+            .store(supported, std::sync::atomic::Ordering::Release);
+    }
+
     pub(crate) fn completion_origin_for_uri(&self, uri: &str) -> ClassCompletionOrigin {
         self.package_info_for_uri(uri).0
     }
@@ -1534,19 +1638,16 @@ impl Backend {
         path: &Path,
     ) -> (ClassCompletionOrigin, Option<String>) {
         let vendor_paths = self.workspace.vendor_dir_paths.lock();
-        let is_under_vendor = vendor_paths.iter().any(|vp| path.starts_with(vp));
-        drop(vendor_paths);
-
         let roots = self.workspace.vendor_package_origin_roots.read();
 
-        if is_under_vendor {
-            for (root, origin, pkg_name) in roots.iter() {
-                if path.starts_with(root) {
-                    return (*origin, Some(pkg_name.clone()));
-                }
-            }
-            return (ClassCompletionOrigin::VendorTransitive, None);
+        if vendor_paths.iter().any(|vp| path.starts_with(vp)) {
+            return match crate::indexing::vendor_package_root_for_path(path, &vendor_paths, &roots)
+            {
+                Some((_, origin, pkg_name)) => (*origin, Some(pkg_name.clone())),
+                None => (ClassCompletionOrigin::VendorTransitive, None),
+            };
         }
+        drop(vendor_paths);
 
         // Path is outside vendor/.  This is usually project code, but
         // it can also be a symlinked path-repository package whose
@@ -1649,52 +1750,76 @@ impl Backend {
     /// Populate the GTI (go-to-implementation) reverse inheritance index
     /// for the given classes.  For each class, inserts the class's FQN
     /// into the child list of every parent (parent_class, interfaces,
-    /// used_traits).
+    /// used_traits), and records the same edges under the class itself in
+    /// `gti_parents_index` so they can be withdrawn again without
+    /// searching for them.
     pub(crate) fn populate_gti_index(&self, classes: &[Arc<ClassInfo>]) {
         let mut gti = self.symbols.gti_index.write();
+        let mut parents_index = self.symbols.gti_parents_index.write();
         for cls in classes {
             if cls.name.starts_with("__anonymous@") {
                 continue;
             }
-            let child_fqn = cls.fqn().to_string();
+            if cls.parent_class.is_none() && cls.interfaces.is_empty() && cls.used_traits.is_empty()
+            {
+                continue;
+            }
 
-            if let Some(ref parent) = cls.parent_class {
-                let parent_str = parent.to_string();
-                let children = gti.entry(parent_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+            let child_fqn = cls.fqn().to_string();
+            let registered = parents_index.entry(child_fqn.clone()).or_default();
+
+            for parent in cls
+                .parent_class
+                .iter()
+                .chain(cls.interfaces.iter())
+                .chain(cls.used_traits.iter())
+            {
+                let parent_fqn: &str = parent;
+                // The edge is deduplicated against the child's own parents,
+                // a list as long as its `extends`/`implements`/`use`
+                // clauses, rather than against the parent's child list,
+                // which grows with the number of implementors.
+                if registered.iter().any(|p| p == parent_fqn) {
+                    continue;
                 }
-            }
-            for iface in &cls.interfaces {
-                let iface_str = iface.to_string();
-                let children = gti.entry(iface_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
-                }
-            }
-            for tr in &cls.used_traits {
-                let tr_str = tr.to_string();
-                let children = gti.entry(tr_str).or_default();
-                if !children.contains(&child_fqn) {
-                    children.push(child_fqn.clone());
+                registered.push(parent_fqn.to_string());
+                match gti.get_mut(parent_fqn) {
+                    Some(children) => children.push(child_fqn.clone()),
+                    None => {
+                        gti.insert(parent_fqn.to_string(), vec![child_fqn.clone()]);
+                    }
                 }
             }
         }
     }
 
-    /// Remove all GTI entries where `child_fqn` appears as a child.
+    /// Remove all GTI entries where one of `fqns` appears as a child.
     /// Called before re-populating when a file is re-parsed.
+    ///
+    /// Only the parents each class was registered under are touched, so the
+    /// cost is the size of the re-parsed file's inheritance clauses rather
+    /// than the size of the workspace.
     pub(crate) fn evict_gti_for_fqns(&self, fqns: &[String]) {
         if fqns.is_empty() {
             return;
         }
-        let fqn_set: HashSet<&str> = fqns.iter().map(|s| s.as_str()).collect();
         let mut gti = self.symbols.gti_index.write();
-        for children in gti.values_mut() {
-            children.retain(|child| !fqn_set.contains(child.as_str()));
+        let mut parents_index = self.symbols.gti_parents_index.write();
+        for fqn in fqns {
+            let Some(parents) = parents_index.remove(fqn.as_str()) else {
+                continue;
+            };
+            for parent in parents {
+                let Some(children) = gti.get_mut(&parent) else {
+                    continue;
+                };
+                children.retain(|child| child != fqn);
+                // Remove empty entries to avoid unbounded growth.
+                if children.is_empty() {
+                    gti.remove(&parent);
+                }
+            }
         }
-        // Remove empty entries to avoid unbounded growth.
-        gti.retain(|_, v| !v.is_empty());
     }
 
     /// Re-scan a batch of files from disk, refreshing their discovery-level
@@ -1722,12 +1847,24 @@ impl Backend {
     /// `update_ast` stores the editor's URI string), so values are matched
     /// against both spellings.  The full
     /// [`ClassInfo`](crate::types::ClassInfo) is re-parsed lazily on next
-    /// access; this only restores the lightweight discovery indexes.
+    /// access.  Beyond the lightweight discovery indexes, only the files the
+    /// workspace index covers are parsed again here, and only once that
+    /// index exists, so their references keep counting.
     ///
     /// `changes` is `(editor URI string, file path, change type)`.
-    pub(crate) fn reindex_files_batch(&self, changes: &[(String, PathBuf, FileChangeType)]) {
+    ///
+    /// Returns whether any *class declaration* was dropped, handed to a
+    /// surviving file, or discovered — i.e. whether class resolution could
+    /// now answer differently.  A batch of declaration-free files (a
+    /// generated cache artifact, a routes or config file) returns `false`,
+    /// and the caller can keep the resolved-class caches it would
+    /// otherwise have to drop.
+    pub(crate) fn reindex_files_batch(
+        &self,
+        changes: &[(String, PathBuf, FileChangeType)],
+    ) -> bool {
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         // Index values are stored under either the editor URI or the
@@ -1755,6 +1892,7 @@ impl Backend {
         // These FQNs no longer resolve, and the promoted ones resolve
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
+        let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1793,7 +1931,7 @@ impl Backend {
         // background indexer stores.  Missing the canonical spelling would
         // leave a stale symbol map that also blocks re-parsing (the
         // workspace-index walk skips files that already have one).
-        for (uri_str, path, _) in changes {
+        for (uri_str, path, change_type) in changes {
             let canonical_uri = crate::util::path_to_uri(path);
             let spellings = if canonical_uri == *uri_str {
                 vec![uri_str.as_str()]
@@ -1810,6 +1948,17 @@ impl Backend {
                 // behind.  Created/changed files rebuild it when re-parsed
                 // below.
                 self.symbols.uri_globals_index.write().remove(uri);
+                // A deleted file no longer declares the config keys it wrote
+                // at runtime.  A file that was merely changed re-registers
+                // them when it is re-parsed below.
+                self.laravel_runtime_config_keys.write().remove(uri);
+                // The Laravel registries a file fed (macros, storage drivers,
+                // commands, morph aliases, gates, provider resources) are
+                // refreshed only when the file is parsed, which a deleted
+                // file never is again.
+                if *change_type == FileChangeType::DELETED {
+                    self.forget_laravel_file_contributions(uri);
+                }
             }
         }
 
@@ -1824,6 +1973,7 @@ impl Backend {
             }
 
             let classes = crate::classmap_scanner::scan_file(path);
+            classes_changed |= !classes.is_empty();
             self.symbols.with_class_declarations(|decls| {
                 for fqn in classes {
                     decls.note_discovered(&fqn, uri_str.clone());
@@ -1844,6 +1994,40 @@ impl Backend {
                 }
             }
         }
+
+        // The refreshed discovery indexes may add or remove a namespace-local
+        // `auth()` or a real global class that shadows a Laravel facade alias.
+        // Re-evaluate only maps that recorded one of those dormant candidates.
+        self.refresh_all_published_laravel_candidates();
+        // The purge above took the files' symbol maps and reference-index
+        // entries with it, and a completed workspace index is never walked
+        // again to put them back, so the reference-count lenses would stop
+        // counting what a changed file references and never see a created
+        // one.  Re-parse them now.  An index that has not started yet picks
+        // them up in its own walk, but one in flight may already be past
+        // them.
+        if self
+            .workspace_indexed
+            .load(std::sync::atomic::Ordering::Acquire)
+            || self.workspace_index_lock.is_locked()
+        {
+            let reparse: Vec<(String, PathBuf)> = changes
+                .iter()
+                .filter(|(_, _, change_type)| {
+                    matches!(
+                        *change_type,
+                        FileChangeType::CREATED | FileChangeType::CHANGED
+                    )
+                })
+                .filter_map(|(_, path, _)| {
+                    let uri = crate::util::path_to_uri(path);
+                    self.workspace_index_path(&uri)?;
+                    Some((uri, path.clone()))
+                })
+                .collect();
+            self.parse_paths_parallel_with_progress(&reparse, None);
+        }
+        classes_changed
     }
 
     /// Create a shallow clone of this `Backend` that shares every
@@ -1901,12 +2085,15 @@ impl Backend {
             laravel_has_commands: Arc::clone(&self.laravel_has_commands),
             laravel_morph_map: Arc::clone(&self.laravel_morph_map),
             laravel_gates: Arc::clone(&self.laravel_gates),
+            laravel_runtime_config_keys: Arc::clone(&self.laravel_runtime_config_keys),
+            is_application: Arc::clone(&self.is_application),
             laravel_macro_seeds: Arc::clone(&self.laravel_macro_seeds),
             laravel_macro_mixin_uris: Arc::clone(&self.laravel_macro_mixin_uris),
             laravel_date_class: Arc::clone(&self.laravel_date_class),
             laravel_date_seed_uris: Arc::clone(&self.laravel_date_seed_uris),
             laravel_provider_resources: Arc::clone(&self.laravel_provider_resources),
             laravel_provider_scans: Arc::clone(&self.laravel_provider_scans),
+            blade_custom_directives: Arc::clone(&self.blade_custom_directives),
             laravel_string_key_cache: Arc::clone(&self.laravel_string_key_cache),
             laravel_string_key_build_locks: Arc::clone(&self.laravel_string_key_build_locks),
             schema_index: Arc::clone(&self.schema_index),
@@ -1921,10 +2108,15 @@ impl Backend {
             mago_analyze_tool: self.mago_analyze_tool.clone(),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),
             supports_file_rename: Arc::clone(&self.supports_file_rename),
+            supports_file_create: Arc::clone(&self.supports_file_create),
             supports_work_done_progress: Arc::clone(&self.supports_work_done_progress),
             supports_type_hierarchy_dynamic_registration: Arc::clone(
                 &self.supports_type_hierarchy_dynamic_registration,
             ),
+            supports_relative_pattern_watchers: Arc::clone(
+                &self.supports_relative_pattern_watchers,
+            ),
+            registered_watcher_state: Arc::clone(&self.registered_watcher_state),
             supports_show_document: Arc::clone(&self.supports_show_document),
             supports_semantic_tokens_refresh: Arc::clone(&self.supports_semantic_tokens_refresh),
             supports_code_lens_refresh: Arc::clone(&self.supports_code_lens_refresh),
@@ -1934,6 +2126,7 @@ impl Backend {
             shutdown_flag: Arc::clone(&self.shutdown_flag),
             blade_virtual_content: Arc::clone(&self.blade_virtual_content),
             blade_source_maps: Arc::clone(&self.blade_source_maps),
+            blade_publish_lock: Arc::clone(&self.blade_publish_lock),
             blade_uris: Arc::clone(&self.blade_uris),
             blade_injected_vars: Arc::clone(&self.blade_injected_vars),
             typed_receiver_view_spans_cache: Arc::clone(&self.typed_receiver_view_spans_cache),
@@ -1965,12 +2158,82 @@ impl Backend {
         self.workspace.config.lock().clone()
     }
 
+    /// The directory symlinks the workspace walks have indexed through.
+    ///
+    /// Walks report into it as they discover links; the watcher
+    /// registration and the watched-file handler read it back.
+    pub(crate) fn followed_links(&self) -> &crate::classmap_scanner::FollowedLinks {
+        &self.workspace.followed_links
+    }
+
     /// Replace the current configuration.
     ///
-    /// Used by integration tests to enable opt-in diagnostics like
-    /// `unresolved-member-access` without needing a `.phpantom.toml` file.
+    /// Used when (re)loading `.phpantom.toml` and by integration tests
+    /// to enable opt-in diagnostics like `unresolved-member-access`
+    /// without needing a `.phpantom.toml` file. Resets the compiled
+    /// `[indexing]` filters so the next scan sees the new settings.
     pub fn set_config(&self, config: config::Config) {
         *self.workspace.config.lock() = config;
+        *self.workspace.index_filters.write() = None;
+    }
+
+    /// Return the compiled `[indexing]` exclude globs and extra PHP
+    /// extensions, building them on first use from the union of the
+    /// `.phpantom.toml` layer and the client-supplied layer.
+    ///
+    /// The two layers are unioned rather than one overriding the other:
+    /// both name files that are not worth indexing, and a client cannot
+    /// know what a project's config file already excludes. The compiled
+    /// result is cached until [`set_config`](Self::set_config) or
+    /// [`set_client_indexing_options`](Self::set_client_indexing_options)
+    /// invalidates it, so glob compilation never runs on a per-file path.
+    pub(crate) fn index_filters(&self) -> Arc<classmap_scanner::IndexFilters> {
+        if let Some(filters) = self.workspace.index_filters.read().as_ref() {
+            return Arc::clone(filters);
+        }
+        let root = self.workspace.workspace_root.read().clone();
+        let indexing = self.config().indexing;
+        let client = self.workspace.client_indexing.read();
+
+        // The overwhelmingly common case is one layer or the other being
+        // empty, so only pay for a merged allocation when both contribute.
+        let compiled = if client.is_empty() {
+            classmap_scanner::IndexFilters::compile(
+                root.as_deref(),
+                indexing.exclude(),
+                indexing.extensions(),
+            )
+        } else {
+            // The config file's patterns go last so a `!` re-include in
+            // `.phpantom.toml` can still override an exclude the editor
+            // forwarded: gitignore semantics give the last match priority.
+            let exclude = [client.exclude.as_slice(), indexing.exclude()].concat();
+            let extensions = [client.extensions.as_slice(), indexing.extensions()].concat();
+            classmap_scanner::IndexFilters::compile(root.as_deref(), &exclude, &extensions)
+        };
+        drop(client);
+
+        let compiled = Arc::new(compiled);
+        *self.workspace.index_filters.write() = Some(Arc::clone(&compiled));
+        compiled
+    }
+
+    /// Replace the client-supplied file filters.
+    ///
+    /// Called from the `initialize` handshake and again whenever a
+    /// `workspace/didChangeConfiguration` arrives. Returns whether the
+    /// filters actually changed, so the caller can skip the rescan and
+    /// watcher churn a no-op settings push would otherwise cause (clients
+    /// re-send their whole settings tree for edits to unrelated keys).
+    pub fn set_client_indexing_options(&self, options: config::ClientIndexingOptions) -> bool {
+        let mut current = self.workspace.client_indexing.write();
+        if *current == options {
+            return false;
+        }
+        *current = options;
+        drop(current);
+        *self.workspace.index_filters.write() = None;
+        true
     }
 
     /// Record whether the client handles `window/showDocument`.
@@ -1990,237 +2253,23 @@ impl Backend {
     /// the given PHP version.
     pub fn set_php_version(&self, version: types::PhpVersion) {
         *self.workspace.php_version.lock() = version;
-        self.stub_function_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_function_removed(source, name, version));
-        self.stub_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_class_removed(source, name, version));
-        self.stub_constant_index
-            .write()
-            .retain(|name, source| !stubs::is_stub_constant_removed(source, name, version));
-    }
-
-    /// Check whether a URI refers to a Blade template file.
-    /// Returns true if the URI ends with `.blade.php` OR was opened with `languageId == "blade"`.
-    pub(crate) fn is_blade_file(&self, uri: &str) -> bool {
-        crate::blade::is_blade_file(uri) || self.blade_uris.read().contains(uri)
-    }
-
-    /// Translate a position from an original Blade file to the virtual PHP file.
-    pub(crate) fn translate_blade_to_php(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.blade_to_php(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade file.
-    pub(crate) fn translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> tower_lsp::lsp_types::Position {
-        if let Some(map) = self.blade_source_maps.read().get(uri) {
-            map.php_to_blade(pos)
-        } else {
-            pos
-        }
-    }
-
-    /// Translate a position from a virtual PHP file back to the original Blade
-    /// file, or `None` when the position lies in the injected prologue.
-    ///
-    /// Use this instead of [`Self::translate_php_to_blade`] wherever the
-    /// result becomes a text edit or a range the editor navigates to: the
-    /// prologue has no template text behind it, and clamping a prologue
-    /// position to `0:0` produces an edit at the very start of the template.
-    pub(crate) fn try_translate_php_to_blade(
-        &self,
-        uri: &str,
-        pos: tower_lsp::lsp_types::Position,
-    ) -> Option<tower_lsp::lsp_types::Position> {
-        match self.blade_source_maps.read().get(uri) {
-            Some(map) => map.try_php_to_blade(pos),
-            None => Some(pos),
-        }
-    }
-
-    /// Translate a range from virtual PHP coordinates back to original Blade
-    /// coordinates, dropping it when either end lies in the prologue.
-    pub(crate) fn try_translate_blade_range(
-        &self,
-        uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> Option<tower_lsp::lsp_types::Range> {
-        Some(tower_lsp::lsp_types::Range {
-            start: self.try_translate_php_to_blade(uri, range.start)?,
-            end: self.try_translate_php_to_blade(uri, range.end)?,
-        })
-    }
-
-    /// Translate one completion item's edit ranges from virtual PHP
-    /// coordinates back to Blade, dropping the item if any range falls in
-    /// the injected prologue.
-    fn translate_completion_item(
-        &self,
-        uri: &str,
-        mut item: tower_lsp::lsp_types::CompletionItem,
-    ) -> Option<tower_lsp::lsp_types::CompletionItem> {
-        use tower_lsp::lsp_types::CompletionTextEdit;
-
-        if let Some(edit) = item.text_edit.take() {
-            item.text_edit = Some(match edit {
-                CompletionTextEdit::Edit(mut e) => {
-                    e.range = self.try_translate_blade_range(uri, e.range)?;
-                    CompletionTextEdit::Edit(e)
-                }
-                CompletionTextEdit::InsertAndReplace(mut e) => {
-                    e.insert = self.try_translate_blade_range(uri, e.insert)?;
-                    e.replace = self.try_translate_blade_range(uri, e.replace)?;
-                    CompletionTextEdit::InsertAndReplace(e)
-                }
-            });
-        }
-
-        if let Some(edits) = item.additional_text_edits.take() {
-            let mut translated = Vec::with_capacity(edits.len());
-            for mut e in edits {
-                e.range = self.try_translate_blade_range(uri, e.range)?;
-                translated.push(e);
-            }
-            item.additional_text_edits = Some(translated);
-        }
-
-        Some(item)
-    }
-
-    /// Translate every completion item in a response from virtual PHP
-    /// coordinates back to Blade, dropping items whose edits target the
-    /// preprocessor's injected prologue rather than clamping them to the
-    /// start of the template.
-    pub(crate) fn translate_completion_response(
-        &self,
-        uri: &str,
-        response: tower_lsp::lsp_types::CompletionResponse,
-    ) -> tower_lsp::lsp_types::CompletionResponse {
-        use tower_lsp::lsp_types::{CompletionList, CompletionResponse};
-
-        match response {
-            CompletionResponse::Array(items) => CompletionResponse::Array(
-                items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            ),
-            CompletionResponse::List(list) => CompletionResponse::List(CompletionList {
-                is_incomplete: list.is_incomplete,
-                items: list
-                    .items
-                    .into_iter()
-                    .filter_map(|item| self.translate_completion_item(uri, item))
-                    .collect(),
-            }),
-        }
-    }
-
-    /// Translate a location from virtual PHP coordinates back to original Blade
-    /// coordinates if the location points into a Blade file.
-    pub(crate) fn translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> tower_lsp::lsp_types::Location {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range.start = self.translate_php_to_blade(&uri_str, location.range.start);
-            location.range.end = self.translate_php_to_blade(&uri_str, location.range.end);
-        }
-        location
-    }
-
-    /// Like [`Self::translate_location`], but drops a Blade location whose
-    /// range falls inside the preprocessor's prologue.
-    pub(crate) fn try_translate_location(
-        &self,
-        mut location: tower_lsp::lsp_types::Location,
-    ) -> Option<tower_lsp::lsp_types::Location> {
-        let uri_str = location.uri.to_string();
-        if self.is_blade_file(&uri_str) {
-            location.range = self.try_translate_blade_range(&uri_str, location.range)?;
-        }
-        Some(location)
-    }
-
-    /// Translate every text edit in a workspace edit from virtual PHP
-    /// coordinates back to Blade, dropping the ones that target a template's
-    /// injected prologue.
-    ///
-    /// Covers both `changes` and `document_changes`; a class rename that also
-    /// renames its file uses the latter.
-    pub(crate) fn translate_workspace_edit(&self, edit: &mut tower_lsp::lsp_types::WorkspaceEdit) {
-        use tower_lsp::lsp_types::{DocumentChangeOperation, DocumentChanges};
-
-        if let Some(changes) = &mut edit.changes {
-            changes.retain(|uri, edits| {
-                let uri_str = uri.to_string();
-                if !self.is_blade_file(&uri_str) {
-                    return true;
-                }
-                edits.retain_mut(
-                    |e| match self.try_translate_blade_range(&uri_str, e.range) {
-                        Some(range) => {
-                            e.range = range;
-                            true
-                        }
-                        None => false,
-                    },
-                );
-                !edits.is_empty()
-            });
-        }
-
-        match &mut edit.document_changes {
-            Some(DocumentChanges::Edits(edits)) => {
-                edits.retain_mut(|e| self.translate_text_document_edit(e));
-            }
-            Some(DocumentChanges::Operations(ops)) => ops.retain_mut(|op| match op {
-                DocumentChangeOperation::Edit(e) => self.translate_text_document_edit(e),
-                DocumentChangeOperation::Op(_) => true,
-            }),
-            None => {}
-        }
-    }
-
-    /// Translate one document's edits back to Blade coordinates, returning
-    /// `false` when every edit it held targeted the prologue.
-    fn translate_text_document_edit(
-        &self,
-        edit: &mut tower_lsp::lsp_types::TextDocumentEdit,
-    ) -> bool {
-        use tower_lsp::lsp_types::OneOf;
-
-        let uri_str = edit.text_document.uri.to_string();
-        if !self.is_blade_file(&uri_str) {
-            return true;
-        }
-        edit.edits.retain_mut(|e| {
-            let range = match e {
-                OneOf::Left(e) => &mut e.range,
-                OneOf::Right(e) => &mut e.text_edit.range,
-            };
-            match self.try_translate_blade_range(&uri_str, *range) {
-                Some(translated) => {
-                    *range = translated;
-                    true
-                }
-                None => false,
-            }
+        // Every symbol a stub file declares shares that file's `&'static str`,
+        // so whether the file mentions `@removed` at all is answered once per
+        // file rather than rescanning it for each of its thousands of symbols.
+        let mut mentions_removed: HashMap<usize, bool> = HashMap::new();
+        let mut may_be_removed = |source: &str| {
+            *mentions_removed
+                .entry(source.as_ptr() as usize)
+                .or_insert_with(|| source.contains("@removed"))
+        };
+        self.stub_function_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_function_removed(source, name, version)
         });
-        !edit.edits.is_empty()
+        self.stub_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_class_removed(source, name, version)
+        });
+        self.stub_constant_index.write().retain(|name, source| {
+            !may_be_removed(source) || !stubs::is_stub_constant_removed(source, name, version)
+        });
     }
 }

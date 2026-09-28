@@ -111,14 +111,53 @@ impl Backend {
             return uris;
         }
 
-        let keys = affected_reference_keys(&baseline, &current);
+        let mut keys = affected_reference_keys(&baseline, &current);
         if keys.is_empty() {
             uris.clear();
             return uris;
         }
+        self.push_descendant_class_keys(&baseline, &current, &mut keys);
 
         self.retain_reference_candidates(&keys, &mut uris);
         uris
+    }
+
+    /// Add the class keys of every transitive descendant of a changed
+    /// class to `keys`.
+    ///
+    /// A grandchild names only its direct parent, so the class keys of
+    /// the changed class never reach it; what it inherits changed all the
+    /// same.  The descendant's own key reaches both the files that extend
+    /// it and the files that use it.
+    fn push_descendant_class_keys(
+        &self,
+        baseline: &FileDeclarations,
+        current: &FileDeclarations,
+        keys: &mut Vec<ReferenceIndexKey>,
+    ) {
+        let mut queue: std::collections::VecDeque<String> = baseline
+            .classes
+            .iter()
+            .chain(current.classes.iter())
+            .map(|class| class.fqn().to_string())
+            .filter(|fqn| keys.contains(&ReferenceIndexKey::class_owned(fqn.clone())))
+            .collect();
+        if queue.is_empty() {
+            return;
+        }
+        let mut seen: HashSet<String> = queue.iter().cloned().collect();
+        let mut descendant_keys = HashSet::new();
+        let gti = self.symbols.gti_index.read();
+        while let Some(fqn) = queue.pop_front() {
+            for child in gti.get(&fqn).into_iter().flatten() {
+                if seen.insert(child.clone()) {
+                    push_class_keys(&mut descendant_keys, child);
+                    queue.push_back(child.clone());
+                }
+            }
+        }
+        drop(gti);
+        keys.extend(descendant_keys);
     }
 
     /// Collect the classes, functions, and constants `uri` currently
@@ -528,6 +567,58 @@ mod tests {
             &backend,
             SERVICE,
             "<?php\nnamespace App;\nclass Service {\n  public function handle(int $n, int $m): void {}\n}\n",
+        );
+
+        assert_eq!(affected, vec![BYSTANDER.to_string(), CONSUMER.to_string()]);
+    }
+
+    // Cases adapted from laravel-lsp's MIT-licensed test suite.  A
+    // grandchild names only its direct parent, so a change further up the
+    // chain reaches it only through the inheritance graph.
+    #[test]
+    fn changing_a_grandparent_class_reaches_its_grandchildren() {
+        let backend = backend_with_open_files(&[
+            (
+                SERVICE,
+                "<?php\nnamespace App;\nabstract class Service {}\n",
+            ),
+            (
+                CONSUMER,
+                "<?php\nnamespace App;\nabstract class Middle extends Service {}\n",
+            ),
+            (
+                BYSTANDER,
+                "<?php\nnamespace App;\nclass Leaf extends Middle {}\n",
+            ),
+        ]);
+
+        let affected = save(
+            &backend,
+            SERVICE,
+            "<?php\nnamespace App;\nabstract class Service {\n  abstract public function run(): void;\n}\n",
+        );
+
+        assert_eq!(affected, vec![BYSTANDER.to_string(), CONSUMER.to_string()]);
+    }
+
+    #[test]
+    fn changing_a_used_trait_reaches_the_users_of_the_trait_that_uses_it() {
+        let backend = backend_with_open_files(&[
+            (SERVICE, "<?php\nnamespace App;\ntrait Service {}\n"),
+            (
+                CONSUMER,
+                "<?php\nnamespace App;\ntrait Middle {\n  use Service;\n}\n",
+            ),
+            (
+                BYSTANDER,
+                "<?php\nnamespace App;\nclass Leaf {\n  use Middle;\n}\n",
+            ),
+        ]);
+
+        let affected = save(
+            &backend,
+            SERVICE,
+            "<?php\nnamespace App;\ntrait Service {\n  abstract public function run(): void;\n}\n",
         );
 
         assert_eq!(affected, vec![BYSTANDER.to_string(), CONSUMER.to_string()]);

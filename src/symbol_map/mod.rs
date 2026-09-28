@@ -27,12 +27,15 @@
 //!   `extract_from_*` helpers)
 
 pub(crate) mod docblock;
-mod extraction;
+pub(crate) mod extraction;
+pub(crate) mod laravel_resources;
 
 use crate::atom::Atom;
 use crate::php_type::PhpType;
 
+#[cfg(test)]
 pub(crate) use extraction::extract_symbol_map;
+pub(crate) use extraction::extract_symbol_map_for_index;
 
 // ─── Data structures ────────────────────────────────────────────────────────
 
@@ -174,6 +177,32 @@ impl DocblockMemberRef {
     }
 }
 
+/// Text a [`SymbolMap`]'s offsets are known to index into.
+///
+/// A map records byte offsets into whatever content it was extracted
+/// from.  Slicing them against a *different* revision of the same file
+/// reads unrelated bytes, and runs off the end as soon as the other
+/// revision is shorter — which panics, taking the whole worker thread
+/// with it.  The two revisions are easy to mix up: the map for a Blade
+/// template describes the virtual PHP it lowers to rather than the
+/// template's own bytes, and a map cached per URI outlives the buffer it
+/// was built from.
+///
+/// `MappedSource` is the proof that a map and a string belong together.
+/// It can only be obtained from [`SymbolMap::source`], which checks the
+/// pairing, so a consumer that holds one cannot be holding the wrong
+/// text.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct MappedSource<'a>(&'a str);
+
+impl<'a> MappedSource<'a> {
+    /// The source text itself, for the parts of a consumer that need a
+    /// plain `&str`.
+    pub(crate) fn text(self) -> &'a str {
+        self.0
+    }
+}
+
 /// The subject (LHS) text of a [`SymbolKind::MemberAccess`] span.
 ///
 /// Most subjects are a verbatim slice of the source (a plain variable,
@@ -212,9 +241,14 @@ impl SubjectText {
         Self::Owned(text.into_boxed_str())
     }
 
-    pub(crate) fn as_str<'a>(&'a self, content: &'a str) -> &'a str {
+    /// The subject text, slicing the source the owning map was extracted
+    /// from for the `Range` case.
+    ///
+    /// Taking a [`MappedSource`] rather than a bare `&str` is what keeps
+    /// the offsets and the text in step: see the type's documentation.
+    pub(crate) fn as_str<'a>(&'a self, source: MappedSource<'a>) -> &'a str {
         match self {
-            Self::Range { start, end } => &content[*start as usize..*end as usize],
+            Self::Range { start, end } => &source.text()[*start as usize..*end as usize],
             Self::Owned(s) => s,
         }
     }
@@ -445,16 +479,56 @@ impl SymbolKind {
     }
 }
 
+/// A Laravel resource whose short name is declared under a config subtree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum LaravelConfigResource {
+    /// A guard under `auth.guards`.
+    AuthGuard,
+    /// A cache store under `cache.stores`.
+    CacheStore,
+    /// A logging channel under `logging.channels`.
+    LogChannel,
+    /// A filesystem disk under `filesystems.disks`.
+    StorageDisk,
+    /// A database connection under `database.connections`.
+    DatabaseConnection,
+    /// A queue connection under `queue.connections`.
+    QueueConnection,
+    /// A configured mailer under `mail.mailers`.
+    Mailer,
+    /// A broadcast connection under `broadcasting.connections`.
+    BroadcastConnection,
+}
+
+impl LaravelConfigResource {
+    /// The resource's unique bit in a zero-allocation family-presence set.
+    pub(crate) const fn bit(self) -> u8 {
+        match self {
+            Self::AuthGuard => 1 << 0,
+            Self::CacheStore => 1 << 1,
+            Self::LogChannel => 1 << 2,
+            Self::StorageDisk => 1 << 3,
+            Self::DatabaseConnection => 1 << 4,
+            Self::QueueConnection => 1 << 5,
+            Self::Mailer => 1 << 6,
+            Self::BroadcastConnection => 1 << 7,
+        }
+    }
+}
+
 /// Identifies the category of a [`SymbolKind::LaravelStringKey`] span.
 ///
 /// Adding a new Laravel navigation feature only requires adding a variant
 /// here and updating the extraction and dispatch paths — the exhaustive
 /// match arms in `highlight`, `hover`, `rename`, `semantic_tokens`, and
 /// `type_definition` do not need to change.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum LaravelStringKind {
     /// A `config('dot.key')` or `Config::get('dot.key')` call.
     Config,
+    /// A short name whose declaration is a direct child of a known config
+    /// subtree, such as a storage disk or database connection.
+    ConfigResource(LaravelConfigResource),
     /// A `view('name')` or `View::make('name')` call.
     View,
     /// A `route('name')` call.
@@ -492,6 +566,104 @@ pub(crate) enum LaravelStringKind {
     /// `Env::get('APP_NAME')` reads, resolving to the line that declares it
     /// in the project's `.env`.
     Env,
+}
+
+impl LaravelStringKind {
+    /// Whether this key resolves through Laravel's config index.
+    pub(crate) const fn is_config_backed(self) -> bool {
+        matches!(self, Self::Config | Self::ConfigResource(_))
+    }
+}
+
+/// A workspace symbol whose presence suppresses an otherwise-valid Laravel
+/// runtime fallback.
+///
+/// PHP first looks for a namespace-local function before falling back to a
+/// global helper, and Laravel's root facade aliases only exist when no real
+/// global class has claimed the same name. These dependencies are stored on
+/// the handful of ambiguous string spans so edits to another file can toggle
+/// the spans without reparsing either file or adding work to request paths.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum LaravelStringDependency {
+    Function(Atom),
+    Class(Atom),
+}
+
+impl LaravelStringDependency {
+    /// The namespace-local `auth` function that may prevent PHP from reaching
+    /// Laravel's global helper.
+    pub(crate) fn namespaced_auth(name: &str) -> Option<Self> {
+        let (namespace, short) = name.rsplit_once('\\')?;
+        (!namespace.is_empty() && short.eq_ignore_ascii_case("auth"))
+            .then(|| Self::Function(crate::atom::ascii_lowercase_atom(name)))
+    }
+
+    /// A global class name Laravel may otherwise provide as a runtime facade
+    /// alias. Fully-qualified facade classes are unambiguous and return none.
+    pub(crate) fn root_facade(name: &str) -> Option<Self> {
+        let name = name.trim_start_matches('\\');
+        if name.contains('\\') {
+            return None;
+        }
+        let is_alias = crate::symbol_map::laravel_resources::RESOURCE_FACADES
+            .iter()
+            .any(|alias| name.eq_ignore_ascii_case(alias))
+            || match name.len() {
+                3 => name.eq_ignore_ascii_case("App"),
+                4 => {
+                    name.eq_ignore_ascii_case("Gate")
+                        || name.eq_ignore_ascii_case("Lang")
+                        || name.eq_ignore_ascii_case("View")
+                }
+                5 => name.eq_ignore_ascii_case("Route"),
+                6 => name.eq_ignore_ascii_case("Config"),
+                7 => name.eq_ignore_ascii_case("Artisan"),
+                8 => name.eq_ignore_ascii_case("Response") || name.eq_ignore_ascii_case("Schedule"),
+                _ => false,
+            };
+        is_alias.then(|| Self::Class(crate::atom::ascii_lowercase_atom(name)))
+    }
+}
+
+/// A Laravel string span whose meaning depends on a workspace symbol being
+/// absent. The payload moves between this side table and [`SymbolMap::spans`]
+/// as it becomes dormant/active, so an active candidate does not duplicate
+/// its key string in memory.
+#[derive(Debug, Clone)]
+pub(crate) struct ConditionalLaravelStringSpan {
+    pub dependency: LaravelStringDependency,
+    start: u32,
+    end: u32,
+    dormant_span: Option<SymbolSpan>,
+}
+
+impl ConditionalLaravelStringSpan {
+    pub(crate) fn new(dependency: LaravelStringDependency, span: SymbolSpan) -> Self {
+        Self {
+            dependency,
+            start: span.start,
+            end: span.end,
+            dormant_span: Some(span),
+        }
+    }
+
+    fn is_inserted(&self) -> bool {
+        self.dormant_span.is_none()
+    }
+
+    /// Heap bytes owned by a dormant payload for the optional memory audit.
+    #[cfg(feature = "mem-audit")]
+    pub(crate) fn audit_heap(&self) -> usize {
+        self.dormant_span
+            .as_ref()
+            .map_or(0, |span| span.kind.audit_heap())
+    }
+}
+
+fn is_candidate_span(span: &SymbolSpan, candidate: &ConditionalLaravelStringSpan) -> bool {
+    span.start == candidate.start
+        && span.end == candidate.end
+        && matches!(&span.kind, SymbolKind::LaravelStringKey { .. })
 }
 
 /// The model a gate check names, recorded alongside its ability span.
@@ -788,6 +960,9 @@ pub(crate) enum VarDefKind {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct SymbolMap {
     pub spans: Vec<SymbolSpan>,
+    /// Laravel string spans gated by cross-file function/class membership.
+    /// Empty for ordinary PHP files and never consulted by request handlers.
+    pub conditional_laravel_spans: Vec<ConditionalLaravelStringSpan>,
     /// Member-access span indices keyed by member name.
     ///
     /// This lets references/rename jump straight to relevant `->name` /
@@ -892,6 +1067,85 @@ pub(crate) struct SymbolMap {
 }
 
 impl SymbolMap {
+    /// Whether this map has a dormant span gated by one of `affected`.
+    pub(crate) fn has_conditional_laravel_dependency(
+        &self,
+        affected: Option<&std::collections::HashSet<LaravelStringDependency>>,
+    ) -> bool {
+        self.conditional_laravel_spans.iter().any(|candidate| {
+            affected.is_none_or(|dependencies| dependencies.contains(&candidate.dependency))
+        })
+    }
+
+    /// Whether reconciling the selected dependencies would add or remove at
+    /// least one span. This lets the publication path avoid cloning an
+    /// already-correct map merely to discover that it is unchanged.
+    pub(crate) fn conditional_laravel_spans_need_refresh(
+        &self,
+        affected: Option<&std::collections::HashSet<LaravelStringDependency>>,
+        mut dependency_exists: impl FnMut(LaravelStringDependency) -> bool,
+    ) -> bool {
+        self.conditional_laravel_spans.iter().any(|candidate| {
+            affected.is_none_or(|dependencies| dependencies.contains(&candidate.dependency))
+                && candidate.is_inserted() == dependency_exists(candidate.dependency)
+        })
+    }
+
+    /// Reconcile dormant Laravel spans against the current workspace symbol
+    /// indexes. When `affected` is supplied, candidates with any other
+    /// dependency are skipped, keeping cross-file edits proportional to the
+    /// uncommon ambiguous call sites rather than to every span in a file.
+    pub(crate) fn refresh_conditional_laravel_spans(
+        &mut self,
+        affected: Option<&std::collections::HashSet<LaravelStringDependency>>,
+        mut dependency_exists: impl FnMut(LaravelStringDependency) -> bool,
+    ) -> bool {
+        let mut changed = false;
+        let mut added = false;
+        for candidate in &mut self.conditional_laravel_spans {
+            if affected.is_some_and(|set| !set.contains(&candidate.dependency)) {
+                continue;
+            }
+            let should_insert = !dependency_exists(candidate.dependency);
+            if should_insert == candidate.is_inserted() {
+                continue;
+            }
+
+            if should_insert {
+                self.spans.push(
+                    candidate
+                        .dormant_span
+                        .take()
+                        .expect("a dormant candidate must own its span"),
+                );
+                added = true;
+            } else {
+                let existing = self
+                    .spans
+                    .iter()
+                    .position(|span| is_candidate_span(span, candidate))
+                    .expect("an active candidate must be present in the symbol map");
+                candidate.dormant_span = Some(self.spans.remove(existing));
+            }
+            changed = true;
+        }
+        if added {
+            self.spans.sort_by_key(|span| span.start);
+        }
+        if changed {
+            self.member_access_indices.clear();
+            for (index, span) in self.spans.iter().enumerate() {
+                if let SymbolKind::MemberAccess { member_name, .. } = &span.kind {
+                    self.member_access_indices
+                        .entry(*member_name)
+                        .or_default()
+                        .push(index);
+                }
+            }
+        }
+        changed
+    }
+
     /// Whether this map's offsets are valid indices into `content`.
     ///
     /// A length match means no text was inserted or removed since the map
@@ -909,6 +1163,17 @@ impl SymbolMap {
     /// vanishingly small gain.
     pub fn matches_source(&self, content: &str) -> bool {
         u32::try_from(content.len()).is_ok_and(|len| len == self.source_len)
+    }
+
+    /// Pair this map with the content its offsets index into, or `None`
+    /// when `content` is a different revision (see [`MappedSource`]).
+    ///
+    /// A consumer that cannot produce the matching text has nothing
+    /// trustworthy to say about the file and should skip it rather than
+    /// slice a span against text it does not describe.
+    pub(crate) fn source<'a>(&self, content: &'a str) -> Option<MappedSource<'a>> {
+        self.matches_source(content)
+            .then_some(MappedSource(content))
     }
 
     /// Indices into [`Self::spans`] for member accesses named `name`.
@@ -943,6 +1208,25 @@ impl SymbolMap {
         } else {
             None
         }
+    }
+
+    /// The span whose extent is exactly `[start, end)`, if the map holds
+    /// one.
+    ///
+    /// Unlike [`lookup`](Self::lookup), which answers "what is at this
+    /// offset", this answers "is this range a symbol of its own".  A
+    /// caller that holds the range of a sub-expression — the subject of a
+    /// member access, say — uses it to find the span that sub-expression
+    /// emitted for itself, and so learns what it is without the file's
+    /// text.  Several spans can start at the same offset (a chain and its
+    /// base both start where the base does), so the whole equal-start run
+    /// is checked.
+    pub(crate) fn span_covering_exactly(&self, start: u32, end: u32) -> Option<&SymbolSpan> {
+        let first = self.spans.partition_point(|span| span.start < start);
+        self.spans[first..]
+            .iter()
+            .take_while(|span| span.start == start)
+            .find(|span| span.end == end)
     }
 
     /// Find the innermost scope that contains `offset`.

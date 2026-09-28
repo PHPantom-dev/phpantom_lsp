@@ -12,7 +12,7 @@ use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::position_to_offset;
-use crate::type_engine::resolver::{ResolutionCtx, resolve_target_classes};
+use crate::type_engine::resolver::{CtxLoaders, resolve_target_classes};
 use crate::types::{ClassInfo, CompletionTarget, FileContext, ResolvedType};
 
 impl Backend {
@@ -64,20 +64,17 @@ impl Backend {
         // cache key can include the actual resolved types. This prevents
         // stale results if a variable (e.g. `$model`) changes type
         // within the same file.
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         let mut resolved = if suppress {
             vec![]
         } else {
@@ -92,20 +89,17 @@ impl Backend {
                     self.parse_php(&patched).into_iter().map(Arc::new).collect();
                 let patched_offset = position_to_offset(&patched, position);
                 let patched_current = find_class_at_offset(&patched_classes, patched_offset);
-                let patched_rctx = ResolutionCtx {
-                    current_class: patched_current,
-                    all_classes: &patched_classes,
-                    content: &patched,
-                    cursor_offset: patched_offset,
-                    class_loader: &class_loader,
-                    backend: Some(self),
-                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                    resolved_class_cache: Some(&self.resolved_class_cache),
-                    function_loader: Some(&function_loader),
-                    scope_var_resolver: None,
-                    is_in_static_method: false,
-                    preserve_static: false,
-                };
+                let patched_rctx = self.resolution_ctx_at(
+                    patched_current,
+                    &patched_classes,
+                    &patched,
+                    patched_offset,
+                    CtxLoaders::new(
+                        &class_loader,
+                        &function_loader,
+                        &laravel_macro_this_resolver,
+                    ),
+                );
                 resolved =
                     resolve_target_classes(&target.subject, target.access_kind, &patched_rctx);
             }
@@ -242,15 +236,7 @@ impl Backend {
     fn member_completion_prefix(content: &str, position: Position) -> String {
         let cursor_offset = position_to_offset(content, position) as usize;
         let bytes = content.as_bytes();
-        let mut start = cursor_offset.min(bytes.len());
-        while start > 0 {
-            let b = bytes[start - 1];
-            if b.is_ascii_alphanumeric() || b == b'_' {
-                start -= 1;
-            } else {
-                break;
-            }
-        }
+        let start = crate::text_scan::scan_ident_backward(bytes, cursor_offset);
 
         let has_member_operator = (start >= 2
             && ((bytes[start - 2] == b'-' && bytes[start - 1] == b'>')
@@ -571,6 +557,11 @@ impl Backend {
     ) -> Option<CompletionTarget> {
         let maps = self.symbol_maps.read();
         let map = maps.get(uri)?;
+        // The map's offsets describe the text it was extracted from; a
+        // buffer edited since then is a different file as far as they are
+        // concerned, and the caller's text-based extraction is the right
+        // answer for it.
+        let source = map.source(content)?;
         let cursor_offset = position_to_offset(content, position);
 
         // The cursor may be at the end of a partially-typed member name
@@ -579,13 +570,7 @@ impl Backend {
         // the cursor to find where the member name starts, then look up
         // the span that starts at or contains the access operator.
         let bytes = content.as_bytes();
-        let mut search_offset = cursor_offset as usize;
-        while search_offset > 0 && {
-            let b = bytes[search_offset - 1];
-            b.is_ascii_alphanumeric() || b == b'_'
-        } {
-            search_offset -= 1;
-        }
+        let search_offset = crate::text_scan::scan_ident_backward(bytes, cursor_offset as usize);
 
         // Check for `->` or `?->` before the member name start
         let has_arrow = search_offset >= 2
@@ -627,7 +612,7 @@ impl Backend {
             };
             return Some(CompletionTarget {
                 access_kind,
-                subject: subject_text.as_str(content).to_string(),
+                subject: subject_text.as_str(source).to_string(),
             });
         }
 

@@ -17,7 +17,7 @@
 //! rescans itself rather than throwing the walk away, since the whole point
 //! of the index is that it does not run per keystroke.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -46,10 +46,61 @@ pub(crate) struct IndexedTemplate {
 /// The project's templates, both ways round: a walk up a chain looks a
 /// layout up by the view name that named it, and everything driven by the
 /// file the cursor is in starts from a URI.
+///
+/// The two edge maps are what keeps the downwards direction off a scan of
+/// every template: they are the `@extends` and `@include` graphs, recorded
+/// as each template is read and amended when one is re-read.
 #[derive(Debug, Default)]
 struct Templates {
     by_view: HashMap<String, Arc<IndexedTemplate>>,
     view_by_uri: HashMap<String, String>,
+    /// The view names that extend a view name, for the walk down the
+    /// `@extends` graph.
+    children: HashMap<String, Vec<String>>,
+    /// How many other templates render each view name inline. A count
+    /// rather than a set so one template's edges can be taken out again
+    /// without rescanning the rest.
+    included_by: HashMap<String, usize>,
+}
+
+impl Templates {
+    /// Record the graph edges the template known as `view` contributes.
+    fn add_edges(&mut self, view: &str, blocks: &TemplateBlocks) {
+        for parent in &blocks.extends {
+            self.children
+                .entry(parent.clone())
+                .or_default()
+                .push(view.to_string());
+        }
+        for included in &blocks.includes {
+            if included == view {
+                continue;
+            }
+            *self.included_by.entry(included.clone()).or_insert(0) += 1;
+        }
+    }
+
+    /// Take the edges of a template that is about to be replaced back out.
+    fn remove_edges(&mut self, view: &str, blocks: &TemplateBlocks) {
+        for parent in &blocks.extends {
+            if let Some(children) = self.children.get_mut(parent)
+                && let Some(pos) = children.iter().position(|child| child == view)
+            {
+                children.swap_remove(pos);
+            }
+        }
+        for included in &blocks.includes {
+            if included == view {
+                continue;
+            }
+            if let Some(count) = self.included_by.get_mut(included) {
+                *count -= 1;
+                if *count == 0 {
+                    self.included_by.remove(included);
+                }
+            }
+        }
+    }
 }
 
 /// Every template of the project, by view name.
@@ -77,10 +128,7 @@ impl BladeBlockIndex {
         let Some(view) = templates.view_by_uri.get(uri) else {
             return false;
         };
-        templates
-            .by_view
-            .values()
-            .any(|entry| entry.uri != uri && entry.blocks.includes.iter().any(|name| name == view))
+        templates.included_by.contains_key(view)
     }
 
     /// Every template that extends `layout`, directly or through another
@@ -91,23 +139,25 @@ impl BladeBlockIndex {
     /// reached as well. A chain that loops back on itself terminates on the
     /// visited set.
     fn descendants(&self, layout: &str) -> Vec<Arc<IndexedTemplate>> {
-        let templates = &self.templates.read().by_view;
-        let mut found: Vec<(String, Arc<IndexedTemplate>)> = Vec::new();
-        let mut frontier = vec![layout.to_string()];
-        let mut seen: Vec<String> = vec![layout.to_string()];
+        let templates = self.templates.read();
+        let mut found: Vec<(&str, Arc<IndexedTemplate>)> = Vec::new();
+        let mut frontier: Vec<&str> = vec![layout];
+        let mut seen: HashSet<&str> = HashSet::from([layout]);
         while let Some(parent) = frontier.pop() {
-            for (view, entry) in templates.iter() {
-                if !entry.blocks.extends.contains(&parent) || seen.iter().any(|name| name == view) {
+            for view in templates.children.get(parent).into_iter().flatten() {
+                let Some(entry) = templates.by_view.get(view.as_str()) else {
+                    continue;
+                };
+                if !seen.insert(view.as_str()) {
                     continue;
                 }
-                seen.push(view.clone());
-                frontier.push(view.clone());
-                found.push((view.clone(), Arc::clone(entry)));
+                frontier.push(view.as_str());
+                found.push((view.as_str(), Arc::clone(entry)));
             }
         }
         // The map's iteration order is not stable between runs, so the
         // answer a user navigates through would not be either.
-        found.sort_by(|(a, _), (b, _)| a.cmp(b));
+        found.sort_by_key(|(a, _)| *a);
         found.into_iter().map(|(_, entry)| entry).collect()
     }
 }
@@ -128,6 +178,7 @@ impl Backend {
         let mut templates = Templates {
             by_view: HashMap::with_capacity(views.views.len()),
             view_by_uri: HashMap::with_capacity(views.views.len()),
+            ..Default::default()
         };
         for (view, path) in &views.views {
             let Ok(uri) = Url::from_file_path(path) else {
@@ -137,14 +188,13 @@ impl Backend {
             let Some(content) = self.blade_template_source(&uri, path) else {
                 continue;
             };
-            templates.view_by_uri.insert(uri.clone(), view.clone());
-            templates.by_view.insert(
-                view.clone(),
-                Arc::new(IndexedTemplate {
-                    uri,
-                    blocks: super::blocks::analyse(&content),
-                }),
-            );
+            let entry = Arc::new(IndexedTemplate {
+                uri: uri.clone(),
+                blocks: super::blocks::analyse(&content),
+            });
+            templates.view_by_uri.insert(uri, view.clone());
+            templates.add_edges(view, &entry.blocks);
+            templates.by_view.insert(view.clone(), entry);
         }
         BladeBlockIndex {
             templates: RwLock::new(templates),
@@ -176,13 +226,16 @@ impl Backend {
         let Some(view) = index.view_of(uri) else {
             return;
         };
-        index.templates.write().by_view.insert(
-            view,
-            Arc::new(IndexedTemplate {
-                uri: uri.to_string(),
-                blocks: super::blocks::analyse(content),
-            }),
-        );
+        let entry = Arc::new(IndexedTemplate {
+            uri: uri.to_string(),
+            blocks: super::blocks::analyse(content),
+        });
+        let mut templates = index.templates.write();
+        if let Some(previous) = templates.by_view.get(&view).map(Arc::clone) {
+            templates.remove_edges(&view, &previous.blocks);
+        }
+        templates.add_edges(&view, &entry.blocks);
+        templates.by_view.insert(view, entry);
     }
 
     /// The templates whose names a template shares: the layouts above it
@@ -208,14 +261,14 @@ impl Backend {
         let index = self.blade_block_index();
         let mut complete = true;
         let mut scope: Vec<Arc<IndexedTemplate>> = Vec::new();
-        let mut seen: Vec<String> = Vec::new();
+        let mut seen: HashSet<String> = HashSet::new();
 
         let mut current = Arc::new(IndexedTemplate {
             uri: uri.to_string(),
             blocks: super::blocks::analyse(content),
         });
         loop {
-            seen.push(current.uri.clone());
+            seen.insert(current.uri.clone());
             if current.blocks.opaque || self.blade_is_component_template(&current) {
                 complete = false;
             }
@@ -236,7 +289,7 @@ impl Backend {
             }
             // A chain that loops back on itself stops here with what it
             // found; the layout it names is already in the scope.
-            let next = layout.filter(|layout| !seen.iter().any(|seen| *seen == layout.uri));
+            let next = layout.filter(|layout| !seen.contains(&layout.uri));
             if next.is_none() && index.is_rendered_by_a_template(&current.uri) {
                 // The chain ends at a partial another template renders, so
                 // the render tree goes on above it.
@@ -270,7 +323,7 @@ impl Backend {
         index: &BladeBlockIndex,
         entry: &Arc<IndexedTemplate>,
         scope: &mut Vec<Arc<IndexedTemplate>>,
-        seen: &mut Vec<String>,
+        seen: &mut HashSet<String>,
         complete: &mut bool,
     ) {
         let mut frontier: Vec<(usize, Vec<String>)> = vec![(0, entry.blocks.includes.clone())];
@@ -284,10 +337,9 @@ impl Backend {
                     *complete = false;
                     continue;
                 };
-                if seen.iter().any(|seen| *seen == included.uri) {
+                if !seen.insert(included.uri.clone()) {
                     continue;
                 }
-                seen.push(included.uri.clone());
                 if included.blocks.opaque {
                     *complete = false;
                 }
@@ -427,13 +479,14 @@ impl Backend {
         };
         let (scope, _) = self.blade_render_scope(uri, &content);
         let mut family: Vec<Arc<IndexedTemplate>> = Vec::new();
+        let mut in_family: HashSet<String> = HashSet::new();
         for entry in scope {
             for descendant in self.blade_extending_templates(&entry.uri) {
-                if !family.iter().any(|seen| seen.uri == descendant.uri) {
+                if in_family.insert(descendant.uri.clone()) {
                     family.push(descendant);
                 }
             }
-            if !family.iter().any(|seen| seen.uri == entry.uri) {
+            if in_family.insert(entry.uri.clone()) {
                 family.push(entry);
             }
         }
@@ -497,27 +550,8 @@ impl Backend {
                 crate::text_position::byte_range_to_lsp_range(&content, span.start, span.end);
             out.push(Location {
                 uri: url.clone(),
-                range: self.blade_range_as_virtual(&entry.uri, range),
+                range: self.translate_blade_range_to_php(&entry.uri, range),
             });
-        }
-    }
-
-    /// Restate a range read off a template's own source in the coordinates
-    /// the LSP layer expects a location in a Blade file to arrive in.
-    ///
-    /// Every location that points into a template is translated from
-    /// virtual PHP back to Blade on its way out, because that is where the
-    /// symbol map puts them. A range read from the raw template has to be
-    /// mapped the other way first, or that translation would shift it. A
-    /// template nobody has open has no source map and needs no mapping.
-    fn blade_range_as_virtual(
-        &self,
-        uri: &str,
-        range: tower_lsp::lsp_types::Range,
-    ) -> tower_lsp::lsp_types::Range {
-        tower_lsp::lsp_types::Range {
-            start: self.translate_blade_to_php(uri, range.start),
-            end: self.translate_blade_to_php(uri, range.end),
         }
     }
 }

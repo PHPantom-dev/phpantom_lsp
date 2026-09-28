@@ -2,56 +2,21 @@
 //! directive name after an `@`, and the component name and attribute names
 //! of a `<x-…>` / `<livewire:…>` tag.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+    complete_at_opened_with_trigger, create_psr4_workspace, create_test_backend, labels,
+    open_document, workspace_uri,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
-
-async fn open_blade(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "blade".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-}
-
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: Some(CompletionContext {
-            trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-            trigger_character: Some("@".to_string()),
-        }),
-    };
-
-    match backend.completion(params).await.unwrap() {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => Vec::new(),
-    }
-}
 
 #[tokio::test]
 async fn at_sign_in_html_position_offers_all_known_directives() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///page.blade.php").unwrap();
-    open_blade(&backend, &uri, "<div>@</div>").await;
+    open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 6).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     assert!(
@@ -65,9 +30,9 @@ async fn at_sign_in_html_position_offers_all_known_directives() {
 async fn the_if_completion_inserts_the_documented_snippet() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///page.blade.php").unwrap();
-    open_blade(&backend, &uri, "<div>@</div>").await;
+    open_document(&backend, &uri, "blade", "<div>@</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 6).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 6, "@").await;
     let if_item = items
         .iter()
         .find(|i| i.label == "@if")
@@ -84,10 +49,10 @@ async fn the_if_completion_inserts_the_documented_snippet() {
 async fn a_partial_directive_name_filters_the_list() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///page.blade.php").unwrap();
-    open_blade(&backend, &uri, "<div>@for</div>").await;
+    open_document(&backend, &uri, "blade", "<div>@for</div>").await;
 
     // Cursor right after "@for".
-    let items = complete_at(&backend, &uri, 0, 9).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 9, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
 
     assert!(labels.contains(&"@for"), "got: {:?}", labels);
@@ -107,9 +72,9 @@ async fn an_unknown_directive_name_still_short_circuits_with_an_empty_list() {
     // `zzz` matches no directive, but the position is still an HTML/
     // directive-name position, so the strategy must not fall through to
     // (e.g.) class-name completion.
-    open_blade(&backend, &uri, "<div>@zzz</div>").await;
+    open_document(&backend, &uri, "blade", "<div>@zzz</div>").await;
 
-    let items = complete_at(&backend, &uri, 0, 9).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 9, "@").await;
     assert!(
         items.is_empty(),
         "expected an empty (short-circuited) list, got: {:?}",
@@ -121,10 +86,10 @@ async fn an_unknown_directive_name_still_short_circuits_with_an_empty_list() {
 async fn no_directive_completion_inside_echo_braces() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///page.blade.php").unwrap();
-    open_blade(&backend, &uri, "{{ @ }}").await;
+    open_document(&backend, &uri, "blade", "{{ @ }}").await;
 
     // Cursor right after "@" inside `{{ ... }}`.
-    let items = complete_at(&backend, &uri, 0, 4).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 4, "@").await;
     assert!(
         items.is_empty(),
         "directive completion must not fire inside {{{{ }}}}, got: {:?}",
@@ -136,11 +101,11 @@ async fn no_directive_completion_inside_echo_braces() {
 async fn no_directive_completion_inside_a_php_block() {
     let backend = create_test_backend();
     let uri = Url::parse("file:///page.blade.php").unwrap();
-    open_blade(&backend, &uri, "@php $x = 1; @\n@endphp").await;
+    open_document(&backend, &uri, "blade", "@php $x = 1; @\n@endphp").await;
 
     // Cursor right after the trailing "@" on the first line, still inside
     // the `@php ... @endphp` block.
-    let items = complete_at(&backend, &uri, 0, 14).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 0, 14, "@").await;
     assert!(
         items.is_empty(),
         "directive completion must not fire inside a @php block, got: {:?}",
@@ -154,9 +119,9 @@ async fn directive_completion_still_fires_inside_an_open_block() {
     let uri = Url::parse("file:///page.blade.php").unwrap();
     // The body between `@if` and `@endif` is ordinary template markup, so
     // a nested directive must still complete.
-    open_blade(&backend, &uri, "@if ($x)\n    @\n@endif").await;
+    open_document(&backend, &uri, "blade", "@if ($x)\n    @\n@endif").await;
 
-    let items = complete_at(&backend, &uri, 1, 5).await;
+    let items = complete_at_opened_with_trigger(&backend, &uri, 1, 5, "@").await;
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"@foreach"),
@@ -167,32 +132,18 @@ async fn directive_completion_still_fires_inside_an_open_block() {
 
 // ── Component tag and attribute completion ──────────────────────────────
 
-const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-    "App\\": "app/",
-    "Illuminate\\": "stubs/Illuminate/",
-    "Livewire\\": "stubs/Livewire/"
-}}}"#;
-
-const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-    abstract class Component {\n\
-        public $attributes;\n\
-        public function render() {}\n\
-    }\n";
-
-const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-    abstract class Component {\n\
-        public function render() {}\n\
-    }\n";
-
 /// A project with one component of every shape the index answers for: a
 /// class-based one, a nested class-based one, an anonymous template, and a
 /// Livewire class.
 fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
     let (backend, dir) = create_psr4_workspace(
-        COMPOSER,
+        BLADE_COMPONENT_COMPOSER,
         &[
-            ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
-            ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+            (
+                "stubs/Illuminate/View/Component.php",
+                ILLUMINATE_COMPONENT_STUB,
+            ),
+            ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
             (
                 "app/View/Components/Alert.php",
                 "<?php\nnamespace App\\View\\Components;\n\
@@ -227,11 +178,24 @@ fn component_workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::Temp
                 "resources/views/components/banner.blade.php",
                 "@props(['headline', 'subHeadline' => 'none'])\n<div>{{ $headline }}</div>\n",
             ),
+            (
+                "resources/views/components/hero.blade.php",
+                "@aware(['theme'])\n\
+                 @php($caption = strtoupper($title))\n\
+                 <h1 class=\"{{ $theme }}\">{{ $title }} {{ $subTitle }} {{ $caption }}</h1>\n\
+                 @foreach ($rows as $row)\n\
+                 <p>{{ $loop->index }}: {{ $row }}</p>\n\
+                 @endforeach\n\
+                 <div>{{ $slot }}</div>\n",
+            ),
+            (
+                "resources/views/components/notice.blade.php",
+                "@props(['level' => 'info'])\n<p class=\"{{ $level }}\">{{ $message }}</p>\n",
+            ),
             ("resources/views/page.blade.php", template),
         ],
     );
-    let root = backend.workspace_root().read().clone().unwrap();
-    let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+    let uri = workspace_uri(&backend, "resources/views/page.blade.php");
     (backend, dir, uri)
 }
 
@@ -262,15 +226,47 @@ async fn complete_typed(
     }
 }
 
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
+/// Put each class in the index class-name completion searches, the way a
+/// scan of the project would.
+fn index_models(backend: &phpantom_lsp::Backend, fqns: &[&str]) {
+    let mut index = backend.fqn_uri_index().write();
+    for fqn in fqns {
+        index.insert(
+            fqn.to_string(),
+            format!("file:///app/{}.php", fqn.replace('\\', "/")),
+        );
+    }
+}
+
+/// Apply completion edits to the template they were planned against.
+fn apply(template: &str, edits: &[TextEdit]) -> String {
+    let offset = |position: Position| {
+        template
+            .split_inclusive('\n')
+            .take(position.line as usize)
+            .map(str::len)
+            .sum::<usize>()
+            + position.character as usize
+    };
+    let mut result = template.to_string();
+    let mut edits = edits.to_vec();
+    // Last first, so an earlier edit's offsets stay valid.
+    edits
+        .sort_by_key(|edit| std::cmp::Reverse((edit.range.start.line, edit.range.start.character)));
+    for edit in &edits {
+        result.replace_range(
+            offset(edit.range.start)..offset(edit.range.end),
+            &edit.new_text,
+        );
+    }
+    result
 }
 
 #[tokio::test]
 async fn an_x_opening_offers_every_component_the_project_ships() {
     let template = "<x-";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 3).await;
     let labels = labels(&items);
@@ -292,7 +288,7 @@ async fn an_x_opening_offers_every_component_the_project_ships() {
 async fn a_class_backed_component_is_offered_as_the_class_it_names() {
     let template = "<x-";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 3).await;
     let alert = items.iter().find(|i| i.label == "alert").expect("no alert");
@@ -313,7 +309,7 @@ async fn a_class_backed_component_is_offered_as_the_class_it_names() {
 async fn a_partly_typed_component_name_filters_the_list() {
     let template = "<x-for";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 6).await;
     assert_eq!(labels(&items), vec!["forms.input"]);
@@ -333,7 +329,7 @@ async fn a_partly_typed_component_name_filters_the_list() {
 async fn a_livewire_opening_offers_the_livewire_index() {
     let template = "<livewire:";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 10).await;
     let labels = labels(&items);
@@ -348,7 +344,7 @@ async fn a_livewire_opening_offers_the_livewire_index() {
 async fn a_constructor_parameter_is_offered_as_an_attribute() {
     let template = "<x-alert ";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 9).await;
     let labels = labels(&items);
@@ -374,7 +370,7 @@ async fn a_constructor_parameter_is_offered_as_an_attribute() {
 async fn a_required_attribute_is_offered_before_an_optional_one() {
     let template = "<x-alert ";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 9).await;
     let sort_of = |label: &str| {
@@ -394,7 +390,7 @@ async fn a_required_attribute_is_offered_before_an_optional_one() {
 async fn a_colon_narrows_the_attributes_to_the_bound_form() {
     let template = "<x-alert :";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 10).await;
     let labels = labels(&items);
@@ -409,7 +405,7 @@ async fn a_colon_narrows_the_attributes_to_the_bound_form() {
 async fn an_anonymous_components_props_are_its_attributes() {
     let template = "<x-banner ";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 10).await;
     let labels = labels(&items);
@@ -420,10 +416,65 @@ async fn an_anonymous_components_props_are_its_attributes() {
 }
 
 #[tokio::test]
+async fn an_anonymous_component_without_props_offers_the_names_it_reads() {
+    let template = "<x-hero ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 8).await;
+    let labels = labels(&items);
+    assert!(
+        labels.contains(&"title") && labels.contains(&"rows"),
+        "expected the template's undeclared reads, got: {labels:?}"
+    );
+    // A read of a camelCase variable is written as the kebab-case
+    // attribute Blade camel-cases back into it.
+    assert!(
+        labels.contains(&"sub-title"),
+        "expected the kebab-case spelling of $subTitle, got: {labels:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_name_the_component_template_supplies_itself_is_not_an_attribute() {
+    let template = "<x-hero ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 8).await;
+    let labels = labels(&items);
+    for name in ["caption", "theme", "row", "loop", "slot"] {
+        assert!(
+            !labels.contains(&name),
+            "{name} is not the tag's to pass, got: {labels:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_declared_prop_keeps_its_default_beside_the_names_it_leaves_out() {
+    let template = "<x-notice ";
+    let (backend, _dir, uri) = component_workspace(template);
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 10).await;
+    let level = items
+        .iter()
+        .find(|item| item.label == "level")
+        .unwrap_or_else(|| panic!("expected the declared prop, got: {:?}", labels(&items)));
+    assert_eq!(level.detail.as_deref(), Some("= 'info'"));
+    assert!(
+        labels(&items).contains(&"message"),
+        "expected the name @props leaves out, got: {:?}",
+        labels(&items)
+    );
+}
+
+#[tokio::test]
 async fn a_livewire_tag_offers_its_mount_parameters_and_public_properties() {
     let template = "<livewire:counter ";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     let items = complete_typed(&backend, &uri, 0, 18).await;
     let labels = labels(&items);
@@ -437,7 +488,7 @@ async fn a_livewire_tag_offers_its_mount_parameters_and_public_properties() {
 async fn attribute_completion_does_not_fire_inside_an_attribute_value() {
     let template = "<x-alert type=\"da\" />";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     // Cursor between `da` and the closing quote.
     let items = complete_typed(&backend, &uri, 0, 17).await;
@@ -463,10 +514,9 @@ async fn an_include_view_name_edit_lands_on_the_directive_not_the_prologue() {
             ("resources/views/page.blade.php", "@include('"),
         ],
     );
-    let root = backend.workspace_root().read().clone().unwrap();
-    let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+    let uri = workspace_uri(&backend, "resources/views/page.blade.php");
     let template = "@include('";
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     // `@include('` is lowered into the virtual PHP's prologue-shifted body,
     // so an untranslated edit would land several lines below line 0.
@@ -489,7 +539,7 @@ async fn an_include_view_name_edit_lands_on_the_directive_not_the_prologue() {
 async fn a_closed_tag_leaves_completion_to_the_rest_of_the_pipeline() {
     let template = "<x-alert type=\"danger\" />\n@\n";
     let (backend, _dir, uri) = component_workspace(template);
-    open_blade(&backend, &uri, template).await;
+    open_document(&backend, &uri, "blade", template).await;
 
     // The `@` on the second line is outside the tag, so directive
     // completion must still own it.
@@ -498,5 +548,134 @@ async fn a_closed_tag_leaves_completion_to_the_rest_of_the_pipeline() {
         labels(&items).contains(&"@if"),
         "expected directive completion, got: {:?}",
         labels(&items)
+    );
+}
+
+/// A template imports with the `@use` directive, so a class-name
+/// completion that needs an import carries one written in that syntax and
+/// placed on a line of the template — an edit against the virtual PHP's
+/// prologue has no template position and takes the whole candidate with it
+/// when it is dropped.
+#[tokio::test]
+async fn a_namespaced_class_completion_imports_with_a_use_directive() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Widget"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "<div>{{ new Widg }}</div>\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 0, 16).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Widget"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    assert_eq!(edits.len(), 1, "{edits:?}");
+    assert_eq!(edits[0].new_text, "@use(\'App\\Models\\Widget\')\n");
+    let at_top = Position {
+        line: 0,
+        character: 0,
+    };
+    assert_eq!(
+        edits[0].range,
+        Range {
+            start: at_top,
+            end: at_top
+        },
+        "the import belongs at the top of the template"
+    );
+
+    // The directive it writes is one the preprocessor honours: reopening
+    // the template with the edit applied imports the class for real.
+    let imported = apply(template, edits);
+    assert_eq!(
+        imported,
+        "@use('App\\Models\\Widget')\n<div>{{ new Widg }}</div>\n"
+    );
+    open_document(&backend, &uri, "blade", &imported).await;
+    let virtual_php = backend
+        .blade_virtual_php(uri.as_str())
+        .expect("blade virtual content");
+    assert!(
+        virtual_php.contains("use App\\Models\\Widget;"),
+        "the directive must lower to a real import: {virtual_php}"
+    );
+}
+
+/// The directives a template already has are the block a new import joins,
+/// read from the template's own text: the preprocessor hoists them into the
+/// virtual PHP's prologue, which no template line stands behind.
+#[tokio::test]
+async fn a_new_import_sorts_among_the_templates_existing_use_directives() {
+    let backend = create_test_backend();
+    index_models(
+        &backend,
+        &[
+            "App\\Models\\Account",
+            "App\\Models\\Widget",
+            "App\\Models\\Zone",
+        ],
+    );
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@use(\'App\\Models\\Account\')\n@use(\'App\\Models\\Zone\')\n{{ new Widg }}\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 2, 11).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Widget"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    // Written at the end of the directive it sorts behind rather than at
+    // the start of the one it precedes: a directive lowers to nothing, so
+    // the start of its line is not addressable in the virtual PHP.
+    assert_eq!(edits[0].new_text, "\n@use(\'App\\Models\\Widget\')");
+    assert_eq!(
+        edits[0].range.start,
+        Position {
+            line: 0,
+            character: "@use('App\\Models\\Account')".chars().count() as u32,
+        },
+        "`Widget` sorts between `Account` and `Zone`"
+    );
+    assert_eq!(
+        apply(template, edits),
+        "@use('App\\Models\\Account')\n@use('App\\Models\\Widget')\n@use('App\\Models\\Zone')\n{{ new Widg }}\n"
+    );
+}
+
+/// A template that opens with a directive has no addressable start: the
+/// directive lowers to nothing, so the virtual PHP's first template column
+/// is the one after it. An import that sorts before every existing one
+/// follows that first line rather than landing in the middle of it.
+#[tokio::test]
+async fn an_import_that_precedes_them_all_follows_a_leading_directive() {
+    let backend = create_test_backend();
+    index_models(&backend, &["App\\Models\\Account", "App\\Models\\Zone"]);
+    let uri = Url::parse("file:///page.blade.php").unwrap();
+    let template = "@use('App\\Models\\Zone')\n{{ new Acco }}\n";
+    open_document(&backend, &uri, "blade", template).await;
+
+    let items = complete_typed(&backend, &uri, 1, 11).await;
+    let item = items
+        .iter()
+        .find(|i| i.detail.as_deref() == Some("App\\Models\\Account"))
+        .unwrap_or_else(|| panic!("expected the namespaced class, got: {:?}", labels(&items)));
+
+    let edits = item
+        .additional_text_edits
+        .as_ref()
+        .expect("expected an import edit");
+    assert_eq!(
+        apply(template, edits),
+        "@use('App\\Models\\Zone')\n@use('App\\Models\\Account')\n{{ new Acco }}\n"
     );
 }

@@ -24,14 +24,16 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
-use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
+use crate::type_engine::resolver::{
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
+};
 use crate::types::AccessKind;
 use crate::types::{ClassInfo, ClassLikeKind};
 use crate::virtual_members::{ResolvedClassCache, resolve_class_fully_cached};
 
 use super::helpers::{
     FileDiagnosticContext, find_enclosing_method_name, find_innermost_enclosing_class,
-    resolve_to_fqn,
+    make_tagged_diagnostic, resolve_to_fqn,
 };
 use super::subject_cache::SubjectCacheKey;
 
@@ -82,28 +84,26 @@ impl Backend {
 
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
-        let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
         let local_classes = &ctx.file.classes;
 
-        let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
-        let function_loader =
-            self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let class_loaders = self.class_loaders(&ctx.file);
+        let function_loaders = self.function_loaders(&ctx.file);
+        let laravel_macro_this_resolvers =
+            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
         let cache = &self.resolved_class_cache;
 
-        let subject_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
-            local_classes,
-            use_map: file_use_map,
-            namespace: file_namespace,
-            content,
-            class_loader: &class_loader,
-            backend: Some(self),
-            function_loader: &function_loader,
+        // A map extracted from different text than `content` describes a
+        // file this pass cannot report on: every offset it holds would
+        // land somewhere else.
+        let Some(source) = symbol_map.source(content) else {
+            return;
         };
 
         // ── Walk every symbol span ──────────────────────────────────────
         for span in &symbol_map.spans {
+            let file_use_map = ctx.file.use_map_at(span.start);
+            let file_namespace = ctx.file.namespace_at(span.start);
+            let class_loader = class_loaders.at(span.start);
             match &span.kind {
                 // ── Class references (type hints, new Foo, extends, etc.) ─
                 SymbolKind::ClassReference {
@@ -138,7 +138,7 @@ impl Backend {
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            &class_loader,
+                            class_loader,
                             cache,
                             content,
                             span.start,
@@ -169,8 +169,20 @@ impl Backend {
                     is_method_call,
                     ..
                 } => {
+                    let function_loader = function_loaders.at(span.start);
+                    let subject_ctx =
+                        crate::type_engine::subject_resolution::SubjectResolutionCtx {
+                            local_classes,
+                            use_map: file_use_map,
+                            namespace: file_namespace,
+                            content,
+                            class_loader,
+                            backend: Some(self),
+                            function_loader,
+                        };
+
                     // Resolve the subject type to a class.
-                    let subject_str = subject_text.as_str(content);
+                    let subject_str = subject_text.as_str(source);
                     let base_class = resolve_subject_to_class_name(
                         subject_str,
                         *is_static,
@@ -205,18 +217,18 @@ impl Backend {
 
                             let cached = var_type_cache.entry(cache_key).or_insert_with(|| {
                                 let rctx = ResolutionCtx {
-                                    current_class: enclosing_class,
-                                    all_classes: local_classes,
-                                    content,
-                                    cursor_offset: span.start,
-                                    class_loader: &class_loader,
-                                    backend: Some(self),
-                                    laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                                    resolved_class_cache: Some(cache),
-                                    function_loader: Some(&function_loader),
-                                    scope_var_resolver: None,
                                     is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                    preserve_static: false,
+                                    ..self.resolution_ctx_at(
+                                        enclosing_class,
+                                        local_classes,
+                                        content,
+                                        span.start,
+                                        CtxLoaders::new(
+                                            class_loader,
+                                            function_loader,
+                                            laravel_macro_this_resolvers.at(span.start),
+                                        ),
+                                    )
                                 };
 
                                 resolve_variable_subject(subject_str, access_kind, &rctx)
@@ -240,7 +252,7 @@ impl Backend {
                     // Builder<Model>).  The FQN-keyed cache cannot
                     // distinguish between generic instantiations, so a
                     // cached entry may lack these members.
-                    let resolved = resolve_class_fully_cached(&base_class, &class_loader, cache);
+                    let resolved = resolve_class_fully_cached(&base_class, class_loader, cache);
 
                     if *is_method_call {
                         // Check method deprecation — try base_class first
@@ -252,7 +264,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -286,7 +298,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -317,7 +329,7 @@ impl Backend {
                             && !is_within_deprecated_scope(
                                 self,
                                 local_classes,
-                                &class_loader,
+                                class_loader,
                                 cache,
                                 content,
                                 span.start,
@@ -356,12 +368,12 @@ impl Backend {
                         file_resolved_names.as_deref(),
                         span.start,
                         file_use_map,
-                        ctx.file.namespace_at(span.start),
+                        file_namespace,
                     ) && let Some(msg) = &func_info.deprecation_message
                         && !is_within_deprecated_scope(
                             self,
                             local_classes,
-                            &class_loader,
+                            class_loader,
                             cache,
                             content,
                             span.start,
@@ -425,17 +437,13 @@ fn deprecated_diagnostic(
         format!("'{}' is deprecated: {}", display, full_message)
     };
 
-    Diagnostic {
+    make_tagged_diagnostic(
         range,
-        severity: Some(DiagnosticSeverity::HINT),
-        code: Some(NumberOrString::String("deprecated_usage".to_string())),
-        code_description: None,
-        source: Some("phpantom".to_string()),
+        DiagnosticSeverity::HINT,
+        "deprecated_usage",
         message,
-        related_information: None,
-        tags: Some(vec![DiagnosticTag::DEPRECATED]),
-        data: None,
-    }
+        Some(DiagnosticTag::DEPRECATED),
+    )
 }
 
 /// Whether `offset` sits inside a scope that PHPStan's own deprecation
