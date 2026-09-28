@@ -30,7 +30,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let class_loader = self.class_loader(&ctx.file);
+        let class_loaders = self.class_loaders(&ctx.file);
 
         for span in &ctx.symbol_map.spans {
             let class_name = match &span.kind {
@@ -38,10 +38,11 @@ impl Backend {
                 _ => continue,
             };
 
-            let class_info = match ctx.declared_class(class_name) {
+            let class_info = match ctx.declared_class(class_name, span.start) {
                 Some(c) => c,
                 None => continue,
             };
+            let class_loader = class_loaders.at(span.start);
 
             if class_info.kind == ClassLikeKind::Interface
                 || class_info.kind == ClassLikeKind::Trait
@@ -67,7 +68,7 @@ impl Backend {
                 }
 
                 if let Some((parent_method, source_name)) =
-                    find_parent_method(class_info, &method.name, &class_loader)
+                    find_parent_method(class_info, &method.name, class_loader)
                 {
                     let parent_native = match &parent_method.native_return_type {
                         Some(t) => t,

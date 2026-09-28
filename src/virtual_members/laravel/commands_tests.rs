@@ -352,7 +352,7 @@ class CacheClear extends Command
 #[test]
 fn index_resolves_alias_names() {
     let mut index = LaravelCommandIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         scan_command_file(
             "<?php #[Signature('a:run', aliases: ['a:go', 'a:fly'])] class ARun extends Command { }",
@@ -454,14 +454,14 @@ fn leading_pipe_marks_hidden_without_swallowing_the_name() {
 #[test]
 fn primary_names_win_over_aliases() {
     let mut index = LaravelCommandIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         scan_command_file(
             "<?php #[Signature('a:run', aliases: ['b:run'])] class ARun extends Command { }",
             "file:///a.php",
         ),
     );
-    index.set_file(
+    index.files.set_file(
         "file:///b.php".to_string(),
         scan_command_file(
             "<?php class BCommand extends Command { protected $signature = 'b:run'; }",
@@ -476,14 +476,14 @@ fn primary_names_win_over_aliases() {
 #[test]
 fn index_dedupes_and_looks_up() {
     let mut index = LaravelCommandIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///a.php".to_string(),
         scan_command_file(
             "<?php class ACommand extends Command { protected $signature = 'a:run {x}'; }",
             "file:///a.php",
         ),
     );
-    index.set_file(
+    index.files.set_file(
         "file:///b.php".to_string(),
         scan_command_file(
             "<?php class BCommand extends Command { protected $signature = 'b:run'; }",
@@ -499,7 +499,9 @@ fn index_dedupes_and_looks_up() {
     assert_eq!(arg_names(&index.get("a:run").unwrap().signature), vec!["x"]);
 
     // Removing a file drops its command.
-    index.set_file("file:///a.php".to_string(), Vec::new());
+    index
+        .files
+        .set_file("file:///a.php".to_string(), Vec::new());
     index.rebuild();
     assert!(index.get("a:run").is_none());
     assert!(index.get("b:run").is_some());

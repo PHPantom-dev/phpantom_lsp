@@ -1,0 +1,20 @@
+// test: the fall-through of a null guard on an impure call does not remember its result
+// feature: hover
+// expect: $next = ?int
+---
+<?php
+
+class Queue
+{
+    /** @phpstan-impure */
+    public function pop(): ?int { return null; }
+}
+
+function drain(?Queue $queue): void
+{
+    if ($queue?->pop() === null) {
+        return;
+    }
+    $next = $queue->pop();
+    echo $ne<>xt;
+}

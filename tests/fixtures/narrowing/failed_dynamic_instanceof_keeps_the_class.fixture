@@ -1,0 +1,21 @@
+// test: failing an instanceof against a class-string value does not rule its class out
+// feature: hover
+// expect: Node
+// expect_absent: never
+---
+<?php
+
+class Node {
+    public function getParent(): ?Node { return null; }
+}
+
+/**
+ * @template T of Node
+ * @param class-string<T> $type
+ */
+function test(Node $node, string $type): void {
+    if ($node instanceof $type) {
+        return;
+    }
+    $<>node;
+}

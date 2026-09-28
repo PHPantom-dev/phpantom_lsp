@@ -233,6 +233,74 @@ function run(Base $base): void {
     assert_eq!(reported[0].range.start.line, 5);
 }
 
+#[tokio::test]
+async fn a_dead_branch_in_another_file_does_not_hide_this_files_diagnostics() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let backend = create_test_backend();
+
+    // `make()` has no declared return type, so resolving `$h->make()`
+    // walks this body to infer it — including the `if (false)` branch,
+    // whose byte range belongs to this file only.  `return $result;`
+    // (rather than `return $this;`, which shortcuts to a marker without
+    // walking) forces that walk to resolve `$result`'s type.  The body
+    // must be readable back from disk (as a real callee's would be) for
+    // that inference to run at all.
+    let helper_php = r#"<?php
+class Helper {
+    public function make() {
+        $result = $this;
+        if (false) {
+            $this->neverA();
+            $this->neverB();
+            $this->neverC();
+            $this->neverD();
+            $this->neverE();
+            $this->neverF();
+        }
+        return $result;
+    }
+}
+"#;
+    crate::common::open_php_at(&backend, &dir, "Helper.php", helper_php).await;
+
+    // Spread unknown-member diagnostics across a range of byte offsets
+    // that overlaps the dead branch above, whichever offsets it happens
+    // to land on: this file starts at offset 0 just like the one above.
+    let mut controller_php = String::from(
+        r#"<?php
+class Controller {
+    public function run(Helper $h): void {
+        $made = $h->make();
+        $made->chained();
+"#,
+    );
+    for i in 0..30 {
+        controller_php.push_str(&format!("        $h->bogus{i}();\n"));
+    }
+    controller_php.push_str("    }\n}\n");
+
+    backend.update_ast("file:///controller.php", &controller_php);
+
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics("file:///controller.php", &controller_php, &mut out);
+
+    let reported: std::collections::HashSet<u32> = out.iter().map(|d| d.range.start.line).collect();
+    assert!(
+        reported.contains(&4),
+        "chained() on the inferred `Helper` return was dropped by another file's dead branch: {out:?}"
+    );
+    // 30 `bogusN()` calls: every one of them is live code in this file
+    // and must be judged, regardless of what another file's forward
+    // walk recorded while inferring `make()`'s return type.
+    for i in 0..30 {
+        let line = 5 + i as u32;
+        assert!(
+            reported.contains(&line),
+            "bogus{i}() at line {line} was dropped by another file's dead branch: {out:?}"
+        );
+    }
+}
+
 #[test]
 fn a_dead_branch_still_counts_as_a_use_of_its_import() {
     let backend = create_test_backend();

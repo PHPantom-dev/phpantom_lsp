@@ -5,14 +5,9 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{
-        "require": { "laravel/framework": "^11.0" },
-        "autoload": { "psr-4": { "App\\": "app/" } }
-    }"#;
 
     const LAYOUT: &str = "<html>\n\
         <head>@stack('styles')</head>\n\
@@ -35,7 +30,7 @@ mod tests {
     async fn workspace(templates: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
         let mut files = vec![("resources/views/layouts/app.blade.php", LAYOUT)];
         files.extend_from_slice(templates);
-        let (backend, dir) = create_psr4_workspace(COMPOSER, &files);
+        let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &files);
         backend.initialized(InitializedParams {}).await;
         (backend, dir)
     }
@@ -47,16 +42,7 @@ mod tests {
     async fn open(backend: &phpantom_lsp::Backend, dir: &tempfile::TempDir, relative: &str) -> Url {
         let uri = uri_of(dir, relative);
         let text = std::fs::read_to_string(dir.path().join(relative)).unwrap();
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text,
-                },
-            })
-            .await;
+        open_document(backend, &uri, "blade", &text).await;
         uri
     }
 

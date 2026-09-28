@@ -1,53 +1,5 @@
-use crate::common::create_test_backend;
-use tower_lsp::LanguageServer;
+use crate::common::{complete_at, create_test_backend, method_names};
 use tower_lsp::lsp_types::*;
-
-/// Helper: open a file and request completions at a given line/character.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => vec![],
-    }
-}
-
-fn method_names(items: &[CompletionItem]) -> Vec<&str> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::METHOD))
-        .map(|i| i.filter_text.as_deref().unwrap_or(&i.label))
-        .collect()
-}
 
 // ── is_array narrowing with PHPDoc generic list ─────────────────────────
 
@@ -911,6 +863,89 @@ async fn an_iterable_assertion_tag_narrows_its_argument() {
     assert!(
         !names.contains(&"plainOnly"),
         "Plain cannot be iterated, got: {:?}",
+        names
+    );
+}
+
+// ── Splitting an iterable ───────────────────────────────────────────────
+
+/// `iterable<int, Foo>` is `array<int, Foo>|Traversable<int, Foo>`, so a
+/// check that rules out the array half leaves a `Traversable` that still
+/// knows what it yields.
+#[tokio::test]
+async fn is_object_on_an_iterable_keeps_the_traversable_value_type() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///is_object_iterable.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template-covariant TValue\n",
+        " */\n",
+        "interface Traversable {}\n",
+        "class Foo {\n",
+        "    public function doFoo(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    /** @param iterable<int, Foo> $items */\n",
+        "    public function run($items): void {\n",
+        "        if (is_object($items)) {\n",
+        "            foreach ($items as $item) {\n",
+        "                $item->\n",
+        "            }\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 14: `                $item->` — cursor after `->`
+    let items = complete_at(&backend, &uri, text, 14, 23).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"doFoo"),
+        "the Traversable half keeps its value type, got: {:?}",
+        names
+    );
+}
+
+/// The guard clause form: past `if (is_array($items)) { return; }` only
+/// the `Traversable` half is left, and an `instanceof` check on it can
+/// then filter it like any other class.
+#[tokio::test]
+async fn a_guard_clause_on_an_iterable_leaves_the_traversable_half() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///is_array_iterable_guard.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "/**\n",
+        " * @template TKey\n",
+        " * @template-covariant TValue\n",
+        " */\n",
+        "interface Traversable {}\n",
+        "class Foo {\n",
+        "    public function doFoo(): void {}\n",
+        "}\n",
+        "class Svc {\n",
+        "    /** @param iterable<int, Foo> $items */\n",
+        "    public function run($items): void {\n",
+        "        if (is_array($items)) {\n",
+        "            return;\n",
+        "        }\n",
+        "        if ($items instanceof Traversable) {\n",
+        "            foreach ($items as $item) {\n",
+        "                $item->\n",
+        "            }\n",
+        "        }\n",
+        "    }\n",
+        "}\n",
+    );
+
+    // Line 17: `                $item->` — cursor after `->`
+    let items = complete_at(&backend, &uri, text, 17, 23).await;
+    let names = method_names(&items);
+    assert!(
+        names.contains(&"doFoo"),
+        "the Traversable half keeps its value type, got: {:?}",
         names
     );
 }

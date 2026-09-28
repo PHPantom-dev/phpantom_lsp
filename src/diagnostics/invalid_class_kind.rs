@@ -22,11 +22,10 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::{ClassRefContext, SymbolKind};
 use crate::types::{ClassInfo, ClassLikeKind};
+use crate::util::short_name;
 
-use super::helpers::{
-    FileDiagnosticContext, compute_use_line_ranges, is_offset_in_ranges, make_diagnostic,
-    resolve_to_fqn,
-};
+use super::helpers::{FileDiagnosticContext, is_offset_in_ranges, make_diagnostic, resolve_to_fqn};
+use super::use_statements::compute_use_line_ranges;
 
 /// Diagnostic code used for invalid-class-kind diagnostics.
 pub(crate) const INVALID_CLASS_KIND_CODE: &str = "invalid_class_kind";
@@ -66,13 +65,11 @@ impl Backend {
     ) {
         let symbol_map = &ctx.symbol_map;
         let file_resolved_names = &ctx.file.resolved_names;
-        let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
         let local_classes = &ctx.file.classes;
 
         let use_line_ranges = compute_use_line_ranges(content);
 
-        let class_loader = self.class_loader(&ctx.file);
+        let class_loaders = self.class_loaders(&ctx.file);
 
         for span in &symbol_map.spans {
             let (ref_name, is_fqn, ref_ctx) = match &span.kind {
@@ -111,6 +108,8 @@ impl Backend {
                 continue;
             }
 
+            let file_use_map = ctx.file.use_map_at(span.start);
+            let file_namespace = ctx.file.namespace_at(span.start);
             let fqn = if is_fqn {
                 ref_name.to_string()
             } else if let Some(rn) = file_resolved_names {
@@ -123,10 +122,11 @@ impl Backend {
 
             // Try to load the class.  If it's not found, skip — the
             // unknown-class diagnostic handles that case.
-            let class_info = if let Some(ci) = local_classes
-                .iter()
-                .find(|c| c.name == ref_name || c.fqn() == fqn)
-            {
+            let class_info = if let Some(ci) = local_classes.iter().find(|c| {
+                c.fqn() == fqn
+                    || (c.name == ref_name
+                        && c.file_namespace.as_deref() == file_namespace.as_deref())
+            }) {
                 Arc::clone(ci)
             } else if let Some(ci) = self.find_or_load_class(&fqn) {
                 ci
@@ -135,7 +135,7 @@ impl Backend {
             };
 
             if let Some((severity, message)) =
-                check_kind_in_context(&class_info, ref_ctx, &fqn, &class_loader)
+                check_kind_in_context(&class_info, ref_ctx, &fqn, class_loaders.at(span.start))
             {
                 let range = match self.offset_range_to_lsp_range(
                     uri,
@@ -432,9 +432,4 @@ fn is_throwable_inner(
     }
 
     false
-}
-
-/// Extract the short name from a potentially namespaced class name.
-fn short_name(name: &str) -> &str {
-    name.rsplit('\\').next().unwrap_or(name)
 }

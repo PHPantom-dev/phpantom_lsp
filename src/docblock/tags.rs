@@ -23,8 +23,9 @@ use super::tag_kind::TagKind;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
+use crate::atom::atom;
 use crate::symbol_map::docblock::get_docblock_text_with_offset;
-use crate::types::{AssertionKind, PhpVersion, TypeAssertion};
+use crate::types::{AssertionKind, ParameterInfo, PhpVersion, TypeAssertion};
 
 use super::parser::{
     DocblockInfo, TagInfo, TagValueInfo, collapse_newlines, parse_docblock_for_tags,
@@ -615,6 +616,29 @@ fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
     inner.trim().trim_start_matches('*').trim()
 }
 
+/// The text after `@tag` at the start of `inner`, in any of the tag's
+/// spellings: plain (`@var`) or vendor-prefixed (`@phpstan-var`,
+/// `@psalm-var`).
+///
+/// The tag has to end there, so `@var` does not match `@variadic`.
+fn strip_tag_prefix<'a>(inner: &'a str, tag: &str) -> Option<&'a str> {
+    let rest = inner.strip_prefix('@')?;
+    let rest = rest
+        .strip_prefix("phpstan-")
+        .or_else(|| rest.strip_prefix("psalm-"))
+        .unwrap_or(rest);
+    let rest = rest.strip_prefix(tag)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest)
+}
+
+/// The byte offset and length of the first `@var` tag in `line`, in any of
+/// its spellings (`@var`, `@phpstan-var`, `@psalm-var`).
+pub(crate) fn find_var_tag(line: &str) -> Option<(usize, usize)> {
+    ["@phpstan-var", "@psalm-var", "@var"]
+        .iter()
+        .find_map(|tag| line.find(tag).map(|pos| (pos, tag.len())))
+}
+
 /// Pull the inner text out of a `/** ... */` docblock that shares its
 /// line with code on either side, e.g.
 /// `$x = /** @param T $y */ static function (T $y) {`.
@@ -666,7 +690,6 @@ pub fn find_var_raw_type_in_source(
     // in the same class) and all further annotations are foreign.
     let mut brace_depth = 0i32;
     let mut min_depth = 0i32;
-    let mut seen_sibling_scope = false;
 
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
@@ -688,17 +711,15 @@ pub fn find_var_raw_type_in_source(
 
         // Once we have exited our containing scope (min_depth < 0) and
         // re-entered a block close to that level, we are inside a
-        // sibling scope (e.g. a different method in the same class).
-        // From that point on every annotation belongs to a foreign
-        // scope.  The threshold is `min_depth + 1` rather than `>= 0`
+        // sibling scope (e.g. a different method in the same class) and
+        // every remaining line is foreign, so stop rather than
+        // brace-counting the rest of the file for an answer we would
+        // discard.  The threshold is `min_depth` rather than `>= 0`
         // because the cursor may be inside a nested block (foreach,
         // if, etc.) whose extra depth prevents brace_depth from ever
         // reaching 0 when traversing sibling classes.
         if min_depth < 0 && brace_depth > min_depth {
-            seen_sibling_scope = true;
-        }
-        if seen_sibling_scope {
-            continue;
+            break;
         }
 
         // Skip annotations that belong to a deeper (inner) scope.
@@ -706,14 +727,15 @@ pub fn find_var_raw_type_in_source(
             continue;
         }
 
-        // Quick reject: must mention both `@var` and the variable.
-        if !trimmed.contains("@var") || !trimmed.contains(var_name) {
+        // Quick reject: must mention both the tag (every spelling of
+        // which ends in `var`) and the variable.
+        if !trimmed.contains("var") || !trimmed.contains(var_name) {
             continue;
         }
 
         let inner = strip_docblock_line_delimiters(trimmed);
 
-        if let Some(rest) = inner.strip_prefix("@var") {
+        if let Some(rest) = strip_tag_prefix(inner, "var") {
             let rest = rest.trim_start();
             if rest.is_empty() {
                 continue;
@@ -762,6 +784,97 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
     }
 
     None
+}
+
+/// Merge a function or method's `@param` docblock tags into its parsed
+/// native parameters: richer docblock types, per-parameter descriptions,
+/// `@param-closure-this` binding, `@param-out` post-call types, and extra
+/// `@param` tags naming a parameter `func_get_args()` reads that the
+/// native signature has none for.
+///
+/// A `@param` tag that omits its variable name (common in
+/// phpstorm-stubs, e.g. `@param callable(TValue, TKey): bool`) is matched
+/// by position instead, once the name-based pass leaves a parameter
+/// unenriched.
+pub(crate) fn merge_param_docblock_into_parameters(
+    info: &DocblockInfo,
+    parameters: &mut Vec<ParameterInfo>,
+    template_bounds: &crate::atom::AtomMap<PhpType>,
+) {
+    for param in parameters.iter_mut() {
+        let param_doc_type = extract_param_raw_type_from_info(info, &param.name);
+        if let Some(ref doc_type) = param_doc_type {
+            let effective = resolve_effective_type_with_template_bounds(
+                param.type_hint.as_ref(),
+                Some(doc_type),
+                template_bounds,
+            );
+            if effective.is_some() {
+                param.type_hint = effective;
+            }
+        }
+        param.description = extract_param_description_from_info(info, &param.name);
+    }
+
+    // Positional fallback for `@param` tags that omit the parameter name.
+    // When the name-based merge above didn't enrich a parameter's type
+    // hint, try matching unnamed `@param` tags by position.
+    let positional_tags = extract_param_types_positional_from_info(info);
+    for (idx, param) in parameters.iter_mut().enumerate() {
+        let already_enriched = extract_param_raw_type_from_info(info, &param.name).is_some();
+        if already_enriched {
+            continue;
+        }
+        if let Some((None, doc_type)) = positional_tags.get(idx) {
+            let effective = resolve_effective_type_with_template_bounds(
+                param.type_hint.as_ref(),
+                Some(doc_type),
+                template_bounds,
+            );
+            if effective.is_some() {
+                param.type_hint = effective;
+            }
+        }
+    }
+
+    // Populate `closure_this_type` from `@param-closure-this` tags so
+    // that `$this` inside a closure argument resolves to the declared
+    // type instead of the lexical class.
+    for (this_type, param_name) in extract_param_closure_this_from_info(info) {
+        if let Some(param) = parameters.iter_mut().find(|p| p.name == param_name) {
+            param.closure_this_type = Some(this_type);
+        }
+    }
+
+    // Populate `param_out_type` from `@param-out` tags so a by-reference
+    // parameter's post-call type is read from the docblock's own
+    // annotation rather than guessed from its declared input type.
+    for (out_type, param_name) in extract_param_out_from_info(info) {
+        if let Some(param) = parameters.iter_mut().find(|p| p.name == param_name) {
+            param.param_out_type = Some(out_type);
+        }
+    }
+
+    // Append extra `@param` tags that don't match any native parameter.
+    // These document parameters accessed via `func_get_args()` or
+    // similar mechanisms and should appear in hover/signature.
+    for (tag_name, tag_type) in extract_all_param_tags_from_info(info) {
+        if !parameters.iter().any(|p| p.name == tag_name) {
+            let description = extract_param_description_from_info(info, &tag_name);
+            parameters.push(ParameterInfo {
+                name: atom(&tag_name),
+                is_required: false,
+                type_hint: Some(tag_type),
+                native_type_hint: None,
+                description,
+                default_value: None,
+                is_variadic: false,
+                is_reference: false,
+                closure_this_type: None,
+                param_out_type: None,
+            });
+        }
+    }
 }
 
 /// Extract all `@param` tags from a docblock as `(name, type)` pairs.
@@ -859,6 +972,30 @@ pub fn extract_param_closure_this_from_info(info: &DocblockInfo) -> Vec<(PhpType
             && let Some(name) = tag.variable()
         {
             results.push((PhpType::parse(&type_text), name.into_owned()));
+        }
+    }
+
+    results
+}
+
+/// Extract all `@param-out` declarations from a docblock.
+///
+/// The tag format is `@param-out Type $paramName`, declaring what a
+/// by-reference parameter holds after the call returns — often a
+/// PHPStan conditional type keyed on the parameter's own pre-call value
+/// (`@param-out ($arg is null ? A&I : A) $arg`).
+///
+/// Returns a list of `(type, param_name)` pairs.  The `param_name`
+/// includes the `$` prefix.
+pub fn extract_param_out_from_info(info: &DocblockInfo) -> Vec<(PhpType, String)> {
+    let mut results = Vec::new();
+
+    for tag in info.tags_by_kind(TagKind::ParamOut) {
+        if let Some(type_text) = tag.type_text()
+            && let Some(name) = tag.variable()
+            && let Some(ty) = sanitise_and_parse_docblock_type(&type_text)
+        {
+            results.push((ty, name.into_owned()));
         }
     }
 
@@ -1046,12 +1183,16 @@ pub fn find_iterable_raw_type_in_source(
     let mut brace_depth = 0i32;
     let mut min_depth = 0i32;
     let mut max_depth = 0i32;
-    let mut seen_sibling_scope = false;
 
     // Track the previous non-empty line we saw while scanning backward.
     // This lets us match `/** @var Type */` (no variable name) when the
     // *next* line is an assignment to our variable.
     let mut prev_non_empty_line: Option<&str> = None;
+
+    // A `|Type`/`&Type` union or intersection continuation collected from
+    // a line below, waiting to be joined onto the `@param`/`@var` tag
+    // that starts the type (see the continuation handling below).
+    let mut pending_continuation: Option<String> = None;
 
     for line in search_area.lines().rev() {
         let trimmed = line.trim();
@@ -1076,19 +1217,20 @@ pub fn find_iterable_raw_type_in_source(
 
         // Once we have exited our containing scope (min_depth < 0) and
         // re-entered a block close to that level, we are inside a
-        // sibling scope (e.g. a different method in the same class).
-        // From that point on every annotation belongs to a foreign
-        // scope.
+        // sibling scope (e.g. a different method in the same class) and
+        // every remaining line is foreign, so stop rather than
+        // brace-counting the rest of the file for an answer we would
+        // discard.
         //
-        // The threshold is `min_depth + 1` rather than `>= 0` because
+        // The threshold is `min_depth` rather than `>= 0` because
         // the cursor may be inside a nested block (foreach, if, etc.)
         // that adds extra depth.  When starting inside a foreach in a
         // class method, min_depth reaches -3 (foreach { + method { +
         // class {), so a sibling method body at depth -1 would never
-        // reach 0.  Using `min_depth + 1` catches the first rise back
-        // toward our exit point.
+        // reach 0.  Comparing against `min_depth` catches the first rise
+        // back toward our exit point.
         if min_depth < 0 && brace_depth > min_depth {
-            seen_sibling_scope = true;
+            break;
         }
 
         // Detect sibling function/method boundaries at the same class
@@ -1125,10 +1267,7 @@ pub fn find_iterable_raw_type_in_source(
         let at_established_floor =
             min_depth < 0 && brace_depth == min_depth && min_depth == prev_min_depth;
 
-        if !seen_sibling_scope
-            && !is_comment_line
-            && ((brace_depth == 0 && max_depth > 0) || at_established_floor)
-        {
+        if !is_comment_line && ((brace_depth == 0 && max_depth > 0) || at_established_floor) {
             // Check for a function/method keyword.  This covers:
             //   `public function foo(...)`, `private static function bar(...)`,
             //   `function baz(...)`, `public static function qux(): array`
@@ -1138,17 +1277,10 @@ pub fn find_iterable_raw_type_in_source(
                 || lower.contains("function(")
                 || lower.ends_with("function")
             {
-                // We've hit a sibling function signature.  Any
-                // docblock above this point belongs to that function.
-                seen_sibling_scope = true;
+                // We've hit a sibling function signature.  Any docblock
+                // above this point belongs to that function, so stop.
+                break;
             }
-        }
-
-        if seen_sibling_scope {
-            if !trimmed.is_empty() {
-                prev_non_empty_line = Some(trimmed);
-            }
-            continue;
         }
 
         // Skip annotations that belong to a deeper (inner) scope.
@@ -1157,6 +1289,54 @@ pub fn find_iterable_raw_type_in_source(
                 prev_non_empty_line = Some(trimmed);
             }
             continue;
+        }
+
+        // ── Union/intersection continued on the next docblock line ──
+        // `@param array<int, Widget>` followed by a line starting
+        // `|Widget $items` is one type. The continuation carries no
+        // `@param`/`@var` keyword of its own, so fold it into a pending
+        // tail instead of matching it as a tag; once the scanner reaches
+        // the tag line above it, join the two back into one type string.
+        if is_comment_line {
+            let inner = strip_docblock_line_delimiters(trimmed);
+            let is_continuation = inner.starts_with('|') || inner.starts_with('&');
+
+            if is_continuation && pending_continuation.is_some() {
+                let existing = pending_continuation.take().unwrap();
+                pending_continuation = Some(format!("{inner} {existing}"));
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
+
+            if let Some(tail) = pending_continuation.take() {
+                let rest =
+                    strip_tag_prefix(inner, "var").or_else(|| strip_tag_prefix(inner, "param"));
+                if let Some(rest) = rest {
+                    let rest = rest.trim_start();
+                    if !rest.is_empty() {
+                        let combined = format!("{rest} {tail}");
+                        let (type_token, remainder) = split_type_token(&combined);
+                        if let Some(name) = remainder.split_whitespace().next()
+                            && name == var_name
+                        {
+                            return Some(PhpType::parse(type_token));
+                        }
+                    }
+                }
+                // Not the tag after all — the continuation is discarded
+                // and this line falls through to the ordinary checks
+                // below.
+            }
+
+            if is_continuation && inner.contains(var_name) {
+                pending_continuation = Some(inner.to_string());
+                if !trimmed.is_empty() {
+                    prev_non_empty_line = Some(trimmed);
+                }
+                continue;
+            }
         }
 
         // ── Named annotation: line mentions the variable name ───────
@@ -1173,11 +1353,7 @@ pub fn find_iterable_raw_type_in_source(
             };
 
             // Try @var first, then @param.
-            let rest = if let Some(r) = inner.strip_prefix("@var") {
-                Some(r)
-            } else {
-                inner.strip_prefix("@param")
-            };
+            let rest = strip_tag_prefix(inner, "var").or_else(|| strip_tag_prefix(inner, "param"));
 
             if let Some(rest) = rest {
                 let rest = rest.trim_start();
@@ -1203,7 +1379,7 @@ pub fn find_iterable_raw_type_in_source(
         //   $thing = [];
         //   $thing[0]->
         if is_comment_line
-            && trimmed.contains("@var")
+            && trimmed.contains("var")
             && let Some(next_line) = prev_non_empty_line
             && next_line.contains(var_name)
         {
@@ -1215,7 +1391,7 @@ pub fn find_iterable_raw_type_in_source(
             {
                 let inner = strip_docblock_line_delimiters(trimmed);
 
-                if let Some(rest) = inner.strip_prefix("@var") {
+                if let Some(rest) = strip_tag_prefix(inner, "var") {
                     let rest = rest.trim_start();
                     if !rest.is_empty() {
                         let (type_token, remainder) = split_type_token(rest);
@@ -1441,6 +1617,100 @@ pub fn should_override_type_typed(docblock_type: &PhpType, native_type: &PhpType
     true
 }
 
+/// A declaration docblock with the members removed that its native class
+/// type can never hold, or `None` when no member survives.
+///
+/// A native `DateTimeImmutable` return is what PHP enforces, so the `false`
+/// in a `@return static|false` written for an older runtime cannot come
+/// back, and neither can the `TValue[]` in `IteratorAggregate::getIterator()`'s
+/// `@return Traversable<TKey, TValue>|TValue[]` on a native `Traversable`.
+/// PHPStan discards such a docblock outright; keeping the members the
+/// native type does allow preserves the generics it carries.  A `null` the
+/// native type does not accept goes the same way, as PHPStan also drops it.
+fn doc_members_native_can_hold<'a>(doc: &'a PhpType, native: &PhpType) -> Option<Cow<'a, PhpType>> {
+    let native_owned = native.non_null_type();
+    let native_inner = native_owned.as_ref().unwrap_or(native);
+    let native_members: &[PhpType] = match native_inner.kind() {
+        TypeKind::Union(members) | TypeKind::Intersection(members) => members,
+        _ => std::slice::from_ref(native_inner),
+    };
+    if !native_members.iter().all(names_a_class) {
+        return Some(Cow::Borrowed(doc));
+    }
+    // A native type that does not accept `null` rules the docblock's `null`
+    // out as well: `@return static|null` on `: self` is a `static`.
+    let drops_null = !native.accepts_null();
+    let can_hold = |m: &PhpType| !is_never_an_object(m) && !(drops_null && m.is_null());
+    match doc.kind() {
+        TypeKind::Union(members) => {
+            let kept: Vec<PhpType> = members.iter().filter(|m| can_hold(m)).cloned().collect();
+            if kept.len() == members.len() {
+                Some(Cow::Borrowed(doc))
+            } else if kept.iter().all(PhpType::is_null) {
+                None
+            } else {
+                Some(Cow::Owned(PhpType::union(kept)))
+            }
+        }
+        TypeKind::Nullable(inner) if drops_null && !is_never_an_object(inner) => {
+            Some(Cow::Owned(PhpType::clone(inner)))
+        }
+        _ if !can_hold(doc) => None,
+        _ => Some(Cow::Borrowed(doc)),
+    }
+}
+
+/// Whether `ty` names one class, interface, or enum: a class name, or the
+/// `self` / `static` / `parent` keyword standing for one (not `mixed` or
+/// `object`).
+fn names_a_class(ty: &PhpType) -> bool {
+    let name = match ty.kind() {
+        TypeKind::Named(name) => name.as_str(),
+        TypeKind::Generic(g) => g.name.as_str(),
+        _ => return false,
+    };
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "self" | "static" | "parent"
+    ) || (crate::php_type::is_class_like_name(name) && !name.eq_ignore_ascii_case("mixed"))
+}
+
+/// Whether `ty` is a value that can never be an object (`false`, `int`,
+/// `list<Foo>`, `'literal'`, `class-string<Foo>`, …).
+///
+/// Types that can hold an object (`static`, `$this`, `object`, `callable`,
+/// `iterable`, `mixed`, a template or class name) do not count, nor do
+/// `null`, `void`, and `never`, which the caller treats separately.
+fn is_never_an_object(ty: &PhpType) -> bool {
+    fn names_a_non_object(name: &str) -> bool {
+        crate::php_type::is_scalar_name_pub(name)
+            && !matches!(
+                name.to_ascii_lowercase().as_str(),
+                "self"
+                    | "static"
+                    | "parent"
+                    | "$this"
+                    | "object"
+                    | "callable"
+                    | "iterable"
+                    | "void"
+                    | "never"
+                    | "null"
+            )
+    }
+    match ty.kind() {
+        TypeKind::Named(name) => names_a_non_object(name),
+        TypeKind::Generic(g) => names_a_non_object(&g.name),
+        TypeKind::Array(_)
+        | TypeKind::ArrayShape(_)
+        | TypeKind::ClassString(_)
+        | TypeKind::InterfaceString(_)
+        | TypeKind::IntRange(_, _)
+        | TypeKind::Literal(_) => true,
+        _ => false,
+    }
+}
+
 /// Whether a docblock type refines the members of the native union it is
 /// written on.
 ///
@@ -1608,18 +1878,66 @@ pub fn get_docblock_info_for_node(
 /// cases, matching the sanitisation logic in [`resolve_effective_type_typed`].
 ///
 /// Returns `None` when the string is completely unrecoverable (e.g.
-/// `"<garbage"` with no base type).
+/// `"<garbage"` with no base type) or is not a valid type at all (e.g.
+/// `"[$x]"`).  Like PHPStan, an invalid type is discarded rather than
+/// kept as raw text, so the declaration falls back to its native type.
 pub fn sanitise_and_parse_docblock_type(raw: &str) -> Option<PhpType> {
     if crate::docblock::type_strings::has_unclosed_delimiters(raw) {
         let base = recover_base_type(raw);
         if base.is_empty() {
             None
         } else {
-            Some(PhpType::parse(base))
+            PhpType::try_parse(base)
         }
     } else {
-        Some(PhpType::parse(raw))
+        PhpType::try_parse(raw)
     }
+}
+
+/// [`resolve_effective_type_typed`] for a declaration that introduces its
+/// own `@template` parameters, `bounds` being their `of` bounds.
+///
+/// A template name says nothing a native hint can be compared against, but
+/// its bound does: `@template T of int` with `@param T $a` on `int $a` is
+/// the same `int` the native hint promises, narrowed to whichever `int` the
+/// call passes, so the template wins (PHPStan's `decideType` compares a
+/// template's bound the same way).  Anything the bound cannot vouch for is
+/// judged as before.
+pub fn resolve_effective_type_with_template_bounds(
+    native_type: Option<&PhpType>,
+    docblock_type: Option<&PhpType>,
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> Option<PhpType> {
+    if let (Some(native), Some(doc)) = (native_type, docblock_type)
+        && !bounds.is_empty()
+    {
+        let names: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+        if doc.references_any_name(&names) {
+            let subs: std::collections::HashMap<String, PhpType> = bounds
+                .iter()
+                .map(|(name, bound)| (name.to_string(), bound.clone()))
+                .collect();
+            let doc_owned = doc.non_null_type();
+            let doc_inner = doc_owned.as_ref().unwrap_or(doc);
+            let native_owned = native.non_null_type();
+            let native_inner = native_owned.as_ref().unwrap_or(native);
+            let resolved = doc_inner.substitute(&subs);
+            // A bound the parser could not evaluate (`key-of<Alias>`) is a
+            // refinement however it evaluates, as for the docblock itself
+            // in `should_override_type_typed`.
+            if resolved.contains_unevaluated_operator()
+                || resolved.is_subtype_of(native_inner)
+                || resolved.equivalent(native_inner)
+            {
+                return Some(if native.accepts_null() && !native.is_mixed() {
+                    doc.clone().or_null()
+                } else {
+                    doc.clone()
+                });
+            }
+        }
+    }
+    resolve_effective_type_typed(native_type, docblock_type)
 }
 
 /// Pick the best available type between a native type hint and a docblock
@@ -1639,8 +1957,24 @@ pub fn resolve_effective_type_typed(
     match (native_type, docblock_type) {
         // Docblock provided, no native hint → use docblock.
         (None, Some(doc)) => Some(doc.clone()),
+        // A declared `never` stands whatever the native hint says: the
+        // function does not return, so what it would have returned is moot.
+        (Some(_), Some(doc)) if doc.is_never() => Some(doc.clone()),
+        // A template bounded by exactly the native type is that type, with
+        // the name of the template the value still is.
+        (Some(native), Some(doc))
+            if doc
+                .as_template_param()
+                .is_some_and(|(_, bound)| bound.equivalent(native)) =>
+        {
+            Some(doc.clone())
+        }
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
+            let Some(doc) = doc_members_native_can_hold(doc, native) else {
+                return Some(native.clone());
+            };
+            let doc = doc.as_ref();
             if should_override_type_typed(doc, native) {
                 // Preserve nullability from the native hint. A `?array`
                 // native with a non-nullable `@param Foo[]` docblock still
@@ -1650,10 +1984,18 @@ pub fn resolve_effective_type_typed(
                 // `mixed` is excluded: it accepts null but carries no
                 // explicit null member, so narrowing it through a docblock
                 // is intentional and must not re-add null.
-                if native.accepts_null() && !native.is_mixed() {
-                    Some(doc.clone().or_null())
+                let doc = with_native_members_doc_omits(doc, native);
+                // An operator the parser could not evaluate
+                // (`Data[value-of<T>]`) has not said yet whether its result
+                // takes the `null`; joining one now would outlive the
+                // evaluation that decides it.
+                if native.accepts_null()
+                    && !native.is_mixed()
+                    && !doc.contains_unevaluated_operator()
+                {
+                    Some(doc.or_null())
                 } else {
-                    Some(doc.clone())
+                    Some(doc)
                 }
             } else {
                 Some(native.clone())
@@ -1663,6 +2005,61 @@ pub fn resolve_effective_type_typed(
         (Some(native), None) => Some(native.clone()),
         // Neither → nothing.
         (None, None) => None,
+    }
+}
+
+/// `doc` joined with each member of a native union that `doc` says nothing
+/// about, the way the native nullability is kept.
+///
+/// `@param array<int, string>` on `array|false` refines the `array` half
+/// and leaves `false` standing, since the value can still be `false` at
+/// runtime (PHPStan's `decideType` does the same).  Only keyword types are
+/// judged, on both sides: whether a class or a template in the docblock
+/// covers a native member takes the class hierarchy or the template's
+/// bound, neither of which is known here.
+fn with_native_members_doc_omits(doc: &PhpType, native: &PhpType) -> PhpType {
+    let TypeKind::Union(native_members) = native.kind() else {
+        return doc.clone();
+    };
+    let doc_members: Vec<PhpType> = match doc.kind() {
+        TypeKind::Union(members) => members.to_vec(),
+        TypeKind::Nullable(inner) => vec![PhpType::clone(inner), PhpType::null()],
+        _ => vec![doc.clone()],
+    };
+    if !doc_members.iter().all(is_plain_value_type) {
+        return doc.clone();
+    }
+    let omitted: Vec<PhpType> = native_members
+        .iter()
+        .filter(|member| {
+            !member.is_null()
+                && !names_a_class(member)
+                && !doc_members.iter().any(|d| d.is_subtype_of(member))
+        })
+        .cloned()
+        .collect();
+    if omitted.is_empty() {
+        return doc.clone();
+    }
+    let mut members = doc_members.to_vec();
+    members.extend(omitted);
+    PhpType::union(members)
+}
+
+/// Whether `ty` is a keyword, array, or literal type whose relation to a
+/// native keyword member can be judged structurally: no class, template,
+/// or unevaluated type operator (`CONST[T]`, `key-of<…>`, a conditional)
+/// whose meaning depends on something only resolution knows.
+fn is_plain_value_type(ty: &PhpType) -> bool {
+    match ty.kind() {
+        TypeKind::Named(_) => !names_a_class(ty),
+        TypeKind::Generic(g) => !names_a_class(ty) && g.args.iter().all(is_plain_value_type),
+        TypeKind::Array(inner) | TypeKind::ListShape(inner) | TypeKind::Nullable(inner) => {
+            is_plain_value_type(inner)
+        }
+        TypeKind::ArrayShape(entries) => entries.iter().all(|e| is_plain_value_type(&e.value_type)),
+        TypeKind::Literal(_) | TypeKind::IntRange(..) => true,
+        _ => false,
     }
 }
 

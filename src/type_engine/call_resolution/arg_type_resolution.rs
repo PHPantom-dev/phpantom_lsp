@@ -6,15 +6,15 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::resolve_class_keyword;
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::subject_expr::SubjectExpr;
 use crate::types::*;
 
-use crate::type_engine::conditional_resolution::{split_call_subject, split_text_args};
+use crate::type_engine::conditional_resolution::split_text_args;
 use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::subject_expr::split_call_subject_raw;
 use crate::type_engine::variable::array_func_rules::ArrayFuncArgs;
 
 thread_local! {
@@ -122,6 +122,14 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
                     )?;
                 (self.ctx.function_loader?)(name, 0)?.return_type
             })
+            .or_else(|| {
+                // A first-class callable (`Row::fromCache(...)`) returns
+                // what the method it names returns.
+                text.trim_end().ends_with("(...)").then_some(())?;
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text, self.ctx,
+                )
+            })
     }
 
     fn callback_inferred_return_type(&self, index: usize, param_type: &PhpType) -> Option<PhpType> {
@@ -153,38 +161,26 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
         crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
     }
+
+    fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
+        crate::type_engine::types::narrowing::split_type_by_guard_name(
+            guard,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
+    }
 }
 
 impl Backend {
-    /// Extract the first argument from a comma-separated argument text,
-    /// respecting nested parentheses, brackets, and braces.
+    /// Extract the first argument from a comma-separated argument text.
+    ///
+    /// [`split_text_args`] does the splitting: it respects nested
+    /// brackets and, unlike the hand-rolled scan this replaced, string
+    /// literals too, so a comma inside `'a, b'` no longer ends the first
+    /// argument.
     pub(super) fn extract_first_arg_text(args_text: &str) -> Option<String> {
-        let trimmed = args_text.trim();
-        if trimmed.is_empty() {
-            return None;
-        }
-        let mut depth = 0i32;
-        for (i, ch) in trimmed.char_indices() {
-            match ch {
-                '(' | '[' | '{' => depth += 1,
-                ')' | ']' | '}' => depth -= 1,
-                ',' if depth == 0 => {
-                    let arg = trimmed[..i].trim();
-                    if !arg.is_empty() {
-                        return Some(crate::call_args::text_arg_value(arg).to_string());
-                    }
-                    return None;
-                }
-                _ => {}
-            }
-        }
-        // No top-level comma: the whole text is a single argument.
-        let arg = trimmed.trim();
-        if !arg.is_empty() {
-            Some(crate::call_args::text_arg_value(arg).to_string())
-        } else {
-            None
-        }
+        let first = split_text_args(args_text).into_iter().next()?.trim();
+        (!first.is_empty()).then(|| crate::call_args::text_arg_value(first).to_string())
     }
 
     /// Resolve the raw return type of an inline argument expression.
@@ -299,7 +295,7 @@ impl Backend {
 
         // ── Call expression ending with `)` ─────────────────────────────
         if arg_text.ends_with(')')
-            && let Some((call_body, call_args)) = split_call_subject(arg_text)
+            && let Some((call_body, call_args)) = split_call_subject_raw(arg_text)
         {
             match &SubjectExpr::parse_callee(call_body) {
                 // A nested function call (e.g. `array_map($cb,
@@ -345,9 +341,14 @@ impl Backend {
                     {
                         class_loader(&resolved).map(Arc::unwrap_or_clone)
                     } else {
-                        find_class_by_name(all_classes, class)
-                            .map(|arc| ClassInfo::clone(arc))
-                            .or_else(|| class_loader(class).map(Arc::unwrap_or_clone))
+                        let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                        let fqn = crate::util::resolve_source_class_name(
+                            class,
+                            ns,
+                            all_classes,
+                            class_loader,
+                        );
+                        class_loader(&fqn).map(Arc::unwrap_or_clone)
                     };
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(

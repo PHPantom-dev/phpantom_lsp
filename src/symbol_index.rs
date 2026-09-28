@@ -72,6 +72,17 @@ pub(crate) struct SymbolIndex {
     pub(crate) method_store: MethodStore,
     /// Reverse inheritance index: parent FQN → list of child FQNs.
     pub(crate) gti_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
+    /// The same inheritance edges the other way round: child FQN → the
+    /// parent FQNs (extends, implements, use) its declaration registered it
+    /// under.
+    ///
+    /// Kept in step with [`gti_index`](Self::gti_index) so that dropping one
+    /// file's classes touches only the child lists that file contributed to,
+    /// instead of scanning every entry in a workspace-sized map on each
+    /// edit, and so that re-registering a child tests a list the length of
+    /// its own `extends`/`implements` clause rather than the list of every
+    /// implementor of a popular interface.
+    pub(crate) gti_parents_index: Arc<RwLock<HashMap<String, Vec<String>>>>,
     /// Identity of this set of indexes, unique for the life of the process
     /// and shared by every clone (a cloned `Backend` shares the indexes
     /// themselves).  Per-thread caches key on it so that a worker thread
@@ -107,6 +118,7 @@ impl SymbolIndex {
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
+            gti_parents_index: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 

@@ -12,7 +12,7 @@ use crate::types::*;
 
 use crate::text_position::position_to_offset;
 use crate::type_engine::conditional_resolution::TemplateContext;
-use crate::type_engine::resolver::ResolutionCtx;
+use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 
 use tower_lsp::lsp_types::Position;
 
@@ -20,6 +20,105 @@ use super::target_cache::CALLABLE_TARGET_CACHE;
 use super::template_subs::evaluate_constant_operands;
 
 impl Backend {
+    /// Bind a method's declaration to one call site: substitute the
+    /// method-level `@template` params the arguments decide, then collapse
+    /// any conditional left inside the return type against those same
+    /// arguments, so signature help and every downstream consumer see a
+    /// settled type rather than a raw conditional.
+    ///
+    /// Returns the bound method together with the template params that
+    /// bound to the receiver itself, which the caller records so a later
+    /// hop knows they are already spoken for.
+    fn bind_method_to_call_site(
+        declared: &MethodInfo,
+        owner: &ClassInfo,
+        method_name: &str,
+        args_text: Option<&str>,
+        rctx: &ResolutionCtx<'_>,
+    ) -> (MethodInfo, crate::atom::AtomMap<Option<PhpType>>) {
+        let mut bound = declared.clone();
+        let mut self_bound_params = crate::atom::AtomMap::default();
+
+        // A parameter naming the base Eloquent collection of a concrete
+        // model is handed that model's own collection, the same rewrite
+        // every return type gets.
+        let rewrite = |param: &ParameterInfo| {
+            param.type_hint.as_ref().and_then(|hint| {
+                crate::virtual_members::laravel::replace_eloquent_collections_in_param_type(
+                    hint,
+                    rctx.class_loader,
+                )
+            })
+        };
+        if let Some((first, first_hint)) = bound
+            .parameters
+            .iter()
+            .enumerate()
+            .find_map(|(i, p)| rewrite(p).map(|hint| (i, hint)))
+        {
+            let params = bound.parameters.make_mut();
+            params[first].type_hint = Some(first_hint);
+            for param in params.iter_mut().skip(first + 1) {
+                if let Some(hint) = rewrite(param) {
+                    param.type_hint = Some(hint);
+                }
+            }
+        }
+
+        let Some(at) = args_text else {
+            return (bound, self_bound_params);
+        };
+
+        let split_args = crate::type_engine::types::conditional::split_text_args(at);
+        let method_subs = Self::build_method_template_subs(owner, method_name, &split_args, rctx);
+        if !method_subs.is_empty() {
+            crate::inheritance::apply_substitution_to_method(&mut bound, &method_subs);
+            self_bound_params = super::template_subs::self_bound_template_params(
+                &declared.template_bindings,
+                &declared.parameters,
+                &split_args,
+                &|tpl| {
+                    declared
+                        .template_param_bounds
+                        .get(tpl)
+                        .or_else(|| owner.template_param_bounds.get(tpl))
+                        .cloned()
+                },
+            );
+        }
+
+        if let Some(ret) = bound
+            .return_type
+            .as_ref()
+            .filter(|r| r.contains_conditional())
+        {
+            let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
+            let tpl = TemplateContext {
+                defaults: Some(&method_subs),
+                params: &bound.template_params,
+                bindings: &bound.template_bindings,
+                arg_type_resolver: Some(&arg_ty_resolver),
+                this_type: None,
+            };
+            let evaluated =
+                crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
+                    ret,
+                    &bound.parameters,
+                    at,
+                    None,
+                    crate::type_engine::types::conditional::ConditionalClassContext {
+                        calling: rctx.current_class.map(|c| c.name.as_str()),
+                        declaring: Some(owner.fqn().as_str()),
+                    },
+                    rctx.class_loader,
+                    &tpl,
+                );
+            bound.return_type = Some(evaluated);
+        }
+
+        (bound, self_bound_params)
+    }
+
     /// Resolve an instance method base expression + method name to a
     /// [`ResolvedCallableTarget`].
     ///
@@ -139,63 +238,8 @@ impl Backend {
             );
 
             if let Some(m) = effective.get_method_ci(&method_lower) {
-                let mut result_method = m.clone();
-                let mut self_bound_params = crate::atom::AtomSet::default();
-
-                // Apply method-level template substitutions when
-                // call-site argument text is available.
-                if let Some(at) = args_text {
-                    let split_args = crate::type_engine::types::conditional::split_text_args(at);
-                    let method_subs = Self::build_method_template_subs(
-                        &effective,
-                        method_name,
-                        &split_args,
-                        rctx,
-                    );
-                    if !method_subs.is_empty() {
-                        crate::inheritance::apply_substitution_to_method(
-                            &mut result_method,
-                            &method_subs,
-                        );
-                        self_bound_params = super::template_subs::self_bound_template_params(
-                            &m.template_bindings,
-                            &m.parameters,
-                            &split_args,
-                        );
-                    }
-                    // Collapse any conditionals nested inside the return type
-                    // (e.g. `Collection<($k is array|string ? array-key :
-                    // …), …>`) against the call arguments so signature help
-                    // and downstream consumers never see a raw conditional.
-                    if result_method
-                        .return_type
-                        .as_ref()
-                        .is_some_and(|r| r.contains_conditional())
-                    {
-                        let ret = result_method.return_type.as_ref().unwrap();
-                        let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
-                        let tpl = TemplateContext {
-                            defaults: Some(&method_subs),
-                            params: &result_method.template_params,
-                            bindings: &result_method.template_bindings,
-                            arg_type_resolver: Some(&arg_ty_resolver),
-                        };
-                        let evaluated =
-                            crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
-                                ret,
-                                &result_method.parameters,
-                                at,
-                                None,
-                                crate::type_engine::types::conditional::ConditionalClassContext {
-                                    calling: rctx.current_class.map(|c| c.name.as_str()),
-                                    declaring: Some(effective.fqn().as_str()),
-                                },
-                                rctx.class_loader,
-                                &tpl,
-                            );
-                        result_method.return_type = Some(evaluated);
-                    }
-                }
+                let (result_method, self_bound_params) =
+                    Self::bind_method_to_call_site(m, &effective, method_name, args_text, rctx);
 
                 let target = ResolvedCallableTarget {
                     parameters: result_method.parameters.clone(),
@@ -275,15 +319,8 @@ impl Backend {
         // to declared defaults, upper bounds, or `mixed`.
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
-                // Look up the child's extends_generics for the parent class
-                rctx.current_class.and_then(|child| {
-                    let parent_short = crate::util::short_name(&owner.name);
-                    child
-                        .extends_generics
-                        .iter()
-                        .find(|(name, _)| crate::util::short_name(name) == parent_short)
-                        .map(|(_, args)| args.clone())
-                })
+                rctx.current_class
+                    .and_then(|child| crate::inheritance::extends_type_args(child, &owner))
             } else {
                 None
             };
@@ -304,55 +341,8 @@ impl Backend {
 
         let m = merged.get_method_ci(method_name)?;
 
-        let mut result_method = m.clone();
-        let mut self_bound_params = crate::atom::AtomSet::default();
-
-        // Apply method-level template substitutions when call-site
-        // argument text is available.
-        if let Some(at) = args_text {
-            let split_args = crate::type_engine::types::conditional::split_text_args(at);
-            let method_subs =
-                Self::build_method_template_subs(&merged, method_name, &split_args, rctx);
-            if !method_subs.is_empty() {
-                crate::inheritance::apply_substitution_to_method(&mut result_method, &method_subs);
-                self_bound_params = super::template_subs::self_bound_template_params(
-                    &m.template_bindings,
-                    &m.parameters,
-                    &split_args,
-                );
-            }
-            // Collapse conditionals nested inside the return type (e.g.
-            // `Str::replace`'s `($subject is string ? string : string[])`
-            // wrapped in a generic factory) against the call arguments.
-            if result_method
-                .return_type
-                .as_ref()
-                .is_some_and(|r| r.contains_conditional())
-            {
-                let ret = result_method.return_type.as_ref().unwrap();
-                let arg_ty_resolver = |t: &str| Self::resolve_arg_text_to_type(t, rctx);
-                let tpl = TemplateContext {
-                    defaults: Some(&method_subs),
-                    params: &result_method.template_params,
-                    bindings: &result_method.template_bindings,
-                    arg_type_resolver: Some(&arg_ty_resolver),
-                };
-                let evaluated =
-                    crate::type_engine::types::conditional::evaluate_nested_conditionals_text(
-                        ret,
-                        &result_method.parameters,
-                        at,
-                        None,
-                        crate::type_engine::types::conditional::ConditionalClassContext {
-                            calling: rctx.current_class.map(|c| c.name.as_str()),
-                            declaring: Some(merged.fqn().as_str()),
-                        },
-                        rctx.class_loader,
-                        &tpl,
-                    );
-                result_method.return_type = Some(evaluated);
-            }
-        }
+        let (result_method, self_bound_params) =
+            Self::bind_method_to_call_site(m, &merged, method_name, args_text, rctx);
 
         Some(ResolvedCallableTarget {
             parameters: result_method.parameters.clone(),
@@ -416,6 +406,7 @@ impl Backend {
                         &func.template_bindings,
                         &func.parameters,
                         &split_args.iter().map(String::as_str).collect::<Vec<_>>(),
+                        &|tpl| func.template_param_bounds.get(tpl).cloned(),
                     ),
                     ..Default::default()
                 };
@@ -479,6 +470,12 @@ impl Backend {
                     &ctor.template_bindings,
                     &ctor.parameters,
                     &split_args,
+                    &|tpl| {
+                        ctor.template_param_bounds
+                            .get(tpl)
+                            .or_else(|| merged.template_param_bounds.get(tpl))
+                            .cloned()
+                    },
                 );
                 let mut result_ctor = ctor;
                 crate::inheritance::apply_substitution_to_method(&mut result_ctor, &subs);
@@ -570,33 +567,59 @@ impl Backend {
         file_ctx: &FileContext,
         call_args_text: Option<&str>,
     ) -> Option<ResolvedCallableTarget> {
+        self.resolve_callable_target_inner(
+            expr,
+            content,
+            cursor_offset,
+            file_ctx,
+            call_args_text,
+            &mut Vec::new(),
+        )
+    }
+
+    /// The body of
+    /// [`resolve_callable_target_with_args_at_offset`](Self::resolve_callable_target_with_args_at_offset),
+    /// carrying the variables whose first-class callable assignment is
+    /// already being followed further up the recursion.
+    ///
+    /// A variable used as a callable resolves to whatever its first-class
+    /// callable assignment names, and that name can lead back to a variable
+    /// already on the way in: `$fn = $fn(...)` names itself, and
+    /// `$a = $b(...); $b = $a(...)` closes the same loop across two names.
+    /// Re-entry on a name already being followed yields no target, which
+    /// ends the walk at the point the cycle closes and leaves every chain
+    /// that does terminate resolving as before.
+    fn resolve_callable_target_inner(
+        &self,
+        expr: &str,
+        content: &str,
+        cursor_offset: u32,
+        file_ctx: &FileContext,
+        call_args_text: Option<&str>,
+        visited_vars: &mut Vec<String>,
+    ) -> Option<ResolvedCallableTarget> {
         // A file may declare several `namespace` blocks, so the namespace
-        // every name here resolves against is the one covering this call
-        // site, not the file's first one.
+        // and imports every name here resolves against are those of the
+        // block covering this call site.
         let namespace = file_ctx.namespace_at(cursor_offset);
-        let class_loader = self.class_loader_with(&file_ctx.classes, &file_ctx.use_map, namespace);
-        let function_loader_cl = self.function_loader_with(
-            file_ctx.resolved_names.as_deref(),
-            &file_ctx.use_map,
-            namespace,
-        );
+        let use_map = file_ctx.use_map_at(cursor_offset);
+        let class_loader = self.class_loader_with(&file_ctx.classes, use_map, namespace);
+        let function_loader_cl =
+            self.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
 
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &file_ctx.classes,
+            &file_ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader_cl),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader_cl,
+                &laravel_macro_this_resolver,
+            ),
+        );
 
         let parsed = SubjectExpr::parse(expr);
 
@@ -624,7 +647,12 @@ impl Backend {
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
                     let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                    crate::util::resolve_source_class_name(class_name, ns, &class_loader)
+                    crate::util::resolve_source_class_name(
+                        class_name,
+                        ns,
+                        rctx.all_classes,
+                        &class_loader,
+                    )
                 } else {
                     resolved_class_name
                 };
@@ -649,7 +677,7 @@ impl Backend {
 
             // ── Standalone function call: `functionName(…)` ─────────
             SubjectExpr::FunctionCall(name) => {
-                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
+                let func = self.resolve_function_name(name, use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -659,16 +687,20 @@ impl Backend {
 
             // ── Variable used as a callable target: `$fn(…)` ────────
             // Check for a first-class callable assignment and recurse.
-            SubjectExpr::Variable(var_name) => {
+            SubjectExpr::Variable(var_name) if !visited_vars.iter().any(|v| v == var_name) => {
                 let callable_target =
                     Self::extract_callable_target_from_variable(var_name, content, cursor_offset)?;
-                self.resolve_callable_target_with_args_at_offset(
+                visited_vars.push(var_name.clone());
+                let resolved = self.resolve_callable_target_inner(
                     &callable_target,
                     content,
                     cursor_offset,
                     file_ctx,
                     call_args_text,
-                )
+                    visited_vars,
+                );
+                visited_vars.pop();
+                resolved
             }
 
             // ── Bare class name used as a function name ─────────────
@@ -677,7 +709,7 @@ impl Backend {
             // as `ClassName` (since it can't distinguish class names
             // from function names without context).
             SubjectExpr::ClassName(name) => {
-                let func = self.resolve_function_name(name, &file_ctx.use_map, namespace)?;
+                let func = self.resolve_function_name(name, use_map, namespace)?;
                 Some(Self::function_to_callable_with_subs(
                     &func,
                     effective_args_text,
@@ -813,6 +845,7 @@ fn callable_type_as_target(return_type: &PhpType) -> Option<ResolvedCallableTarg
                     is_variadic: p.variadic,
                     is_reference: false,
                     closure_this_type: None,
+                    param_out_type: None,
                 })
                 .collect();
             Some(ResolvedCallableTarget {
