@@ -248,6 +248,7 @@ use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
 pub(crate) use builder::custom_builder_fqn;
 use casts::cast_type_to_php_type;
+pub(crate) use casts::qualify_cast_type;
 pub use facade::LaravelFacadeProvider;
 pub(crate) use facade::facade_concrete_class;
 pub use factory::LaravelFactoryProvider;
