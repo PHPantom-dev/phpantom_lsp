@@ -1,0 +1,19 @@
+// test: an enum constant whose initializer names a case holds the enum
+// feature: hover
+// expect: Suit
+// expect_absent: static
+---
+<?php
+
+enum Suit {
+    const DEFAULT = Suit::Hearts;
+    const static FALLBACK = self::Spades;
+
+    case Hearts;
+    case Spades;
+}
+
+function test(): void {
+    $suit = Suit::FALLBACK;
+    $<>suit;
+}

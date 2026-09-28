@@ -1,0 +1,19 @@
+// test: extract() with EXTR_IF_EXISTS writes only the locals already defined
+// feature: hover
+// expect_hover: $rx => $rx = string
+// expect_hover: $rpx => $rpx = string
+// expect_hover: $rpy => $rpy = 3
+---
+<?php
+
+/** @param array{x: string, y: string} $row */
+function test(array $row): void {
+    $x = 1;
+    $p_x = 2;
+    $p_y = 3;
+    extract($row, EXTR_IF_EXISTS);
+    extract($row, flags: EXTR_PREFIX_IF_EXISTS, prefix: 'p');
+    $rx = $x;
+    $rpx = $p_x;
+    $rpy = $p_y;<>
+}

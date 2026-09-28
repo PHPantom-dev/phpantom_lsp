@@ -1,0 +1,16 @@
+// test: extract() with EXTR_PREFIX_SAME prefixes only the keys that collide
+// feature: hover
+// expect_hover: $rx => $rx = 1
+// expect_hover: $rdx => $rdx = string
+// expect_hover: $ry => $ry = string
+---
+<?php
+
+/** @param array{x: string, y: string} $row */
+function test(array $row): void {
+    $x = 1;
+    extract($row, EXTR_PREFIX_SAME, 'dup');
+    $rx = $x;
+    $rdx = $dup_x;
+    $ry = $y;<>
+}

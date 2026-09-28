@@ -795,7 +795,7 @@ fn split_last_arrow_raw(subject: &str) -> Option<(&str, &str)> {
 ///
 /// Returns `(call_body, args_text)` where `call_body` is the expression
 /// before `(` and `args_text` is the trimmed content between `(` and `)`.
-fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_call_subject_raw(subject: &str) -> Option<(&str, &str)> {
     let inner = subject.strip_suffix(')')?;
     let bytes = inner.as_bytes();
     let mut depth: u32 = 0;
@@ -845,7 +845,7 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
     // (e.g. `new C("foo")` should become `CallExpr { callee: NewExpr, args_text }`).
     if let Some(paren_start) = rest[end..].find('(') {
         let after_class = &rest[end + paren_start..];
-        if let Some(close) = find_matching_paren(after_class) {
+        if let Some(close) = crate::text_scan::find_matching_forward(after_class, 0, b'(', b')') {
             let remainder = after_class[close + 1..].trim_start();
             if remainder.starts_with("->") {
                 return None;
@@ -875,39 +875,6 @@ pub(crate) fn parse_new_expression_class(s: &str) -> Option<String> {
         return None;
     }
     Some(class_name.to_string())
-}
-
-/// Find the index of the closing `)` that matches the opening `(` at the
-/// start of `s`.  Returns `None` if `s` doesn't start with `(` or the
-/// parens are unbalanced.
-fn find_matching_paren(s: &str) -> Option<usize> {
-    if !s.starts_with('(') {
-        return None;
-    }
-    let mut depth = 0u32;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut prev_backslash = false;
-    for (i, ch) in s.char_indices() {
-        if prev_backslash {
-            prev_backslash = false;
-            continue;
-        }
-        match ch {
-            '\\' if in_single || in_double => prev_backslash = true,
-            '\'' if !in_double => in_single = !in_single,
-            '"' if !in_single => in_double = !in_double,
-            '(' if !in_single && !in_double => depth += 1,
-            ')' if !in_single && !in_double => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 /// Parse a variable with bracket access like `$var['key'][0]`.

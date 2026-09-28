@@ -42,8 +42,17 @@ pub(crate) fn end_unreachable_collection() {
 /// Record a byte range the walk proved cannot run.
 ///
 /// A no-op when no collection is in progress, so the walker can call it
-/// unconditionally.
+/// unconditionally.  Also a no-op while a nested walk started by
+/// [`suspend_snapshot_recording`](super::suspend_snapshot_recording) is in
+/// progress: that walk can be over a different function's body entirely
+/// (return-type inference of a called method, possibly in another file),
+/// and its statement offsets must not be treated as unreachable ranges in
+/// the outer file being checked. See
+/// [`snapshot_recording_suspended`](super::snapshot_recording_suspended).
 pub(crate) fn record_unreachable_range(range: (u32, u32)) {
+    if snapshot_recording_suspended() {
+        return;
+    }
     UNREACHABLE_RANGES.with(|cell| {
         if let Some(ranges) = cell.borrow_mut().as_mut()
             && !ranges.contains(&range)

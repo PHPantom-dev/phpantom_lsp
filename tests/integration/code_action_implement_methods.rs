@@ -4,56 +4,17 @@
 //! the class hierarchy, detecting missing methods, and generating the
 //! `WorkspaceEdit` with method stubs.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    create_psr4_workspace, create_test_backend, extract_edits, find_action, get_code_actions_at,
+};
 use tower_lsp::lsp_types::*;
 
-/// Helper: send a code action request at the given line/character and
-/// return the list of code actions.
-fn get_code_actions(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(line, character),
-            end: Position::new(line, character),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
-}
-
-/// Extract the "Implement" code action from a list of actions.
-fn find_implement_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
-    actions.iter().find_map(|a| match a {
-        CodeActionOrCommand::CodeAction(ca) if ca.title.starts_with("Implement ") => Some(ca),
-        _ => None,
-    })
-}
-
 /// Extract the inserted text from a code action's workspace edit.
-fn extract_edit_text(action: &CodeAction) -> String {
-    let edit = action.edit.as_ref().expect("action should have an edit");
-    let changes = edit.changes.as_ref().expect("edit should have changes");
-    let edits: Vec<&TextEdit> = changes.values().flat_map(|v| v.iter()).collect();
-    edits
+/// The concatenated replacement text of every edit an action carries.
+/// Unlike [`crate::common::extract_edit_text`], an action that inserts
+/// several methods at once is expected here.
+fn all_edit_text(action: &CodeAction) -> String {
+    extract_edits(action)
         .iter()
         .map(|e| e.new_text.as_str())
         .collect::<Vec<_>>()
@@ -78,14 +39,14 @@ class Page implements Renderable {
     backend.update_ast(uri, content);
 
     // Cursor inside the Page class body (line 6, the closing brace line).
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
     let action = action.unwrap();
     assert_eq!(action.title, "Implement `render`");
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         text.contains("public function render(): string"),
         "Stub should have correct signature. Got:\n{}",
@@ -110,8 +71,8 @@ class Page implements Renderable {
 
     // Cursor on the `class Page implements Renderable {` line (line 5),
     // before the opening brace.
-    let actions = get_code_actions(&backend, uri, content, 5, 6);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 5, 6);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_some(),
         "Should offer implement action when cursor is on the class declaration line"
@@ -135,8 +96,8 @@ class MyClass implements Serializable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
     let action = action.unwrap();
@@ -146,7 +107,7 @@ class MyClass implements Serializable {
         action.title
     );
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         text.contains("public function serialize(): string"),
         "Should contain serialize stub. Got:\n{}",
@@ -181,8 +142,8 @@ class Circle extends Shape {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 11, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 11, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_some(),
         "Should offer implement action for abstract methods"
@@ -195,7 +156,7 @@ class Circle extends Shape {
         action.title
     );
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         text.contains("public function area(): float"),
         "Should implement area(). Got:\n{}",
@@ -235,14 +196,14 @@ class Page implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 8, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 8, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer action for toHtml");
 
     let action = action.unwrap();
     assert_eq!(action.title, "Implement `toHtml`");
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         !text.contains("render"),
         "Should not re-implement render(). Got:\n{}",
@@ -275,8 +236,8 @@ class Page implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should not offer implement action when all methods are implemented"
@@ -300,8 +261,8 @@ abstract class AbstractPage implements Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should not offer implement action for abstract classes"
@@ -325,8 +286,8 @@ interface ExtendedRenderable extends Renderable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should not offer implement action for interfaces"
@@ -347,8 +308,8 @@ trait MyTrait {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 2, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 2, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should not offer implement action for traits"
@@ -372,11 +333,11 @@ class MyProcessor implements Processor {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("string $name"),
         "Should include type hint. Got:\n{}",
@@ -411,11 +372,11 @@ class UserFactory implements Factory {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("public static function create(): static"),
         "Should preserve static modifier. Got:\n{}",
@@ -444,8 +405,8 @@ class Widget implements Renderable, Stringable {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
     let action = action.unwrap();
@@ -455,7 +416,7 @@ class Widget implements Renderable, Stringable {
         action.title
     );
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(text.contains("function render()"), "Got:\n{}", text);
     assert!(text.contains("function __toString()"), "Got:\n{}", text);
 }
@@ -481,11 +442,11 @@ class MyClass implements Child {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("function childMethod()"),
         "Should implement childMethod. Got:\n{}",
@@ -518,8 +479,8 @@ class FileLogger implements Logger {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should recognize log/Log as the same method (case-insensitive)"
@@ -546,8 +507,8 @@ $x = 1;
     backend.update_ast(uri, content);
 
     // Cursor on the $x = 1 line, outside any class.
-    let actions = get_code_actions(&backend, uri, content, 8, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 8, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_none(),
         "Should not offer action when cursor is outside a class"
@@ -564,11 +525,11 @@ fn respects_tab_indentation() {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     // The stub should use tab indentation to match the class body.
     assert!(
         text.contains("\tpublic function render(): string"),
@@ -615,8 +576,8 @@ fn implements_interface_from_another_file() {
     // Load the class file.
     backend.update_ast(&class_uri, class_file);
 
-    let actions = get_code_actions(&backend, &class_uri, class_file, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, &class_uri, class_file, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(
         action.is_some(),
         "Should offer implement action for cross-file interface"
@@ -629,7 +590,7 @@ fn implements_interface_from_another_file() {
         action.title
     );
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         text.contains("function render()"),
         "Should contain render stub. Got:\n{}",
@@ -660,11 +621,11 @@ class MyCollector implements Collector {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 7, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 7, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer implement action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("string ...$items"),
         "Should preserve variadic. Got:\n{}",
@@ -694,11 +655,11 @@ class UserRepository implements Repository {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some());
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("?string"),
         "Should preserve nullable return type. Got:\n{}",
@@ -723,11 +684,11 @@ class MyParser implements Parser {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some());
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("int|false"),
         "Should preserve union return type. Got:\n{}",
@@ -752,11 +713,11 @@ class MyHandler implements Handler {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 6, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 6, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some());
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     // No `: type` after the parentheses.
     assert!(
         text.contains("public function handle()\n"),
@@ -786,11 +747,11 @@ class Button extends Component {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer action");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("function render()"),
         "Should implement interface method. Got:\n{}",
@@ -824,11 +785,11 @@ class Child extends ParentClass {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 10, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 10, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer action for deep chain");
 
-    let text = extract_edit_text(action.unwrap());
+    let text = all_edit_text(action.unwrap());
     assert!(
         text.contains("function parentMethod()"),
         "Should implement parentMethod. Got:\n{}",
@@ -865,8 +826,8 @@ class ConcreteService extends BaseService {
 
     backend.update_ast(uri, content);
 
-    let actions = get_code_actions(&backend, uri, content, 13, 0);
-    let action = find_implement_action(&actions);
+    let actions = get_code_actions_at(&backend, uri, content, 13, 0);
+    let action = find_action(&actions, "Implement ");
     assert!(action.is_some(), "Should offer action for methodB only");
 
     let action = action.unwrap();
@@ -875,7 +836,7 @@ class ConcreteService extends BaseService {
         "Should only need to implement methodB"
     );
 
-    let text = extract_edit_text(action);
+    let text = all_edit_text(action);
     assert!(
         !text.contains("methodA"),
         "Should not re-implement methodA. Got:\n{}",

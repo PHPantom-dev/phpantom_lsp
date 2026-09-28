@@ -3,30 +3,16 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
-    use tower_lsp::LanguageServer;
+    use crate::common::{
+        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
+        open_document, workspace_path, workspace_uri,
+    };
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-        "App\\": "app/",
-        "Illuminate\\": "stubs/Illuminate/",
-        "Livewire\\": "stubs/Livewire/"
-    }}}"#;
-
-    const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-        abstract class Component {\n\
-            public $attributes;\n\
-            public function render() {}\n\
-        }\n";
 
     const ANONYMOUS_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
         class AnonymousComponent extends Component {\n\
             public function anonymousMarker(): string { return ''; }\n\
-        }\n";
-
-    const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
         }\n";
 
     /// One component class per naming shape the index has to cover: a
@@ -34,14 +20,17 @@ mod tests {
     /// (`Card\Card`, which `<x-card>` reaches).
     fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
                 (
                     "stubs/Illuminate/View/AnonymousComponent.php",
                     ANONYMOUS_STUB,
                 ),
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 // Laravel's own container helper, which is how the virtual
                 // PHP says "the container builds this parameter".
                 (
@@ -110,99 +99,25 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
         // Parse the helper up front: a function is only findable once the
         // file declaring it has been indexed, and these workspaces are not
         // walked.
-        let helpers = Url::from_file_path(root.join("stubs/helpers.php")).unwrap();
+        let helpers = workspace_uri(&backend, "stubs/helpers.php");
         backend.update_ast(
             helpers.as_str(),
-            &std::fs::read_to_string(root.join("stubs/helpers.php")).unwrap(),
+            &std::fs::read_to_string(workspace_path(&backend, "stubs/helpers.php")).unwrap(),
         );
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         (backend, dir, uri)
     }
 
     /// Open a second template from the same workspace, for the cases that
     /// need a caller and a callee.
-    async fn open_view(
-        backend: &phpantom_lsp::Backend,
-        root: &std::path::Path,
-        relative: &str,
-    ) -> Url {
-        let uri = Url::from_file_path(root.join(relative)).unwrap();
-        let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open(backend, &uri, &text).await;
+    async fn open_view(backend: &phpantom_lsp::Backend, relative: &str) -> Url {
+        let uri = workspace_uri(backend, relative);
+        let text = std::fs::read_to_string(workspace_path(backend, relative)).unwrap();
+        open_document(backend, &uri, "blade", &text).await;
         uri
-    }
-
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
-    }
-
-    async fn hover_text(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> String {
-        let result = backend
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .unwrap();
-        match result {
-            Some(Hover {
-                contents: HoverContents::Markup(m),
-                ..
-            }) => m.value,
-            other => panic!("expected markup hover, got {other:?}"),
-        }
-    }
-
-    async fn completion_labels(
-        backend: &phpantom_lsp::Backend,
-        uri: &Url,
-        line: u32,
-        character: u32,
-    ) -> Vec<String> {
-        let items = backend
-            .completion(CompletionParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position { line, character },
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: Some(CompletionContext {
-                    trigger_kind: CompletionTriggerKind::TRIGGER_CHARACTER,
-                    trigger_character: Some(">".to_string()),
-                }),
-            })
-            .await
-            .unwrap();
-        match items {
-            Some(CompletionResponse::Array(items)) => items,
-            Some(CompletionResponse::List(list)) => list.items,
-            None => Vec::new(),
-        }
-        .into_iter()
-        .map(|item| item.label)
-        .collect()
     }
 
     /// Method labels carry a trailing `()`; property labels do not.
@@ -220,10 +135,10 @@ mod tests {
     async fn a_bound_attribute_expression_stays_where_it_is_written() {
         let template = "@php $kind = 'danger'; @endphp\n<x-alert :type=\"$kind\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         // Column 18 is inside the `$kind` in the attribute value.
-        let hover = hover_text(&backend, &uri, 1, 18).await;
+        let hover = markup_hover_at(&backend, &uri, 1, 18).await;
         assert!(
             hover.contains("$kind"),
             "hovering the bound expression should describe it: {hover}"
@@ -236,9 +151,9 @@ mod tests {
     async fn a_component_tag_puts_its_class_behind_component() {
         let template = "<x-alert type=\"danger\">\n{{ $component-> }}\n</x-alert>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "severity"),
             "expected the Alert members, got: {labels:?}"
@@ -253,9 +168,9 @@ mod tests {
         for (tag, member) in [("forms.input", "placeholder"), ("card", "heading")] {
             let template = format!("<x-{tag}>\n{{{{ $component-> }}}}\n</x-{tag}>\n");
             let (backend, _dir, uri) = workspace(&template);
-            open(&backend, &uri, &template).await;
+            open_document(&backend, &uri, "blade", &template).await;
 
-            let labels = completion_labels(&backend, &uri, 1, 15).await;
+            let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
             assert!(
                 has_member(&labels, member),
                 "<x-{tag}> should resolve to the class declaring {member}, got: {labels:?}"
@@ -268,9 +183,9 @@ mod tests {
     async fn a_livewire_tag_puts_its_class_behind_component() {
         let template = "<livewire:counter :count=\"$n\" />\n{{ $component-> }}\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "increment") && has_member(&labels, "count"),
             "expected the Counter members, got: {labels:?}"
@@ -283,9 +198,9 @@ mod tests {
     async fn an_anonymous_component_resolves_to_the_framework_class() {
         let template = "<x-banner>\n{{ $component-> }}\n</x-banner>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
-        let labels = completion_labels(&backend, &uri, 1, 15).await;
+        let labels = complete_labels_at_opened_with_trigger(&backend, &uri, 1, 15, ">").await;
         assert!(
             has_member(&labels, "anonymousMarker"),
             "an anonymous component is an AnonymousComponent, got: {labels:?}"
@@ -301,13 +216,13 @@ mod tests {
              <x-dynamic-component :component=\"$name\" :type=\"$kind\" />\n\
              <p>{{ $kind }}</p>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
             .expect("blade virtual content");
         assert!(
-            virtual_php.contains("blade_directive($name);"),
+            virtual_php.contains("blade_bound_attr_directive($name);"),
             "the target expression must still be parsed: {virtual_php}"
         );
         assert!(
@@ -315,7 +230,7 @@ mod tests {
             "no component may be resolved for a dynamic tag: {virtual_php}"
         );
 
-        let hover = hover_text(&backend, &uri, 2, 8).await;
+        let hover = markup_hover_at(&backend, &uri, 2, 8).await;
         assert!(
             hover.contains("$kind"),
             "the rest of the template must still resolve, got: {hover}"
@@ -328,7 +243,7 @@ mod tests {
     async fn an_unknown_component_reports_nothing() {
         let template = "<x-not-a-component foo=\"bar\">\n<p>hi</p>\n</x-not-a-component>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -347,7 +262,7 @@ mod tests {
     async fn the_component_variable_is_never_reported_unused() {
         let template = "<x-alert type=\"danger\">hi</x-alert>\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let virtual_php = backend
             .blade_virtual_php(uri.as_str())
@@ -384,7 +299,7 @@ mod tests {
         let template =
             "<x-alert type=\"danger\" class=\"m-2\" wire:model=\"x\" data-id=\"3\" disabled />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert!(
             diagnostics(&backend, &uri).is_empty(),
@@ -400,7 +315,7 @@ mod tests {
     async fn a_bound_attribute_is_checked_against_the_parameter() {
         let template = "@php $name = 'oops'; @endphp\n<x-forms.input :service=\"$name\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -417,7 +332,7 @@ mod tests {
     async fn a_required_attribute_that_is_missing_is_reported() {
         let template = "<x-alert class=\"m-2\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -432,7 +347,7 @@ mod tests {
     async fn a_livewire_attribute_is_checked_against_mount() {
         let template = "@php $label = 'x'; @endphp\n<livewire:counter :start=\"$label\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         let diags = diagnostics(&backend, &uri);
         assert!(
@@ -459,17 +374,11 @@ mod tests {
              <x-alert :type=\"$kind\" />\n\
              <x-banner :headline=\"$head\" />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
-        let root = backend.workspace_root().read().clone().unwrap();
-        let banner = open_view(
-            &backend,
-            &root,
-            "resources/views/components/banner.blade.php",
-        )
-        .await;
+        let banner = open_view(&backend, "resources/views/components/banner.blade.php").await;
 
-        let hover = hover_text(&backend, &banner, 0, 10).await;
+        let hover = markup_hover_at(&backend, &banner, 0, 10).await;
         assert!(
             hover.contains("42") && !hover.contains("danger"),
             "$headline is what its own tag passes, not what the tag before \
@@ -485,7 +394,7 @@ mod tests {
     async fn parameters_the_container_fills_are_not_reported_missing() {
         let template = "<x-forms.input />\n";
         let (backend, _dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert!(
             diagnostics(&backend, &uri).is_empty(),

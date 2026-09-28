@@ -13,7 +13,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::atom::atom;
 use crate::inheritance::{
@@ -25,6 +24,7 @@ use crate::php_type::PhpType;
 use crate::types::ClassInfo;
 use crate::virtual_members::laravel::patches::apply_laravel_patches;
 
+use super::cache::PendingClaim;
 use super::laravel;
 use super::{
     ResolvedClassCache, ResolvedClassCacheKey, active_resolved_class_cache, apply_virtual_members,
@@ -59,6 +59,66 @@ impl Drop for InFlightGuard<'_> {
     }
 }
 
+/// RAII guard that releases a cross-thread single-flight claim (see
+/// [`super::cache::ResolvedCacheInner::claim_pending`]) when the
+/// resolution that took it finishes, normally or by panic.
+struct PendingGuard<'a> {
+    cache: &'a ResolvedClassCache,
+    key: ResolvedClassCacheKey,
+}
+
+impl Drop for PendingGuard<'_> {
+    fn drop(&mut self) {
+        self.cache.write().release_pending(&self.key);
+    }
+}
+
+/// Bound on how long a thread waits for another thread's first-time
+/// resolution of the same not-yet-cached class before giving up and
+/// resolving it independently.
+///
+/// A single resolution takes a fraction of a millisecond in the common
+/// case (see [`MAX_POPULATE_WORKERS`]), so this is orders of magnitude
+/// above normal contention and only fires if the owning thread is
+/// abnormally stuck — mirroring `ParseInflight`'s escape hatch in
+/// `resolution.rs`.
+const PENDING_WAIT_ESCAPE_HATCH: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Wait for another thread's first-time resolution of `key` to land in
+/// the cache.
+///
+/// Returns `None` when the caller should give up waiting and resolve
+/// the class itself instead: either the owning thread released its
+/// claim without inserting a result (e.g. it hit its own cycle break
+/// at this very key from a different angle), or the wait exceeded
+/// [`PENDING_WAIT_ESCAPE_HATCH`].
+fn wait_for_pending(
+    cache: &ResolvedClassCache,
+    key: &ResolvedClassCacheKey,
+) -> Option<Arc<ClassInfo>> {
+    let deadline = std::time::Instant::now() + PENDING_WAIT_ESCAPE_HATCH;
+    loop {
+        std::thread::sleep(std::time::Duration::from_micros(50));
+        {
+            let guard = cache.read();
+            if let Some(cached) = guard.get(key) {
+                return Some(Arc::clone(cached));
+            }
+            if !guard.is_pending(key) {
+                return None;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            tracing::warn!(
+                "PHPantom: gave up waiting for another thread to resolve {} \
+                 after {PENDING_WAIT_ESCAPE_HATCH:?}; resolving independently",
+                key.0
+            );
+            return None;
+        }
+    }
+}
+
 // ─── Eager class population ─────────────────────────────────────────────────
 
 /// Pre-populate the [`ResolvedClassCache`] from a pre-computed
@@ -76,10 +136,11 @@ impl Drop for InFlightGuard<'_> {
 /// (all files parsed into `uri_classes_index`) and again incrementally when files
 /// change.
 ///
-/// The list is consumed by a pool of scoped workers on
-/// [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE) stacks, so
-/// callers do not need to arrange either the parallelism or the stack
-/// size themselves; the call blocks until the whole list is populated.
+/// The list is consumed by [`crate::parallel::map_indexed_with_threads`]
+/// workers on [`PARSE_WORKER_STACK_SIZE`](crate::PARSE_WORKER_STACK_SIZE)
+/// stacks, so callers do not need to arrange either the parallelism or
+/// the stack size themselves; the call blocks until the whole list is
+/// populated.
 /// Workers pull indices off a shared counter, so the list is still
 /// consumed dependency-first overall and a class's dependencies are
 /// normally cached by the time it is claimed.  Immediate neighbours can
@@ -108,23 +169,18 @@ pub fn populate_from_sorted(
         .min(MAX_POPULATE_WORKERS);
     let workers = (sorted_fqns.len() / MIN_CLASSES_PER_WORKER).clamp(1, cap);
 
-    let next = AtomicUsize::new(0);
-    // Large stacks: class resolution walks parsed ASTs and can nest when
-    // the toposort misses dependencies (stubs, on-demand vendor loads).
-    std::thread::scope(|s| {
-        for _ in 0..workers {
-            let next = &next;
-            std::thread::Builder::new()
-                .name("eager-populate".into())
-                .stack_size(crate::PARSE_WORKER_STACK_SIZE)
-                .spawn_scoped(s, move || {
-                    while let Some(fqn) = sorted_fqns.get(next.fetch_add(1, Ordering::Relaxed)) {
-                        populate_one(fqn, cache, class_loader);
-                    }
-                })
-                .expect("failed to spawn eager-populate worker");
-        }
-    });
+    // The pool's parse-sized stacks matter here too: class resolution
+    // walks parsed ASTs and can nest when the toposort misses
+    // dependencies (stubs, on-demand vendor loads).
+    crate::parallel::map_indexed_with_threads(
+        "eager-populate",
+        sorted_fqns.len(),
+        Some(workers),
+        |_, i| {
+            populate_one(&sorted_fqns[i], cache, class_loader);
+            None::<()>
+        },
+    );
 }
 
 /// Classes per worker below which fanning the population out costs more
@@ -564,6 +620,38 @@ fn resolve_class_fully_inner(
         }
     }
 
+    // ── Cross-thread single-flight for the first resolution ─────────
+    // Two threads racing to resolve the same never-before-cached class
+    // (common for a vendor interface reached only via a parameter type
+    // hint, so it is never eagerly toposorted) would otherwise both
+    // run the full merge independently and race to insert, each seeing
+    // only its own `in_flight` set below — see
+    // `ResolvedCacheInner::pending` for why that can silently diverge
+    // rather than merely duplicate work.
+    // Bound the write guard to a `let` (not a `match` scrutinee) so it
+    // is dropped immediately: a `match`/`if let` scrutinee's temporary
+    // lives for the whole expression, and the `OwnedByOtherThread` arm
+    // below takes its own `cache.read()` inside `wait_for_pending` —
+    // holding the write guard that long would self-deadlock.
+    let claim = cache.write().claim_pending(&cache_key);
+    let pending_guard = match claim {
+        PendingClaim::Fresh => Some(PendingGuard {
+            cache,
+            key: cache_key.clone(),
+        }),
+        PendingClaim::AlreadyOwnedByThisThread => None,
+        PendingClaim::OwnedByOtherThread => {
+            if let Some(result) = wait_for_pending(cache, &cache_key) {
+                return result;
+            }
+            // Gave up waiting; resolve independently instead of
+            // blocking forever. `pending_guard` stays `None` so this
+            // thread's completion below does not release a claim it
+            // never took.
+            None
+        }
+    };
+
     // ── Cycle break ─────────────────────────────────────────────────
     // If this class is already being resolved by this thread (re-entrant
     // call from a virtual member provider or interface merge on a
@@ -586,6 +674,7 @@ fn resolve_class_fully_inner(
     merged.rebuild_method_index();
     let result = Arc::new(merged);
     cache.write().insert(cache_key, Arc::clone(&result));
+    drop(pending_guard);
 
     result
 }

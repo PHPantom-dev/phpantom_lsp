@@ -108,3 +108,22 @@ namespace PsalmTest_property_type_7 {
     assertType('Foo', $a);
 }
 
+// Test: intersectionPropertyAccess
+namespace PsalmTest_property_type_8 {
+    /** @property int $test1 */
+    class a {
+        public function __get(string $name)
+        {
+            return 0;
+        }
+    }
+
+    /** @var a&object{test2: "lmao"} */
+    $r = null;
+
+    $test1 = $r->test1;
+    $test2 = $r->test2;
+
+    assertType('int', $test1);
+    assertType('\'lmao\'', $test2);
+}

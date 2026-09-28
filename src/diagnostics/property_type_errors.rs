@@ -11,9 +11,6 @@
 //! when in doubt (unresolved types, `mixed`, complex generics),
 //! the diagnostic is suppressed to avoid false positives.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use mago_span::HasSpan;
 use mago_syntax::cst::access::Access;
 use mago_syntax::cst::class_like::member::ClassLikeMemberSelector;
@@ -25,14 +22,13 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::bytes_to_str;
-use crate::parser::{with_parse_cache, with_parsed_program};
+use crate::parser::with_parsed_program;
 use crate::php_type::{PhpType, TypeKind};
-use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
+use crate::type_engine::resolver::{LendsLoaders, VarResolutionCtx};
 use crate::type_engine::variable::foreach_resolution::resolve_expression_type;
-use crate::types::ClassInfo;
 
-use super::helpers::{find_innermost_enclosing_class, make_diagnostic};
-use super::type_errors::{has_strict_types, is_type_compatible};
+use super::helpers::{TypeCheckCtx, collect_type_check, find_innermost_enclosing_class};
+use super::type_errors::is_type_compatible;
 
 /// Diagnostic code used for property type mismatch diagnostics.
 pub(crate) const TYPE_MISMATCH_PROPERTY_CODE: &str = "type_mismatch_property";
@@ -61,9 +57,7 @@ struct ResolvedPropertyAssignment {
 struct PropertyCheckCtx<'a> {
     content: &'a str,
     file_ctx: &'a crate::types::FileContext,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    function_loader: &'a dyn Fn(&str, u32) -> Option<crate::types::FunctionInfo>,
-    constant_loader: &'a dyn Fn(&str, u32) -> Option<Option<String>>,
+    type_ctx: &'a TypeCheckCtx<'a>,
     backend: &'a Backend,
     out: &'a mut Vec<ResolvedPropertyAssignment>,
 }
@@ -318,6 +312,9 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         _ => return,
     };
 
+    let site = assign.rhs.span().start.offset;
+    let class_loader = ctx.type_ctx.class_loader_at(site);
+
     // Resolve `self`/`static`/`parent`/`$this` in the declared property
     // type, then expand any remaining short class names to their
     // fully-qualified form.
@@ -330,7 +327,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
             if name.contains("__anonymous@") {
                 return name.to_string();
             }
-            if let Some(cls) = (ctx.class_loader)(name) {
+            if let Some(cls) = class_loader(name) {
                 cls.fqn().to_string()
             } else {
                 name.to_string()
@@ -342,31 +339,24 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
     let rhs_start = rhs_span.start.offset as usize;
     let rhs_end = rhs_span.end.offset as usize;
 
-    let config_resolver = |key: &str| ctx.backend.resolve_config_type(key);
-    let trans_resolver = |key: &str| ctx.backend.resolve_trans_type(key);
-    let loaders = Loaders {
-        function_loader: Some(ctx.function_loader),
-        constant_loader: Some(ctx.constant_loader),
-        config_resolver: Some(&config_resolver),
-        trans_resolver: Some(&trans_resolver),
-    };
+    let owned_loaders = ctx.backend.diagnostic_loaders_over(
+        ctx.type_ctx.function_loader_at(site),
+        ctx.type_ctx.constant_loader_at(site),
+    );
+    let loaders = owned_loaders.loaders();
 
     let var_ctx = VarResolutionCtx {
-        var_name: "",
-        top_level_scope: None,
-        current_class: prop_class,
-        all_classes: &ctx.file_ctx.classes,
-        content: ctx.content,
-        cursor_offset: rhs_start as u32,
-        class_loader: ctx.class_loader,
         backend: Some(ctx.backend),
         loaders,
         resolved_class_cache: Some(&ctx.backend.resolved_class_cache),
-        enclosing_return_type: None,
-        branch_aware: true,
-        match_arm_narrowing: HashMap::new(),
-        scope_var_resolver: None,
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            "",
+            prop_class,
+            &ctx.file_ctx.classes,
+            ctx.content,
+            rhs_start as u32,
+            class_loader,
+        )
     };
 
     let rhs_type = resolve_expression_type(assign.rhs, &var_ctx).unwrap_or_else(PhpType::untyped);
@@ -384,7 +374,7 @@ fn check_expression_for_property_assignment(expr: &Expression<'_>, ctx: &mut Pro
         if name.contains("__anonymous@") {
             return name.to_string();
         }
-        if let Some(cls) = (ctx.class_loader)(name) {
+        if let Some(cls) = class_loader(name) {
             cls.fqn().to_string()
         } else {
             name.to_string()
@@ -413,71 +403,48 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
-        let file_ctx = self.file_context(uri);
+        collect_type_check(
+            self,
+            uri,
+            content,
+            TYPE_MISMATCH_PROPERTY_CODE,
+            out,
+            |ctx| {
+                with_parsed_program(content, "property_type_diagnostics", |program, _content| {
+                    let mut resolved: Vec<ResolvedPropertyAssignment> = Vec::new();
 
-        let _parse_guard = with_parse_cache(content);
+                    let mut walk_ctx = PropertyCheckCtx {
+                        content,
+                        file_ctx: ctx.file_ctx,
+                        type_ctx: ctx,
+                        backend: self,
+                        out: &mut resolved,
+                    };
 
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader_cl = self.function_loader(&file_ctx);
-        let constant_loader_cl = self.constant_loader(&file_ctx);
+                    for stmt in program.statements.iter() {
+                        collect_from_statement(stmt, &mut walk_ctx);
+                    }
 
-        let results: Vec<ResolvedPropertyAssignment> =
-            with_parsed_program(content, "property_type_diagnostics", |program, _content| {
-                let mut resolved: Vec<ResolvedPropertyAssignment> = Vec::new();
-
-                let mut ctx = PropertyCheckCtx {
-                    content,
-                    file_ctx: &file_ctx,
-                    class_loader: &class_loader,
-                    function_loader: &function_loader_cl,
-                    constant_loader: &constant_loader_cl,
-                    backend: self,
-                    out: &mut resolved,
-                };
-
-                for stmt in program.statements.iter() {
-                    collect_from_statement(stmt, &mut ctx);
+                    resolved
+                })
+            },
+            |assignment, ctx| {
+                if is_type_compatible(
+                    &assignment.rhs_type,
+                    &assignment.declared_type,
+                    ctx.class_loader_at(assignment.start as u32),
+                    ctx.strict_types,
+                ) {
+                    return None;
                 }
-
-                resolved
-            });
-
-        // Emit diagnostics for incompatible property assignments.
-        let strict_types = with_parsed_program(content, "property_strict", |program, _| {
-            has_strict_types(program)
-        });
-
-        for assignment in &results {
-            if is_type_compatible(
-                &assignment.rhs_type,
-                &assignment.declared_type,
-                &class_loader,
-                strict_types,
-            ) {
-                continue;
-            }
-
-            let range = match self.offset_range_to_lsp_range(
-                uri,
-                content,
-                assignment.start,
-                assignment.end,
-            ) {
-                Some(r) => r,
-                None => continue,
-            };
-
-            let message = format!(
-                "Property ${} expects {}, got {}",
-                assignment.property_name, assignment.declared_type, assignment.rhs_type,
-            );
-
-            out.push(make_diagnostic(
-                range,
-                DiagnosticSeverity::ERROR,
-                TYPE_MISMATCH_PROPERTY_CODE,
-                message,
-            ));
-        }
+                Some((
+                    (assignment.start, assignment.end),
+                    format!(
+                        "Property ${} expects {}, got {}",
+                        assignment.property_name, assignment.declared_type, assignment.rhs_type,
+                    ),
+                ))
+            },
+        );
     }
 }

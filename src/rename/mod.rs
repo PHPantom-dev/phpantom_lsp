@@ -30,9 +30,36 @@
 //!   mapping exists, `RenameFile` operations are emitted to move
 //!   files so the directory structure stays consistent.
 
+mod blade;
 mod class;
 mod namespace;
 mod prepare;
 mod validate;
 
 mod tests;
+
+/// What a rename request answers with.
+///
+/// `Ok(Some(edit))` is the rename, `Ok(None)` means there was nothing
+/// renameable under the cursor, and `Err(message)` is a refusal the user
+/// needs to read — the editor surfaces it as the request's error.
+pub(crate) type RenameOutcome = Result<Option<tower_lsp::lsp_types::WorkspaceEdit>, String>;
+
+/// Parse a file's URI for use as a [`tower_lsp::lsp_types::WorkspaceEdit`]
+/// change key, logging and skipping the file when it does not parse.
+///
+/// Every file a rename or move touches is named by a URI string read
+/// back out of an index; a `WorkspaceEdit`'s `changes` map is keyed by
+/// the structured [`tower_lsp::lsp_types::Url`] instead, so each one is
+/// reparsed here rather than trusted as already valid.
+fn parse_edit_target_uri(file_uri_str: &str) -> Option<tower_lsp::lsp_types::Url> {
+    match tower_lsp::lsp_types::Url::parse(file_uri_str) {
+        Ok(u) => Some(u),
+        Err(e) => {
+            tracing::warn!(
+                "rename: dropping edits for file with unparseable URI {file_uri_str:?}: {e}"
+            );
+            None
+        }
+    }
+}

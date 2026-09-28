@@ -20,9 +20,38 @@ PHPantom is supported directly by Zed's official PHP extension, no separate PHPa
 }
 ```
 
+#### File filters
+
+Zed forwards `lsp.phpantom.initialization_options` to the server as-is, so you can tell PHPantom which paths to skip and which extra extensions to treat as PHP from the same `settings.json`:
+
+```json
+{
+  "lsp": {
+    "phpantom": {
+      "initialization_options": {
+        "indexing": {
+          "exclude": ["generated", "storage/framework"],
+          "extensions": ["module", "theme"]
+        }
+      }
+    }
+  }
+}
+```
+
+These are the [editor-supplied file filters](configuration.md#editor-supplied-file-filters): `exclude` uses gitignore syntax relative to the workspace root, and they merge with (rather than replace) anything the project's `.phpantom.toml` already sets.
+
+Zed's own `file_scan_exclusions` and `file_types` are not picked up automatically. Its extension API serves extensions only the `language`, `lsp`, and `context_servers` settings categories, so the PHP extension cannot read those two settings to forward them. Until Zed exposes them, list the paths and extensions you care about in the block above, or in `.phpantom.toml` if you would rather your whole team got them.
+
 ### VS Code / Cursor
 
 Install the [PHPantom extension](https://marketplace.visualstudio.com/items?itemName=phpantom.phpantom) from the VS Code Marketplace. It automatically downloads the language server binary and starts it when you open a PHP file.
+
+#### File filters
+
+No setup needed. The extension reads your `files.exclude` and `files.associations` settings for each workspace folder and forwards them as [editor-supplied file filters](configuration.md#editor-supplied-file-filters), so a folder you hide is not indexed and an extension you have mapped to `php` is. Changing either setting re-sends them, and the index is reconciled with the new filters without a restart.
+
+Two kinds of entry are skipped, because neither has an equivalent the server can act on. A `files.exclude` entry with a `"when"` clause hides a file only while a sibling exists, which is a per-file question a glob cannot answer, and hiding real source from the index on a guess is worse than indexing it. A `files.associations` pattern that does not reduce to a bare extension (`Jenkinsfile`, or `*.blade.php`, whose files are already indexed as `.php`) has nothing to contribute to a list of extensions. Put either case in `.phpantom.toml` instead.
 
 ## Manual Installation
 

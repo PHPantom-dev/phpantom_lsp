@@ -62,11 +62,12 @@ use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use serde::Deserialize;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range};
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Range};
 
 use crate::composer::ComposerPackage;
 use crate::config::MagoConfig;
-use crate::process::paths_match;
+use crate::process::{auto_detect_binary, paths_match};
+use crate::text_position::offset_to_position;
 
 /// Composer package name Mago is distributed under.
 const MAGO_PACKAGE: &str = "carthage-software/mago";
@@ -116,19 +117,11 @@ pub(crate) fn resolve_mago(
             path: PathBuf::from(cmd),
         }),
         None => {
+            // Only a project that depends on Mago has a vendored copy to
+            // prefer over the one on `$PATH`.
             let depends_on_mago =
                 composer_json.is_some_and(|pkg| crate::composer::has_dependency(pkg, MAGO_PACKAGE));
-
-            if depends_on_mago && let Some(root) = workspace_root {
-                let bin = bin_dir.unwrap_or("vendor/bin");
-                let candidate = root.join(bin).join("mago");
-                if candidate.is_file() {
-                    return Some(ResolvedMago { path: candidate });
-                }
-            }
-
-            crate::process::which("mago")
-                .ok()
+            auto_detect_binary(workspace_root.filter(|_| depends_on_mago), bin_dir, "mago")
                 .map(|path| ResolvedMago { path })
         }
     }
@@ -304,7 +297,30 @@ pub(crate) fn formats_with_mago(workspace_root: &Path) -> bool {
 
 // ── Mago execution ─────────────────────────────────────────────────
 
-/// Run `mago lint` on the given buffer content and return LSP diagnostics.
+/// A per-file Mago command: [`run_mago_lint`] or [`run_mago_analyze`].
+pub(crate) type MagoFileRunner = fn(
+    &ResolvedMago,
+    &str,
+    &Path,
+    &Path,
+    &MagoConfig,
+    &std::sync::atomic::AtomicBool,
+) -> Result<Vec<Diagnostic>, String>;
+
+/// Which Mago command to run on a single file, and how its findings
+/// are labelled.
+struct MagoCommand<'a> {
+    /// The CLI subcommand, e.g. `lint`.
+    subcommand: &'a str,
+    /// Human-readable name for timeout and failure messages.
+    label: &'a str,
+    /// The `source` field every diagnostic it produces carries.
+    source: &'a str,
+    timeout_ms: u64,
+}
+
+/// Run one per-file Mago command on the given buffer content and return
+/// LSP diagnostics.
 ///
 /// `file_path` is the real path of the file on disk.  `content` is the
 /// current editor buffer (which may differ from the on-disk version).
@@ -316,19 +332,24 @@ pub(crate) fn formats_with_mago(workspace_root: &Path) -> bool {
 ///
 /// `workspace_root` is needed to run Mago from the project root so that
 /// it picks up `mago.toml`.
-pub(crate) fn run_mago_lint(
+fn run_mago_command(
+    command: MagoCommand<'_>,
     resolved: &ResolvedMago,
     content: &str,
     file_path: &Path,
     workspace_root: &Path,
-    config: &MagoConfig,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<Diagnostic>, String> {
-    let timeout_ms = config.lint_timeout_ms();
+    let MagoCommand {
+        subcommand,
+        label,
+        source,
+        timeout_ms,
+    } = command;
     let timeout = Duration::from_millis(timeout_ms);
 
     let mut cmd = Command::new(&resolved.path);
-    cmd.arg("lint")
+    cmd.arg(subcommand)
         .arg("--reporting-format")
         .arg("json")
         .arg("--stdin-input")
@@ -341,7 +362,7 @@ pub(crate) fn run_mago_lint(
         &mut cmd,
         timeout,
         cancelled,
-        "Mago lint",
+        label,
         Some(content),
     )?;
 
@@ -355,17 +376,17 @@ pub(crate) fn run_mago_lint(
             if result.stdout.trim().is_empty() {
                 Ok(Vec::new())
             } else {
-                match parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint") {
+                match parse_mago_json(&result.stdout, content, &file_path_str, source) {
                     Ok(diags) => Ok(diags),
                     Err(_) => Ok(Vec::new()),
                 }
             }
         }
-        1 => parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint"),
-        _ => match parse_mago_json(&result.stdout, content, &file_path_str, "mago-lint") {
+        1 => parse_mago_json(&result.stdout, content, &file_path_str, source),
+        _ => match parse_mago_json(&result.stdout, content, &file_path_str, source) {
             Ok(diags) if !diags.is_empty() => Ok(diags),
             _ => Err(format!(
-                "Mago lint exited with code {} (stderr: {})",
+                "{label} exited with code {} (stderr: {})",
                 result.code,
                 result.stderr.trim()
             )),
@@ -373,10 +394,32 @@ pub(crate) fn run_mago_lint(
     }
 }
 
-/// Run `mago analyze` on the given buffer content and return LSP diagnostics.
-///
-/// Same approach as [`run_mago_lint`] but invokes `mago analyze` which
-/// performs slower, type-aware analysis.
+/// Run `mago lint` on the given buffer content. See [`run_mago_command`].
+pub(crate) fn run_mago_lint(
+    resolved: &ResolvedMago,
+    content: &str,
+    file_path: &Path,
+    workspace_root: &Path,
+    config: &MagoConfig,
+    cancelled: &std::sync::atomic::AtomicBool,
+) -> Result<Vec<Diagnostic>, String> {
+    run_mago_command(
+        MagoCommand {
+            subcommand: "lint",
+            label: "Mago lint",
+            source: "mago-lint",
+            timeout_ms: config.lint_timeout_ms(),
+        },
+        resolved,
+        content,
+        file_path,
+        workspace_root,
+        cancelled,
+    )
+}
+
+/// Run `mago analyze` on the given buffer content, the slower type-aware
+/// analysis. See [`run_mago_command`].
 pub(crate) fn run_mago_analyze(
     resolved: &ResolvedMago,
     content: &str,
@@ -385,52 +428,20 @@ pub(crate) fn run_mago_analyze(
     config: &MagoConfig,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<Vec<Diagnostic>, String> {
-    let timeout_ms = config.analyze_timeout_ms();
-    let timeout = Duration::from_millis(timeout_ms);
-
-    let mut cmd = Command::new(&resolved.path);
-    cmd.arg("analyze")
-        .arg("--reporting-format")
-        .arg("json")
-        .arg("--stdin-input")
-        .arg(file_path)
-        .stdin(Stdio::piped())
-        .current_dir(workspace_root);
-
-    let file_path_str = file_path.to_string_lossy();
-    let result = crate::process::run_command_with_timeout(
-        &mut cmd,
-        timeout,
-        cancelled,
-        "Mago analyze",
-        Some(content),
-    )?;
-
-    match result.code {
-        0 => {
-            if result.stdout.trim().is_empty() {
-                Ok(Vec::new())
-            } else {
-                match parse_mago_json(&result.stdout, content, &file_path_str, "mago-analyze") {
-                    Ok(diags) => Ok(diags),
-                    Err(_) => Ok(Vec::new()),
-                }
-            }
-        }
-        1 => parse_mago_json(&result.stdout, content, &file_path_str, "mago-analyze"),
-        _ => match parse_mago_json(&result.stdout, content, &file_path_str, "mago-analyze") {
-            Ok(diags) if !diags.is_empty() => Ok(diags),
-            _ => Err(format!(
-                "Mago analyze exited with code {} (stderr: {})",
-                result.code,
-                result.stderr.trim()
-            )),
+    run_mago_command(
+        MagoCommand {
+            subcommand: "analyze",
+            label: "Mago analyze",
+            source: "mago-analyze",
+            timeout_ms: config.analyze_timeout_ms(),
         },
-    }
+        resolved,
+        content,
+        file_path,
+        workspace_root,
+        cancelled,
+    )
 }
-
-/// Project-wide runs multiply the per-file timeout by this factor.
-const WORKSPACE_TIMEOUT_FACTOR: u64 = 10;
 
 /// Run `mago lint` once over the whole project and return diagnostics
 /// grouped by file path.
@@ -480,7 +491,9 @@ fn run_mago_workspace(
     source_name: &str,
     cancelled: &std::sync::atomic::AtomicBool,
 ) -> Result<std::collections::HashMap<PathBuf, Vec<Diagnostic>>, String> {
-    let timeout = Duration::from_millis(base_timeout_ms.saturating_mul(WORKSPACE_TIMEOUT_FACTOR));
+    let timeout = Duration::from_millis(
+        base_timeout_ms.saturating_mul(crate::process::WORKSPACE_TIMEOUT_FACTOR),
+    );
 
     let mut cmd = Command::new(&resolved.path);
     cmd.arg(subcommand)
@@ -492,26 +505,9 @@ fn run_mago_workspace(
     let result =
         crate::process::run_command_with_timeout(&mut cmd, timeout, cancelled, &tool_name, None)?;
 
-    match result.code {
-        0 => {
-            if result.stdout.trim().is_empty() {
-                Ok(std::collections::HashMap::new())
-            } else {
-                parse_mago_json_workspace(&result.stdout, workspace_root, source_name)
-                    .or_else(|_| Ok(std::collections::HashMap::new()))
-            }
-        }
-        1 => parse_mago_json_workspace(&result.stdout, workspace_root, source_name),
-        _ => match parse_mago_json_workspace(&result.stdout, workspace_root, source_name) {
-            Ok(map) if !map.is_empty() => Ok(map),
-            _ => Err(format!(
-                "{} exited with code {} (stderr: {})",
-                tool_name,
-                result.code,
-                result.stderr.trim()
-            )),
-        },
-    }
+    crate::process::workspace_run_result(&result, &tool_name, &[1], true, |stdout| {
+        parse_mago_json_workspace(stdout, workspace_root, source_name)
+    })
 }
 
 /// Parse Mago's JSON output into diagnostics grouped by file path.
@@ -698,8 +694,8 @@ fn parse_mago_issue(
             .and_then(|o| o.as_u64())
             .unwrap_or(start_offset as u64) as usize;
 
-        let start_pos = byte_offset_to_position(content, start_offset);
-        let end_pos = byte_offset_to_position(content, end_offset);
+        let start_pos = offset_to_position(content, start_offset);
+        let end_pos = offset_to_position(content, end_offset);
 
         range = Some(Range {
             start: start_pos,
@@ -789,28 +785,6 @@ fn parse_mago_issue(
     })
 }
 
-/// Convert a byte offset within `content` to an LSP `Position`
-/// (0-based line, UTF-16 character offset).
-pub(crate) fn byte_offset_to_position(content: &str, offset: usize) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in content.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += ch.len_utf16() as u32;
-        }
-    }
-    Position {
-        line,
-        character: col,
-    }
-}
-
 // ── Tests ───────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -856,52 +830,6 @@ mod tests {
             Some("mago-lint"),
             "workspace results carry the same source as per-file runs"
         );
-    }
-
-    // ── byte_offset_to_position ─────────────────────────────────────
-
-    #[test]
-    fn byte_offset_to_position_start_of_file() {
-        let content = "<?php\necho 'hello';\n";
-        let pos = byte_offset_to_position(content, 0);
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn byte_offset_to_position_second_line() {
-        let content = "<?php\necho 'hello';\n";
-        // Offset 6 is the 'e' of 'echo' on line 1.
-        let pos = byte_offset_to_position(content, 6);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 0);
-    }
-
-    #[test]
-    fn byte_offset_to_position_mid_line() {
-        let content = "<?php\necho 'hello';\n";
-        // Offset 10 is the '\'' before 'hello' (line 1, col 4).
-        let pos = byte_offset_to_position(content, 10);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 4);
-    }
-
-    #[test]
-    fn byte_offset_to_position_end_of_content() {
-        let content = "ab\ncd";
-        // Offset 5 is past the last character.
-        let pos = byte_offset_to_position(content, 5);
-        assert_eq!(pos.line, 1);
-        assert_eq!(pos.character, 2);
-    }
-
-    #[test]
-    fn byte_offset_to_position_multibyte_char() {
-        // '€' is 3 bytes in UTF-8 but 1 code unit in UTF-16.
-        let content = "€x";
-        let pos = byte_offset_to_position(content, 3); // byte offset of 'x'
-        assert_eq!(pos.line, 0);
-        assert_eq!(pos.character, 1);
     }
 
     // ── parse_mago_json — lint issues ───────────────────────────────

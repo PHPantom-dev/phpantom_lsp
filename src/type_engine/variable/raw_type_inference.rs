@@ -18,6 +18,15 @@ use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type for an array literal (`[…]` or
 /// `array(…)`) from its keys and value expressions.
+///
+/// The literal is built the way PHP builds it, one element at a time: a
+/// constant key sets that entry (a repeated key overwrites the earlier one
+/// in place), a value takes the next free integer key, and a spread copies
+/// its source's entries across, keeping string keys and renumbering integer
+/// keys onto the end. While every element's keys are known the result is a
+/// shape. A spread of an array of unknown length leaves the entries written
+/// beside it known, and makes the shape an unsealed one; a runtime key turns
+/// it into `array<K, V>`/`list<T>`.
 pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
@@ -28,142 +37,337 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // `list<T>` to avoid unbounded shape growth.
     const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
 
-    // Maximum number of distinct alternatives to keep in the `list<T>`
-    // element union before falling back to the base scalar types. A
-    // literal array that names more distinct values than this is a data
-    // table rather than a set of alternatives worth reasoning about, and
-    // the union's pairwise absorption is quadratic in its member count.
-    const MAX_ELEMENT_ALTERNATIVES: usize = 32;
-
-    let mut types: Vec<PhpType> = Vec::new();
-    let mut key_types: Vec<PhpType> = Vec::new();
-    let mut has_string_keys = false;
-    let mut non_constant_key = false;
-    let mut saw_spread = false;
-    let mut saw_element = false;
-    let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
-
+    let mut builder = LiteralBuilder::default();
     for elem in elements {
-        saw_element = true;
         match elem {
             ArrayElement::KeyValue(kv) => {
-                has_string_keys = true;
                 let value_type = infer_element_type(kv.value, ctx).unwrap_or_else(PhpType::mixed);
                 match extract_array_key_text(kv.key) {
                     Some(key_text) => {
-                        push_unique(&mut key_types, constant_key_type(kv.key));
-                        shape_entries.push(crate::php_type::ShapeEntry {
-                            key: Some(key_text),
-                            value_type: value_type.clone(),
-                            optional: false,
-                        });
+                        builder.set_key(key_text, constant_key_type(kv.key), value_type);
                     }
                     // A key that is not a literal has no name to record, and
                     // naming the entry after the key's *type* would invent a
                     // shape field nobody wrote. The whole literal falls back
                     // to `array<K, V>` instead.
                     None => {
-                        non_constant_key = true;
-                        push_unique(&mut key_types, dynamic_key_type(kv.key, ctx));
+                        builder.loosen();
+                        builder.is_list = false;
+                        push_unique(&mut builder.key_types, dynamic_key_type(kv.key, ctx));
+                        push_unique(&mut builder.types, value_type);
                     }
                 }
-                push_unique(&mut types, value_type);
             }
             ArrayElement::Value(v) => {
-                let resolved = infer_element_type(v.value, ctx);
                 // A positional shape must keep one entry per element to
                 // preserve arity, so an unresolvable element becomes
-                // `mixed`. The `list<T>` fallback keeps its original
-                // behaviour of ignoring unresolvable elements. Recorded
-                // in `shape_entries` (key: None) at the position it was
-                // written so PHP's sequential auto-index numbering,
-                // which `shape_keys` and `shape_value_type` both assume,
-                // stays intact even when later entries have string keys.
-                shape_entries.push(crate::php_type::ShapeEntry {
-                    key: None,
-                    value_type: resolved.clone().unwrap_or_else(PhpType::mixed),
-                    optional: false,
-                });
-                push_unique(&mut key_types, PhpType::int());
-                if let Some(t) = resolved
-                    && !types.contains(&t)
-                {
-                    types.push(t);
-                }
+                // `mixed`. The `list<T>` fallback ignores it instead.
+                let resolved = infer_element_type(v.value, ctx);
+                builder.append(resolved);
             }
             ArrayElement::Variadic(v) => {
-                // Spread: `...$other` — try to resolve iterable element type.
-                // A spread copies values the source already knows, so its
-                // element type carries over as written, the same as a value
-                // element beside it.
-                saw_spread = true;
                 let raw = super::foreach_resolution::resolve_expression_type(v.value, ctx);
-                push_unique(
-                    &mut key_types,
-                    raw.as_ref()
-                        .and_then(PhpType::iterable_key_type)
-                        .unwrap_or_else(array_key_type),
-                );
-                if let Some(raw) = raw
-                    && let Some(elem) = raw.iterable_element_type()
-                    && !types.contains(&elem)
-                {
-                    types.push(elem);
-                }
+                builder.spread(raw.as_ref());
             }
             ArrayElement::Missing(_) => {}
         }
     }
 
-    // `[]` is exactly the empty array, which a bare `array` (an array of
-    // unknown contents) does not say. Recording it as `array{}` lets a
-    // later write's result absorb it when branches rejoin, instead of
-    // leaving `array|array<int, Foo>` behind for every array built up
-    // conditionally from an empty start.
-    if !saw_element {
-        return Some(PhpType::array_shape(Vec::new()));
-    }
-
-    // At least one key is only known at runtime, so the literal has no
-    // fixed set of fields: describe it by its key and value types instead.
-    if non_constant_key {
-        let key_type = join_key_types(key_types);
-        let value_type =
-            join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
-        return Some(PhpType::generic_array(key_type, value_type));
-    }
-
-    if has_string_keys && !shape_entries.is_empty() {
-        return Some(PhpType::array_shape(shape_entries));
-    }
-
-    if types.is_empty() {
-        return None;
-    }
-
-    // A value-only literal with a fixed set of elements is recorded as a
-    // positional (tuple-style) array shape so that integer-literal indexing
-    // (`$pair[1]`) and list destructuring select the element at that
-    // position, and out-of-bounds indices are known to be absent. A spread
-    // element or an over-long literal makes the arity indeterminate, so
-    // those widen to `list<T>` instead.
-    if !saw_spread && !shape_entries.is_empty() && shape_entries.len() <= MAX_POSITIONAL_SHAPE_LEN {
-        return Some(PhpType::array_shape(shape_entries));
-    }
-
-    // Preserved literals need absorbing against their siblings, so that a
-    // list written as `[$stringVar, 'yes', 'no']` is `list<string>` rather
-    // than `list<string|'yes'|'no'>`. A list that names more distinct
-    // values than the cap is a data table, not a set of alternatives worth
-    // carrying, and the join's pairwise absorption is quadratic in the
-    // member count, so those widen to their base types first.
+    // A literal whose every entry is known is recorded as that shape, so
+    // that integer-literal indexing (`$pair[1]`) and list destructuring
+    // select the element at that position and out-of-bounds indices are
+    // known to be absent. `[]` is `array{}` for the same reason: a bare
+    // `array` would not say it is empty, and a later write's result could
+    // not absorb it when branches rejoin.
     //
-    // Element sets with no literal in them keep the plain union: the join
-    // also rewrites `?T` into `T|null`, and that spelling change alone
-    // moves types that were never imprecise to begin with.
-    let elem_type =
-        join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
-    Some(PhpType::list(elem_type))
+    // Entries written beside a spread of unknown length are still known one
+    // by one, so they are kept as an unsealed shape with the spread's keys
+    // and values as its tail. With nothing written beside it, the tail is
+    // the whole array and the plain `array<K, V>`/`list<T>` says it.
+    if let Some(exact) = builder.exact.take() {
+        let positional = exact.iter().all(|(_, entry)| entry.key.is_none());
+        let within_limit = !positional || exact.len() <= MAX_POSITIONAL_SHAPE_LEN;
+        match builder.tail.take() {
+            None if within_limit => {
+                return Some(PhpType::array_shape(
+                    exact.into_iter().map(|(_, entry)| entry).collect(),
+                ));
+            }
+            Some(tail) if within_limit && !exact.is_empty() => {
+                let entries = exact.into_iter().map(|(_, entry)| entry).collect();
+                let shape = if builder.is_list && positional {
+                    PhpType::list_shape(entries)
+                } else {
+                    PhpType::array_shape(entries)
+                };
+                let value = join_alternatives(tail.values, MAX_ELEMENT_ALTERNATIVES)
+                    .unwrap_or_else(PhpType::mixed);
+                return Some(PhpType::unsealed_shape(
+                    shape,
+                    join_key_types(tail.keys),
+                    value,
+                ));
+            }
+            _ => {}
+        }
+    }
+    builder.loose_type()
+}
+
+/// Maximum number of distinct alternatives to keep in the element union
+/// before falling back to the base scalar types. A literal array that names
+/// more distinct values than this is a data table rather than a set of
+/// alternatives worth reasoning about, and the union's pairwise absorption
+/// is quadratic in its member count.
+const MAX_ELEMENT_ALTERNATIVES: usize = 32;
+
+/// The entries of an array literal beyond the ones known one by one, once
+/// a spread of unknown length has put some there.
+#[derive(Default)]
+struct LiteralTail {
+    keys: Vec<PhpType>,
+    values: Vec<PhpType>,
+}
+
+/// The array an array literal builds, as far as its elements so far go.
+struct LiteralBuilder {
+    /// The literal's entries alongside the runtime key each lands on, while
+    /// every one of them is known. `None` once an element's keys are not.
+    exact: Option<Vec<(String, crate::php_type::ShapeEntry)>>,
+    /// The entries a spread of unknown length added beside `exact`. Once
+    /// there are some, which integer key comes next is no longer known, so
+    /// a positional element joins them rather than `exact`.
+    tail: Option<LiteralTail>,
+    /// The integer key the next positional element takes.
+    next_index: i64,
+    /// The key and value types every element contributes, for when the
+    /// literal is not a shape.
+    key_types: Vec<PhpType>,
+    types: Vec<PhpType>,
+    /// Whether a spread copied values whose type is not known.
+    unknown_values: bool,
+    /// Whether every key is one PHP numbered in order, making the literal a
+    /// list.
+    is_list: bool,
+}
+
+impl Default for LiteralBuilder {
+    fn default() -> Self {
+        LiteralBuilder {
+            exact: Some(Vec::new()),
+            tail: None,
+            next_index: 0,
+            key_types: Vec::new(),
+            types: Vec::new(),
+            unknown_values: false,
+            is_list: true,
+        }
+    }
+}
+
+impl LiteralBuilder {
+    /// Write `value_type` under the constant key `key_text`, whose type as a
+    /// key is `key_type`.
+    fn set_key(&mut self, key_text: String, key_type: PhpType, value_type: PhpType) {
+        self.is_list = false;
+        let index = crate::php_type::canonical_int_key(&key_text);
+        if let Some(index) = index {
+            self.next_index = self.next_index.max(index.saturating_add(1));
+        }
+        push_unique(&mut self.key_types, key_type);
+        push_unique(&mut self.types, value_type.clone());
+        let Some(exact) = self.exact.as_mut() else {
+            return;
+        };
+        let runtime_key = index.map_or(key_text.clone(), |index| index.to_string());
+        let entry = crate::php_type::ShapeEntry {
+            key: Some(key_text),
+            value_type,
+            optional: false,
+        };
+        match exact.iter_mut().find(|(key, _)| *key == runtime_key) {
+            // PHP keeps an overwritten key where it was.
+            Some((_, existing)) => existing.value_type = entry.value_type,
+            None => exact.push((runtime_key, entry)),
+        }
+    }
+
+    /// Write a value under the next free integer key.
+    fn append(&mut self, value_type: Option<PhpType>) {
+        push_unique(&mut self.key_types, PhpType::int());
+        if let Some(tail) = self.tail.as_mut() {
+            push_unique(&mut tail.keys, PhpType::int());
+            push_unique(
+                &mut tail.values,
+                value_type.clone().unwrap_or_else(PhpType::mixed),
+            );
+        } else if let Some(exact) = self.exact.as_mut() {
+            // Positional while it lands on the index a reader counting the
+            // positional entries before it would expect. Once an explicit
+            // integer key has moved the index along, it is spelled out.
+            let positional_count = exact
+                .iter()
+                .filter(|(_, entry)| entry.key.is_none())
+                .count();
+            let positional = usize::try_from(self.next_index) == Ok(positional_count);
+            exact.push((
+                self.next_index.to_string(),
+                crate::php_type::ShapeEntry {
+                    key: (!positional).then(|| self.next_index.to_string()),
+                    value_type: value_type.clone().unwrap_or_else(PhpType::mixed),
+                    optional: false,
+                },
+            ));
+        }
+        self.next_index = self.next_index.saturating_add(1);
+        if let Some(value_type) = value_type {
+            push_unique(&mut self.types, value_type);
+        }
+    }
+
+    /// Copy the entries of a spread `...$source` across, `source` being what
+    /// the spread resolved to.
+    fn spread(&mut self, source: Option<&PhpType>) {
+        // The listed entries of an unsealed shape are copied like a sealed
+        // shape's. A list's come first, ahead of the rest of the list; any
+        // other shape's are copied after its tail, since the tail cannot
+        // overwrite the value they are listed with.
+        if let Some(unsealed) = source.and_then(PhpType::as_unsealed_shape) {
+            if unsealed.shape.is_list_shape() {
+                self.spread(Some(&unsealed.shape));
+                self.spread(Some(&PhpType::list(unsealed.value.clone())));
+            } else {
+                let tail = PhpType::generic_array(unsealed.key.clone(), unsealed.value.clone());
+                self.spread(Some(&tail));
+                self.spread(Some(&unsealed.shape));
+            }
+            return;
+        }
+        if let Some(entries) = source.and_then(spread_entries) {
+            for (key, value_type) in entries {
+                match key {
+                    Some(key) => {
+                        let key_type = PhpType::string();
+                        self.set_key(key, key_type, value_type);
+                    }
+                    None => self.append(Some(value_type)),
+                }
+            }
+            return;
+        }
+        let key_type = source.and_then(PhpType::iterable_key_type);
+        // Integer keys are renumbered onto the end, so only the string keys
+        // keep what they are.
+        let copied_key = match &key_type {
+            Some(key) if key.is_int_subtype() => PhpType::int(),
+            Some(key) if key.is_string_subtype() => key.clone(),
+            _ => array_key_type(),
+        };
+        if !copied_key.is_int_subtype() {
+            self.is_list = false;
+        }
+        push_unique(&mut self.key_types, copied_key.clone());
+        // A spread copies values the source already knows, so its element
+        // type carries over as written, the same as a value element beside
+        // it.
+        let elem = source.and_then(PhpType::iterable_element_type);
+        match &elem {
+            Some(elem) => push_unique(&mut self.types, elem.clone()),
+            None => self.unknown_values = true,
+        }
+        let Some(exact) = self.exact.as_mut() else {
+            return;
+        };
+        let elem = elem.unwrap_or_else(PhpType::mixed);
+        // A string key the source may hold overwrites the entry written
+        // under it, which is then one or the other.
+        if !copied_key.is_int_subtype() {
+            for (runtime_key, entry) in exact.iter_mut() {
+                if crate::php_type::canonical_int_key(runtime_key).is_none()
+                    && string_key_may_match(&copied_key, runtime_key)
+                {
+                    entry.value_type = PhpType::join_runtime_value_types(vec![
+                        entry.value_type.clone(),
+                        elem.clone(),
+                    ]);
+                }
+            }
+        }
+        let tail = self.tail.get_or_insert_default();
+        push_unique(&mut tail.keys, copied_key);
+        push_unique(&mut tail.values, elem);
+    }
+
+    /// Stop tracking the literal as a shape.
+    fn loosen(&mut self) {
+        self.exact = None;
+        self.tail = None;
+    }
+
+    /// The literal as `array<K, V>`, or `list<T>` when its keys are.
+    fn loose_type(self) -> Option<PhpType> {
+        if self.types.is_empty() {
+            return None;
+        }
+        // Preserved literals need absorbing against their siblings, so that a
+        // list written as `[$stringVar, 'yes', 'no']` is `list<string>` rather
+        // than `list<string|'yes'|'no'>`.
+        let value_type = if self.unknown_values {
+            PhpType::mixed()
+        } else {
+            join_alternatives(self.types, MAX_ELEMENT_ALTERNATIVES)?
+        };
+        if self.is_list {
+            Some(PhpType::list(value_type))
+        } else {
+            Some(PhpType::generic_array(
+                join_key_types(self.key_types),
+                value_type,
+            ))
+        }
+    }
+}
+
+/// The entries a spread of `source` copies, in order, when `source` is a
+/// shape whose every entry is known to be there: `Some(key)` for a string
+/// key, which the spread keeps, and `None` for an integer key, which it
+/// renumbers.
+pub(in crate::type_engine) fn spread_entries(
+    source: &PhpType,
+) -> Option<Vec<(Option<String>, PhpType)>> {
+    let crate::php_type::TypeKind::ArrayShape(entries) = source.kind() else {
+        return None;
+    };
+    let keys = crate::php_type::runtime_shape_keys(entries)?;
+    entries
+        .iter()
+        .zip(keys)
+        .map(|(entry, key)| {
+            // A class-constant key is stored as its spelling, which says
+            // nothing about the key it evaluates to.
+            if entry.optional || key.contains("::") {
+                return None;
+            }
+            let key = crate::php_type::canonical_int_key(&key)
+                .is_none()
+                .then_some(key);
+            Some((key, entry.value_type.clone()))
+        })
+        .collect()
+}
+
+/// Whether a key of type `key_type` may be the string `key`: any string
+/// key may be, unless every alternative is a literal naming another one.
+fn string_key_may_match(key_type: &PhpType, key: &str) -> bool {
+    key_type
+        .union_members()
+        .into_iter()
+        .any(|member| match member.as_literal() {
+            Some(literal) => literal
+                .string_content()
+                .is_none_or(|content| content == key),
+            None => !member.is_int_subtype(),
+        })
 }
 
 /// Collapse a set of alternatives into one type, or `None` when empty.
@@ -208,10 +412,10 @@ fn join_key_types(key_types: Vec<PhpType>) -> PhpType {
     // Unlike a value union, the alternatives here are worth keeping as
     // written: a `Foo::class` key is a `class-string<Foo>`, and widening it
     // to `string` costs a `array<class-string, …>` parameter its match.
-    match key_types.len() {
-        0 => array_key_type(),
-        1 => key_types.into_iter().next().unwrap(),
-        _ => PhpType::union(key_types),
+    if key_types.is_empty() {
+        array_key_type()
+    } else {
+        PhpType::union(key_types)
     }
 }
 
@@ -272,12 +476,12 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> Option<String> {
 /// A scalar literal keeps its exact value here. The array's contents are
 /// fully known at the point the literal is written, so `[1, 1.5, '123']`
 /// records `1|1.5|'123'` and a read off it can still be proven `numeric`.
-/// Precision is given up where the array is *mutated* instead: a later
-/// push or keyed write widens through [`merge_push_type`] and friends,
-/// because a value arriving after construction says the array is being
-/// built up rather than written out.
+/// Precision is given up where the array is *mutated* inside a loop
+/// instead: a push or keyed write there widens before it reaches
+/// [`merge_push_type`] and friends, because a value arriving on every pass
+/// says the array is being built up rather than written out.
 ///
-/// [`merge_push_type`]: super::resolution::merge_push_type
+/// [`merge_push_type`]: super::array_shape_writes::merge_push_type
 fn infer_element_type<'b>(
     value: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
@@ -295,6 +499,7 @@ fn infer_element_type<'b>(
                 let fqn = crate::util::resolve_source_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))
@@ -444,6 +649,19 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
                     super::array_func_rules::callable_string_function_name(bytes_to_str(s.raw))?;
                 (self.ctx.loaders.function_loader?)(name, 0)?.return_type
             }
+            // `array_map(Row::fromCache(...), $rows)` hands over the method
+            // itself, so its declared return is what each element becomes.
+            Expression::PartialApplication(pa) => {
+                let span = pa.span();
+                let text = self
+                    .ctx
+                    .content
+                    .get(span.start.offset as usize..span.end.offset as usize)?;
+                crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                    text,
+                    &self.ctx.as_resolution_ctx(),
+                )
+            }
             _ => None,
         }
     }
@@ -480,6 +698,14 @@ impl ArrayFuncArgs for AstArrayFuncArgs<'_, '_, '_> {
 
     fn narrows(&self, inferred: &PhpType, declared: &PhpType) -> bool {
         crate::class_lookup::is_subtype_of_typed(inferred, declared, self.ctx.class_loader)
+    }
+
+    fn guard_split(&self, guard: &str, subject: &PhpType) -> Option<(Option<PhpType>, bool)> {
+        crate::type_engine::types::narrowing::split_type_by_guard_name(
+            guard,
+            subject,
+            Some(&self.ctx.class_loader),
+        )
     }
 }
 
@@ -567,6 +793,13 @@ pub(in crate::type_engine) fn extract_arg_texts_from_ast(
         .collect()
 }
 
+fn first_param_name(params: &FunctionLikeParameterList<'_>) -> Option<String> {
+    params
+        .parameters
+        .first()
+        .map(|param| bytes_to_str(param.variable.name).to_string())
+}
+
 /// Infer the return type of a callback (arrow function or closure) by
 /// resolving its body expression with the first parameter seeded to
 /// `param_type`.
@@ -580,14 +813,14 @@ fn infer_callback_return_type(
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let (param_name, body_expr) = match callback_expr {
+        // A callback that takes no parameters ignores the element it is
+        // handed, but its body still decides the result.
         Expression::ArrowFunction(arrow) => {
-            let param = arrow.parameter_list.parameters.first()?;
-            let name = bytes_to_str(param.variable.name).to_string();
+            let name = first_param_name(&arrow.parameter_list);
             (name, arrow.expression)
         }
         Expression::Closure(closure) => {
-            let param = closure.parameter_list.parameters.first()?;
-            let name = bytes_to_str(param.variable.name).to_string();
+            let name = first_param_name(&closure.parameter_list);
             // Find the first return statement's expression.
             let ret_expr = closure.body.statements.iter().find_map(|stmt| {
                 if let Statement::Return(ret) = stmt {
@@ -620,8 +853,34 @@ fn infer_callback_return_type(
         crate::php_type::TypeKind::Union(members) => members.iter().map(seed_member).collect(),
         _ => vec![seed_member(param_type)],
     };
+
+    // A full closure body may reassign the parameter before returning it
+    // (`$result['a'] = (string) $result['a']; return $result;`), so its
+    // statements are walked with the shared forward walker — seeded with
+    // the same call-site type — before the return expression is resolved.
+    // Reading the parameter straight from `resolved_param` (as an arrow
+    // function's single-expression body still does below) would answer
+    // with the type the callback receives rather than the one it hands
+    // back.
+    let walked_locals = if let Expression::Closure(closure) = callback_expr {
+        Some(walk_closure_body_scope(
+            closure,
+            param_name.as_deref(),
+            &resolved_param,
+            ctx,
+        ))
+    } else {
+        None
+    };
+
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
-        if var == param_name {
+        if let Some(locals) = &walked_locals
+            && let Some(types) = locals.get(&atom(var))
+            && !types.is_empty()
+        {
+            return types.clone();
+        }
+        if param_name.as_deref() == Some(var) {
             resolved_param.clone()
         } else {
             vec![]
@@ -631,22 +890,48 @@ fn infer_callback_return_type(
     // Create a synthetic context with the scope resolver.
     let body_offset = body_expr.span().start.offset;
     let infer_ctx = VarResolutionCtx {
-        var_name: "",
-        current_class: ctx.current_class,
-        all_classes: ctx.all_classes,
-        content: ctx.content,
-        cursor_offset: body_offset,
-        class_loader: ctx.class_loader,
         backend: ctx.backend,
         loaders: ctx.loaders,
         resolved_class_cache: ctx.resolved_class_cache,
-        enclosing_return_type: None,
-        top_level_scope: None,
-        branch_aware: false,
-        match_arm_narrowing: std::collections::HashMap::new(),
         scope_var_resolver: Some(&scope_resolver),
-        scope_proofs: None,
+        ..VarResolutionCtx::new(
+            "",
+            ctx.current_class,
+            ctx.all_classes,
+            ctx.content,
+            body_offset,
+            ctx.class_loader,
+        )
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
+}
+
+/// Walk a closure's own body with the shared forward walker, seeded with
+/// what the call site hands its parameter, and return the scope its
+/// statements leave behind.
+///
+/// This is a transient lookup seeded from the call site rather than the
+/// closure's own declared scope, so, like
+/// [`super::forward_walk::resolve_in_method_body`], it must not write into
+/// an active diagnostic scope cache — reading from one is safe, since the
+/// offsets walked belong to this same file.
+fn walk_closure_body_scope(
+    closure: &Closure<'_>,
+    param_name: Option<&str>,
+    resolved_param: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> crate::atom::AtomMap<Vec<ResolvedType>> {
+    let fw_ctx =
+        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
+    let mut scope = super::forward_walk::ScopeState::new();
+    if let Some(name) = param_name {
+        scope.seed(name, resolved_param.to_vec());
+    }
+
+    let _suspend = super::forward_walk::suspend_snapshot_recording();
+    let _barrier = super::forward_walk::suspend_return_edges();
+    super::forward_walk::walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+
+    scope.locals
 }

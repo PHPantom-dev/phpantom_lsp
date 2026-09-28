@@ -8,7 +8,7 @@
 //! registration, and a provider loses to one that extends it, regardless of
 //! which of them is scanned first.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -154,21 +154,10 @@ class Application
 }
 "#;
 
-const HELPERS_PHP: &str = r#"<?php
-/**
- * @template TClass
- * @param string|class-string<TClass> $abstract
- * @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
- */
-function app($abstract = null, array $parameters = [])
-{
-}
-"#;
-
 fn base_files(providers: &'static str) -> Vec<(&'static str, &'static str)> {
     vec![
         ("bootstrap/providers.php", providers),
-        ("src/helpers.php", HELPERS_PHP),
+        ("src/helpers.php", APP_HELPERS_PHP),
         (
             "src/Providers/TranslationServiceProvider.php",
             APPLICATION_PROVIDER,
@@ -232,17 +221,11 @@ async fn hover_over_x(providers: &'static str, consumer: &str) -> String {
     }
 }
 
-fn consumer(body: &str) -> String {
-    format!(
-        "<?php\nnamespace App;\nclass Consumer {{\n    public function go(): void {{\n        $x = {body};\n        $x;\n    }}\n}}\n"
-    )
-}
-
 #[tokio::test]
 async fn an_application_provider_replaces_a_framework_binding() {
     let text = hover_over_x(
         APPLICATION_REPLACES_FRAMEWORK,
-        &consumer("app()->make('translator')"),
+        &consumer_class("app()->make('translator')"),
     )
     .await;
     assert!(
@@ -255,7 +238,7 @@ async fn an_application_provider_replaces_a_framework_binding() {
 async fn the_app_helper_reaches_the_replaced_binding_too() {
     let text = hover_over_x(
         APPLICATION_REPLACES_FRAMEWORK,
-        &consumer("app('translator')"),
+        &consumer_class("app('translator')"),
     )
     .await;
     assert!(
@@ -267,7 +250,7 @@ async fn the_app_helper_reaches_the_replaced_binding_too() {
 /// Nothing replaces the framework's binding, so it keeps the key.
 #[tokio::test]
 async fn a_framework_binding_stands_when_nothing_replaces_it() {
-    let text = hover_over_x(FRAMEWORK_ONLY, &consumer("app()->make('translator')")).await;
+    let text = hover_over_x(FRAMEWORK_ONLY, &consumer_class("app()->make('translator')")).await;
     assert!(
         text.contains("Translator") && !text.contains("DatabaseTranslator"),
         "expected the framework's Translator, got: {text}"
@@ -278,7 +261,11 @@ async fn a_framework_binding_stands_when_nothing_replaces_it() {
 /// relationship between them says which one the container ends up with.
 #[tokio::test]
 async fn a_subclass_provider_replaces_its_parents_binding() {
-    let text = hover_over_x(SUBCLASS_BEFORE_PARENT, &consumer("app('acme.client')")).await;
+    let text = hover_over_x(
+        SUBCLASS_BEFORE_PARENT,
+        &consumer_class("app('acme.client')"),
+    )
+    .await;
     assert!(
         text.contains("TracingClient"),
         "expected the subclass provider's binding to win, got: {text}"

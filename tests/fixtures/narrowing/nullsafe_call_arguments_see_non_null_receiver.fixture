@@ -1,0 +1,12 @@
+// test: the arguments of a ?-> call see the receiver as not null
+// feature: hover
+// expect: Exception
+// expect_absent: ?Exception
+// expect_absent: null
+---
+<?php
+
+function report(?\Exception $e): void
+{
+    $e?->getMessage((string) $<>e->getCode());
+}
