@@ -1642,6 +1642,45 @@ check(
         === $uuidOrder->id . ':' . $ulidDelivery->tracking_id
 );
 
+// ─── Class-based casts ──────────────────────────────────────────────────────
+
+check(
+    'AsEnumCollection::of stores class:enum',
+    \Illuminate\Database\Eloquent\Casts\AsEnumCollection::of(\App\Models\OrderStatus::class)
+        === \Illuminate\Database\Eloquent\Casts\AsEnumCollection::class . ':' . \App\Models\OrderStatus::class
+);
+check(
+    'AsEnumArrayObject::of stores class:enum',
+    \Illuminate\Database\Eloquent\Casts\AsEnumArrayObject::of(\App\Models\JamFlavor::class)
+        === \Illuminate\Database\Eloquent\Casts\AsEnumArrayObject::class . ':' . \App\Models\JamFlavor::class
+);
+check(
+    'AsCollection::of stores an empty collection class and the item',
+    \Illuminate\Database\Eloquent\Casts\AsCollection::of(\App\Models\Frosting::class)
+        === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
+);
+check(
+    'AsCollection::using stores the collection class and an empty map',
+    \Illuminate\Database\Eloquent\Casts\AsCollection::using(\App\Models\PostCollection::class)
+        === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':' . \App\Models\PostCollection::class . ','
+);
+check(
+    'AsBinary::uuid stores class:uuid',
+    \Illuminate\Database\Eloquent\Casts\AsBinary::uuid()
+        === \Illuminate\Database\Eloquent\Casts\AsBinary::class . ':uuid'
+);
+
+$castSample = new \App\Models\CastSample();
+$castSampleCasts = $castSample->getCasts();
+check(
+    'CastSample::statuses is an AsEnumCollection of OrderStatus',
+    ($castSampleCasts['statuses'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsEnumCollection::class . ':' . \App\Models\OrderStatus::class
+);
+check(
+    'CastSample::toppings is an AsCollection of Frosting',
+    ($castSampleCasts['toppings'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
+);
+
 // ─── Summary ────────────────────────────────────────────────────────────────
 
 echo "\n";
