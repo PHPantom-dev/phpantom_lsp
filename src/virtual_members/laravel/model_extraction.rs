@@ -534,19 +534,62 @@ pub(crate) fn overlay_casts(
 
 /// The trimmed, non-empty entries of a PHP array literal written as `[…]`.
 ///
-/// Splitting on commas is safe for the arrays this reads: a model's
-/// `$casts`, `$fillable`, `$hidden`, and their siblings hold string
-/// literals and `::class` constants, never a nested array or a call whose
-/// own arguments would carry a comma. Text that is not an array literal
-/// yields nothing.
+/// Commas inside parentheses, brackets, braces, or quotes do not split an
+/// entry, so `AsCollection::using(Custom::class, Item::class)` stays one
+/// value. Text that is not an array literal yields nothing.
 fn array_literal_entries(text: &str) -> impl Iterator<Item = &str> {
-    text.trim()
+    let inner = text
+        .trim()
         .strip_prefix('[')
-        .map(|s| s.strip_suffix(']').unwrap_or(s))
+        .map(|s| s.strip_suffix(']').unwrap_or(s));
+    inner
         .into_iter()
-        .flat_map(|inner| inner.split(','))
-        .map(str::trim)
+        .flat_map(split_top_level_commas)
         .filter(|segment| !segment.is_empty())
+}
+
+/// Split `text` on commas that are not nested in `()`, `[]`, `{}`, or a
+/// quoted string. Empty segments (a trailing comma) are kept out.
+fn split_top_level_commas(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < text.len() {
+        let c = text[i..].chars().next().unwrap_or('\0');
+        let len = c.len_utf8();
+        if let Some(q) = quote {
+            if c == '\\' {
+                i += len + text[i + len..].chars().next().map_or(0, char::len_utf8);
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+            i += len;
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                let segment = text[start..i].trim();
+                if !segment.is_empty() {
+                    out.push(segment);
+                }
+                start = i + len;
+            }
+            _ => {}
+        }
+        i += len;
+    }
+    let tail = text[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
 
 /// Parse key-value pairs from a PHP array literal text.
@@ -563,7 +606,7 @@ fn parse_casts_array(text: &str) -> Vec<(String, String)> {
             continue;
         };
         let key = extract_string_literal(segment[..arrow_pos].trim());
-        let value = extract_string_literal(segment[arrow_pos + 2..].trim());
+        let value = extract_cast_value(segment[arrow_pos + 2..].trim());
 
         if let (Some(k), Some(v)) = (key, value)
             && !k.is_empty()
@@ -603,6 +646,176 @@ fn extract_string_literal(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The cast type string a `$casts` / `casts()` value names.
+///
+/// Accepts the forms Eloquent evaluates before it stores a cast:
+/// - a quoted string (`'boolean'`, `'decimal:2'`)
+/// - `SomeCast::class`, including a concatenated argument
+///   (`Address::class.':nullable'`, `AsEnumCollection::class.':'.Status::class`)
+/// - a static call whose return value is that string
+///   (`AsEnumCollection::of(Status::class)`, `AsCollection::using(Custom::class, Item::class)`,
+///   `AsBinary::uuid()`)
+///
+/// A call is stored with its method kept (`AsEnumCollection::of:Status`) so
+/// the type resolver can tell `of()` from `using()` after the class name has
+/// been resolved. Arguments that are not a class constant or a string literal
+/// are dropped: a variable there is not knowable statically.
+fn extract_cast_value(text: &str) -> Option<String> {
+    let t = text.trim().trim_end_matches(';').trim();
+    if let Some(value) = extract_string_literal_quoted(t) {
+        return Some(value);
+    }
+    if let Some(value) = extract_static_cast_call(t) {
+        return Some(value);
+    }
+    extract_class_const_cast(t)
+}
+
+fn extract_string_literal_quoted(text: &str) -> Option<String> {
+    if ((text.starts_with('\'') && text.ends_with('\''))
+        || (text.starts_with('"') && text.ends_with('"')))
+        && text.len() >= 2
+    {
+        return Some(text[1..text.len() - 1].to_string());
+    }
+    None
+}
+
+/// `Class::method(args)` as the cast string the method returns.
+///
+/// `::class` is a constant, not a call, and is left for
+/// [`extract_class_const_cast`].
+fn extract_static_cast_call(text: &str) -> Option<String> {
+    let open = text.find('(')?;
+    let close = text.rfind(')')?;
+    if close < open || !text[close + 1..].trim().is_empty() {
+        return None;
+    }
+    let head = text[..open].trim();
+    let sep = head.rfind("::")?;
+    let class = strip_fqn_prefix(head[..sep].trim());
+    let method = head[sep + 2..].trim();
+    if method == "class" || !is_php_ident(method) || !is_php_class_name(class) {
+        return None;
+    }
+    let args = parse_cast_call_args(&text[open + 1..close]);
+    Some(super::casts::format_cast_reference(
+        class,
+        Some(method),
+        &args,
+    ))
+}
+
+fn parse_cast_call_args(inner: &str) -> Vec<String> {
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+    split_top_level_commas(inner)
+        .into_iter()
+        .map(|arg| extract_cast_call_arg(arg).unwrap_or_default())
+        .collect()
+}
+
+fn extract_cast_call_arg(arg: &str) -> Option<String> {
+    let arg = strip_named_argument(arg.trim());
+    if let Some(value) = extract_string_literal_quoted(arg) {
+        return Some(value);
+    }
+    if let Some(class_pos) = arg.find("::class") {
+        let name = strip_fqn_prefix(arg[..class_pos].trim());
+        if is_php_class_name(name) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// `name: value` with a single colon, not the `::` of a class constant.
+fn strip_named_argument(arg: &str) -> &str {
+    if let Some(idx) = arg.find(':')
+        && !arg[..idx].contains(':')
+        && arg.as_bytes().get(idx + 1) != Some(&b':')
+    {
+        let name = arg[..idx].trim();
+        if is_php_ident(name) {
+            return arg[idx + 1..].trim();
+        }
+    }
+    arg
+}
+
+/// `Class::class`, plus any `.'…'` / `.Other::class` concatenations after it.
+///
+/// `Address::class.':nullable'` is `Address:nullable`.
+/// `AsEnumCollection::class.':'.Status::class` is `AsEnumCollection:Status`.
+fn extract_class_const_cast(text: &str) -> Option<String> {
+    let class_pos = text.find("::class")?;
+    let name = strip_fqn_prefix(text[..class_pos].trim());
+    if !is_php_class_name(name) {
+        return None;
+    }
+    let mut result = name.to_string();
+    let mut rest = text[class_pos + "::class".len()..].trim();
+    while let Some(stripped) = rest.strip_prefix('.') {
+        rest = stripped.trim();
+        if let Some(quoted) = leading_quoted(rest) {
+            if let Some(value) = extract_string_literal_quoted(quoted) {
+                result.push_str(&value);
+            }
+            rest = rest[quoted.len()..].trim();
+            continue;
+        }
+        let Some(next) = rest.find("::class") else {
+            break;
+        };
+        let other = strip_fqn_prefix(rest[..next].trim());
+        if !is_php_class_name(other) {
+            break;
+        }
+        result.push_str(other);
+        rest = rest[next + "::class".len()..].trim();
+    }
+    Some(result)
+}
+
+/// The quoted literal `rest` starts with, if it starts with one.
+fn leading_quoted(rest: &str) -> Option<&str> {
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let mut chars = rest.char_indices().skip(1);
+    while let Some((idx, c)) = chars.next() {
+        if c == '\\' {
+            chars.next();
+            continue;
+        }
+        if c == quote {
+            return Some(&rest[..=idx]);
+        }
+    }
+    None
+}
+
+fn is_php_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn is_php_class_name(name: &str) -> bool {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    !name.is_empty()
+        && !name.ends_with('\\')
+        && !name.contains("\\\\")
+        && name
+            .split('\\')
+            .all(|segment| !segment.is_empty() && is_php_ident(segment))
 }
 
 /// Extract Eloquent attribute defaults from a class's `$attributes` property.
@@ -1460,6 +1673,74 @@ class User {
             [
                 ("nickname".to_string(), "string".to_string()),
                 ("is_admin".to_string(), "boolean".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn class_based_cast_calls_keep_their_method_and_arguments() {
+        let src = r#"<?php
+class User {
+    protected function casts(): array {
+        return [
+            'statuses' => AsEnumCollection::of(OrderStatus::class),
+            'flavors' => AsEnumArrayObject::of(JamFlavor::class),
+            'options' => AsArrayObject::class,
+            'tags' => AsCollection::class,
+            'toppings' => AsCollection::of(Frosting::class),
+            'notes' => AsCollection::using(PostCollection::class),
+            'mapped' => AsCollection::using(PostCollection::class, Frosting::class),
+            'secrets' => AsEncryptedCollection::of(Frosting::class),
+            'directory' => AsStringable::class,
+            'uuid' => AsBinary::uuid(),
+            'ulid' => AsBinary::ulid(),
+            'binary' => AsBinary::of('uuid'),
+            'address' => Address::class.':nullable',
+            'joined' => AsEnumCollection::class.':'.OrderStatus::class,
+        ];
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let laravel = classes[0].0.laravel().unwrap();
+        assert_eq!(
+            laravel.casts_definitions,
+            [
+                (
+                    "statuses".to_string(),
+                    "AsEnumCollection::of:OrderStatus".to_string()
+                ),
+                (
+                    "flavors".to_string(),
+                    "AsEnumArrayObject::of:JamFlavor".to_string()
+                ),
+                ("options".to_string(), "AsArrayObject".to_string()),
+                ("tags".to_string(), "AsCollection".to_string()),
+                (
+                    "toppings".to_string(),
+                    "AsCollection::of:Frosting".to_string()
+                ),
+                (
+                    "notes".to_string(),
+                    "AsCollection::using:PostCollection".to_string()
+                ),
+                (
+                    "mapped".to_string(),
+                    "AsCollection::using:PostCollection,Frosting".to_string()
+                ),
+                (
+                    "secrets".to_string(),
+                    "AsEncryptedCollection::of:Frosting".to_string()
+                ),
+                ("directory".to_string(), "AsStringable".to_string()),
+                ("uuid".to_string(), "AsBinary::uuid".to_string()),
+                ("ulid".to_string(), "AsBinary::ulid".to_string()),
+                ("binary".to_string(), "AsBinary::of:uuid".to_string()),
+                ("address".to_string(), "Address:nullable".to_string()),
+                (
+                    "joined".to_string(),
+                    "AsEnumCollection:OrderStatus".to_string()
+                ),
             ]
         );
     }
