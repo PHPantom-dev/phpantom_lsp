@@ -12,6 +12,8 @@
 
 use tower_lsp::lsp_types::*;
 
+use super::helpers::make_diagnostic;
+
 use crate::Backend;
 
 impl Backend {
@@ -74,17 +76,12 @@ impl Backend {
                 }
             };
 
-            out.push(Diagnostic {
+            out.push(make_diagnostic(
                 range,
-                severity: Some(DiagnosticSeverity::ERROR),
-                code: Some(NumberOrString::String("syntax_error".to_string())),
-                code_description: None,
-                source: Some("phpantom".to_string()),
-                message: message.clone(),
-                related_information: None,
-                tags: None,
-                data: None,
-            });
+                DiagnosticSeverity::ERROR,
+                "syntax_error",
+                message.clone(),
+            ));
         }
     }
 }

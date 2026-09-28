@@ -1358,7 +1358,7 @@ each([1, 2, 3], function ($x) {});
         .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
         .collect();
 
-    // Template substitution infers T = int from [1, 2, 3].
+    // Template substitution infers T = 1|2|3 from [1, 2, 3].
     assert_eq!(
         param_type_hints.len(),
         1,
@@ -1367,8 +1367,8 @@ each([1, 2, 3], function ($x) {});
     );
     assert_eq!(
         hint_label(param_type_hints[0]),
-        "int ",
-        "template T should be substituted to int; all hints: {:?}",
+        "1|2|3 ",
+        "template T should be substituted to 1|2|3; all hints: {:?}",
         all
     );
     // Verify the callable resolves — we should get ": void" return hint.
@@ -1406,8 +1406,8 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
         .iter()
         .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'))
         .collect();
-    // Template substitution infers T = int from [1, 2, 3], so the
-    // return type of callable(T): T becomes ": int".
+    // Template substitution infers T = 1|2|3 from [1, 2, 3], so the
+    // return type of callable(T): T becomes ": 1|2|3".
     assert!(
         !return_hints.is_empty(),
         "expected a closure return-type hint; all hints: {:?}",
@@ -1415,8 +1415,8 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
     );
     assert_eq!(
         hint_label(return_hints[0]),
-        ": int",
-        "return type hint should be ': int' (T substituted from array elements); all: {:?}",
+        ": 1|2|3",
+        "return type hint should be ': 1|2|3' (T substituted from array elements); all: {:?}",
         all
     );
 }

@@ -40,6 +40,22 @@ class ImportClassDemo
 }
 
 
+// ── Code Action: Import Qualified Name ─────────────────────────────────────
+// Place the cursor on either qualified name and trigger "Code Action".
+// The refactoring adds the appropriate import and replaces every equivalent
+// usage in this file with its short name. The companion action alongside it,
+// "Import all qualified symbols and shorten usages", does the same for every
+// qualified class, function, and constant in this namespace at once.
+
+class ImportQualifiedNameDemo
+{
+    public function demo(): Scaffolding\Pen
+    {
+        return \Demo\Scaffolding\makePen();
+    }
+}
+
+
 // ── Code Action: Remove Unused Import ───────────────────────────────────────
 // The `use ReflectionClass;` below is unused — it appears dimmed in the editor.
 // Place cursor on it and press Ctrl+. → "Remove unused import 'ReflectionClass'"
@@ -55,6 +71,19 @@ class RemoveUnusedImportDemo
         $x = 42;
     }
 }
+
+
+// ── Code Action: Remove Unused Member Of A Wrapped Group Import ─────────────
+// A group import written across several lines is checked member by member,
+// the same as a single-line `use Foo\{Bar, Baz};` is. Neither engine below is
+// used, so both names appear dimmed.
+// Ctrl+. on either → "Remove unused import" takes that member's line with it;
+// "Remove all unused imports" removes the whole statement instead.
+
+use Random\Engine\{
+    Mt19937,
+    Secure,
+};
 
 
 // ── Code Action: Sort Use Statements ────────────────────────────────────────

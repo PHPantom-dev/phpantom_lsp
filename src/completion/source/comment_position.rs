@@ -20,9 +20,14 @@ pub(crate) use crate::text_position::position_to_byte_offset;
 /// Scans backwards from the cursor to find the nearest `/**` that has not
 /// been closed by a matching `*/` before the cursor position.
 pub fn is_inside_docblock(content: &str, position: Position) -> bool {
-    let byte_offset = position_to_byte_offset(content, position);
+    is_offset_inside_docblock(content, position_to_byte_offset(content, position))
+}
 
-    let before_cursor = &content[..byte_offset.min(content.len())];
+/// [`is_inside_docblock`] for a byte offset.
+pub(crate) fn is_offset_inside_docblock(content: &str, byte_offset: usize) -> bool {
+    let before_cursor = content
+        .get(..byte_offset.min(content.len()))
+        .unwrap_or(content);
 
     let Some(open_pos) = before_cursor.rfind("/**") else {
         return false;

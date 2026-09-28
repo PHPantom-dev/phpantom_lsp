@@ -6,7 +6,7 @@
 //! resolving, and a key two providers bind ends up with whichever of them the
 //! container would let win once the edit has landed.
 
-use crate::common::create_psr4_workspace;
+use crate::common::{APP_HELPERS_PHP, consumer_class, create_psr4_workspace};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -92,23 +92,10 @@ class Application
 }
 "#;
 
-const HELPERS_PHP: &str = r#"<?php
-/**
- * @template TClass
- * @param string|class-string<TClass> $abstract
- * @return ($abstract is class-string<TClass> ? TClass : \Illuminate\Foundation\Application)
- */
-function app($abstract = null, array $parameters = [])
-{
-}
-"#;
-
 /// The consumer resolves `$x` from a container key, so its hover text names
 /// whatever class the provider scan currently has behind that key.
 fn consumer(key: &str) -> String {
-    format!(
-        "<?php\nnamespace App;\nclass Consumer {{\n    public function go(): void {{\n        $x = app('{key}');\n        $x;\n    }}\n}}\n"
-    )
+    consumer_class(&format!("app('{key}')"))
 }
 
 fn base_files() -> Vec<(&'static str, &'static str)> {
@@ -117,7 +104,7 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
         ("src/AppServiceProvider.php", APP_PROVIDER),
         ("src/Support/Clock.php", CLOCK_PHP),
         ("src/Support/Mailer.php", MAILER_PHP),
-        ("src/helpers.php", HELPERS_PHP),
+        ("src/helpers.php", APP_HELPERS_PHP),
         ("vendor/acme/AcmeServiceProvider.php", ACME_PROVIDER),
         ("vendor/acme/Stopwatch.php", STOPWATCH_PHP),
         (

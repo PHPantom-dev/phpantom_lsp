@@ -1,17 +1,5 @@
-use crate::common::{create_test_backend, with_parse_worker_stack};
+use crate::common::{create_test_backend, hover_at, with_parse_worker_stack};
 use tower_lsp::lsp_types::Position;
-
-/// Helper: send a hover request at (line, character) and return the result.
-fn hover_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    line: u32,
-    character: u32,
-) -> Option<tower_lsp::lsp_types::Hover> {
-    backend.update_ast(uri, content);
-    backend.handle_hover(uri, content, Position { line, character })
-}
 
 /// Regression test: parse the exact sandbox.php content through
 /// update_ast (the did_open code path) to verify it does not crash

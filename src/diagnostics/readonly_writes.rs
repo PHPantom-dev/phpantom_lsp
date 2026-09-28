@@ -65,7 +65,9 @@ use crate::hover::{MemberKindForOrigin, find_declaring_class};
 use crate::parser::{with_parse_cache, with_parsed_program};
 use crate::php_type::{PhpType, TypeKind, is_array_like_name};
 use crate::symbol_map::SymbolKind;
-use crate::type_engine::resolver::{ResolutionCtx, SubjectOutcome, resolve_subject_outcome};
+use crate::type_engine::resolver::{
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome,
+};
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind, PropertyInfo};
 use crate::virtual_members::resolve_class_fully_cached;
 
@@ -456,15 +458,12 @@ impl Backend {
         }
 
         let local_classes = &ctx.file.classes;
-        let class_loader =
-            self.class_loader_with(local_classes, &ctx.file.use_map, &ctx.file.namespace);
-        let function_loader = self.function_loader_with(
-            ctx.file.resolved_names.as_deref(),
-            &ctx.file.use_map,
-            &ctx.file.namespace,
-        );
-        let resolved_cache = &self.resolved_class_cache;
+        let class_loaders = self.class_loaders(&ctx.file);
+        let function_loaders = self.function_loaders(&ctx.file);
         let symbol_map = &ctx.symbol_map;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
 
         for span in &symbol_map.spans {
             let SymbolKind::MemberAccess {
@@ -485,6 +484,7 @@ impl Backend {
             }
 
             let current_class = find_innermost_enclosing_class(local_classes, span.start);
+            let class_loader = class_loaders.at(span.start);
 
             // A trait body is incomplete by nature: the property it
             // writes may be declared by any host class, and the trait
@@ -493,7 +493,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
 
             // `$this->ownProperty = …` inside the constructor is the
             // shape most writes in a file have.  Settling it before
@@ -510,25 +510,21 @@ impl Backend {
                         .classes
                         .get(&class.start_offset)
                         .is_some_and(|facts| facts.covers_initializer(span.start))
-                        && declares_property(class, member_name, &class_loader, &mut Vec::new())
+                        && declares_property(class, member_name, class_loader, &mut Vec::new())
                 })
             {
                 continue;
             }
 
             let rctx = ResolutionCtx {
-                current_class,
-                all_classes: local_classes,
-                content,
-                cursor_offset: span.start,
-                class_loader: &class_loader,
-                backend: Some(self),
-                laravel_macro_this_resolver: None,
-                resolved_class_cache: Some(resolved_cache),
-                function_loader: Some(&function_loader),
-                scope_var_resolver: None,
                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                preserve_static: false,
+                ..self.resolution_ctx_at(
+                    current_class,
+                    local_classes,
+                    content,
+                    span.start,
+                    CtxLoaders::without_macro_this(class_loader, function_loaders.at(span.start)),
+                )
             };
             let SubjectOutcome::Resolved(receivers) =
                 resolve_subject_outcome(subject_text, AccessKind::Arrow, &rctx)
@@ -547,7 +543,7 @@ impl Backend {
             };
             let mut verdict: Option<Verdict> = None;
             for receiver in &receivers {
-                let judged = self.judge_readonly_write(receiver, &site, &writes, &class_loader);
+                let judged = self.judge_readonly_write(receiver, &site, &writes, class_loader);
                 if matches!(judged, Verdict::Ok) {
                     verdict = None;
                     break;

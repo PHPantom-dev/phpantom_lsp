@@ -1,0 +1,12 @@
+// test: $value::class names the class the value holds
+// feature: hover
+// expect: class-string<Pen>
+---
+<?php
+
+class Pen {}
+
+function test(Pen $pen): void {
+    $class = $pen::class;
+    $<>class;
+}

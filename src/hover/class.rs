@@ -24,16 +24,22 @@ impl Backend {
         class_loader: &dyn Fn(&str) -> Option<std::sync::Arc<ClassInfo>>,
         cursor_offset: u32,
     ) -> Option<Hover> {
-        let class_info = class_loader(name);
+        // In a docblock a template parameter in scope shadows a class of
+        // the same name, so `@param T $x` under `@template T` names the
+        // template even when a class `T` exists.  In code it is the class.
+        if crate::completion::source::comment_position::is_offset_inside_docblock(
+            content,
+            cursor_offset as usize,
+        ) && let Some(tpl) = self.find_template_def_for_hover(uri, name, cursor_offset)
+        {
+            return Some(tpl);
+        }
 
-        if let Some(cls) = class_info {
+        if let Some(cls) = class_loader(name) {
             Some(self.hover_for_class_info(&cls, uri, content))
         } else {
             // Check whether this is a template parameter in scope.
-            if let Some(tpl) = self.find_template_def_for_hover(uri, name, cursor_offset) {
-                return Some(tpl);
-            }
-            None
+            self.find_template_def_for_hover(uri, name, cursor_offset)
         }
     }
 

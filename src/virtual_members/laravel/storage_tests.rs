@@ -10,7 +10,7 @@ fn tree(config: &str) -> ConfigNode {
 /// (minus the closure-body inference, which needs a `Backend`).
 fn drivers(provider: &str) -> LaravelStorageDriverIndex {
     let mut index = LaravelStorageDriverIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///app/Providers/AppServiceProvider.php".to_string(),
         extract_storage_driver_registrations(provider),
     );
@@ -273,7 +273,7 @@ fn dynamic_driver_name_is_skipped() {
 #[test]
 fn non_class_return_type_is_not_indexed() {
     let mut index = LaravelStorageDriverIndex::default();
-    index.set_file(
+    index.files.set_file(
         "file:///app/Providers/AppServiceProvider.php".to_string(),
         vec![StorageDriverRegistration {
             driver: "memory".to_string(),

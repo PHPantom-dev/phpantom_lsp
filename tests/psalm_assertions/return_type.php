@@ -129,7 +129,10 @@ namespace PsalmTest_return_type_7 {
 
     $obj = (object)returnsInt();
 
-    assertType('object{scalar:int}', $obj);
+    // PHPantom is more precise than Psalm here: an object cast always
+    // instantiates stdClass, so the result keeps that class identity
+    // alongside the shape.
+    assertType('object{scalar: int}&stdClass', $obj);
 }
 
 // Test: infersObjectShapeOfCastArray
@@ -143,6 +146,63 @@ namespace PsalmTest_return_type_8 {
 
     $obj = (object)returnsArray();
 
-    assertType('object{a:int}', $obj);
+    // PHPantom is more precise than Psalm here: an object cast always
+    // instantiates stdClass, so the result keeps that class identity
+    // alongside the shape.
+    assertType('object{a: int}&stdClass', $obj);
 }
 
+// Test: arrayCombine
+namespace PsalmTest_return_type_9 {
+    class a {}
+
+    /**
+     * @return list{0, 0}|list<a>
+     */
+    function ret() {
+        return [new a, new a, new a];
+    }
+
+    $result = ret();
+
+    // PHPantom keeps the declared union, where Psalm folds it into one list shape.
+    assertType('list{0, 0}|list<a>', $result);
+}
+
+// Test: arrayCombineInv
+namespace PsalmTest_return_type_10 {
+    class a {}
+
+    /**
+     * @return list<a>|list{0, 0}
+     */
+    function ret() {
+        return [new a, new a, new a];
+    }
+
+    $result = ret();
+
+    // PHPantom keeps the declared union, where Psalm folds it into one list shape.
+    assertType('list<a>|list{0, 0}', $result);
+}
+
+// Test: newReturnTypesInPhp82
+// Requires PHP 8.2
+namespace PsalmTest_return_type_11 {
+    function alwaysTrue(): true {
+        return true;
+    }
+
+    function alwaysFalse(): false {
+        return false;
+    }
+
+    function alwaysNull(): null {
+        return null;
+    }
+    $true = alwaysTrue();
+    $false = alwaysFalse();
+    $null = alwaysNull();
+
+    assertType('null', $null);
+}

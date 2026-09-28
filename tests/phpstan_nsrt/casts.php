@@ -111,11 +111,11 @@ class Foo extends Bar
 		$nullToBool = (bool) null;
 		$nullToArray = (array) null;
 
-		assertType('int', $nullToInt);
-		assertType('float', $nullToFloat);
-		assertType('string', $nullToString);
-		assertType('bool', $nullToBool);
-		assertType('array', $nullToArray);
+		assertType('0', $nullToInt);
+		assertType('0.0', $nullToFloat);
+		assertType("''", $nullToString);
+		assertType('false', $nullToBool);
+		assertType('array{}', $nullToArray);
 	}
 
 	public function castInConditionalBranch(bool $cond, string $str): void
@@ -124,9 +124,13 @@ class Foo extends Bar
 		assertType('string|null', $cond ? (string) $str : null);
 		assertType('float|null', $cond ? (float) $str : null);
 		assertType('bool|null', $cond ? (bool) $str : null);
-		assertType('array|null', $cond ? (array) $str : null);
-		assertType('object{scalar: string}|null', $cond ? (object) $str : null);
-		assertType('object{a: int}|null', $cond ? (object) ['a' => 1] : null);
+		// PHPantom is more precise than PHPStan here: a string casts to the
+		// one-entry list holding it.
+		assertType('array{string}|null', $cond ? (array) $str : null);
+		// PHPantom keeps stdClass's class identity alongside the shape, since
+		// an object cast always instantiates stdClass.
+		assertType('object{scalar: string}&stdClass|null', $cond ? (object) $str : null);
+		assertType('object{a: int}&stdClass|null', $cond ? (object) ['a' => 1] : null);
 		assertType('bool|null', $cond ? !$str : null);
 		assertType('string|null', $cond ? ~$str : null);
 	}
@@ -137,8 +141,8 @@ class Foo extends Bar
 		$arrFromString = (array) 'hello';
 		$arrFromBool = (array) true;
 
-		assertType('array', $arrFromInt);
-		assertType('array', $arrFromString);
-		assertType('array', $arrFromBool);
+		assertType('array{1}', $arrFromInt);
+		assertType("array{'hello'}", $arrFromString);
+		assertType('array{true}', $arrFromBool);
 	}
 }

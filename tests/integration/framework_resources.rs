@@ -377,6 +377,17 @@ return App::config([
             .any(|text| text == "App\\\\Service\\\\MessageMailer"),
         "expected escaped service class edit, got {config_edits:?}"
     );
+    // `Mailer::class` is both a PHP class reference and a framework one;
+    // it must be edited once, not by both renames.
+    let mut ranges: Vec<Range> = edit.changes.as_ref().unwrap()[&config_uri]
+        .iter()
+        .map(|edit| edit.range)
+        .collect();
+    ranges.sort_by_key(|range| (range.start.line, range.start.character));
+    assert!(
+        ranges.windows(2).all(|pair| pair[0].end <= pair[1].start),
+        "config edits must not overlap: {ranges:?}"
+    );
 }
 
 #[tokio::test]
@@ -866,6 +877,45 @@ return static function (ContainerConfigurator $container): void {
     assert!(
         titles.contains(&"Symfony service class: Mailer"),
         "expected PHP service declaration class lens, got {titles:?}"
+    );
+}
+
+#[tokio::test]
+async fn renaming_a_controller_action_from_php_updates_the_route() {
+    let controller_php = "<?php\nnamespace App\\Controller;\nclass HomeController {\n    public function index(): void {}\n}\n";
+    let routes_yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("config/routes.yaml", routes_yaml),
+        ],
+    );
+
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let routes_uri = uri_for(&dir, "config/routes.yaml");
+    open_doc(&backend, controller_uri.clone(), "php", controller_php).await;
+    open_doc(&backend, routes_uri.clone(), "yaml", routes_yaml).await;
+
+    let edit = backend
+        .rename(RenameParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: controller_uri.clone(),
+                },
+                position: Position::new(3, 21),
+            },
+            new_name: "dashboard".to_string(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .unwrap()
+        .expect("method rename should produce edits");
+
+    assert_eq!(edit_texts_for_uri(&edit, &routes_uri), vec!["dashboard"]);
+    assert_eq!(
+        edit_texts_for_uri(&edit, &controller_uri),
+        vec!["dashboard"]
     );
 }
 
@@ -2237,4 +2287,46 @@ final class Configuration
             .as_ref()
             .is_some_and(|command| command.title == "Symfony configuration: 1 ref")
     }));
+}
+
+#[tokio::test]
+async fn renaming_a_mapped_property_updates_validation_config() {
+    let user_php =
+        "<?php\nnamespace App\\Entity;\n\nfinal class User\n{\n    private string $email;\n}\n";
+    let validation_yaml = "App\\Entity\\User:\n  properties:\n    email:\n      - NotBlank: ~\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", user_php),
+            ("config/validator/User.yaml", validation_yaml),
+        ],
+    );
+    let user_uri = uri_for(&dir, "src/Entity/User.php");
+    let yaml_uri = uri_for(&dir, "config/validator/User.yaml");
+    open_doc(&backend, user_uri.clone(), "php", user_php).await;
+    open_doc(&backend, yaml_uri.clone(), "yaml", validation_yaml).await;
+
+    let rename_from = |uri: Url, position: Position| {
+        let backend = &backend;
+        async move {
+            backend
+                .rename(RenameParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri },
+                        position,
+                    },
+                    new_name: "mail".to_string(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .unwrap()
+                .expect("property rename should produce edits")
+        }
+    };
+    let from_config = rename_from(yaml_uri.clone(), Position::new(2, 6)).await;
+    let from_declaration = rename_from(user_uri.clone(), Position::new(5, 21)).await;
+    assert_eq!(from_config, from_declaration);
+
+    assert_eq!(edit_texts_for_uri(&from_config, &yaml_uri), vec!["mail"]);
+    assert_eq!(edit_texts_for_uri(&from_config, &user_uri), vec!["$mail"]);
 }

@@ -5,7 +5,7 @@ fn get_folding_ranges(php: &str) -> Vec<FoldingRange> {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     backend.update_ast(uri, php);
-    backend.handle_folding_range(php).unwrap_or_default()
+    backend.handle_folding_range(uri, php).unwrap_or_default()
 }
 
 fn has_range(ranges: &[FoldingRange], start_line: u32, end_line: u32) -> bool {
