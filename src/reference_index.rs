@@ -768,15 +768,10 @@ impl Backend {
                 // XML from adding one index entry per distinct class it
                 // names on top of the one that answers lookups.
                 if *is_fqn && crate::resource_navigation::is_resource_document(uri) {
-                    let mut seen = HashSet::new();
-                    return self
-                        .metadata_class_family(name)
-                        .into_iter()
-                        .filter_map(|name| {
-                            let key = ReferenceIndexKey::class_owned(name);
-                            seen.insert(key.clone()).then_some((key, true))
-                        })
-                        .collect();
+                    return vec![(
+                        ReferenceIndexKey::class_owned(normalize_symbol_name(name)),
+                        true,
+                    )];
                 }
                 let resolved = if *is_fqn {
                     normalize_symbol_name(name)

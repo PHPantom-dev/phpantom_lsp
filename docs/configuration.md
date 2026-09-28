@@ -61,24 +61,6 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | --------- | ------ | --------------------------- | ----------- |
 | `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
 
-#### `[[php.proxies]]`
-
-Declare generated transparent-proxy subclasses so metadata found on the
-generated class is attributed to its real parent class. PHPantom scans only
-the listed workspace-relative files, directories, or globs. A class must
-directly implement `marker-interface`; an ordinary subclass in the same path
-is left alone.
-
-```toml
-[[php.proxies]]
-paths = ["var/cache/*/generated-proxies/*.php"]
-marker-interface = 'ProxyManager\Proxy\AccessInterceptorValueHolderInterface'
-```
-
-This does not replace the proxy class in PHP type resolution. It gives project
-metadata features one shared relation to the parent class; YAML/XML navigation
-uses that relation directly.
-
 ### `[symfony]`
 
 PHPantom can read Symfony's generated dependency-injection container as text to
@@ -143,9 +125,7 @@ when another argument is set, such as an event sent to Messenger instead of
 Symfony's event dispatcher.
 
 The result is bidirectional go-to-definition, references, and `Symfony event`
-code lenses between publisher and listener methods. Listener classes that are
-configured transparent proxies use the shared `[[php.proxies]]` relation, so
-the links land on the real class.
+code lenses between publisher and listener methods.
 
 #### `[symfony.expression-language]`
 

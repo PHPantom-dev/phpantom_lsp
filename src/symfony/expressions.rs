@@ -106,10 +106,8 @@ impl Backend {
             let target = path.last()?;
             let mut locations = Vec::new();
             for class in classes {
-                let mut location = self
-                    .metadata_class_family(&class.fqn())
-                    .iter()
-                    .find_map(|fqn| self.class_member_declaration_location(fqn, &target.name));
+                let mut location =
+                    self.class_member_declaration_location(&class.fqn(), &target.name);
                 if location.is_none()
                     && target.kind == ExpressionAccessKind::Property
                     && matches!(target.name.as_str(), "name" | "value")
@@ -307,15 +305,10 @@ impl Backend {
         } else if let Some(class_fqn) = source.strip_prefix("class:") {
             let class_fqn = normalize_fqn(class_fqn.trim());
             let definitions = self
-                .metadata_class_family(&class_fqn)
-                .iter()
-                .filter_map(|fqn| self.class_declaration_location(fqn))
+                .class_declaration_location(&class_fqn)
+                .into_iter()
                 .collect();
-            let classes = self
-                .metadata_class_family(&class_fqn)
-                .iter()
-                .filter_map(|fqn| class_loader(fqn))
-                .collect();
+            let classes = class_loader(&class_fqn).into_iter().collect();
             (definitions, classes)
         } else {
             let selector = source.strip_prefix("parameter:").unwrap_or(source);
