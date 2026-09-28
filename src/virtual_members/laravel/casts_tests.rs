@@ -638,3 +638,163 @@ fn cast_get_return_type_used_when_no_implements_generics() {
         "?HtmlString"
     );
 }
+
+// ── framework class-based casts ─────────────────────────────────────
+
+fn framework(cast: &str) -> String {
+    cast_type_to_php_type(cast, &no_loader).to_string()
+}
+
+#[test]
+fn as_enum_collection_of_is_a_collection_of_that_enum() {
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection::of:App\\Enums\\Status"),
+        "Illuminate\\Support\\Collection<array-key, App\\Enums\\Status>"
+    );
+    assert_eq!(
+        framework("AsEnumCollection::of:Status"),
+        "Illuminate\\Support\\Collection<array-key, Status>"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection:App\\Enums\\Status"),
+        "Illuminate\\Support\\Collection<array-key, App\\Enums\\Status>"
+    );
+}
+
+#[test]
+fn as_enum_collection_without_an_enum_is_a_collection_of_mixed() {
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection"),
+        "Illuminate\\Support\\Collection<array-key, mixed>"
+    );
+}
+
+#[test]
+fn as_enum_array_object_of_is_an_array_object_of_that_enum() {
+    assert_eq!(
+        framework(
+            "Illuminate\\Database\\Eloquent\\Casts\\AsEnumArrayObject::of:App\\Enums\\Status"
+        ),
+        "Illuminate\\Database\\Eloquent\\Casts\\ArrayObject<array-key, App\\Enums\\Status>"
+    );
+}
+
+#[test]
+fn as_collection_of_and_using_set_the_collection_and_item() {
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsCollection"),
+        "Illuminate\\Support\\Collection<array-key, mixed>"
+    );
+    assert_eq!(
+        framework(
+            "Illuminate\\Database\\Eloquent\\Casts\\AsCollection::of:App\\ValueObjects\\Option"
+        ),
+        "Illuminate\\Support\\Collection<array-key, App\\ValueObjects\\Option>"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsCollection:,App\\ValueObjects\\Option"),
+        "Illuminate\\Support\\Collection<array-key, App\\ValueObjects\\Option>"
+    );
+    assert_eq!(
+        framework(
+            "Illuminate\\Database\\Eloquent\\Casts\\AsCollection::using:App\\Collections\\Options"
+        ),
+        "App\\Collections\\Options"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsCollection:App\\Collections\\Options,"),
+        "App\\Collections\\Options"
+    );
+    assert_eq!(
+        framework(
+            "Illuminate\\Database\\Eloquent\\Casts\\AsCollection::using:App\\Collections\\Options,App\\ValueObjects\\Option"
+        ),
+        "App\\Collections\\Options<array-key, App\\ValueObjects\\Option>"
+    );
+}
+
+#[test]
+fn encrypted_collection_and_array_object_match_their_plain_counterparts() {
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsEncryptedCollection::of:App\\Item"),
+        "Illuminate\\Support\\Collection<array-key, App\\Item>"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsEncryptedArrayObject"),
+        "Illuminate\\Database\\Eloquent\\Casts\\ArrayObject<array-key, mixed>"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsArrayObject"),
+        "Illuminate\\Database\\Eloquent\\Casts\\ArrayObject<array-key, mixed>"
+    );
+}
+
+#[test]
+fn scalar_framework_casts_map_to_the_value_they_return() {
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsStringable"),
+        "Illuminate\\Support\\Stringable"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsFluent"),
+        "Illuminate\\Support\\Fluent"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsHtmlString"),
+        "Illuminate\\Support\\HtmlString"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsUri"),
+        "Illuminate\\Support\\Uri"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsBinary::uuid"),
+        "string"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsBinary:ulid"),
+        "string"
+    );
+    assert_eq!(
+        framework("Illuminate\\Database\\Eloquent\\Casts\\AsVector"),
+        "array<int, float>"
+    );
+}
+
+#[test]
+fn a_user_class_sharing_a_framework_cast_name_is_not_rewritten() {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "App\\Casts\\AsCollection" {
+            let mut c = make_class("AsCollection");
+            c.interfaces = vec![atom(CASTABLE_FQN)];
+            Some(Arc::new(c))
+        } else {
+            None
+        }
+    };
+    assert_eq!(
+        cast_type_to_php_type("App\\Casts\\AsCollection", &loader).to_string(),
+        "App\\Casts\\AsCollection"
+    );
+}
+
+#[test]
+fn framework_cast_wins_over_the_castable_rule() {
+    let loader = |name: &str| -> Option<Arc<ClassInfo>> {
+        if name == "Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection" {
+            let mut c = make_class("AsEnumCollection");
+            c.interfaces = vec![atom(CASTABLE_FQN)];
+            Some(Arc::new(c))
+        } else {
+            None
+        }
+    };
+    assert_eq!(
+        cast_type_to_php_type(
+            "Illuminate\\Database\\Eloquent\\Casts\\AsEnumCollection::of:App\\Enums\\Status",
+            &loader
+        )
+        .to_string(),
+        "Illuminate\\Support\\Collection<array-key, App\\Enums\\Status>"
+    );
+}
