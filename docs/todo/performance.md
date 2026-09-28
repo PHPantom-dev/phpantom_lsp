@@ -913,6 +913,53 @@ lengths where it shows.
 
 ---
 
+## P56. Folding array shapes across branches costs superlinear time
+
+**Impact: Low · Complexity: Medium**
+
+`join_shapes` keeps a variable at one tracked shape no matter how many
+branches write to it, which is what stops a merge from having to compare
+a variant per branch pairwise. The fold itself is not free, though:
+`join_shape_entries` builds a fresh `Vec<ShapeEntry>` and interns a new
+shape on every merge, so a variable that gains a key per branch pays for
+hashing a shape whose entry count grows with the branch count. The work
+is quadratic in the number of conditional writes.
+
+Measured on a release build, over a generated function assigning a
+distinct array shape under each of N sequential `if`s:
+
+| N writes | analyse wall clock |
+| -------- | ------------------ |
+| 400      | 0.30s              |
+| 800      | 0.90s              |
+| 1200     | 2.10s              |
+
+Doubling the writes roughly triples the time, and the same file with the
+shapes left un-merged (each write pushing its own alternative instead)
+runs in half of that, so folding is the more expensive of the two
+strategies at these sizes. It is still the right default: the variant-per-
+branch alternative grows the *type* without bound, which costs every
+later consumer rather than just the merge. What is missing is the cheap
+exit that would make the fold linear in the common case:
+
+1. **Skip the rebuild when nothing changes.** Most merges join a shape
+   with one whose keys it already covers, and the result is the existing
+   shape. Comparing entry lists before allocating would return the
+   interned handle unchanged rather than rebuilding and re-hashing it.
+
+2. **Fold in place along a chain of merges.** A run of merges against the
+   same variable rebuilds the accumulator from scratch each time. Joining
+   into a reusable buffer and interning once at the end of the run would
+   drop the repeated hashing.
+
+**Where to look:** `join_shapes`, `join_shape_entries`, and `join_values`
+in `php_type/mod.rs`, and the shape-folding branch of `merge_branch` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`. Hand-written code
+does not reach the sizes where this shows; generated code and long
+procedural report builders do.
+
+---
+
 ## P50. Cache the top-level scope for `global` keyword resolution
 
 **Impact: Low-Medium · Complexity: High**
@@ -1080,3 +1127,247 @@ through a separate flag, so the cached value has to carry both.
 `type_engine/resolver/mod.rs` (`SubjectExpr::CallExpr` and the property
 path) and `narrowed_by_rewalk` in
 `type_engine/variable/rhs_resolution/mod.rs`.
+
+---
+
+## P57. Narrowing deep-copies a class every time it crosses the `Arc` boundary
+
+**Impact: Medium · Complexity: Medium-High**
+
+A `ClassInfo`'s members are `SharedVec`s, so the struct is often called
+cheap to clone, but it still owns a `method_index` with one entry per
+method plus a dozen other `Vec`/`AtomMap` fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.
+
+The narrowing layer pays that on every crossing, in both directions:
+
+- `ResolvedType::apply_narrowing` collects `arc.as_ref().clone()` for
+  every candidate on the way in, and pushes survivors back through
+  `from_class`, which wraps each copy in a *fresh* `Arc`. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every `instanceof`,
+  `assert`, `in_array`, and identity guard the forward walk sees.
+- `apply_property_narrowing` unwraps the whole vector with
+  `Arc::unwrap_or_clone` and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  `Vec<ClassInfo>`. The `Arc`s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.
+- `resolved_type_with_lookup` clones a class out of the index only to
+  hand it to `from_both`, which allocates a new `Arc` around the copy.
+  Fifteen call sites, essentially every method-call return type.
+- `narrowing/resolve.rs`, `narrowing/instanceof.rs`, and
+  `narrowing/assertions.rs` repeat the pattern, the last one deep-copying
+  a `MethodInfo` out of its `Arc`.
+
+`ResolvedType::from_arc` and `from_both_arc` already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+`Vec<ClassInfo>` to `Vec<Arc<ClassInfo>>` — `apply_narrowing`'s closure,
+the `results` parameters in `narrowing::{instanceof,assertions,guards}`,
+`resolve_class_names_to_union`, and `ClassInfo::push_unique` — so a class
+is only allocated where one is genuinely constructed.
+`apply_property_narrowing`'s unwrap/rewrap then disappears.
+
+This is the same defect as [P53](#p53-the-deprecated-collector-deep-copies-a-class-per-member-access)
+on a different path, and it is worth measuring the two together.
+
+**Where to look:** `apply_narrowing`, `from_class`, `from_arc`,
+`from_both`, and `from_both_arc` in `types/resolved_type.rs`;
+`apply_property_narrowing` in `type_engine/resolver/property_narrowing.rs`;
+`resolved_type_with_lookup` in
+`type_engine/variable/rhs_resolution/mod.rs`;
+`type_engine/types/narrowing/{resolve,instanceof,assertions}.rs`.
+
+## P58. A member-completion cache hit copies the whole item list
+
+**Impact: Low · Complexity: Low**
+
+The member-completion cache exists so that each keystroke in
+`$model->wh…` reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached `Vec<CompletionItem>` wholesale, which for an
+Eloquent model is several hundred items each carrying several `String`s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.
+
+Store an `Arc<Vec<CompletionItem>>` and have the filter take a slice,
+cloning only the items that survive.
+
+**Where to look:** `member_completion_cache` and
+`filter_member_completion_items` in
+`completion/handler/member_access.rs`.
+
+## P63. Every diagnostic converts its offsets by counting from the top of the file
+
+**Impact: High · Complexity: Low**
+
+`offset_range_to_lsp_range` (`diagnostics/mod.rs`) turns a diagnostic's
+byte span into an LSP range through `byte_range_to_lsp_range`, which
+calls `offset_to_position` twice, and that walks `content.char_indices()`
+from byte 0 every time. There are around fifty call sites building
+diagnostic ranges this way, so a file reports each of its diagnostics at
+a cost proportional to how far down the file it sits, and a pass over one
+file costs O(size × diagnostics).
+
+`vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php` (2,927 lines,
+150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
+there puts 69% of the stacks in `byte_range_to_lsp_range` alone, ahead of
+the whole type engine.
+
+`text_position::LineIndex` already exists for exactly this and documents
+the quadratic it avoids; semantic tokens, code lenses, and inlay hints
+were moved onto it. The diagnostic collectors were not, and they produce
+far more positions per file than any of those. Build one index per file
+per pass and answer every collector's range from it.
+
+**Where to look:** the free `offset_range_to_lsp_range` and
+`Backend::offset_range_to_lsp_range` in `diagnostics/mod.rs`,
+`offset_to_position`/`LineIndex` in `text_position.rs`, and the
+collectors under `diagnostics/` that call them.
+
+## P64. A file with one very large scope copies it at every branch
+
+**Impact: Medium · Complexity: Medium-High**
+
+`ScopeState::merge_branch` joins two paths by comparing and then unioning
+their whole locals map, and a branch entered from a scope keeps a copy of
+it to merge back. That is proportional to how many variables the enclosing
+scope holds, which is fine inside a method and not fine at the top level of
+a long procedural file, where every statement so far has left its variable
+behind and each `if`/`foreach`/`switch` therefore copies and compares all
+of them. The cost of walking the file grows with the square of its length.
+
+A generated model, N repetitions of `/** @var … */ $vN = []; foreach ($vN
+as $eN) { $zN = $eN->prop; }` at the top level of one file, measured on a
+release build:
+
+| lines | analyse wall clock |
+| ----- | ------------------ |
+| 2,000 | 0.45s              |
+| 4,000 | 1.5s               |
+| 8,000 | 5.8s               |
+| 16,000| 24.8s              |
+
+Each doubling costs roughly four times as much. Sampling the 8,000-line
+run puts about 38% of the diagnostic worker's stacks in
+`merge_branch` and in cloning and dropping the `Ustr → Vec<ResolvedType>`
+map underneath it, ahead of any single resolution step. The same shape
+inside a method body does not show it, because a method's scope is
+bounded by its own body.
+
+The generated model is not far-fetched: a legacy procedural script, a
+generated routing or configuration file, and a long report builder all
+have the same shape, one scope holding thousands of live variables.
+
+A branch reads far fewer variables than the scope holds, so the copy is
+mostly of entries neither path touches. Recording what a branch actually
+wrote and merging only those entries, or sharing the untouched part
+rather than cloning it, would make a merge proportional to the branch
+instead of to the file.
+
+**Where to look:** `merge_branch`, `merge_local` and
+`describes_same_state_as` in
+`type_engine/variable/forward_walk/scope_state/merge.rs`, the proof joins in
+`scope_state/proofs.rs`, and the branch forks: `fork_if_branches` and
+`merge_if_branches` in `forward_walk/if_else.rs` (both `if` spellings go
+through them), the loop bodies in `forward_walk/while_for.rs` and
+`forward_walk/foreach.rs`, and `process_try` / `process_switch` in
+`forward_walk/control_flow.rs`. `scope_state/tests.rs` pins what the join
+does to one variable at a time.
+
+The branch clones are not the only place the walk pays for the size of
+the scope. Measure these too before deciding what the join has to fix:
+
+- `record_scope_snapshot` (`forward_walk/diagnostic_cache.rs`) copies the
+  whole locals map at the start and again at the end of every statement
+  in a diagnostic pass (`walk_body_forward` in `forward_walk/mod.rs`, which
+  also clones a `pre_stmt_scope` per statement). That is
+  O(statements × locals) on its own, the same shape as the branch clones.
+- `ScopeState::snapshot_resolver` clones the map once per call and is
+  called once per condition narrowing (`cond_narrowing/apply.rs`,
+  `cond_narrowing/instanceof.rs`).
+- Condition narrowing turns every local into a `String` per condition
+  (the `var_names` lists in `cond_narrowing/apply.rs`) and runs its
+  extractors per local.
+- `forward_walk/by_ref.rs` re-resolves every local in scope on every call
+  statement to see whether the call rebinds it by reference.
+- The proof joins in `scope_state/proofs.rs` walk every key of one side,
+  `simplify_class_hierarchy_unions` runs after every multi-way join, and
+  `invalidate_dependent_keys` / `invalidate_receiver_state` in
+  `scope_state/mod.rs` `retain` over the whole map on every reassignment
+  or impure call.
+
+Full-scope clones at fork points, for the join rewrite: the then, per
+`elseif`, and `else` copies in `fork_if_branches` plus the implicit-else
+copy in `merge_if_branches`; `pre_loop_scope` and the post-loop join in
+each loop of `while_for.rs` and `foreach.rs`; `loops.rs` once per
+re-walk; `process_try` per `catch` and `process_switch` per arm and at
+the join; `closures.rs` on the first return; `loop_control.rs` per
+`break`/`continue`; `cond_narrowing/apply.rs` per `&&` operand. Narrowing
+writes into branch scopes too, and exit and return edges are recorded at
+arbitrary nesting depth and merged at an outer fork, so a "keys the branch
+wrote" set has to be carried through nested forks.
+
+---
+
+## P65. Every call site repeats the full function lookup, hit or miss
+
+**Impact: Low-Medium · Complexity: Medium**
+
+The forward walker asks `find_or_load_function` about the same call
+several times per statement (by-reference out-parameters, `@assert`
+narrowing, the return type), and nothing remembers the answer. A hit
+clones the whole `FunctionInfo` out of `global_functions`; a miss, which
+is every call to a function the project never declares, walks all four
+phases again, including cloning `autoload_file_paths` and building a URI
+per path. Every hover re-walks the enclosing body from its first
+statement, so the cost lands once per call site per hover.
+
+PHPStan's `nsrt/if.php` (a 545-line closure calling undeclared helpers
+such as `foo()` and `doFoo()`) measures about 70 ms per hover near its
+end in a release build, with `find_or_load_function`,
+`resolve_function_name_at`, and the `CiMap` lookups they make taking the
+top of the profile. Real code rarely calls hundreds of undeclared
+functions, but it does call the same declared ones over and over, and
+each of those pays the clone.
+
+The same file takes 53 s under the assertType runner in a debug build,
+which is why it is not among the ported fixtures in `tests/phpstan_nsrt/`
+yet; port it once this lands. Re-measured on 2026-09-27 it takes about
+210 s at `HEAD` (5f6422d3), so the cost has grown since. PHPStan's
+`nsrt/filterVar.php` (315 `filter_var()` calls in one function) takes
+about 540 s the same way, and `nsrt/array-functions.php` about 97 s;
+confirm with a profile that they are this item before counting them in.
+
+Caching the resolved `Arc<FunctionInfo>` (and a negative entry) per
+request, keyed by the candidate names, would turn the repeats into
+lookups. Returning an `Arc` rather than a clone is the larger half of
+the saving on its own.
+
+**Where to look:** `find_or_load_function` in `resolution.rs`, and the
+`function_loader` closures built for `VarResolutionCtx`.
+
+---
+
+## P66. Stub version filtering rescans a stub file once per symbol it declares
+
+**Impact: Low · Complexity: Low-Medium**
+
+`set_php_version` drops every stub symbol marked `@removed` at or before
+the target version. For a file that mentions `@removed` at all,
+`is_stub_function_removed` and its class and constant counterparts locate
+each symbol with `source.find("function NAME(")` from the start of the
+file, so a stub file declaring n symbols is scanned n times. Whether a
+file mentions `@removed` is now answered once per file, which halved the
+cost, but the per-symbol search remains: building a full-stub backend in
+a debug build still spends about 0.45 s there, and every test that uses
+`new_test_with_full_stubs` (including each fixture the assertType runner
+checks) pays it. The server pays it once at startup, far less in a
+release build.
+
+Scanning each such file once for its `@removed` docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.
+
+**Where to look:** `set_php_version` in `lib.rs` and the
+`is_stub_*_removed` family in `stubs.rs`.

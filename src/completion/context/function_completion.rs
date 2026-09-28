@@ -187,6 +187,11 @@ impl Backend {
         {
             let fmap = self.symbols.global_functions.read();
             for (key, (_uri, info)) in fmap.iter() {
+                // The Blade lowering's own functions resolve, but the
+                // user never writes one: they are not completions.
+                if crate::blade::is_synthetic_function(&info.name) {
+                    continue;
+                }
                 // Match against both the FQN (key) and the short name so
                 // that typing either finds the function.
                 if !key.to_lowercase().contains(&prefix_lower)
@@ -349,6 +354,9 @@ impl Backend {
         let stub_fn_idx = self.stub_function_index.read();
         for name in stub_fn_idx.keys() {
             if !name.to_lowercase().contains(&prefix_lower) {
+                continue;
+            }
+            if crate::blade::is_synthetic_function(name) {
                 continue;
             }
             if !seen.insert(name.to_string()) {

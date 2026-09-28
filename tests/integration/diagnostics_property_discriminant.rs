@@ -7,24 +7,20 @@
 //! the same way.  A member whose property could also have passed the
 //! check must survive it.
 
-use crate::common::create_test_backend;
+use crate::common::{collect_diagnostics_with, create_test_backend, messages_with_code};
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 fn collect(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_return_type_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    )
 }
 
 fn has_return_error(diags: &[Diagnostic]) -> bool {
-    diags.iter().any(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_return"))
-    })
+    !messages_with_code(diags, "type_mismatch_return").is_empty()
 }
 
 /// Two boxes whose `$v` differs only in its declared scalar type.

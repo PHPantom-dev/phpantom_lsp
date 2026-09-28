@@ -10,7 +10,10 @@
 //! non-trivial PHP files containing classes, inheritance, generics,
 //! docblocks, and cross-method calls.
 
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{
+    complete_labels_at_opened, create_psr4_workspace, create_test_backend, definition_locations,
+    goto_definition_at, hover_text_at, open_php,
+};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -41,87 +44,15 @@ async fn open_with_cursor(
 ) -> (Url, u32, u32) {
     let (content, line, character) = strip_cursor(src_with_cursor);
     let uri = Url::parse(uri_str).unwrap();
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(params).await;
+    open_php(backend, &uri, &content).await;
     (uri, line, character)
 }
 
 /// Open a PHP file on the backend (no cursor) and return its URI.
 async fn open_file(backend: &phpantom_lsp::Backend, uri_str: &str, content: &str) -> Url {
     let uri = Url::parse(uri_str).unwrap();
-    let params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content.to_string(),
-        },
-    };
-    backend.did_open(params).await;
+    open_php(backend, &uri, content).await;
     uri
-}
-
-/// Fire a completion request and return the item labels.
-async fn complete_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Vec<String> {
-    let params = CompletionParams {
-        text_document_position: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-        context: None,
-    };
-    let response = backend.completion(params).await.unwrap();
-    match response {
-        Some(CompletionResponse::Array(items)) => items.iter().map(|i| i.label.clone()).collect(),
-        Some(CompletionResponse::List(list)) => {
-            list.items.iter().map(|i| i.label.clone()).collect()
-        }
-        None => Vec::new(),
-    }
-}
-
-/// Fire a hover request and return the hover text (if any).
-async fn hover_at(
-    backend: &phpantom_lsp::Backend,
-    uri: &Url,
-    line: u32,
-    character: u32,
-) -> Option<String> {
-    let params = HoverParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-    };
-    let result = backend.hover(params).await.unwrap()?;
-    Some(match result.contents {
-        HoverContents::Markup(mc) => mc.value,
-        HoverContents::Scalar(MarkedString::String(s)) => s,
-        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value,
-        HoverContents::Array(items) => items
-            .into_iter()
-            .map(|ms| match ms {
-                MarkedString::String(s) => s,
-                MarkedString::LanguageString(ls) => ls.value,
-            })
-            .collect::<Vec<_>>()
-            .join("\n"),
-    })
 }
 
 /// Fire a go-to-definition request and return the locations.
@@ -131,27 +62,7 @@ async fn definition_at(
     line: u32,
     character: u32,
 ) -> Vec<Location> {
-    let params = GotoDefinitionParams {
-        text_document_position_params: TextDocumentPositionParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            position: Position { line, character },
-        },
-        work_done_progress_params: WorkDoneProgressParams::default(),
-        partial_result_params: PartialResultParams::default(),
-    };
-    let result = backend.goto_definition(params).await.unwrap();
-    match result {
-        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc],
-        Some(GotoDefinitionResponse::Array(locs)) => locs,
-        Some(GotoDefinitionResponse::Link(links)) => links
-            .into_iter()
-            .map(|link| Location {
-                uri: link.target_uri,
-                range: link.target_selection_range,
-            })
-            .collect(),
-        None => Vec::new(),
-    }
+    definition_locations(goto_definition_at(backend, uri, line, character).await)
 }
 
 /// Fire a signature help request and return the result.
@@ -205,7 +116,7 @@ $car-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("drive")),
         "Expected `drive` in completion, got: {labels:?}"
@@ -241,7 +152,7 @@ $log-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(labels.iter().any(|l| l.starts_with("info")));
     assert!(labels.iter().any(|l| l.starts_with("error")));
     assert!(labels.iter().any(|l| l.starts_with("debug")));
@@ -274,7 +185,7 @@ $p-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("play")),
         "Own method missing: {labels:?}"
@@ -306,7 +217,7 @@ Config::<>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("get")),
         "Static method missing: {labels:?}"
@@ -336,7 +247,7 @@ $qb->where('id', 1)->orderBy('name')-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("limit")),
         "Chained method missing: {labels:?}"
@@ -367,7 +278,7 @@ $b->frontWheel-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("rotate")),
         "Docblock-typed property chain failed: {labels:?}"
@@ -395,7 +306,7 @@ function display(Renderable $r): void {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("render")),
         "Interface method missing: {labels:?}"
@@ -423,7 +334,7 @@ $p-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getTitle")),
         "Own method missing: {labels:?}"
@@ -455,7 +366,7 @@ Color::<>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("Red")),
         "Enum case missing: {labels:?}"
@@ -489,7 +400,7 @@ enum Color {
     )
     .await;
 
-    let instance_labels = complete_at(&backend, &uri2, line2, ch2).await;
+    let instance_labels = complete_labels_at_opened(&backend, &uri2, line2, ch2).await;
     assert!(
         instance_labels.iter().any(|l| l.starts_with("label")),
         "Enum instance method missing: {instance_labels:?}"
@@ -519,7 +430,7 @@ $pc->first()-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getPrice")),
         "Generic resolution through @extends failed: {labels:?}"
@@ -548,7 +459,7 @@ foreach ($cart->getItems() as $item) {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getName")),
         "Foreach item type resolution failed: {labels:?}"
@@ -577,7 +488,7 @@ function handle(Cat|Fish $animal): void {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("meow")),
         "Narrowed type should show Cat methods: {labels:?}"
@@ -605,7 +516,7 @@ $hero-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("punch")),
         "Own method missing: {labels:?}"
@@ -637,7 +548,7 @@ $e-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("save")),
         "Real method missing: {labels:?}"
@@ -670,7 +581,7 @@ class Service {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("name")),
         "Private property via $this missing: {labels:?}"
@@ -702,7 +613,7 @@ $r = new <>Router();
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(hover.is_some(), "Hover on class name should return content");
     let text = hover.unwrap();
     assert!(
@@ -733,7 +644,7 @@ $calc-><>add(1, 2);
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on method call should return content"
@@ -762,7 +673,7 @@ $u-><>name;
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on property access should return content"
@@ -790,7 +701,7 @@ $db = new Database();
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(hover.is_some(), "Hover on variable should return content");
     let text = hover.unwrap();
     assert!(
@@ -820,7 +731,7 @@ class HvApp {
     )
     .await;
 
-    let hover = hover_at(&backend, &uri, line, ch).await;
+    let hover = hover_text_at(&backend, &uri, line, ch).await;
     assert!(
         hover.is_some(),
         "Hover on write() after ($this->formatter)() should return content"
@@ -1168,18 +1079,10 @@ class Service {
         Url::from_file_path(_tmp.path().join("src/Service.php").canonicalize().unwrap()).unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Service.php")).unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &content).await;
 
     // Cursor right after `$repo->` on line 4 (0-based), character 15
-    let labels = complete_at(&backend, &uri, 4, 15).await;
+    let labels = complete_labels_at_opened(&backend, &uri, 4, 15).await;
     assert!(
         labels.iter().any(|l| l.starts_with("findAll")),
         "Cross-file method missing: {labels:?}"
@@ -1233,15 +1136,7 @@ class Controller {
     .unwrap();
 
     let content = std::fs::read_to_string(_tmp.path().join("src/Controller.php")).unwrap();
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: content,
-        },
-    };
-    backend.did_open(open_params).await;
+    open_php(&backend, &uri, &content).await;
 
     // Click on "toArray" in `$model->toArray()` — line 4, around character 17
     let locations = definition_at(&backend, &uri, 4, 17).await;
@@ -1273,7 +1168,7 @@ $email->to('a@b.com')->from('x@y.com')->subject('Hi')-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("body")),
         "Builder chain should resolve: {labels:?}"
@@ -1311,7 +1206,7 @@ foreach ($orders->all() as $order) {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getTotal")),
         "Generic collection foreach failed: {labels:?}"
@@ -1346,7 +1241,7 @@ function handle(Success|Error $result): void {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getData")),
         "Guard clause narrowing should show Success methods: {labels:?}"
@@ -1386,7 +1281,7 @@ class Vehicle {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri_b, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri_b, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("start")),
         "Cross-file type hint resolution failed: {labels:?}"
@@ -1421,7 +1316,7 @@ $c->make(Box::class)-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("open")),
         "class-string<T> generic resolution failed: {labels:?}"
@@ -1449,7 +1344,7 @@ $result['validator']-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("validate")),
         "Array shape value type resolution failed: {labels:?}"
@@ -1478,7 +1373,7 @@ $p->getAddress()?-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("getCity")),
         "Null-safe chain should resolve: {labels:?}"
@@ -1505,7 +1400,7 @@ class PageController extends BaseController {
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("__construct")),
         "parent:: should show constructor: {labels:?}"
@@ -1537,7 +1432,7 @@ $c-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("area")),
         "Overridden abstract method missing: {labels:?}"
@@ -1575,7 +1470,7 @@ $s-><>
     )
     .await;
 
-    let labels = complete_at(&backend, &uri, line, ch).await;
+    let labels = complete_labels_at_opened(&backend, &uri, line, ch).await;
     assert!(
         labels.iter().any(|l| l.starts_with("log")),
         "First trait method missing: {labels:?}"
@@ -1597,25 +1492,21 @@ async fn smoke_regression_did_change_updates_completion() {
     let uri = Url::parse("file:///smoke_change.php").unwrap();
 
     // Open with one method
-    let open_params = DidOpenTextDocumentParams {
-        text_document: TextDocumentItem {
-            uri: uri.clone(),
-            language_id: "php".to_string(),
-            version: 1,
-            text: r#"<?php
+    open_php(
+        &backend,
+        &uri,
+        r#"<?php
 class Evolving {
     public function alpha(): void {}
 }
 $e = new Evolving();
 $e->
-"#
-            .to_string(),
-        },
-    };
-    backend.did_open(open_params).await;
+"#,
+    )
+    .await;
 
     // Cursor right after `$e->` on line 5, character 4
-    let labels = complete_at(&backend, &uri, 5, 4).await;
+    let labels = complete_labels_at_opened(&backend, &uri, 5, 4).await;
     assert!(labels.iter().any(|l| l.starts_with("alpha")));
     assert!(!labels.iter().any(|l| l.starts_with("beta")));
 
@@ -1642,7 +1533,7 @@ $e->
     backend.did_change(change_params).await;
 
     // Now `$e->` is on line 6
-    let labels = complete_at(&backend, &uri, 6, 4).await;
+    let labels = complete_labels_at_opened(&backend, &uri, 6, 4).await;
     assert!(
         labels.iter().any(|l| l.starts_with("alpha")),
         "Original method should still be present: {labels:?}"

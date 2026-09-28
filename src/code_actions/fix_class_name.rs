@@ -4,6 +4,8 @@ use crate::Backend;
 use crate::diagnostics::class_name_mismatch::class_name_mismatch_diagnostic;
 use crate::text_position::offset_to_position;
 
+use super::single_edit;
+
 impl Backend {
     pub(crate) fn collect_fix_class_name_actions(
         &self,
@@ -12,9 +14,11 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let file_path = match Url::parse(uri).ok().and_then(|u| u.to_file_path().ok()) {
-            Some(p) => p,
-            None => return,
+        let Ok(url) = Url::parse(uri) else {
+            return;
+        };
+        let Ok(file_path) = url.to_file_path() else {
+            return;
         };
         let file_stem = match file_path.file_stem().and_then(|s| s.to_str()) {
             Some(s) => s.to_string(),
@@ -38,24 +42,13 @@ impl Backend {
             return;
         }
 
-        let edit = TextEdit {
-            range,
-            new_text: file_stem.clone(),
-        };
-
         let title = format!("Fix class name to `{}`", file_stem);
-
-        let mut changes = std::collections::HashMap::new();
-        changes.insert(Url::parse(uri).unwrap(), vec![edit]);
 
         out.push(CodeActionOrCommand::CodeAction(CodeAction {
             title,
             kind: Some(CodeActionKind::QUICKFIX),
             diagnostics: Some(vec![diag]),
-            edit: Some(WorkspaceEdit {
-                changes: Some(changes),
-                ..Default::default()
-            }),
+            edit: Some(single_edit(url, range, file_stem)),
             is_preferred: Some(true),
             ..Default::default()
         }));

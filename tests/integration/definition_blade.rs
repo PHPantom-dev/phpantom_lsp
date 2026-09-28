@@ -3,34 +3,24 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::create_psr4_workspace;
+    use crate::common::{
+        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        create_psr4_workspace, open_document, open_php, workspace_uri,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-        "App\\": "app/",
-        "Illuminate\\": "stubs/Illuminate/",
-        "Livewire\\": "stubs/Livewire/"
-    }}}"#;
-
-    const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
-        }\n";
-
-    const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
-        }\n";
 
     /// A project holding one component of every shape a tag can name, with
     /// `page.blade.php` carrying the template under test.
     fn workspace(template: &str) -> (phpantom_lsp::Backend, tempfile::TempDir, Url) {
         let (backend, dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 (
                     "app/View/Components/Alert.php",
                     "<?php\nnamespace App\\View\\Components;\n\
@@ -62,22 +52,8 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
         (backend, dir, uri)
-    }
-
-    async fn open(backend: &phpantom_lsp::Backend, uri: &Url, text: &str) {
-        backend
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "blade".to_string(),
-                    version: 1,
-                    text: text.to_string(),
-                },
-            })
-            .await;
     }
 
     /// The file go-to-definition answers with, relative to the project
@@ -128,7 +104,7 @@ mod tests {
     async fn a_component_tag_leads_to_the_class_backing_it() {
         let template = "<x-alert>hi</x-alert>\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         // On the `l` of `alert`.
         assert_eq!(
@@ -143,7 +119,7 @@ mod tests {
     async fn a_nested_component_tag_leads_to_its_class() {
         let template = "<x-forms.date-picker />\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert_eq!(
             definition(&backend, &dir, &uri, 0, 12).await.as_deref(),
@@ -155,7 +131,7 @@ mod tests {
     async fn a_livewire_tag_leads_to_the_livewire_class() {
         let template = "<livewire:counter />\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert_eq!(
             definition(&backend, &dir, &uri, 0, 13).await.as_deref(),
@@ -169,7 +145,7 @@ mod tests {
     async fn an_anonymous_component_tag_leads_to_its_template() {
         let template = "<x-banner>hi</x-banner>\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert_eq!(
             definition(&backend, &dir, &uri, 0, 5).await.as_deref(),
@@ -181,7 +157,7 @@ mod tests {
     async fn a_tag_no_component_answers_for_leads_nowhere() {
         let template = "<x-nonexistent />\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert_eq!(definition(&backend, &dir, &uri, 0, 5).await, None);
     }
@@ -192,7 +168,7 @@ mod tests {
     async fn an_attribute_is_not_the_component_name() {
         let template = "<x-alert type=\"danger\" />\n";
         let (backend, dir, uri) = workspace(template);
-        open(&backend, &uri, template).await;
+        open_document(&backend, &uri, "blade", template).await;
 
         assert_eq!(definition(&backend, &dir, &uri, 0, 11).await, None);
     }
@@ -220,27 +196,16 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-
         for (rel_path, content) in [
             ("app/echo_helper.php", e_helper),
             ("app/route_helper.php", route_helper),
         ] {
-            let uri = Url::from_file_path(root.join(rel_path)).unwrap();
-            backend
-                .did_open(DidOpenTextDocumentParams {
-                    text_document: TextDocumentItem {
-                        uri,
-                        language_id: "php".to_string(),
-                        version: 1,
-                        text: content.to_string(),
-                    },
-                })
-                .await;
+            let uri = workspace_uri(&backend, rel_path);
+            open_php(&backend, &uri, content).await;
         }
 
-        let uri = Url::from_file_path(root.join("resources/views/page.blade.php")).unwrap();
-        open(&backend, &uri, template).await;
+        let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+        open_document(&backend, &uri, "blade", template).await;
 
         // On the first `{` of the `{{` opening the echo.
         assert_eq!(
@@ -252,5 +217,46 @@ mod tests {
             definition(&backend, &dir, &uri, 0, 24).await.as_deref(),
             Some("app/echo_helper.php")
         );
+    }
+
+    /// A `{{`/`}}` lookalike inside a `{{-- --}}` comment, a `@verbatim`
+    /// block, or an `@`-escaped `@{{ … }}` echo is literal output in all
+    /// three cases, none of it compiling to the `e()` call a genuine echo
+    /// delimiter does. Go-to-definition on any of them must not answer with
+    /// `e()`'s declaration.
+    #[tokio::test]
+    async fn an_echo_lookalike_outside_a_real_echo_does_not_lead_to_e() {
+        let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
+        let e_helper = "<?php\n\
+             function e(mixed $value, bool $doubleEncode = true): string {\n\
+                 return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8', $doubleEncode);\n\
+             }\n";
+
+        for (template, line, character) in [
+            // The `{{` inside a `{{-- --}}` comment.
+            ("{{-- {{ 'x' }} --}}\n", 0, 5),
+            // The `{{` inside a `@verbatim` block.
+            ("@verbatim\n{{ 'x' }}\n@endverbatim\n", 1, 0),
+            // The `{{` of an `@`-escaped echo.
+            ("@{{ 'x' }}\n", 0, 1),
+        ] {
+            let (backend, dir) = create_psr4_workspace(
+                composer,
+                &[
+                    ("app/echo_helper.php", e_helper),
+                    ("resources/views/page.blade.php", template),
+                ],
+            );
+            let uri = workspace_uri(&backend, "resources/views/page.blade.php");
+            let helper_uri = workspace_uri(&backend, "app/echo_helper.php");
+            open_php(&backend, &helper_uri, e_helper).await;
+            open_document(&backend, &uri, "blade", template).await;
+
+            assert_eq!(
+                definition(&backend, &dir, &uri, line, character).await,
+                None,
+                "template {template:?} at {line}:{character} must not resolve to e()"
+            );
+        }
     }
 }

@@ -53,9 +53,7 @@ impl Backend {
             // mago-names' offset-keyed resolution, fall back to the file's
             // imports for names it does not track (docblock references, which
             // is exactly what `@covers` is).
-            let resolved_names = self.resolved_names.read().get(file_uri).cloned();
-            let file_namespace = self.first_file_namespace(file_uri);
-            let file_use_map = std::cell::OnceCell::new();
+            let fqn_resolver = super::SpanFqnResolver::new(self, file_uri);
             // Only a tag on a class docblock needs the source text, to tell a
             // block that documents the class from one that documents whatever
             // sits between it and the declaration.
@@ -80,21 +78,7 @@ impl Backend {
                 // was there, so a written-out target is already the FQN.
                 // Re-resolving it would prefix the test's own namespace and
                 // produce `App\Tests\App\Calculator`.
-                let resolved = if *is_fqn {
-                    name.to_string()
-                } else if let Some(fqn) = resolved_names.as_ref().and_then(|rn| rn.get(span.start))
-                {
-                    fqn.to_string()
-                } else {
-                    let use_map = file_use_map.get_or_init(|| {
-                        self.file_imports
-                            .read()
-                            .get(file_uri)
-                            .cloned()
-                            .unwrap_or_default()
-                    });
-                    Self::resolve_to_fqn(name, use_map, &file_namespace)
-                };
+                let resolved = fqn_resolver.fqn(name, *is_fqn, span.start);
                 if !class_names_match(strip_fqn_prefix(&resolved), target, target_short) {
                     continue;
                 }

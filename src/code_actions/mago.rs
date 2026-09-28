@@ -3,11 +3,10 @@
 //! Converts fix edits attached to Mago diagnostics (`"mago-lint"` / `"mago-analyze"`)
 //! into LSP quick-fix code actions.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::single_file_edit;
 
 /// The safety level of a Mago fix edit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -91,8 +90,8 @@ impl Backend {
                     worst_safety = safety;
                 }
 
-                let start_pos = crate::mago::byte_offset_to_position(content, start);
-                let end_pos = crate::mago::byte_offset_to_position(content, end);
+                let start_pos = crate::text_position::offset_to_position(content, start);
+                let end_pos = crate::text_position::offset_to_position(content, end);
 
                 text_edits.push(TextEdit {
                     range: Range::new(start_pos, end_pos),
@@ -126,17 +125,11 @@ impl Backend {
                 }
             };
 
-            let mut changes = HashMap::new();
-            changes.insert(document_uri.clone(), text_edits);
-
             let action = CodeAction {
                 title,
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diag.clone()]),
-                edit: Some(WorkspaceEdit {
-                    changes: Some(changes),
-                    ..Default::default()
-                }),
+                edit: Some(single_file_edit(document_uri.clone(), text_edits)),
                 is_preferred,
                 ..Default::default()
             };

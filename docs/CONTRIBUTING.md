@@ -32,11 +32,13 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
-- Integration tests go in `tests/completion_*.rs` or `tests/definition_*.rs`, one file per feature area
-- Use `create_test_backend()` from `tests/common/mod.rs` for same-file tests
+- Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
+- Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
 - Use `create_psr4_workspace()` for cross-file / PSR-4 tests
+- A helper (a request wrapper, a label extractor, a position finder) that three or more test files would define belongs in `tests/integration/common/mod.rs`, not copied into each file; check there before writing one
+- Inline `#[cfg(test)]` modules in `src/` are for unit tests of private helpers; a test that drives a `Backend` through a public handler goes in `tests/integration/`
 - Test the happy path, edge cases, and interactions with existing features
-- When adding a feature, update `examples/php/demo.php` with working examples (and verify with `php -l examples/php/demo.php`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`).
+- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`).
 
 See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 

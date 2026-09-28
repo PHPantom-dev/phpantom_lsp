@@ -7,15 +7,16 @@
 /// helpers (`resolve_parent_class_names`, `resolve_name`) used to convert
 /// short class names to fully-qualified names.
 use std::cell::RefCell;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::ParseErrorEntry;
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::blade::call_site_inference::BladeScope;
 use crate::ci_map::CiMap;
 use crate::names::OwnedResolvedNames;
 use crate::php_type::PhpType;
-use crate::symbol_map::{SymbolMap, extract_symbol_map};
+use crate::symbol_map::{LaravelStringDependency, SymbolMap, extract_symbol_map_for_index};
 use crate::types::{
     ClassInfo, DefineInfo, DocblockMembers, FunctionInfo, MethodInfo, NamespaceSpan, TypeAliasDef,
 };
@@ -60,7 +61,7 @@ fn with_reusable_arena<R>(f: impl FnOnce(&LocalArena) -> R) -> R {
 }
 
 pub(crate) enum AstIndexParseResult {
-    Update(AstIndexUpdate),
+    Update(Box<AstIndexUpdate>),
     ParseFailed {
         uri: String,
         errors: Vec<ParseErrorEntry>,
@@ -77,6 +78,21 @@ pub(crate) struct AstIndexUpdate {
     functions: Vec<FunctionInfo>,
     defines: Vec<(String, DefineInfo)>,
     symbol_map: Arc<SymbolMap>,
+    /// The lowering a template was parsed as, published together with
+    /// `symbol_map` because the map's offsets index its virtual PHP.
+    blade: Option<BladeLowering>,
+}
+
+/// A Blade template lowered to the virtual PHP everything else reads it as,
+/// with the source map that carries positions back to the template.
+pub(crate) struct BladeLowering {
+    virtual_php: Arc<String>,
+    source_map: crate::blade::source_map::BladeSourceMap,
+    /// The scope this lowering was seeded from, so a batch that outlives a
+    /// newer scope written by call-site re-inference can be told apart from
+    /// one still describing the current scope (see
+    /// [`Backend::apply_ast_index_parse_results_batch`]).
+    scope: BladeScope,
 }
 
 fn class_info_fqn(class: &ClassInfo) -> String {
@@ -178,6 +194,73 @@ fn withdraw_function(
 }
 
 impl Backend {
+    /// Whether the workspace declares the symbol that keeps a dormant Laravel
+    /// span from meaning what Laravel would make of it.
+    fn laravel_string_dependency_exists(&self, dependency: LaravelStringDependency) -> bool {
+        match dependency {
+            LaravelStringDependency::Function(name) => self.has_indexed_function(name.as_str()),
+            LaravelStringDependency::Class(name) => self.has_indexed_class(name.as_str()),
+        }
+    }
+
+    /// Clone and reconcile only published maps whose dormant Laravel spans
+    /// depend on one of `affected`. Passing `None` is reserved for rare
+    /// workspace purges where several declaration indexes changed together.
+    fn refreshed_laravel_candidate_maps(
+        &self,
+        affected: Option<&HashSet<LaravelStringDependency>>,
+        excluded_uris: &HashSet<&str>,
+    ) -> Vec<(String, Arc<SymbolMap>)> {
+        let candidates: Vec<(String, Arc<SymbolMap>)> = self
+            .symbol_maps
+            .read()
+            .iter()
+            .filter(|(uri, _)| !excluded_uris.contains(uri.as_str()))
+            .filter(|(_, map)| map.has_conditional_laravel_dependency(affected))
+            .map(|(uri, map)| (uri.clone(), Arc::clone(map)))
+            .collect();
+        let mut dependency_presence = HashMap::new();
+        candidates
+            .into_iter()
+            .filter_map(|(uri, map)| {
+                let mut dependency_exists = |dependency| {
+                    *dependency_presence
+                        .entry(dependency)
+                        .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
+                };
+                if !map.conditional_laravel_spans_need_refresh(affected, &mut dependency_exists) {
+                    return None;
+                }
+                let mut refreshed = map.as_ref().clone();
+                let changed =
+                    refreshed.refresh_conditional_laravel_spans(affected, dependency_exists);
+                debug_assert!(changed);
+                Some((uri, Arc::new(refreshed)))
+            })
+            .collect()
+    }
+
+    /// Publish refreshed conditional maps and keep their reference-index
+    /// entries in the same generation. Used after discovery-index rebuilds;
+    /// normal AST batches fold refreshed maps into their existing reindex.
+    pub(crate) fn refresh_all_published_laravel_candidates(&self) -> bool {
+        let refreshed = self.refreshed_laravel_candidate_maps(None, &HashSet::new());
+        if refreshed.is_empty() {
+            return false;
+        }
+        self.reindex_references_for_symbol_maps_batch(refreshed.clone());
+        self.refresh_laravel_config_writes(
+            refreshed
+                .iter()
+                .map(|(uri, map)| (uri.as_str(), map.as_ref())),
+        );
+        let mut symbol_maps = self.symbol_maps.write();
+        for (uri, map) in refreshed {
+            symbol_maps.insert(uri, map);
+        }
+        true
+    }
+
     /// Drop every function declaration contributed by `uris`, handing each
     /// name to the next-lowest file that still declares it.
     ///
@@ -215,45 +298,11 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
-        let content_to_parse = if self.is_blade_file(uri) {
-            // Seed the template scope with the set cached by the refresh
-            // passes (post-index refresh, Blade did_open, caller save):
-            // the members of the component class backing the view, then
-            // the types its call sites imply, plus the class the view's
-            // `$this` is bound to.  Both variable sources sit below the
-            // template's own declarations, which the preprocessor gives
-            // priority.
-            //
-            // Neither is computed here: `update_ast` is called from the
-            // parallel index/analyse workers, where scanning call sites
-            // is wasted (callers may not be parsed yet) and resolving
-            // their expression types from many threads at once has
-            // deadlocked against the batch-publish locks.  The serial
-            // refresh passes own the cache; this path only reads it.
-            let injected = self
-                .blade_injected_vars
-                .read()
-                .get(uri)
-                .cloned()
-                .unwrap_or_default();
-            let components = self.blade_component_resolver(&injected.components);
-            let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
-                content,
-                &injected.vars,
-                crate::blade::template_kind(uri, content),
-                injected.this_class.as_deref(),
-                Some(&components),
-            );
-            self.blade_source_maps
-                .write()
-                .insert(uri.to_string(), source_map);
-            self.blade_virtual_content
-                .write()
-                .insert(uri.to_string(), virtual_php.clone());
-            virtual_php
-        } else {
-            content.to_string()
-        };
+        let blade = self.lower_blade_template(uri, content);
+        let content_to_parse = blade.as_ref().map_or_else(
+            || Arc::new(content.to_string()),
+            |lowering| Arc::clone(&lowering.virtual_php),
+        );
 
         self.laravel_string_key_cache
             .write()
@@ -274,12 +323,16 @@ impl Backend {
         let uri_owned = uri.to_string();
 
         let result = crate::util::catch_panic_unwind_safe("parse", uri, None, || {
-            self.update_ast_inner(&uri_owned, &content_owned)
+            self.update_ast_inner(&uri_owned, &content_owned, blade)
         });
+
+        // The refreshes below that rebuild from the registered provider list
+        // share one read of it.
+        let providers = crate::backend::laravel::ProvidersOnce::new(self);
 
         // Keep the Laravel macro index coherent with edits to files that
         // register macros.  Cheap no-op for files without a `macro(` call.
-        self.refresh_laravel_macros(uri, content);
+        self.refresh_laravel_macros(uri, content, &providers);
 
         // Keep the filesystem disk type coherent with edits to `config/` and
         // to files that register a `Storage::extend()` driver.
@@ -306,7 +359,7 @@ impl Backend {
         // translation directories, route files, and component namespaces
         // coherent with edits to the providers that register them.  Cheap
         // no-op for every file that is not a registered service provider.
-        self.refresh_laravel_provider_resources(uri, content);
+        self.refresh_laravel_provider_resources(uri, content, &providers);
 
         match result {
             Some(changed) => changed,
@@ -324,8 +377,9 @@ impl Backend {
 
     /// Inner implementation of [`update_ast`] that performs the actual parse
     /// and publishes the resulting single-file update.
-    fn update_ast_inner(&self, uri: &str, content: &str) -> bool {
-        let update = self.build_ast_index_update(uri, content);
+    fn update_ast_inner(&self, uri: &str, content: &str, blade: Option<BladeLowering>) -> bool {
+        let mut update = self.build_ast_index_update(uri, content);
+        update.blade = blade;
         self.apply_ast_index_updates_batch(vec![update])
     }
 
@@ -355,17 +409,94 @@ impl Backend {
         }
     }
 
+    /// Preprocess a Blade template into the virtual PHP everything else
+    /// reads it as, and the source map the position translation rides on.
+    ///
+    /// Nothing is published here: the lowering travels with the parse of
+    /// its virtual PHP and is published alongside the symbol map in
+    /// [`Self::apply_ast_index_updates_batch`], so the two always describe
+    /// the same text.
+    ///
+    /// Returns `None` for a file that is not a template, which is parsed
+    /// as it stands.
+    ///
+    /// Seeds the template scope with the set cached by the refresh passes
+    /// (post-index refresh, Blade did_open, caller save): the members of
+    /// the component class backing the view, then the types its call sites
+    /// imply, plus the class the view's `$this` is bound to.  Both variable
+    /// sources sit below the template's own declarations, which the
+    /// preprocessor gives priority.
+    ///
+    /// Neither is computed here: this runs on the parallel index/analyse
+    /// workers, where scanning call sites is wasted (callers may not be
+    /// parsed yet) and resolving their expression types from many threads
+    /// at once has deadlocked against the batch-publish locks.  The serial
+    /// refresh passes own the cache; this path only reads it.
+    pub(crate) fn lower_blade_template(&self, uri: &str, content: &str) -> Option<BladeLowering> {
+        if !self.is_blade_file(uri) {
+            return None;
+        }
+
+        let injected = self
+            .blade_injected_vars
+            .read()
+            .get(uri)
+            .cloned()
+            .unwrap_or_default();
+        let components = self.blade_component_resolver(&injected.components);
+        // Read under the guard rather than cloned: the set is small but
+        // this runs on every keystroke in a template, and nothing the
+        // preprocessor does can write it back.
+        let custom_directives = self.blade_custom_directives.read();
+        let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
+            content,
+            &injected.vars,
+            crate::blade::template_kind(uri, content),
+            injected.this_class.as_deref(),
+            Some(&components),
+            &custom_directives,
+        );
+        Some(BladeLowering {
+            virtual_php: Arc::new(virtual_php),
+            source_map,
+            scope: injected,
+        })
+    }
+
     pub(crate) fn parse_ast_index_update_for_index(
         &self,
         uri: &str,
         content: &str,
     ) -> AstIndexParseResult {
         let uri_owned = uri.to_string();
+        // A template is indexed as the virtual PHP it lowers to, the same
+        // way an open one is.  Parsing its own bytes leaves everything
+        // Blade-specific as inline HTML, so the symbol map holds none of
+        // the class references the template makes and rename, references,
+        // and diagnostics all read it as empty.
+        //
+        // An open buffer is left alone: this batch reads the file from
+        // disk, and `apply_ast_index_parse_results_batch` drops its result
+        // for that reason.  Publishing virtual content from disk here
+        // would leave it describing different text than the symbol map
+        // `did_change` published, which is exactly what the rename's
+        // `matches_source` check refuses to plan against.
+        let blade = if self.is_blade_file(uri) && !self.open_files.read().contains_key(uri) {
+            self.lower_blade_template(uri, content)
+        } else {
+            None
+        };
+        let content = blade
+            .as_ref()
+            .map_or(content, |lowering| lowering.virtual_php.as_str());
 
         match crate::util::catch_panic_unwind_safe("parse", uri, None, || {
             self.build_ast_index_update(uri, content)
         }) {
-            Some(update) => AstIndexParseResult::Update(update),
+            Some(mut update) => {
+                update.blade = blade;
+                AstIndexParseResult::Update(Box::new(update))
+            }
             None => AstIndexParseResult::ParseFailed {
                 uri: uri_owned,
                 errors: vec![("Parse failed (internal error)".to_string(), 0, 0)],
@@ -391,6 +522,17 @@ impl Backend {
         // buffers are always kept fresh by `did_change`, so skipping them
         // here loses nothing.
         let open_uris = self.open_files.read();
+        // A template's lowering carries the scope it was built from. If
+        // call-site re-inference has since written a newer scope for the
+        // same uri (`reinfer_and_reparse_blade_with`, which re-lowers and
+        // re-parses against it right away), this batch result is describing
+        // variables the template no longer has -- drop it rather than
+        // publish a lowering that is internally consistent but pinned to a
+        // scope nothing points at anymore. The template stays on whatever
+        // was last published (the fresh re-inference pass, if one already
+        // landed) until its own next parse computes a lowering against the
+        // current scope.
+        let injected_vars = self.blade_injected_vars.read();
 
         let mut updates = Vec::new();
         let mut failures = Vec::new();
@@ -400,7 +542,17 @@ impl Backend {
                     if open_uris.contains_key(&update.uri) {
                         continue;
                     }
-                    updates.push(update);
+                    if let Some(blade) = &update.blade {
+                        let current = injected_vars.get(&update.uri);
+                        let stale = match current {
+                            Some(current) => *current != blade.scope,
+                            None => blade.scope != BladeScope::default(),
+                        };
+                        if stale {
+                            continue;
+                        }
+                    }
+                    updates.push(*update);
                 }
                 AstIndexParseResult::ParseFailed { uri, errors } => {
                     if open_uris.contains_key(&uri) {
@@ -411,6 +563,7 @@ impl Backend {
             }
         }
         drop(open_uris);
+        drop(injected_vars);
 
         if !failures.is_empty() {
             let mut parse_errors = self.parse_errors.write();
@@ -421,7 +574,7 @@ impl Backend {
 
         // Invalidate the reverse pivot index when a background-indexed file
         // declares a many-to-many relationship, so its target models pick up
-        // `$pivot` on the next class load.
+        // its pivot accessors on the next class load.
         if !self
             .laravel_pivots_dirty
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -433,6 +586,7 @@ impl Backend {
         {
             self.laravel_pivots_dirty
                 .store(true, std::sync::atomic::Ordering::Relaxed);
+            self.clear_resolved_member_files();
         }
 
         self.apply_ast_index_updates_batch(updates)
@@ -476,12 +630,14 @@ impl Backend {
             // Extract all three in a single parse pass.
             //
             // `classes_with_ns` tracks each extracted class together with the
-            // namespace block it was declared in.  This is critical for files
-            // that contain multiple `namespace { }` blocks, each declaring
-            // classes under a different namespace.  The per-class namespace is
-            // used later when building the `fqn_uri_index` and when resolving
-            // parent/trait names.
-            let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
+            // namespace block it was declared in (its namespace, and its index
+            // in `namespace_spans`, or `None` outside any block).  This is
+            // critical for files that contain multiple `namespace { }` blocks,
+            // each declaring classes under a different namespace with its own
+            // imports.  The per-class namespace is used later when building
+            // the `fqn_uri_index`, and the block when resolving parent/trait
+            // names.
+            let mut classes_with_ns: Vec<(ClassInfo, Option<String>, Option<usize>)> = Vec::new();
             let mut use_map = HashMap::new();
             let mut namespace: Option<String> = None;
             let mut namespace_spans: Vec<NamespaceSpan> = Vec::new();
@@ -498,13 +654,6 @@ impl Backend {
                             .map(|ident| bytes_to_str(ident.value()).to_string())
                             .filter(|n| !n.is_empty());
 
-                        let ns_span = ns.span();
-                        namespace_spans.push(NamespaceSpan {
-                            namespace: block_ns.clone(),
-                            start: ns_span.start.offset,
-                            end: ns_span.end.offset,
-                        });
-
                         // The file-level namespace is the FIRST non-empty one.
                         if namespace.is_none() {
                             namespace = block_ns.clone();
@@ -513,27 +662,13 @@ impl Backend {
                         // Collect classes from this namespace block, tagging
                         // each with the block's namespace.
                         let mut block_classes = Vec::new();
+                        let mut block_use_map = HashMap::new();
                         for inner in ns.statements().iter() {
                             match inner {
                                 Statement::Use(use_stmt) => {
-                                    Self::extract_use_items(&use_stmt.items, &mut use_map);
+                                    Self::extract_use_items(&use_stmt.items, &mut block_use_map);
                                 }
-                                Statement::Class(_)
-                                | Statement::Interface(_)
-                                | Statement::Trait(_)
-                                | Statement::Enum(_)
-                                // Class-likes declared inside conditional /
-                                // control-flow blocks (e.g. Doctrine's
-                                // `ServiceEntityRepository` version guard) —
-                                // the extractor descends into the bodies.
-                                | Statement::If(_)
-                                | Statement::Block(_)
-                                | Statement::Try(_)
-                                | Statement::Switch(_)
-                                | Statement::While(_)
-                                | Statement::DoWhile(_)
-                                | Statement::For(_)
-                                | Statement::Foreach(_) => {
+                                inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
                                         std::iter::once(inner),
                                         &mut block_classes,
@@ -544,7 +679,7 @@ impl Backend {
                                     // Nested namespaces (rare but valid)
                                     Self::extract_use_statements_from_statements(
                                         inner_ns.statements().iter(),
-                                        &mut use_map,
+                                        &mut block_use_map,
                                     );
                                     Self::extract_classes_from_statements(
                                         inner_ns.statements().iter(),
@@ -564,25 +699,20 @@ impl Backend {
                             }
                         }
 
+                        let block_index = namespace_spans.len();
                         for cls in block_classes {
-                            classes_with_ns.push((cls, block_ns.clone()));
+                            classes_with_ns.push((cls, block_ns.clone(), Some(block_index)));
                         }
+
+                        let ns_span = ns.span();
+                        namespace_spans.push(NamespaceSpan {
+                            namespace: block_ns,
+                            start: ns_span.start.offset,
+                            end: ns_span.end.offset,
+                            use_map: block_use_map,
+                        });
                     }
-                    Statement::Class(_)
-                    | Statement::Interface(_)
-                    | Statement::Trait(_)
-                    | Statement::Enum(_)
-                    // Class-likes declared inside top-level conditional /
-                    // control-flow blocks — the extractor descends into the
-                    // bodies (and still collects anonymous classes within).
-                    | Statement::If(_)
-                    | Statement::Block(_)
-                    | Statement::Try(_)
-                    | Statement::Switch(_)
-                    | Statement::While(_)
-                    | Statement::DoWhile(_)
-                    | Statement::For(_)
-                    | Statement::Foreach(_) => {
+                    statement if Self::is_classlike_extraction_candidate(statement) => {
                         // A template whose `$this` is bound wraps its body
                         // in a method rather than a function, which buries
                         // the template's own imports just the same (see the
@@ -595,7 +725,7 @@ impl Backend {
                             Some(&doc_ctx),
                         );
                         for cls in top_classes {
-                            classes_with_ns.push((cls, None));
+                            classes_with_ns.push((cls, None, None));
                         }
                     }
                     // Laravel compiles a template's `@php` and `<?php`
@@ -622,24 +752,40 @@ impl Backend {
                             Some(&doc_ctx),
                         );
                         for cls in anon_classes {
-                            classes_with_ns.push((cls, None));
+                            classes_with_ns.push((cls, None, None));
                         }
                     }
+                }
+            }
+
+            // The file-wide table holds every block's imports.  A file with
+            // one block keeps them only there (see `NamespaceSpan::use_map`).
+            let multi_block = namespace_spans.len() > 1;
+            for span in &mut namespace_spans {
+                if multi_block {
+                    use_map.extend(
+                        span.use_map
+                            .iter()
+                            .map(|(alias, fqn)| (alias.clone(), fqn.clone())),
+                    );
+                } else {
+                    use_map.extend(std::mem::take(&mut span.use_map));
                 }
             }
 
             // A class-like declared in two branches of a conditional yields
             // one entry per branch; keep the first so resolution is
             // deterministic (see `dedup_class_likes_first_wins`).
-            Self::dedup_class_likes_first_wins(&mut classes_with_ns);
+            Self::dedup_class_likes_first_wins(&mut classes_with_ns, |(cls, ns, _)| (cls, ns));
 
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
             // which recurses into if/block statements.
             let mut functions = Vec::new();
-            // Update doc_ctx with the file's use-map and namespace so that
-            // parameter default values (e.g. `Application::class`) can be
-            // resolved to FQNs during extraction.
+            // Update doc_ctx with the use-map and namespace in force where
+            // each function is declared so that parameter default values
+            // (e.g. `Application::class`) can be resolved to FQNs during
+            // extraction.
             let func_doc_ctx = DocblockCtx {
                 trivias: doc_ctx.trivias,
                 content: doc_ctx.content,
@@ -647,12 +793,41 @@ impl Backend {
                 use_map: use_map.clone(),
                 namespace: namespace.clone(),
             };
-            Self::extract_functions_from_statements(
-                program.statements.iter(),
-                &mut functions,
-                &namespace,
-                Some(&func_doc_ctx),
-            );
+            let mut block_index = 0;
+            for statement in program.statements.iter() {
+                let block = match statement {
+                    Statement::Namespace(_) if multi_block => {
+                        block_index += 1;
+                        Some(&namespace_spans[block_index - 1])
+                    }
+                    _ => None,
+                };
+                let block_doc_ctx = block.map(|span| DocblockCtx {
+                    trivias: doc_ctx.trivias,
+                    content: doc_ctx.content,
+                    php_version: doc_ctx.php_version,
+                    use_map: span.use_map.clone(),
+                    namespace: span.namespace.clone(),
+                });
+                Self::extract_functions_from_statements(
+                    std::iter::once(statement),
+                    &mut functions,
+                    &namespace,
+                    Some(block_doc_ctx.as_ref().unwrap_or(&func_doc_ctx)),
+                );
+            }
+
+            // Drop the declarations the Blade lowering wrote itself: the
+            // wrapper holding the template body and the prologue's marker
+            // functions.  Every template lowers to the same ones, so
+            // publishing them makes each template a redeclaration of the
+            // last and puts boilerplate no file wrote into
+            // workspace-symbol results.  They stay in the virtual PHP, so
+            // the calls the lowering emits still resolve against them
+            // within the template.
+            if self.is_blade_file(uri) {
+                functions.retain(|func| !crate::blade::is_synthetic_function(&func.name));
+            }
 
             // Apply stub patches when parsing embedded stub content
             // (e.g. a constant lookup routes its stub source through
@@ -668,7 +843,7 @@ impl Backend {
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }
-                for (cls, _) in &mut classes_with_ns {
+                for (cls, _, _) in &mut classes_with_ns {
                     crate::stub_patches::apply_class_stub_patches(cls);
                 }
             }
@@ -686,7 +861,17 @@ impl Backend {
                     // so that multi-namespace files resolve return types
                     // against the correct namespace block.
                     let func_ns = func.namespace.clone().or_else(|| namespace.clone());
-                    let resolver = Self::build_type_resolver(&use_map, &func_ns, &skip_names);
+                    let func_use_map = if multi_block {
+                        namespace_spans
+                            .iter()
+                            .find(|span| {
+                                func.name_offset >= span.start && func.name_offset <= span.end
+                            })
+                            .map_or(&use_map, |span| &span.use_map)
+                    } else {
+                        &use_map
+                    };
+                    let resolver = Self::build_type_resolver(func_use_map, &func_ns, &skip_names);
 
                     if let Some(ref ret) = func.return_type {
                         let resolved = ret.resolve_names(&resolver);
@@ -761,46 +946,14 @@ impl Backend {
                 .collect();
 
             // Post-process: resolve parent_class short names to fully-qualified
-            // names using the file's use_map and each class's own namespace so
-            // that cross-file inheritance resolution can find parent classes via
-            // PSR-4.
-            //
-            // For files with multiple namespace blocks, each class's names are
-            // resolved against its own namespace rather than the file-level
-            // default.  This is done by grouping classes by namespace and
-            // calling resolve_parent_class_names once per group.
-            {
-                // Gather distinct namespaces used in this file.
-                let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-                for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-                    ns_groups.entry(ns.clone()).or_default().push(i);
-                }
-
-                // When all classes share the same namespace, take the fast
-                // path (single call, no extra allocation).
-                if ns_groups.len() <= 1 {
-                    let mut classes: Vec<ClassInfo> =
-                        classes_with_ns.iter().map(|(c, _)| c.clone()).collect();
-                    Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
-                    // Write back
-                    for (i, cls) in classes.into_iter().enumerate() {
-                        classes_with_ns[i].0 = cls;
-                    }
-                } else {
-                    // Multi-namespace file: resolve each group with its own
-                    // namespace context.
-                    for (group_ns, indices) in &ns_groups {
-                        let mut group: Vec<ClassInfo> = indices
-                            .iter()
-                            .map(|&i| classes_with_ns[i].0.clone())
-                            .collect();
-                        Self::resolve_parent_class_names(&mut group, &use_map, group_ns);
-                        for (j, &idx) in indices.iter().enumerate() {
-                            classes_with_ns[idx].0 = group[j].clone();
-                        }
-                    }
-                }
-            }
+            // names so that cross-file inheritance resolution can find parent
+            // classes via PSR-4.
+            Self::resolve_parent_class_names_by_block(
+                &mut classes_with_ns,
+                &namespace_spans,
+                &use_map,
+                &namespace,
+            );
 
             // Separate the classes from their namespace tags for storage,
             // stamping each ClassInfo with its namespace so that
@@ -808,10 +961,10 @@ impl Backend {
             // short name in different namespace blocks.
             let classes: Vec<ClassInfo> = classes_with_ns
                 .iter()
-                .map(|(c, ns)| {
+                .map(|(c, ns, _)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
-                    cls.cache_fqn();
+                    cls.cache_fqn_in_uri(uri);
                     // Keyed by FQN, so this has to wait until the class
                     // carries one.
                     crate::stub_patches::apply_third_party_class_patches(&mut cls);
@@ -821,7 +974,11 @@ impl Backend {
 
             // Build the precomputed symbol map while the AST is still alive.
             // This must happen before the `Program` (and its arena) are dropped.
-            let symbol_map = Arc::new(extract_symbol_map(program, content));
+            let symbol_map = Arc::new(extract_symbol_map_for_index(
+                program,
+                content,
+                &owned_resolved,
+            ));
 
             // For files without any explicit namespace blocks, synthesize a
             // single span covering the entire file with the detected namespace
@@ -831,6 +988,7 @@ impl Backend {
                     namespace: namespace.clone(),
                     start: 0,
                     end: content.len() as u32,
+                    use_map: HashMap::new(),
                 });
             }
 
@@ -844,6 +1002,7 @@ impl Backend {
                 functions,
                 defines,
                 symbol_map,
+                blade: None,
             }
         })
     }
@@ -859,6 +1018,12 @@ impl Backend {
             old_classes: Vec<ClassInfo>,
             old_fqns: Vec<String>,
             new_fqns: Vec<String>,
+            /// The anonymous classes this file declared on its *previous*
+            /// parse, which `old_fqns` deliberately leaves out because they
+            /// never reach the declaration index.  They do occupy the
+            /// resolved-class cache, so they still have to be evicted from it.
+            /// Empty on a first parse, where nothing can be cached yet.
+            old_anon_fqns: Vec<String>,
             classes: Vec<Arc<ClassInfo>>,
             use_map: HashMap<String, String>,
             resolved_names: Arc<OwnedResolvedNames>,
@@ -866,6 +1031,7 @@ impl Backend {
             functions: Vec<FunctionInfo>,
             defines: Vec<(String, DefineInfo)>,
             symbol_map: Arc<SymbolMap>,
+            blade: Option<BladeLowering>,
             old_function_fqns: Vec<String>,
             old_define_names: Vec<String>,
             new_function_fqns: Vec<String>,
@@ -925,6 +1091,11 @@ impl Backend {
                 .filter(|class| !class.name.starts_with("__anonymous@"))
                 .map(|class| class.fqn().to_string())
                 .collect();
+            let old_anon_fqns: Vec<String> = old_classes
+                .iter()
+                .filter(|class| class.name.starts_with("__anonymous@"))
+                .map(|class| class.fqn().to_string())
+                .collect();
 
             all_old_fqns.extend(old_fqns.iter().cloned());
             all_new_fqns.extend(new_fqns.iter().cloned());
@@ -936,6 +1107,7 @@ impl Backend {
                 old_classes,
                 old_fqns,
                 new_fqns,
+                old_anon_fqns,
                 classes,
                 use_map: update.use_map,
                 resolved_names: update.resolved_names,
@@ -943,6 +1115,7 @@ impl Backend {
                 functions: update.functions,
                 defines: update.defines,
                 symbol_map: update.symbol_map,
+                blade: update.blade,
                 old_function_fqns,
                 old_define_names,
                 new_function_fqns: Vec::new(),
@@ -1028,6 +1201,9 @@ impl Backend {
         // The common case — a class file with no standalone functions that
         // never had any — skips the snapshot scan below entirely.
         let mut any_function_changed = false;
+        // The names behind `any_function_changed`, for the caches that can
+        // be invalidated by dependency rather than wholesale.
+        let mut changed_names: Vec<crate::atom::Atom> = Vec::new();
         {
             let mut fmap = self.symbols.global_functions.write();
             let mut dupes = self.symbols.duplicate_functions.write();
@@ -1103,20 +1279,18 @@ impl Backend {
                     // empty the file has never been parsed before.  New
                     // functions appearing on first parse are not changes
                     // — they mirror the class first-parse fast path.
-                    if !any_function_changed && !old_functions.is_empty() {
-                        match old_functions
+                    if !old_functions.is_empty() {
+                        let changed = match old_functions
                             .iter()
                             .find(|(f, _)| f.eq_ignore_ascii_case(&fqn))
                         {
-                            Some((_, old_info)) => {
-                                if !old_info.signature_eq(&func_info) {
-                                    any_function_changed = true;
-                                }
-                            }
-                            None => {
-                                // New function — may affect callers.
-                                any_function_changed = true;
-                            }
+                            Some((_, old_info)) => !old_info.signature_eq(&func_info),
+                            // New function — may affect callers.
+                            None => true,
+                        };
+                        if changed {
+                            any_function_changed = true;
+                            changed_names.push(crate::resolution_deps::dep_key(&fqn));
                         }
                     }
 
@@ -1132,11 +1306,15 @@ impl Backend {
 
                 // A function was removed from this file — callers may
                 // now reference an unknown function.
-                if !any_function_changed
-                    && !old_functions.is_empty()
-                    && update.new_function_fqns.len() != old_functions.len()
-                {
-                    any_function_changed = true;
+                for (old_fqn, _) in &old_functions {
+                    if !update
+                        .new_function_fqns
+                        .iter()
+                        .any(|fqn| fqn.eq_ignore_ascii_case(old_fqn))
+                    {
+                        any_function_changed = true;
+                        changed_names.push(crate::resolution_deps::dep_key(old_fqn));
+                    }
                 }
             }
         }
@@ -1241,6 +1419,18 @@ impl Backend {
         {
             let mut cache = self.resolved_class_cache.write();
             for update in &prepared {
+                // An anonymous class keeps its FQN across an edit that leaves
+                // its opening brace where it was, so a cache entry from the
+                // previous parse would keep answering for a body that has
+                // since changed.  Comparing signatures is not worth it here:
+                // the name is already offset-specific, so an edit that reaches
+                // one at all has almost certainly changed it.
+                for fqn in &update.old_anon_fqns {
+                    changed_names.push(crate::resolution_deps::dep_key(fqn));
+                    evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
+                    any_signature_changed = true;
+                }
+
                 if update.old_fqns.is_empty() {
                     continue;
                 }
@@ -1258,6 +1448,7 @@ impl Backend {
                     match (old_cls, new_cls) {
                         (Some(old), Some(new)) if old.signature_eq(new) => {}
                         _ => {
+                            changed_names.push(crate::resolution_deps::dep_key(fqn));
                             evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                             any_signature_changed = true;
                         }
@@ -1266,6 +1457,7 @@ impl Backend {
 
                 for fqn in &update.new_fqns {
                     if !update.old_fqns.contains(fqn) {
+                        changed_names.push(crate::resolution_deps::dep_key(fqn));
                         evicted_fqns.extend(crate::virtual_members::evict_fqn(&mut cache, fqn));
                         any_signature_changed = true;
                     }
@@ -1274,6 +1466,19 @@ impl Backend {
         }
         evicted_fqns.sort();
         evicted_fqns.dedup();
+        // A class whose own resolution was cached read its parents, traits,
+        // and mixins from that cache rather than loading them, so it records
+        // no dependency on the one that just changed.  The eviction above
+        // already walked the cache's reverse-dependency graph to find every
+        // such class; carrying its result into the changed set is what makes
+        // the dependency-keyed invalidation below sound for inheritance.
+        changed_names.extend(
+            evicted_fqns
+                .iter()
+                .map(|fqn| crate::resolution_deps::dep_key(fqn)),
+        );
+        changed_names.sort_unstable();
+        changed_names.dedup();
 
         {
             let mut uri_classes = self.symbols.uri_classes_index.write();
@@ -1318,14 +1523,24 @@ impl Backend {
             );
         }
 
-        let changed = any_signature_changed || any_function_changed;
+        let structural_changed = any_signature_changed || any_function_changed;
 
-        if changed {
+        if structural_changed {
             self.member_completion_cache.lock().clear();
             // Exact member targets in other files may depend on the return or
-            // property type that changed here. Rebuild those files lazily;
-            // the edited file itself is evicted by reference reindexing below.
-            self.clear_resolved_member_files();
+            // property type that changed here, but only in the files whose
+            // resolution consulted one of the names this parse changed.  A
+            // signature keystroke in a controller would otherwise throw away
+            // the receiver layer for every candidate file in the workspace
+            // and make the next search rebuild all of it.  The edited file
+            // itself is evicted by reference reindexing below.
+            self.retain_resolved_member_files(&changed_names);
+            // For the same reason an access in a file nothing touched can
+            // start belonging to a different declaration, which the
+            // per-file invalidation the reindex does cannot see.
+            if !self.member_ref_counts.is_empty() {
+                self.member_ref_counts.invalidate_locations_all();
+            }
             // A receiver's type is settled against the classes of the whole
             // workspace, so a signature change anywhere can turn a call that
             // was not a render into one, or the other way round.
@@ -1336,20 +1551,148 @@ impl Backend {
             }
         }
 
-        let reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
+        // The batch declarations are now visible. Activate its prospective
+        // Laravel spans against that final state, not the incomplete index
+        // that happened to exist while parallel workers parsed the files.
+        {
+            let mut dependency_presence = HashMap::new();
+            for update in &mut prepared {
+                Arc::make_mut(&mut update.symbol_map).refresh_conditional_laravel_spans(
+                    None,
+                    |dependency| {
+                        *dependency_presence
+                            .entry(dependency)
+                            .or_insert_with(|| self.laravel_string_dependency_exists(dependency))
+                    },
+                );
+            }
+        }
+
+        // Only declaration names that can gate a candidate trigger a scan of
+        // the published maps. Function signatures and ordinary class edits
+        // therefore retain the existing O(batch) publication cost.
+        let mut affected_laravel_dependencies = HashSet::new();
+        for fqn in all_old_fqns.iter().chain(&all_new_fqns) {
+            if let Some(dependency) = LaravelStringDependency::root_facade(fqn) {
+                affected_laravel_dependencies.insert(dependency);
+            }
+        }
+        for update in &prepared {
+            for fqn in update
+                .old_function_fqns
+                .iter()
+                .chain(&update.new_function_fqns)
+            {
+                if let Some(dependency) = LaravelStringDependency::namespaced_auth(fqn) {
+                    affected_laravel_dependencies.insert(dependency);
+                }
+            }
+        }
+        let prepared_uris: HashSet<&str> =
+            prepared.iter().map(|update| update.uri.as_str()).collect();
+        let refreshed_existing = if affected_laravel_dependencies.is_empty() {
+            Vec::new()
+        } else {
+            self.refreshed_laravel_candidate_maps(
+                Some(&affected_laravel_dependencies),
+                &prepared_uris,
+            )
+        };
+        let changed = structural_changed || !refreshed_existing.is_empty();
+
+        let mut reference_items: Vec<(String, Arc<SymbolMap>)> = prepared
             .iter()
             .map(|update| (update.uri.clone(), Arc::clone(&update.symbol_map)))
             .collect();
+        reference_items.extend(refreshed_existing.iter().cloned());
         self.reindex_references_for_symbol_maps_batch(reference_items);
 
+        // Runtime writes follow every published map, including unedited
+        // files whose facade alias was shadowed or restored by this batch.
+        self.refresh_laravel_config_writes(
+            prepared
+                .iter()
+                .map(|update| (update.uri.as_str(), update.symbol_map.as_ref()))
+                .chain(
+                    refreshed_existing
+                        .iter()
+                        .map(|(uri, map)| (uri.as_str(), map.as_ref())),
+                ),
+        );
+
+        // A template's lowering and its symbol map go out under one hold of
+        // the publish lock, so that of two parses of the same template racing
+        // each other, one publishes all three maps before the other starts.
+        let has_blade = prepared.iter().any(|update| update.blade.is_some());
+        let _blade_publish_guard = has_blade.then(|| self.blade_publish_lock.lock());
+        if has_blade {
+            let mut virtual_content = self.blade_virtual_content.write();
+            let mut source_maps = self.blade_source_maps.write();
+            for update in &mut prepared {
+                if let Some(blade) = update.blade.take() {
+                    virtual_content.insert(update.uri.clone(), blade.virtual_php);
+                    source_maps.insert(update.uri.clone(), blade.source_map);
+                }
+            }
+        }
         {
             let mut symbol_maps = self.symbol_maps.write();
+            for (uri, map) in refreshed_existing {
+                symbol_maps.insert(uri, map);
+            }
             for update in prepared {
                 symbol_maps.insert(update.uri, update.symbol_map);
             }
         }
 
         changed
+    }
+
+    /// [`resolve_parent_class_names`](Self::resolve_parent_class_names)
+    /// for every class of a file, each against the `namespace` block that
+    /// declared it.
+    ///
+    /// `classes` pairs each class with its namespace and the index of its
+    /// block in `blocks` (`None` outside any block).  PHP scopes both the
+    /// namespace and the `use` imports to a block, so in a file with several
+    /// blocks each block's classes are resolved with that block's own
+    /// imports.  A file with at most one block resolves everything against
+    /// the file-wide `use_map` and `namespace` in one pass.
+    pub(crate) fn resolve_parent_class_names_by_block(
+        classes: &mut [(ClassInfo, Option<String>, Option<usize>)],
+        blocks: &[NamespaceSpan],
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) {
+        let multi_block = blocks.len() > 1;
+        let mut groups: Vec<Option<usize>> = Vec::new();
+        for (_, _, block) in classes.iter() {
+            let key = if multi_block { *block } else { None };
+            if !groups.contains(&key) {
+                groups.push(key);
+            }
+        }
+        for group in groups {
+            let indices: Vec<usize> = (0..classes.len())
+                .filter(|&i| !multi_block || classes[i].2 == group)
+                .collect();
+            let mut members: Vec<ClassInfo> = indices
+                .iter()
+                .map(|&i| std::mem::take(&mut classes[i].0))
+                .collect();
+            match group.and_then(|b| blocks.get(b)) {
+                Some(block) => {
+                    Self::resolve_parent_class_names(&mut members, &block.use_map, &block.namespace)
+                }
+                None if multi_block => {
+                    Self::resolve_parent_class_names(&mut members, use_map, &None)
+                }
+                None => Self::resolve_parent_class_names(&mut members, use_map, namespace),
+            }
+            for (cls, &i) in members.into_iter().zip(&indices) {
+                classes[i].0 = cls;
+            }
+        }
     }
 
     /// Resolve `parent_class` short names in a list of `ClassInfo` to
@@ -1447,6 +1790,9 @@ impl Backend {
                 if let Some(collection) = laravel.custom_collection.take() {
                     laravel.custom_collection = Some(collection.resolve_names(&resolver));
                 }
+                if let Some(factory) = laravel.custom_factory.take() {
+                    laravel.custom_factory = Some(factory.resolve_names(&resolver));
+                }
 
                 // Resolve custom builder class name to FQN.
                 if let Some(builder) = laravel.custom_builder.take() {
@@ -1498,50 +1844,42 @@ impl Backend {
             // classes like `DecimalCast` (imported via `use`) are
             // loadable cross-file when `cast_type_to_php_type` calls
             // the class loader.
-            {
-                let casts: Vec<(String, String)> = class
-                    .laravel()
-                    .map(|l| l.casts_definitions.clone())
-                    .unwrap_or_default();
-                if !casts.is_empty() {
-                    let resolved: Vec<(String, String)> = casts
-                        .into_iter()
-                        .map(|(col, cast_type)| {
-                            // Only resolve class-like cast types (not
-                            // built-in strings like "boolean", "datetime",
-                            // etc.).  A simple heuristic: if the value
-                            // contains an uppercase letter and is not a
-                            // known built-in, treat it as a class name.
-                            //
-                            // Skip names that already contain a `\` — they
-                            // are already qualified (e.g. the string literal
-                            // `'App\Casts\HtmlCast'`).  Passing them through
-                            // `resolve_name` would prepend the file's
-                            // namespace, producing a broken FQN like
-                            // `App\Models\App\Casts\HtmlCast`.
-                            let first_segment = cast_type.split(':').next().unwrap_or(&cast_type);
-                            if first_segment.contains('\\') || first_segment.starts_with('\\') {
-                                // Already qualified — strip leading `\` if present to produce canonical FQN.
-                                let canonical = cast_type
-                                    .strip_prefix('\\')
-                                    .map_or(cast_type.clone(), |s| s.to_string());
-                                (col, canonical)
-                            } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
-                                let resolved_class =
-                                    Self::resolve_name(first_segment, use_map, namespace);
-                                if resolved_class != first_segment {
-                                    // Re-attach any `:argument` suffix.
-                                    let suffix = &cast_type[first_segment.len()..];
-                                    (col, format!("{resolved_class}{suffix}"))
-                                } else {
-                                    (col, cast_type)
-                                }
-                            } else {
-                                (col, cast_type)
-                            }
-                        })
-                        .collect();
-                    class.laravel_mut().casts_definitions = resolved;
+            if let Some(laravel) = class.laravel.as_deref_mut() {
+                let resolve_cast = |cast_type: &mut String| {
+                    // Only resolve class-like cast types (not built-in
+                    // strings like "boolean", "datetime", etc.).  A simple
+                    // heuristic: if the value contains an uppercase letter
+                    // and is not a known built-in, treat it as a class name.
+                    //
+                    // Skip names that already contain a `\` — they are
+                    // already qualified (e.g. the string literal
+                    // `'App\Casts\HtmlCast'`).  Passing them through
+                    // `resolve_name` would prepend the file's namespace,
+                    // producing a broken FQN like
+                    // `App\Models\App\Casts\HtmlCast`.
+                    let first_segment = cast_type.split(':').next().unwrap_or(cast_type);
+                    if first_segment.contains('\\') {
+                        // Already qualified — strip leading `\` if present
+                        // to produce canonical FQN.
+                        if let Some(stripped) = cast_type.strip_prefix('\\') {
+                            *cast_type = stripped.to_string();
+                        }
+                    } else if first_segment.chars().any(|c| c.is_ascii_uppercase()) {
+                        let resolved_class = Self::resolve_name(first_segment, use_map, namespace);
+                        if resolved_class != first_segment {
+                            // Re-attach any `:argument` suffix.
+                            let suffix = &cast_type[first_segment.len()..];
+                            *cast_type = format!("{resolved_class}{suffix}");
+                        }
+                    }
+                };
+                let sources = laravel.cast_sources.as_deref_mut().into_iter();
+                for (_, cast_type) in laravel
+                    .casts_definitions
+                    .iter_mut()
+                    .chain(sources.flat_map(|s| s.property.iter_mut().chain(s.method.iter_mut())))
+                {
+                    resolve_cast(cast_type);
                 }
             }
 
@@ -1554,34 +1892,42 @@ impl Backend {
             // that forwarded params (e.g. `@use BuildsQueries<TModel>`
             // where TModel is a class-level template) remain as bare
             // names and match substitution map keys later.
+            //
+            // Type alias names are skipped too: they are expanded below,
+            // once every class's names have been qualified.
             let tpl_params: Vec<String> = class
                 .template_params
                 .iter()
                 .map(|a| a.to_string())
                 .collect();
+            let generic_arg_skip: Vec<String> = tpl_params
+                .iter()
+                .cloned()
+                .chain(all_alias_names.iter().map(|a| a.to_string()))
+                .collect();
             Self::resolve_generics_type_args(
                 &mut class.extends_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.implements_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.use_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.mixin_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
 
             // Resolve template parameter bounds (`@template T of Bound`)
@@ -1746,6 +2092,12 @@ impl Backend {
             {
                 class.doc_members = Some(resolved);
             }
+        }
+
+        // A member signature is read from every file that uses the class,
+        // where the alias names it would no longer be in scope.
+        if !all_alias_names.is_empty() {
+            crate::type_engine::types::aliases::expand_local_type_aliases(classes);
         }
     }
 
@@ -1948,6 +2300,359 @@ mod tests {
     use super::*;
     use crate::Backend;
 
+    fn has_config_resource_span(
+        backend: &Backend,
+        uri: &str,
+        key: &str,
+        resource: crate::symbol_map::LaravelConfigResource,
+    ) -> bool {
+        backend.symbol_map_for(uri).is_some_and(|map| {
+            map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    crate::symbol_map::SymbolKind::LaravelStringKey {
+                        kind: crate::symbol_map::LaravelStringKind::ConfigResource(found),
+                        key: found_key,
+                        ..
+                    } if *found == resource && found_key == key
+                )
+            })
+        })
+    }
+
+    fn reference_index_has_config_resource(
+        backend: &Backend,
+        uri: &str,
+        key: &str,
+        resource: crate::symbol_map::LaravelConfigResource,
+    ) -> bool {
+        let index_key = crate::reference_index::laravel_string_reference_key(
+            crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+            key,
+        );
+        backend
+            .reference_index
+            .read()
+            .get(&index_key)
+            .is_some_and(|entries| entries.keys().any(|entry_uri| entry_uri.as_ref() == uri))
+    }
+
+    #[test]
+    fn namespaced_auth_candidates_follow_cross_file_function_lifecycle() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let helper_uri = "file:///app/helpers.php";
+        backend.update_ast(consumer_uri, "<?php\nnamespace App;\nauth('web');\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        // An already-correct map must not be cloned or reindexed merely
+        // because a workspace discovery refresh completed.
+        assert!(!backend.refresh_all_published_laravel_candidates());
+
+        let changed = backend.update_ast(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        assert!(changed, "the consumer map changed even on a first parse");
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(!reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        let removed = HashSet::from([helper_uri.to_string()]);
+        backend.withdraw_functions_for_uris(&removed);
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        backend.update_ast(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+
+        backend.update_ast(helper_uri, "<?php\nnamespace App;\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+        assert!(reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "web",
+            AuthGuard
+        ));
+    }
+
+    #[test]
+    fn prospective_batch_functions_shadow_auth_candidates() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let helper_uri = "file:///app/helpers.php";
+        let consumer = backend.parse_ast_index_update_for_index(
+            consumer_uri,
+            "<?php\nnamespace App;\nauth('admin');\n",
+        );
+        let helper = backend.parse_ast_index_update_for_index(
+            helper_uri,
+            "<?php\nnamespace App;\nfunction auth(?string $guard = null): object {}\n",
+        );
+        backend.apply_ast_index_parse_results_batch(vec![consumer, helper]);
+
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "admin",
+            AuthGuard
+        ));
+        assert!(!reference_index_has_config_resource(
+            &backend,
+            consumer_uri,
+            "admin",
+            AuthGuard
+        ));
+    }
+
+    #[test]
+    fn root_facade_candidates_follow_global_class_lifecycle() {
+        use crate::symbol_map::LaravelConfigResource::{CacheStore, StorageDisk};
+
+        let backend = Backend::new_test();
+        let consumer_uri = "file:///app/Consumer.php";
+        let class_uri = "file:///app/Cache.php";
+        backend.update_ast(
+            consumer_uri,
+            "<?php\nCache::store('redis');\nStorage::disk('local');\nRoute::get('/')->where('id')->middleware('auth:route');\n",
+        );
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "local",
+            StorageDisk
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+
+        backend.update_ast(
+            class_uri,
+            "<?php\nclass Cache { public static function store() {} }\nclass Route { public static function get() {} }\n",
+        );
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "local",
+            StorageDisk
+        ));
+        assert!(!has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+        let map = backend
+            .symbol_map_for(consumer_uri)
+            .expect("consumer map should remain published");
+        let disk_indices = map.member_access_indices("disk");
+        assert_eq!(disk_indices.len(), 1);
+        assert!(matches!(
+            &map.spans[disk_indices[0]].kind,
+            crate::symbol_map::SymbolKind::MemberAccess { member_name, .. }
+                if member_name == "disk"
+        ));
+
+        backend.update_ast(class_uri, "<?php\nclass Other {}\n");
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "redis",
+            CacheStore
+        ));
+        assert!(has_config_resource_span(
+            &backend,
+            consumer_uri,
+            "route",
+            crate::symbol_map::LaravelConfigResource::AuthGuard
+        ));
+    }
+
+    #[test]
+    fn batch_publication_indexes_runtime_writes_without_opening_the_writer() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let writer_uri = "file:///project/tests/DiskTest.php";
+        let reader_uri = "file:///project/app/Reader.php";
+        let writer = backend.parse_ast_index_update_for_index(
+            writer_uri,
+            "<?php\nconfig(['cache.stores.scratch' => []]);\nConfig::set('filesystems.disks.temporary', []);\nStorage::fake('temporary');\nStorage::persistentFake('persistent');\n",
+        );
+        let reader = backend.parse_ast_index_update_for_index(
+            reader_uri,
+            "<?php\nStorage::disk('temporary');\nCache::store('scratch');\n",
+        );
+
+        backend.apply_ast_index_parse_results_batch(vec![reader, writer]);
+
+        assert_eq!(
+            backend.laravel_runtime_config_keys.read()[writer_uri],
+            [
+                "cache.stores.scratch",
+                "filesystems.disks.persistent",
+                "filesystems.disks.temporary",
+            ]
+        );
+        let writes = backend.laravel_runtime_config_keys.read();
+        assert_eq!(
+            writes[writer_uri].len(),
+            3,
+            "duplicate writes share one key"
+        );
+        assert!(!writes.contains_key(reader_uri));
+    }
+
+    #[test]
+    fn runtime_writes_follow_cross_file_facade_shadows() {
+        for (facade, call, key) in [
+            (
+                "Storage",
+                "Storage::fake('scratch')",
+                "filesystems.disks.scratch",
+            ),
+            (
+                "Config",
+                "Config::set('cache.stores.scratch', [])",
+                "cache.stores.scratch",
+            ),
+        ] {
+            let backend = Backend::new_test();
+            backend.resolved_class_cache.write().set_laravel(true);
+            let writer_uri = "file:///project/tests/FixtureTest.php";
+            let shadow_uri = "file:///project/app/LocalFacade.php";
+            backend.update_ast(writer_uri, &format!("<?php\n{call};\n"));
+            assert!(backend.runtime_config_key_covers(key), "{facade}");
+
+            backend.update_ast(shadow_uri, &format!("<?php\nclass {facade} {{}}\n"));
+            assert!(
+                backend.laravel_runtime_config_keys.read().is_empty(),
+                "a global {facade} class must withdraw the unedited file's write"
+            );
+
+            backend.update_ast(shadow_uri, "<?php\nclass Other {}\n");
+            assert!(
+                backend.runtime_config_key_covers(key),
+                "removing the {facade} shadow must restore the unedited file's write"
+            );
+        }
+    }
+
+    #[test]
+    fn discovery_refresh_reconciles_runtime_writes_with_facade_aliases() {
+        let backend = Backend::new_test();
+        backend.resolved_class_cache.write().set_laravel(true);
+        let writer_uri = "file:///project/tests/DiskTest.php";
+        let shadow_uri = "file:///project/app/Storage.php";
+        let key = "filesystems.disks.scratch";
+        backend.update_ast(writer_uri, "<?php\nStorage::fake('scratch');\n");
+        assert!(backend.runtime_config_key_covers(key));
+
+        backend.symbols.with_class_declarations(|declarations| {
+            declarations.note_discovered("Storage", shadow_uri.to_string());
+        });
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(backend.laravel_runtime_config_keys.read().is_empty());
+
+        backend.symbols.with_class_declarations(|declarations| {
+            declarations.withdraw_uris(&HashSet::from([shadow_uri.to_string()]));
+        });
+        assert!(backend.refresh_all_published_laravel_candidates());
+        assert!(backend.runtime_config_key_covers(key));
+        assert!(!backend.refresh_all_published_laravel_candidates());
+    }
+
+    #[test]
+    fn controller_middleware_does_not_claim_auth_guards_without_a_typed_receiver() {
+        use crate::symbol_map::LaravelConfigResource::AuthGuard;
+
+        let backend = Backend::new_test();
+        let uri = "file:///app/Controller.php";
+        backend.update_ast(
+            uri,
+            "<?php\nclass Controller {\n    function boot() {\n        $this->middleware('auth:web');\n        $this->middleware('can:update,Post');\n    }\n}\nRoute::get('/')->middleware('auth:admin');\nRoute::get('/')->a()->b()->c()->d()->middleware('auth:too-deep');\n",
+        );
+        assert!(!has_config_resource_span(&backend, uri, "web", AuthGuard));
+        assert!(has_config_resource_span(&backend, uri, "admin", AuthGuard));
+        assert!(!has_config_resource_span(
+            &backend, uri, "too-deep", AuthGuard
+        ));
+        assert!(backend.symbol_map_for(uri).is_some_and(|map| {
+            map.spans.iter().any(|span| {
+                matches!(
+                    &span.kind,
+                    crate::symbol_map::SymbolKind::LaravelStringKey {
+                        kind: crate::symbol_map::LaravelStringKind::GateAbility,
+                        key,
+                        ..
+                    } if key == "update"
+                )
+            })
+        }));
+    }
+
     /// Changing a function's parameter type should cause `update_ast` to
     /// return `true` (signature changed), triggering cross-file
     /// diagnostic invalidation.  This is the exact scenario from
@@ -2030,6 +2735,93 @@ mod tests {
         assert!(changed, "Removing a function must be detected");
     }
 
+    /// Two parses of one template can race: an index worker lowers it with
+    /// the scope it had, while call-site inference re-parses it with a
+    /// larger one.  Whichever lands last, the virtual PHP, the source map
+    /// and the symbol map must all come from the same parse, or every
+    /// offset in the map points at the wrong text and every position
+    /// translated back to the template is off by the prologue difference.
+    #[test]
+    fn racing_template_parses_leave_one_consistent_lowering() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![
+                    ("a".to_string(), "int".to_string()),
+                    ("b".to_string(), "string".to_string()),
+                ],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        let virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+        let symbol_map = backend.symbol_maps.read().get(uri).cloned().unwrap();
+        assert!(
+            symbol_map.matches_source(&virtual_php),
+            "the symbol map must index the virtual PHP that was published with it"
+        );
+
+        let item = symbol_map
+            .spans
+            .iter()
+            .find(|span| matches!(&span.kind, crate::symbol_map::SymbolKind::ClassReference { name, .. } if name.ends_with("Item")))
+            .expect("the template names App\\Item");
+        let position = crate::text_position::offset_to_position(&virtual_php, item.start as usize);
+        assert_eq!(
+            backend
+                .try_translate_php_to_blade(uri, position)
+                .map(|p| p.line),
+            Some(1),
+            "App\\Item is on the template's second line"
+        );
+    }
+
+    /// A stale index parse must not pin a template back to the scope it
+    /// started with. If call-site re-inference computes a new scope and
+    /// re-parses the template before the index worker's older-scoped batch
+    /// applies, the batch's lowering describes variables the template no
+    /// longer has and must be dropped rather than published over the fresh
+    /// state.
+    #[test]
+    fn stale_scope_batch_does_not_clobber_a_fresher_reinference() {
+        let backend = Backend::new_test();
+        let uri = "file:///resources/views/shop.blade.php";
+        let template = "<p>{{ $a }}</p>\n{{ \\App\\Item::class }}\n";
+
+        // An index worker lowers the template while the scope is still
+        // empty (nothing has been cached for this uri yet).
+        let stale = backend.parse_ast_index_update_for_index(uri, template);
+
+        // Call-site re-inference computes the real scope and re-parses
+        // against it before the index worker's batch is applied.
+        backend.blade_injected_vars.write().insert(
+            uri.to_string(),
+            crate::blade::call_site_inference::BladeScope {
+                vars: vec![("a".to_string(), "int".to_string())],
+                ..Default::default()
+            },
+        );
+        backend.update_ast(uri, template);
+        let fresh_virtual_php = backend.blade_virtual_php_arc(uri).unwrap();
+
+        // The index worker's batch, built from the empty scope, lands last.
+        backend.apply_ast_index_parse_results_batch(vec![stale]);
+
+        assert_eq!(
+            backend.blade_virtual_php_arc(uri).unwrap(),
+            fresh_virtual_php,
+            "a batch built from a scope the template has moved past must not \
+             overwrite the lowering built from the current scope"
+        );
+    }
+
     /// Adding a parameter to a function should be detected.
     #[test]
     fn update_ast_detects_added_parameter() {
@@ -2093,11 +2885,11 @@ mod tests {
         );
     }
 
-    /// A `belongsToMany` body with `->using(...)` and `->withPivot(...)`
-    /// must populate `belongs_to_many_pivots`, with the pivot class resolved
-    /// to an FQN.
+    /// A `belongsToMany` body with `->as(...)`, `->using(...)`, and
+    /// `->withPivot(...)` must populate `belongs_to_many_pivots`, with the
+    /// pivot class resolved to an FQN.
     #[test]
-    fn parses_pivot_using_and_columns_from_relationship_body() {
+    fn parses_pivot_accessor_using_and_columns_from_relationship_body() {
         let backend = Backend::new_test();
         let uri = "file:///app/Models/User.php";
         let content = "<?php
@@ -2107,7 +2899,7 @@ use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
 class User extends Model {
     /** @return BelongsToMany<Role, $this> */
     public function roles(): BelongsToMany {
-        return $this->belongsToMany(Role::class)->using(RoleUser::class)->withPivot('expires_at', 'active');
+        return $this->belongsToMany(Role::class)->as('participation')->using(RoleUser::class)->withPivot('expires_at', 'active');
     }
 }
 ";
@@ -2124,11 +2916,43 @@ class User extends Model {
         assert_eq!(pivots.len(), 1, "one pivot relation, got: {pivots:?}");
         assert_eq!(pivots[0].method, "roles");
         assert_eq!(
+            pivots[0].accessor,
+            crate::types::PivotAccessor::Custom(crate::atom::atom("participation"))
+        );
+        assert_eq!(
             pivots[0].using.as_deref(),
             Some("App\\Models\\RoleUser"),
             "using() class should be resolved to an FQN"
         );
         assert_eq!(pivots[0].columns, vec!["expires_at", "active"]);
+    }
+
+    #[test]
+    fn marks_dynamic_pivot_accessor_as_unknown() {
+        let backend = Backend::new_test();
+        let uri = "file:///app/Models/User.php";
+        let content = "<?php
+namespace App\\Models;
+use Illuminate\\Database\\Eloquent\\Model;
+use Illuminate\\Database\\Eloquent\\Relations\\BelongsToMany;
+class User extends Model {
+    /** @return BelongsToMany<Role, $this> */
+    public function roles(string $accessor): BelongsToMany {
+        return $this->belongsToMany(Role::class)->as($accessor);
+    }
+}
+";
+        backend.update_ast(uri, content);
+        let classes = backend.symbols.uri_classes_index.read();
+        let user = classes
+            .get(uri)
+            .and_then(|c| c.iter().find(|c| c.name == "User"))
+            .expect("User class should be indexed");
+        let pivot = user
+            .laravel()
+            .and_then(|laravel| laravel.belongs_to_many_pivots.first())
+            .expect("dynamic as() should still record pivot metadata");
+        assert_eq!(pivot.accessor, crate::types::PivotAccessor::Unknown);
     }
 
     /// A background/workspace parse batch must not clobber the state of a
@@ -2327,5 +3151,31 @@ class User extends Model {
                 .is_some_and(|kids| kids.iter().any(|k| k == "Vendor\\Variant")),
             "the withdrawn declaration's parent must not still list it"
         );
+    }
+
+    /// An inheritance edge is deduplicated through the class's own list of
+    /// parents rather than through the parent's list of children, so a
+    /// re-parse that leaves the edge unchanged must still leave exactly one
+    /// entry for it.
+    #[test]
+    fn reparsing_a_class_does_not_duplicate_its_inheritance_edges() {
+        let backend = Backend::new_test();
+        let src =
+            "<?php namespace Vendor; class Child extends Base implements Contract { use Helper; }";
+
+        backend.update_ast("file:///child.php", src);
+        backend.update_ast("file:///child.php", src);
+
+        let gti = backend.symbols.gti_index.read();
+        for parent in ["Vendor\\Base", "Vendor\\Contract", "Vendor\\Helper"] {
+            let kids = gti
+                .get(parent)
+                .unwrap_or_else(|| panic!("{parent} should list Child as an implementor"));
+            assert_eq!(
+                kids.iter().filter(|k| *k == "Vendor\\Child").count(),
+                1,
+                "{parent} should list Child exactly once, got {kids:?}"
+            );
+        }
     }
 }

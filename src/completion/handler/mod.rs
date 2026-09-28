@@ -181,20 +181,15 @@ impl Backend {
             return Ok(Some(response));
         }
 
-        // Get file content for offset calculation.  For Blade files,
-        // use the virtual PHP content and translate the cursor position
-        // so that variable resolution walks the preprocessed AST.
-        let content = if self.is_blade_file(&uri) {
-            let vc = self.blade_virtual_content.read();
-            if let Some(virtual_php) = vc.get(&uri) {
-                position = self.translate_blade_to_php(&uri, position);
-                Some(virtual_php.clone())
-            } else {
-                self.get_file_content(&uri)
-            }
-        } else {
-            self.get_file_content(&uri)
-        };
+        // A template is analysed as the virtual PHP it lowers to, with the
+        // cursor moved into it, so variable resolution walks the
+        // preprocessed AST.
+        let content = self
+            .analysable_content_at(&uri, position)
+            .map(|(content, translated)| {
+                position = translated;
+                content
+            });
 
         if let Some(content) = content {
             let response = (|| -> Result<Option<CompletionResponse>> {
@@ -373,7 +368,7 @@ impl Backend {
                         StringContext::InStringLiteral | StringContext::NotInString
                     )
                     && let Some(response) =
-                        self.try_laravel_string_key_completion(&content, position)
+                        self.try_laravel_string_key_completion_in_file(&content, position, &ctx)
                 {
                     return Ok(Some(response));
                 }
@@ -435,18 +430,31 @@ impl Backend {
                     return Ok(Some(response));
                 }
 
-                // ── model-property<Model> string completion ────────────
-                // When the cursor is inside a string argument whose
-                // parameter is typed as `model-property<Model>`, suggest
-                // the model's known property names.
+                // ── Completion driven by the parameter's declared type ──
+                // `model-property<Model>` asks for one of a model's
+                // columns and `view-string` for one of the project's
+                // templates, neither of which the call's own spelling
+                // says — only the callee's signature does. Locating the
+                // call and resolving its callee is the expensive half, so
+                // it happens once here and both strategies read the
+                // parameter type it produced.
                 if matches!(
                     string_ctx,
                     StringContext::InStringLiteral | StringContext::NotInString
                 ) && let Some(code) = code_ctx.as_ref()
-                    && let Some(response) =
-                        self.try_model_property_completion(&content, position, &ctx, code)
+                    && let Some((call, param_type)) =
+                        self.typed_string_argument(&content, position, &ctx, code)
                 {
-                    return Ok(Some(response));
+                    if let Some(response) = self.model_property_completion(&call, &param_type, &ctx)
+                    {
+                        return Ok(Some(response));
+                    }
+                    if is_laravel
+                        && let Some(response) =
+                            self.view_string_completion(&call, &param_type, &content, position)
+                    {
+                        return Ok(Some(response));
+                    }
                 }
 
                 // ── Request input key completion ────────────────────────

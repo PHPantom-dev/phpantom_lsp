@@ -26,17 +26,9 @@ use crate::class_lookup::find_class_at_offset;
 use crate::composer;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
-use crate::types::{AccessKind, ClassInfo, MAX_INHERITANCE_DEPTH};
+use crate::types::{AccessKind, ClassInfo};
 use crate::util::short_name;
 use crate::virtual_members::laravel;
-
-struct MemberPrototypeSearch<'a> {
-    member_name: &'a str,
-    kind: MemberKind,
-    uri: &'a str,
-    content: &'a str,
-    class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-}
 
 impl Backend {
     /// Handle a "go to definition" request.
@@ -299,7 +291,7 @@ impl Backend {
                 };
                 let mctx = MemberDefinitionCtx {
                     member_name,
-                    subject: subject_text.as_str(content),
+                    subject: subject_text.as_str(self.symbol_map_source(uri, content)?),
                     access_kind,
                     access_hint,
                 };
@@ -316,35 +308,14 @@ impl Backend {
                 .resolve_class_reference(uri, content, name, *is_fqn, cursor_offset)
                 .map(|loc| vec![loc]),
 
-            SymbolKind::MemberDeclaration { name, is_static } => {
-                // If this method/property overrides a parent or implements
-                // an interface member, jump to the prototype declaration.
-                let ctx = self.file_context(uri);
-                let class_loader = self.class_loader(&ctx);
-                let current_class =
-                    crate::class_lookup::find_class_at_offset(&ctx.classes, cursor_offset);
-                if let Some(cls) = current_class
-                    && let Some(kind) = self.infer_member_declaration_kind(cls, name, *is_static)
-                    && let Some(loc) = self.resolve_member_declaration_prototype(
-                        uri,
-                        content,
-                        cls,
-                        name,
-                        kind,
-                        &class_loader,
-                    )
-                {
-                    return Some(vec![loc]);
-                }
-
-                if let Some(cls) = current_class
-                    && let Some(locs) =
-                        self.resolve_reverse_implementation(uri, content, cls, name, &class_loader)
-                    && !locs.is_empty()
-                {
-                    return Some(locs);
-                }
-
+            SymbolKind::MemberDeclaration { name, .. } => {
+                // Return self-location so editors detect "definition ==
+                // cursor" and offer Find Usages instead of navigating.
+                // Navigating to the interface or abstract prototype from a
+                // declaration site makes the concrete method's usages
+                // unreachable; the `implements`/`extends` clause and the
+                // `textDocument/implementation` command handle prototype
+                // navigation.
                 self.declaration_or_usages(uri, content, cursor_offset, name)
             }
 
@@ -380,7 +351,7 @@ impl Backend {
 
                 // Build FQN candidates: the resolved name, the raw name,
                 // and (if namespaced) the namespace-qualified version.
-                let ctx = self.file_context(uri);
+                let ctx = self.file_context_at(uri, cursor_offset);
 
                 // An unqualified `@see name()` names the documented class's
                 // own member first, as phpDocumentor reads it, and only
@@ -453,210 +424,6 @@ impl Backend {
         }
     }
 
-    fn infer_member_declaration_kind(
-        &self,
-        class: &ClassInfo,
-        member_name: &str,
-        is_static: bool,
-    ) -> Option<MemberKind> {
-        if is_static
-            && class
-                .constants
-                .iter()
-                .any(|c| c.name == member_name && c.visibility != crate::types::Visibility::Private)
-        {
-            return Some(MemberKind::Constant);
-        }
-
-        if class.methods.iter().any(|m| {
-            m.name == member_name
-                && m.is_static == is_static
-                && !m.is_virtual
-                && m.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Method);
-        }
-
-        if class.properties.iter().any(|p| {
-            p.name == member_name
-                && p.is_static == is_static
-                && !p.is_virtual
-                && p.visibility != crate::types::Visibility::Private
-        }) {
-            return Some(MemberKind::Property);
-        }
-
-        None
-    }
-
-    fn resolve_member_declaration_prototype(
-        &self,
-        uri: &str,
-        content: &str,
-        class: &ClassInfo,
-        member_name: &str,
-        kind: MemberKind,
-        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-    ) -> Option<Location> {
-        let search = MemberPrototypeSearch {
-            member_name,
-            kind,
-            uri,
-            content,
-            class_loader,
-        };
-
-        if let Some(loc) = self.find_member_prototype_in_traits(&class.used_traits, &search, 0) {
-            return Some(loc);
-        }
-
-        let mut current = class.clone();
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let Some(parent_name) = current.parent_class else {
-                break;
-            };
-            let Some(parent) = class_loader(&parent_name).map(Arc::unwrap_or_clone) else {
-                break;
-            };
-
-            if self.class_declares_member(&parent, &search)
-                && let Some(loc) = self.member_location(&parent_name, &parent, &search)
-            {
-                return Some(loc);
-            }
-
-            if let Some(loc) = self.find_member_prototype_in_traits(&parent.used_traits, &search, 0)
-            {
-                return Some(loc);
-            }
-
-            current = parent;
-        }
-
-        if matches!(search.kind, MemberKind::Method | MemberKind::Constant) {
-            return self.find_member_prototype_in_interfaces(class, &search);
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_traits(
-        &self,
-        trait_names: &[crate::atom::Atom],
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-
-        for trait_name in trait_names {
-            let Some(trait_info) = (search.class_loader)(trait_name).map(Arc::unwrap_or_clone)
-            else {
-                continue;
-            };
-            if self.class_declares_member(&trait_info, search)
-                && let Some(loc) = self.member_location(trait_name, &trait_info, search)
-            {
-                return Some(loc);
-            }
-            if let Some(loc) =
-                self.find_member_prototype_in_traits(&trait_info.used_traits, search, depth + 1)
-            {
-                return Some(loc);
-            }
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interfaces(
-        &self,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let mut current = Some(class.clone());
-        for _ in 0..MAX_INHERITANCE_DEPTH {
-            let cls = current?;
-            for iface_name in &cls.interfaces {
-                if let Some(loc) = self.find_member_prototype_in_interface(iface_name, search, 0) {
-                    return Some(loc);
-                }
-            }
-            current = cls
-                .parent_class
-                .as_deref()
-                .and_then(|parent| (search.class_loader)(parent).map(Arc::unwrap_or_clone));
-        }
-
-        None
-    }
-
-    fn find_member_prototype_in_interface(
-        &self,
-        iface_name: &str,
-        search: &MemberPrototypeSearch<'_>,
-        depth: usize,
-    ) -> Option<Location> {
-        if depth > MAX_INHERITANCE_DEPTH as usize {
-            return None;
-        }
-        let iface = (search.class_loader)(iface_name).map(Arc::unwrap_or_clone)?;
-        if self.class_declares_member(&iface, search)
-            && let Some(loc) = self.member_location(iface_name, &iface, search)
-        {
-            return Some(loc);
-        }
-
-        for parent in &iface.interfaces {
-            if let Some(loc) = self.find_member_prototype_in_interface(parent, search, depth + 1) {
-                return Some(loc);
-            }
-        }
-
-        if let Some(parent) = iface.parent_class
-            && let Some(loc) = self.find_member_prototype_in_interface(&parent, search, depth + 1)
-        {
-            return Some(loc);
-        }
-
-        None
-    }
-
-    fn class_declares_member(&self, class: &ClassInfo, search: &MemberPrototypeSearch<'_>) -> bool {
-        match search.kind {
-            MemberKind::Method => class.methods.iter().any(|m| {
-                m.name == search.member_name
-                    && !m.is_virtual
-                    && m.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Property => class.properties.iter().any(|p| {
-                p.name == search.member_name
-                    && !p.is_virtual
-                    && p.visibility != crate::types::Visibility::Private
-            }),
-            MemberKind::Constant => class.constants.iter().any(|c| {
-                c.name == search.member_name && c.visibility != crate::types::Visibility::Private
-            }),
-        }
-    }
-
-    fn member_location(
-        &self,
-        class_name: &str,
-        class: &ClassInfo,
-        search: &MemberPrototypeSearch<'_>,
-    ) -> Option<Location> {
-        let offset = class.member_name_offset(search.member_name, search.kind.as_str())?;
-        let (target_uri, target_content) =
-            self.find_class_file_content(class_name, search.uri, search.content)?;
-        let parsed_uri = Url::parse(&target_uri).ok()?;
-        Some(point_location(
-            parsed_uri,
-            crate::text_position::offset_to_position(&target_content, offset as usize),
-        ))
-    }
-
     /// Return the declaration's own location for a symbol that has nowhere
     /// else to jump to.
     ///
@@ -694,6 +461,19 @@ impl Backend {
         is_fqn: bool,
         cursor_offset: u32,
     ) -> Option<Location> {
+        // In a docblock a template parameter in scope shadows a class of
+        // the same name, so `@param T $x` under `@template T` names the
+        // template even when a class `T` exists.  In code it is the class.
+        if !is_fqn
+            && crate::completion::source::comment_position::is_offset_inside_docblock(
+                content,
+                cursor_offset as usize,
+            )
+            && let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset)
+        {
+            return template_def_location(uri, content, &tpl_def);
+        }
+
         let mut candidates = if is_fqn {
             // Already fully-qualified — use as-is.
             vec![name.to_string()]
@@ -755,20 +535,7 @@ impl Backend {
         // (e.g. `TKey`, `TModel`) defined in a `@template` tag on the
         // enclosing class or method docblock.
         if let Some(tpl_def) = self.lookup_template_def(uri, name, cursor_offset) {
-            let target_uri = Url::parse(uri).ok()?;
-            let start_pos =
-                crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
-            let end_pos = crate::text_position::offset_to_position(
-                content,
-                (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
-            );
-            return Some(Location {
-                uri: target_uri,
-                range: Range {
-                    start: start_pos,
-                    end: end_pos,
-                },
-            });
+            return template_def_location(uri, content, &tpl_def);
         }
 
         None
@@ -1268,4 +1035,22 @@ impl Backend {
 
         None
     }
+}
+
+/// The location of a `@template` parameter's name in its declaring tag.
+fn template_def_location(
+    uri: &str,
+    content: &str,
+    tpl_def: &crate::symbol_map::TemplateParamDef,
+) -> Option<Location> {
+    let target_uri = Url::parse(uri).ok()?;
+    let start = crate::text_position::offset_to_position(content, tpl_def.name_offset as usize);
+    let end = crate::text_position::offset_to_position(
+        content,
+        (tpl_def.name_offset + tpl_def.name.len() as u32) as usize,
+    );
+    Some(Location {
+        uri: target_uri,
+        range: Range { start, end },
+    })
 }

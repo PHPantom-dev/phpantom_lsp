@@ -228,6 +228,15 @@ pub struct DiagnosticsConfig {
     #[serde(rename = "workspace-external")]
     pub workspace_external: Option<bool>,
 
+    /// Downgrade `type_mismatch_argument` to a warning when the only
+    /// reason an argument's type fails to satisfy its parameter is a stray
+    /// `null` (every non-null member of the argument's type is already
+    /// compatible).
+    ///
+    /// Off by default, matching current (error) behaviour.
+    #[serde(rename = "downgrade-nullable-argument-mismatch")]
+    pub downgrade_nullable_argument_mismatch: Option<bool>,
+
     /// Rules that suppress matching diagnostics, similar to PHPStan's
     /// `ignoreErrors`.
     ///
@@ -303,6 +312,12 @@ impl DiagnosticsConfig {
     pub fn workspace_external_enabled(&self) -> bool {
         self.workspace_external.unwrap_or(true)
     }
+
+    /// Whether a nullability-only argument type mismatch is downgraded
+    /// to a warning.
+    pub fn downgrade_nullable_argument_mismatch_enabled(&self) -> bool {
+        self.downgrade_nullable_argument_mismatch.unwrap_or(false)
+    }
 }
 
 /// `[formatting]` section — controls the formatting strategy.
@@ -343,6 +358,31 @@ pub struct FormattingConfig {
     /// - `""` — disable pint.
     /// - Any other value — use as the command.
     pub pint: Option<String>,
+    /// Whether Blade templates are formatted through Pint's
+    /// `Pint/laravel_blade` rule.
+    ///
+    /// - `None` (default) — follow the workspace `pint.json`: Blade files
+    ///   go to Pint when its `rules` turn the rule on, and to the built-in
+    ///   reindenter otherwise.
+    /// - `true` — send Blade files to Pint with `--blade`, which turns the
+    ///   rule on for the run.
+    /// - `false` — never send Blade files to Pint.
+    #[serde(rename = "pint-blade")]
+    pub pint_blade: Option<bool>,
+    /// Whether the built-in Blade formatter also formats the PHP the
+    /// template carries: `@php` bodies, `<?php` islands, echoes, and
+    /// directive arguments, along with the spacing that is Blade's own
+    /// (`@if(` to `@if (`, `{{$x}}` to `{{ $x }}`).
+    ///
+    /// - `None` (default) — the reindenter changes leading whitespace
+    ///   only, and every fragment keeps the spacing its author typed.
+    /// - `true` — format each fragment through the built-in PHP
+    ///   formatter, with the same `mago.toml` settings a `.php` file gets.
+    ///
+    /// Has no effect on a project whose Blade files go to Pint, which
+    /// formats them itself.
+    #[serde(rename = "blade-php")]
+    pub blade_php: Option<bool>,
     /// Maximum runtime in milliseconds before each formatter is killed.
     /// Defaults to 10 000 ms (10 seconds).  Applied per tool, not
     /// for the combined pipeline.
@@ -356,12 +396,12 @@ impl FormattingConfig {
         self.timeout.unwrap_or(10_000)
     }
 
-    /// Whether formatting is entirely disabled (all tools explicitly
-    /// set to empty strings).
+    /// Whether formatting is entirely disabled (every tool explicitly
+    /// set to an empty string).
     pub fn is_disabled(&self) -> bool {
-        self.php_cs_fixer.as_deref() == Some("")
-            && self.phpcbf.as_deref() == Some("")
-            && self.pint.as_deref() == Some("")
+        crate::formatting::Tool::ALL
+            .into_iter()
+            .all(|tool| tool.configured(self) == Some(""))
     }
 }
 
@@ -525,11 +565,95 @@ pub struct IndexingConfig {
     ///   if present, still resolves on demand, but never falls back to
     ///   self-scan.
     pub strategy: Option<IndexingStrategy>,
+    /// Paths the workspace scanners must skip, in gitignore syntax
+    /// relative to the workspace root: a bare name matches at any
+    /// depth, a pattern containing `/` anchors to the root, a trailing
+    /// `/` restricts to directories, and a leading `!` re-includes.
+    ///
+    /// Excludes apply to background discovery and to the directories
+    /// `analyze` walks. A file the editor opens, or one named outright
+    /// on the `analyze` command line, is always served.
+    pub exclude: Option<Vec<String>>,
+    /// Extra file extensions (without the dot) treated as PHP source
+    /// during workspace discovery, e.g. `["module", "inc", "theme"]`
+    /// for Drupal. `.php` is always included. Drupal projects get the
+    /// Drupal extensions inside the detected web root automatically;
+    /// this setting extends discovery elsewhere.
+    pub extensions: Option<Vec<String>>,
 }
 
 impl IndexingConfig {
     pub fn strategy(&self) -> IndexingStrategy {
         self.strategy.unwrap_or_default()
+    }
+
+    pub fn exclude(&self) -> &[String] {
+        self.exclude.as_deref().unwrap_or_default()
+    }
+
+    pub fn extensions(&self) -> &[String] {
+        self.extensions.as_deref().unwrap_or_default()
+    }
+}
+
+/// File filters supplied by the editor rather than by `.phpantom.toml`.
+///
+/// An editor already knows which paths the user hides and which
+/// extensions they treat as PHP; mirroring that into `.phpantom.toml`
+/// by hand is duplicated work. A client passes the same two lists
+/// [`IndexingConfig`] accepts through `initializationOptions` (and
+/// again through `workspace/didChangeConfiguration` when the user
+/// edits their settings mid-session):
+///
+/// ```json
+/// { "indexing": { "exclude": ["generated"], "extensions": ["module"] } }
+/// ```
+///
+/// The shape is deliberately generic. It is a list of gitignore-style
+/// globs and a list of extensions, never an editor's own setting
+/// names, so every client can translate its native settings into it.
+/// This layer sits beside the config-file layer rather than replacing
+/// it: [`Backend::index_filters`](crate::Backend::index_filters)
+/// compiles the union, so a `.phpantom.toml` reload keeps the client's
+/// contribution and a client update keeps the file's.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct ClientIndexingOptions {
+    /// Paths to skip, in the same gitignore syntax as
+    /// [`IndexingConfig::exclude`].
+    pub exclude: Vec<String>,
+    /// Extra file extensions treated as PHP source, as in
+    /// [`IndexingConfig::extensions`].
+    pub extensions: Vec<String>,
+}
+
+impl ClientIndexingOptions {
+    /// Read the `indexing` filters out of a client-supplied settings
+    /// blob, from either `initializationOptions` or the `settings` of a
+    /// `workspace/didChangeConfiguration` notification.
+    ///
+    /// Accepts the filters at the top level (`{"indexing": …}`, what an
+    /// extension passes as its own initialization options) or nested
+    /// under a `phpantom` key (`{"phpantom": {"indexing": …}}`, the
+    /// shape a client sends when it pushes its whole settings tree).
+    ///
+    /// Returns `None` when the blob carries no readable `indexing`
+    /// block, meaning "this notification is not about file filters"
+    /// rather than "the user cleared them". Clients re-push settings
+    /// for reasons of their own (VS Code's client sends the whole
+    /// `phpantom` section whenever any key in it changes), and reading
+    /// those as an empty filter set would silently discard what the
+    /// editor forwarded at startup. Clearing is still expressible: an
+    /// `indexing` block that is present but empty parses as no filters.
+    /// A malformed block is ignored for the same reason.
+    pub fn from_client_settings(settings: &serde_json::Value) -> Option<Self> {
+        let scoped = settings.get("phpantom").unwrap_or(settings);
+        serde_json::from_value(scoped.get("indexing")?.clone()).ok()
+    }
+
+    /// Whether the client supplied no filters at all.
+    pub fn is_empty(&self) -> bool {
+        self.exclude.is_empty() && self.extensions.is_empty()
     }
 }
 
@@ -612,14 +736,20 @@ pub const CONFIG_FILE_NAME: &str = ".phpantom.toml";
 /// The subdirectory under the user's XDG config directory.
 const CONFIG_APP_DIR: &str = "phpantom_lsp";
 
-/// Default content for a newly created `.phpantom.toml` file.
-pub const DEFAULT_CONFIG_CONTENT: &str = r#"#:schema https://github.com/PHPantom-dev/phpantom_lsp/raw/main/config-schema.json
+/// Header shared by every generated `.phpantom.toml`: enables
+/// schema-aware editor tooling and points at the docs. `init_wizard`
+/// reuses this so an interactively-built config still starts the same
+/// way as the blank one below.
+pub(crate) const CONFIG_HEADER: &str = r#"#:schema https://github.com/PHPantom-dev/phpantom_lsp/raw/main/config-schema.json
 
 # PHPantom configuration: only add settings you want to override.
 # Editors with TOML schema support (Zed, VS Code + Even Better TOML, Neovim)
 # provide autocomplete and hover documentation for all available options.
 # Full reference: https://phpantom-dev.github.io/phpantom_lsp/configuration/
 "#;
+
+/// Default content for a newly created `.phpantom.toml` file.
+pub const DEFAULT_CONFIG_CONTENT: &str = CONFIG_HEADER;
 
 /// Return the path to the global config file, if the platform's config
 /// directory can be determined.
@@ -657,10 +787,34 @@ pub fn create_global_config() -> Result<(bool, PathBuf), ConfigError> {
     Ok((created, config_path))
 }
 
+/// Same as [`create_default_config`], but with caller-supplied content
+/// (e.g. the answers `init_wizard` collected) instead of the blank
+/// starter config.
+pub fn create_default_config_with_content(
+    workspace_root: &Path,
+    content: &str,
+) -> Result<bool, ConfigError> {
+    write_config_content(&workspace_root.join(CONFIG_FILE_NAME), content)
+}
+
+/// Same as [`create_global_config`], but with caller-supplied content.
+pub fn create_global_config_with_content(content: &str) -> Result<(bool, PathBuf), ConfigError> {
+    let config_path = global_config_path().ok_or(ConfigError::NoConfigDir)?;
+    let created = write_config_content(&config_path, content)?;
+    Ok((created, config_path))
+}
+
 /// Write the starter config to `config_path`, creating any missing
 /// parent directories.  Returns `false` without touching anything when
 /// the file is already there.
 fn write_default_config(config_path: &Path) -> Result<bool, ConfigError> {
+    write_config_content(config_path, DEFAULT_CONFIG_CONTENT)
+}
+
+/// Write `content` to `config_path`, creating any missing parent
+/// directories.  Returns `false` without touching anything when the
+/// file is already there.
+fn write_config_content(config_path: &Path, content: &str) -> Result<bool, ConfigError> {
     if config_path.exists() {
         return Ok(false);
     }
@@ -672,7 +826,7 @@ fn write_default_config(config_path: &Path) -> Result<bool, ConfigError> {
         })?;
     }
 
-    std::fs::write(config_path, DEFAULT_CONFIG_CONTENT).map_err(|e| ConfigError::Io {
+    std::fs::write(config_path, content).map_err(|e| ConfigError::Io {
         path: config_path.display().to_string(),
         source: e,
     })?;
@@ -975,6 +1129,36 @@ marker-interface = 'Acme\Proxy\TransparentProxy'
     }
 
     #[test]
+    fn parses_downgrade_nullable_argument_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            "[diagnostics]\ndowngrade-nullable-argument-mismatch = true\n",
+        )
+        .unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(
+            config
+                .diagnostics
+                .downgrade_nullable_argument_mismatch_enabled()
+        );
+    }
+
+    #[test]
+    fn downgrade_nullable_argument_mismatch_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[diagnostics]\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert!(
+            !config
+                .diagnostics
+                .downgrade_nullable_argument_mismatch_enabled()
+        );
+    }
+
+    #[test]
     fn extra_arguments_defaults_to_false() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(CONFIG_FILE_NAME);
@@ -1165,6 +1349,8 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 
 [indexing]
 strategy = "self"
+exclude = ["generated", "web/sites/default/files"]
+extensions = ["module", "inc"]
 
 [semantic_tokens]
 mode = "full"
@@ -1208,6 +1394,17 @@ analyze-timeout = 45000
             Some("deprecated_usage")
         );
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+        assert_eq!(
+            config.indexing.exclude(),
+            &[
+                "generated".to_string(),
+                "web/sites/default/files".to_string()
+            ]
+        );
+        assert_eq!(
+            config.indexing.extensions(),
+            &["module".to_string(), "inc".to_string()]
+        );
         assert_eq!(config.semantic_tokens.mode, Some(SemanticTokensMode::Full));
         assert_eq!(config.formatting.php_cs_fixer.as_deref(), Some(""));
         assert_eq!(
@@ -1394,6 +1591,16 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(&path, "[formatting]\ntimeout = 3000\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.formatting.timeout_ms(), 3000);
+    }
+
+    #[test]
+    fn parses_blade_php_formatting() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(&path, "[formatting]\nblade-php = true\n").unwrap();
+        let config = load_config(dir.path()).unwrap();
+        assert_eq!(config.formatting.blade_php, Some(true));
+        assert!(!config.formatting.is_disabled());
     }
 
     #[test]
@@ -1646,5 +1853,77 @@ paths = ["database/schema", "extra/schema.sql"]
         merge_toml(&mut base, overlay);
         let config: Config = base.try_into().unwrap();
         assert_eq!(config.indexing.strategy, Some(IndexingStrategy::SelfScan));
+    }
+
+    #[test]
+    fn client_options_read_top_level_indexing() {
+        let settings = serde_json::json!({
+            "indexing": { "exclude": ["generated"], "extensions": ["module"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
+        assert_eq!(options.extensions, ["module"]);
+    }
+
+    /// A client that pushes its whole settings tree namespaces the block
+    /// under the server's section name.
+    #[test]
+    fn client_options_read_a_phpantom_scoped_block() {
+        let settings = serde_json::json!({
+            "phpantom": { "indexing": { "exclude": ["build"] } },
+            "editor": { "tabSize": 4 }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["build"]);
+        assert!(options.extensions.is_empty());
+    }
+
+    /// A settings blob with no readable `indexing` block means "not
+    /// about file filters", not "the user cleared them". VS Code's
+    /// client re-pushes the whole `phpantom` section whenever any key in
+    /// it changes, so reading those as an empty filter set would discard
+    /// what the extension forwarded at startup the first time someone
+    /// toggled an unrelated setting.
+    #[test]
+    fn client_options_ignore_settings_without_an_indexing_block() {
+        for settings in [
+            serde_json::json!({}),
+            serde_json::json!({ "unrelated": true }),
+            serde_json::json!({ "phpantom": { "trace": { "server": "verbose" } } }),
+            serde_json::json!({ "indexing": "not-an-object" }),
+            serde_json::json!({ "indexing": { "exclude": "not-a-list" } }),
+            serde_json::json!(null),
+        ] {
+            assert!(
+                ClientIndexingOptions::from_client_settings(&settings).is_none(),
+                "settings without a readable indexing block must be ignored: {settings}"
+            );
+        }
+    }
+
+    /// Clearing the filters again still has to be expressible, or a user
+    /// who removes their last exclude keeps it until they restart.
+    #[test]
+    fn an_empty_indexing_block_clears_the_filters() {
+        for settings in [
+            serde_json::json!({ "indexing": {} }),
+            serde_json::json!({ "indexing": { "exclude": [], "extensions": [] } }),
+        ] {
+            let options = ClientIndexingOptions::from_client_settings(&settings)
+                .expect("a present indexing block is a filter update");
+            assert!(options.is_empty());
+        }
+    }
+
+    /// The strategy key belongs to `.phpantom.toml` alone: an editor
+    /// forwards file filters, it does not get to switch the project's
+    /// indexing mode.
+    #[test]
+    fn client_options_carry_only_the_two_filter_lists() {
+        let settings = serde_json::json!({
+            "indexing": { "strategy": "none", "exclude": ["generated"] }
+        });
+        let options = ClientIndexingOptions::from_client_settings(&settings).unwrap();
+        assert_eq!(options.exclude, ["generated"]);
     }
 }

@@ -1,35 +1,18 @@
-use crate::common::create_test_backend;
+use crate::common::{
+    collect_diagnostics_with, create_test_backend, create_test_backend_with_full_stubs,
+    messages_with_code,
+};
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn collect(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_return_type_diagnostics(uri, php, &mut out);
-    out
-}
-
-fn has_return_error(diags: &[Diagnostic]) -> bool {
-    diags.iter().any(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_return"))
-    })
-}
-
-fn return_error_messages(diags: &[Diagnostic]) -> Vec<String> {
-    diags
-        .iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_return"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    )
 }
 
 // ─── Basic: return wrong type from function ─────────────────────────────────
@@ -43,10 +26,10 @@ function get_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error for array returned from string function, got: {diags:?}"
     );
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter().any(|m| m.contains("incompatible")),
         "Expected message about incompatible return, got: {msgs:?}"
@@ -64,7 +47,7 @@ function get_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return type, got: {diags:?}"
     );
 }
@@ -80,7 +63,7 @@ function get_count(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error for null returned from int function, got: {diags:?}"
     );
 }
@@ -96,7 +79,7 @@ function maybe_name(): ?string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null returned from ?string, got: {diags:?}"
     );
 }
@@ -112,10 +95,10 @@ function do_nothing(): void {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for value returned from void function, got: {diags:?}"
     );
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter()
             .any(|m| m.contains("Void") || m.contains("void")),
@@ -134,7 +117,7 @@ function do_nothing(): void {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag bare return in void function, got: {diags:?}"
     );
 }
@@ -150,10 +133,10 @@ function get_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for bare return in string function, got: {diags:?}"
     );
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter()
             .any(|m| m.contains("must not return without a value")),
@@ -174,7 +157,7 @@ class Foo {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for value returned from void method, got: {diags:?}"
     );
 }
@@ -192,7 +175,7 @@ class Calculator {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error in method, got: {diags:?}"
     );
 }
@@ -210,7 +193,7 @@ class Calculator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct method return, got: {diags:?}"
     );
 }
@@ -228,7 +211,7 @@ function get_value(bool $flag): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -250,7 +233,7 @@ function fetch(): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -269,7 +252,7 @@ function get_value(): string|int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int returned from string|int, got: {diags:?}"
     );
 }
@@ -285,7 +268,7 @@ function get_value() {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag when no return type declared, got: {diags:?}"
     );
 }
@@ -301,7 +284,7 @@ function get_anything(): mixed {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag mixed return type, got: {diags:?}"
     );
 }
@@ -320,7 +303,7 @@ function get_processor(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Closure's int return should not be checked against outer string type, got: {diags:?}"
     );
 }
@@ -336,7 +319,7 @@ function get_count(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error for bool returned from int function, got: {diags:?}"
     );
 }
@@ -352,7 +335,7 @@ function get_count(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error for string returned from int function, got: {diags:?}"
     );
 }
@@ -368,7 +351,7 @@ function get_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error for array returned from string function, got: {diags:?}"
     );
 }
@@ -388,7 +371,7 @@ function label(int $code): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -407,7 +390,7 @@ function maybe_name(): ?string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for bare return in ?string function (should use return null), got: {diags:?}"
     );
 }
@@ -425,7 +408,7 @@ class Foo {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag bare return in void method, got: {diags:?}"
     );
 }
@@ -443,7 +426,7 @@ function find_name(array $items): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -464,10 +447,10 @@ class Service {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for string returned from void method, got: {diags:?}"
     );
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter()
             .any(|m| m.contains("Void") || m.contains("void")),
@@ -488,7 +471,7 @@ function search(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected return type error in while loop, got: {diags:?}"
     );
 }
@@ -507,7 +490,7 @@ function process(bool $flag): void {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag multiple bare returns in void function, got: {diags:?}"
     );
 }
@@ -529,7 +512,7 @@ function gen(): \Generator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag return in generator function, got: {diags:?}"
     );
 }
@@ -547,7 +530,7 @@ class Streamer {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag return in generator method, got: {diags:?}"
     );
 }
@@ -564,7 +547,7 @@ function range_gen(int $start, int $end): \Generator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield in loop, got: {diags:?}"
     );
 }
@@ -581,7 +564,7 @@ function conditional_gen(bool $flag): \Generator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield inside if, got: {diags:?}"
     );
 }
@@ -600,7 +583,7 @@ function safe_gen(): \Generator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield inside try/catch, got: {diags:?}"
     );
 }
@@ -621,7 +604,7 @@ function switch_gen(int $mode): \Generator {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag generator with yield in switch, got: {diags:?}"
     );
 }
@@ -644,7 +627,7 @@ class Service {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Closure's int return must not leak to outer string method, got: {diags:?}"
     );
 }
@@ -659,7 +642,7 @@ function get_mapper(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Arrow function return should not affect outer function, got: {diags:?}"
     );
 }
@@ -676,7 +659,7 @@ function transform(array $items): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Closure in array_map should not leak return type to outer, got: {diags:?}"
     );
 }
@@ -693,7 +676,7 @@ function outer(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Nested function return should not leak to outer, got: {diags:?}"
     );
 }
@@ -711,7 +694,7 @@ function maybe(): ?string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag string returned from ?string, got: {diags:?}"
     );
 }
@@ -725,7 +708,7 @@ function flexible(): int|string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int returned from int|string, got: {diags:?}"
     );
 }
@@ -739,7 +722,7 @@ function flexible(): int|string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag string returned from int|string, got: {diags:?}"
     );
 }
@@ -753,7 +736,7 @@ function maybe(): string|null {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null returned from string|null, got: {diags:?}"
     );
 }
@@ -772,7 +755,7 @@ function resolve(bool $a, bool $b): int|string|null {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any branch of int|string|null, got: {diags:?}"
     );
 }
@@ -787,7 +770,7 @@ function flexible(): int|string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from int|string, got: {diags:?}"
     );
 }
@@ -806,7 +789,7 @@ function label(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int returned from string function (type juggling), got: {diags:?}"
     );
 }
@@ -820,7 +803,7 @@ function label(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag float returned from string function (type juggling), got: {diags:?}"
     );
 }
@@ -835,7 +818,7 @@ function precise(): float {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int returned from float function (widening), got: {diags:?}"
     );
 }
@@ -856,7 +839,7 @@ function get_animal(): Animal {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag subclass Cat returned from Animal function, got: {diags:?}"
     );
 }
@@ -877,7 +860,7 @@ function get_printable(): Printable {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag interface implementor returned from interface function, got: {diags:?}"
     );
 }
@@ -895,7 +878,7 @@ function get_base(): Base {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag deep subclass returned from base function, got: {diags:?}"
     );
 }
@@ -911,7 +894,7 @@ function get_object(): object {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag class instance returned from object function, got: {diags:?}"
     );
 }
@@ -931,7 +914,7 @@ class Builder {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag new self() returned from self function, got: {diags:?}"
     );
 }
@@ -947,7 +930,7 @@ class Builder {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag new static() returned from static function, got: {diags:?}"
     );
 }
@@ -963,7 +946,7 @@ class Builder {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag $this returned from static return type, got: {diags:?}"
     );
 }
@@ -984,9 +967,9 @@ class Category {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Category[] returned from self[] method, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -1003,9 +986,9 @@ class Category {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Category[] returned from static[] method, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -1026,9 +1009,9 @@ function build(): Node {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Node&HasCount returned where Node is declared, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -1047,7 +1030,7 @@ class Query {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag $this returned from self in chaining methods, got: {diags:?}"
     );
 }
@@ -1069,7 +1052,7 @@ function render(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Stringable object returned from string function, got: {diags:?}"
     );
 }
@@ -1087,7 +1070,7 @@ function get_items(): iterable {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag array returned from iterable function, got: {diags:?}"
     );
 }
@@ -1101,7 +1084,7 @@ function get_items(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag array literal returned from array function, got: {diags:?}"
     );
 }
@@ -1115,7 +1098,7 @@ function get_callback(): callable {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag closure returned from callable function, got: {diags:?}"
     );
 }
@@ -1135,7 +1118,7 @@ trait Describable {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return in trait method, got: {diags:?}"
     );
 }
@@ -1151,7 +1134,7 @@ trait Describable {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from string trait method, got: {diags:?}"
     );
 }
@@ -1170,7 +1153,7 @@ enum Color {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return in enum method, got: {diags:?}"
     );
 }
@@ -1191,7 +1174,7 @@ enum Status {
     // In non-strict mode int→string is juggled, so this actually should NOT be flagged.
     // This tests that we don't accidentally flag valid juggling in enum context.
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int returned from string enum method (type juggling), got: {diags:?}"
     );
 }
@@ -1209,7 +1192,7 @@ abstract class Shape {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag abstract method (no body), got: {diags:?}"
     );
 }
@@ -1228,7 +1211,7 @@ interface Repository {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag interface methods (no body), got: {diags:?}"
     );
 }
@@ -1248,7 +1231,7 @@ class Legacy {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag method with no return type, got: {diags:?}"
     );
 }
@@ -1263,7 +1246,7 @@ class Foo {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag constructor with no return statement, got: {diags:?}"
     );
 }
@@ -1293,7 +1276,7 @@ function nested(int $a, int $b, int $c): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in deeply nested if, got: {diags:?}"
     );
 }
@@ -1314,7 +1297,7 @@ function search(array $items): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in do-while, got: {diags:?}"
     );
 }
@@ -1333,7 +1316,7 @@ function find_index(array $items, string $target): int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in for loop, got: {diags:?}"
     );
 }
@@ -1350,7 +1333,7 @@ function finalize(): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -1374,7 +1357,7 @@ function classify(int $x): string {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -1397,7 +1380,7 @@ function label(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for int returned from string function under strict_types=1, got: {diags:?}"
     );
 }
@@ -1416,7 +1399,7 @@ function get_animal(): Animal {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "strict_types should not affect subclass return, got: {diags:?}"
     );
 }
@@ -1432,7 +1415,7 @@ function maybe(): ?string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "strict_types should not affect nullable null return, got: {diags:?}"
     );
 }
@@ -1452,7 +1435,7 @@ function format_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return in namespaced function, got: {diags:?}"
     );
 }
@@ -1468,7 +1451,7 @@ function format_name(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from namespaced string function, got: {diags:?}"
     );
 }
@@ -1486,7 +1469,7 @@ class UserService {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return in namespaced class method, got: {diags:?}"
     );
 }
@@ -1518,7 +1501,7 @@ class Baz {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any correct returns across multiple classes, got: {diags:?}"
     );
 }
@@ -1545,7 +1528,7 @@ class AlsoGood {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert_eq!(
         msgs.len(),
         1,
@@ -1566,7 +1549,7 @@ function is_valid(): bool {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag true returned from bool function, got: {diags:?}"
     );
 }
@@ -1580,7 +1563,7 @@ function is_valid(): bool {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag false returned from bool function, got: {diags:?}"
     );
 }
@@ -1598,7 +1581,7 @@ function greet(string $name): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag string concatenation returned from string function, got: {diags:?}"
     );
 }
@@ -1612,7 +1595,7 @@ function add(int $a, int $b): int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag arithmetic returned from int function, got: {diags:?}"
     );
 }
@@ -1632,7 +1615,7 @@ declare(strict_types=1) {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct return inside declare block, got: {diags:?}"
     );
 }
@@ -1650,7 +1633,7 @@ function pick(bool $flag): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag ternary returning strings from string function, got: {diags:?}"
     );
 }
@@ -1664,7 +1647,7 @@ function get_name(?string $name): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null coalescing returning string from string function, got: {diags:?}"
     );
 }
@@ -1700,7 +1683,7 @@ class UserService {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any correct returns across multiple methods, got: {diags:?}"
     );
 }
@@ -1726,7 +1709,7 @@ class Initializer {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag bare return in constructor, got: {diags:?}"
     );
 }
@@ -1744,7 +1727,7 @@ function identity(string $s): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag returning typed parameter matching return type, got: {diags:?}"
     );
 }
@@ -1758,7 +1741,7 @@ function passthrough(?int $val): ?int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag returning ?int param from ?int function, got: {diags:?}"
     );
 }
@@ -1786,7 +1769,7 @@ function another_helper(): bool {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any correct returns in mixed file, got: {diags:?}"
     );
 }
@@ -1813,7 +1796,7 @@ function status_label(int $code): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in switch cases, got: {diags:?}"
     );
 }
@@ -1831,7 +1814,7 @@ function empty_list(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag empty array returned from array function, got: {diags:?}"
     );
 }
@@ -1845,7 +1828,7 @@ function oops(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for empty array returned from int function, got: {diags:?}"
     );
 }
@@ -1867,7 +1850,7 @@ function unwrap(?string $s): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag guarded nullable param return, got: {diags:?}"
     );
 }
@@ -1885,7 +1868,7 @@ function maybe_count(): ?int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null literal from ?int, got: {diags:?}"
     );
 }
@@ -1899,7 +1882,7 @@ function maybe_count(): ?int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag int literal from ?int, got: {diags:?}"
     );
 }
@@ -1917,7 +1900,7 @@ function anything(): mixed {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag array returned from mixed, got: {diags:?}"
     );
 }
@@ -1931,7 +1914,7 @@ function anything(): mixed {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null returned from mixed, got: {diags:?}"
     );
 }
@@ -1954,7 +1937,7 @@ function categorize(int $n): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any of the many correct string returns, got: {diags:?}"
     );
 }
@@ -1974,7 +1957,7 @@ function will_throw(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag function with no return statement (throws), got: {diags:?}"
     );
 }
@@ -1998,7 +1981,7 @@ function safe_parse(string $json): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in multiple catch blocks, got: {diags:?}"
     );
 }
@@ -2018,7 +2001,7 @@ function count_items(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for object returned from int function, got: {diags:?}"
     );
 }
@@ -2032,7 +2015,7 @@ function get_count(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for null returned from int, got: {diags:?}"
     );
 }
@@ -2046,7 +2029,7 @@ function get_label(): string {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for bool returned from string, got: {diags:?}"
     );
 }
@@ -2060,7 +2043,7 @@ function check(): bool {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for string returned from bool, got: {diags:?}"
     );
 }
@@ -2074,7 +2057,7 @@ function compute(): int {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from int, got: {diags:?}"
     );
 }
@@ -2088,7 +2071,7 @@ function validate(): bool {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from bool, got: {diags:?}"
     );
 }
@@ -2117,7 +2100,7 @@ function get_collection(): Countable&Serializable {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag class implementing both interfaces for intersection return, got: {diags:?}"
     );
 }
@@ -2138,7 +2121,7 @@ class Repository {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag array literal from method with @return array<string, int>, got: {diags:?}"
     );
 }
@@ -2165,7 +2148,7 @@ class User {}
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Collection returned from Collection-typed method, got: {diags:?}"
     );
 }
@@ -2186,7 +2169,7 @@ function get_ids(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag empty array from int[] return type, got: {diags:?}"
     );
 }
@@ -2201,7 +2184,7 @@ function get_names(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag empty array from list<string> return type, got: {diags:?}"
     );
 }
@@ -2216,7 +2199,7 @@ function get_config(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag array literal from array<string, mixed>, got: {diags:?}"
     );
 }
@@ -2236,7 +2219,7 @@ function find_user(): ?User {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag User returned from ?User, got: {diags:?}"
     );
 }
@@ -2252,7 +2235,7 @@ function find_user(): ?User {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag null returned from ?User, got: {diags:?}"
     );
 }
@@ -2269,7 +2252,7 @@ function find_vehicle(): ?Vehicle {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag subclass Car returned from ?Vehicle, got: {diags:?}"
     );
 }
@@ -2287,7 +2270,7 @@ function maybe_find(): string|false {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag false returned from string|false, got: {diags:?}"
     );
 }
@@ -2301,7 +2284,7 @@ function maybe_find(): string|false {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag string returned from string|false, got: {diags:?}"
     );
 }
@@ -2319,7 +2302,7 @@ function get_result(): Success|Failure|Pending {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag Pending returned from Success|Failure|Pending, got: {diags:?}"
     );
 }
@@ -2338,8 +2321,59 @@ function get_user(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag matching array shape return, got: {diags:?}"
+    );
+}
+
+#[test]
+fn no_diagnostic_for_foreach_key_value_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach ($pairs as $cn => $_) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach ($arr as $key => $_) that rewrites every element should not join \
+         with the pre-loop shape, got: {diags:?}"
+    );
+}
+
+/// Same as above, iterating the array's keys through `array_keys()`: the
+/// key `array_keys()` hands the loop is the array's own `string` key, not
+/// the `int|string` default for an array key.
+#[test]
+fn no_diagnostic_for_foreach_over_array_keys_rewriting_every_element() {
+    let php = r#"<?php
+/**
+ * @param array<string, array{string, bool, string}> $pairs
+ * @return array<string, array{string, bool, string, array{'I'}}>
+ */
+function add_flag(array $pairs): array {
+    foreach (array_keys($pairs) as $cn) {
+        $pairs[$cn][3] = ['I'];
+    }
+    return $pairs;
+}
+"#;
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_return_type_diagnostics,
+    );
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "A foreach over array_keys($arr) that rewrites every element should keep \
+         the array's string key, got: {diags:?}"
     );
 }
 
@@ -2374,7 +2408,7 @@ class QueryBuilder {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any returns in builder pattern, got: {diags:?}"
     );
 }
@@ -2406,7 +2440,7 @@ class Square extends Shape {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag factory methods returning subclasses of self, got: {diags:?}"
     );
 }
@@ -2435,7 +2469,7 @@ class UserRepository {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any returns in repository pattern, got: {diags:?}"
     );
 }
@@ -2461,7 +2495,7 @@ enum Status {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag match expression returning strings from string method, got: {diags:?}"
     );
 }
@@ -2490,7 +2524,7 @@ class Parser {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any returns in complex nullable method, got: {diags:?}"
     );
 }
@@ -2508,7 +2542,7 @@ function to_int(string $s): int {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag (int) cast returned from int function, got: {diags:?}"
     );
 }
@@ -2522,7 +2556,7 @@ function stringify(mixed $v): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag (string) cast returned from string function, got: {diags:?}"
     );
 }
@@ -2536,7 +2570,7 @@ function to_array(object $o): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag (array) cast returned from array function, got: {diags:?}"
     );
 }
@@ -2557,7 +2591,7 @@ function make_error(): \RuntimeException {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag deep exception subclass returned as RuntimeException, got: {diags:?}"
     );
 }
@@ -2581,7 +2615,7 @@ class Config {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct static method returns, got: {diags:?}"
     );
 }
@@ -2597,7 +2631,7 @@ class Config {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from static string method, got: {diags:?}"
     );
 }
@@ -2625,7 +2659,7 @@ class Service {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag method call return matching declared type, got: {diags:?}"
     );
 }
@@ -2653,7 +2687,7 @@ class Internal {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct private/protected method returns, got: {diags:?}"
     );
 }
@@ -2669,7 +2703,7 @@ class Internal {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected error for array returned from private string method, got: {diags:?}"
     );
 }
@@ -2693,7 +2727,7 @@ class Transformer {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag method with internal closures returning correct type, got: {diags:?}"
     );
 }
@@ -2725,7 +2759,7 @@ enum Suit: string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag correct returns in backed enum methods, got: {diags:?}"
     );
 }
@@ -2743,7 +2777,7 @@ function fail(): never {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag never function with no return, got: {diags:?}"
     );
 }
@@ -2788,7 +2822,7 @@ class OrderService {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Should not flag any returns in complex service class, got: {diags:?}"
     );
 }
@@ -2839,9 +2873,9 @@ class Factory {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "collect([...]) narrowed via conditional should satisfy array<AccordionData>, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -2874,9 +2908,9 @@ class Consumer {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "instance build([...]) narrowed via conditional should satisfy list<Widget>, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -2912,10 +2946,10 @@ fn now_and_today_satisfy_datetime_return() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()/today() resolve to Illuminate\\Support\\Carbon (a \\DateTime), so returning them \
          from a :DateTime method must not flag, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -2929,9 +2963,9 @@ fn now_chain_narrows_to_concrete_carbon() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "now()->addHours(1) should resolve to the concrete Carbon (a \\DateTime), got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -2980,9 +3014,9 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "$this->mock(Client::class) should resolve to Client&MockInterface, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3040,9 +3074,9 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "$this->mock(Client::class) inside a trait should resolve to Client&MockInterface, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3141,9 +3175,9 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "a `@method` tag must not shadow the real inherited helper, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3235,9 +3269,9 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "a mock parked in a local should keep the intersection, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3314,9 +3348,9 @@ fn chained_builder_get_returns_the_models_custom_collection() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "chained get() should resolve to OrderCollection, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3329,9 +3363,9 @@ fn self_referential_relation_property_uses_the_custom_collection() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "a self-referential relation should resolve to OrderCollection, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3342,9 +3376,9 @@ fn relation_get_returns_the_related_models_custom_collection() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "relation get() should resolve to OrderCollection, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3357,7 +3391,7 @@ fn base_collection_is_flagged_where_a_custom_collection_is_declared() {
     );
     let diags = collect(&php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "the base Collection is not an OrderCollection and should be flagged"
     );
 }
@@ -3388,9 +3422,9 @@ fn view_helper_satisfies_a_concrete_view_return() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "view('name') should resolve to the concrete Illuminate\\View\\View, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3401,9 +3435,9 @@ fn argument_less_view_helper_still_resolves_to_the_factory() {
     );
     let diags = collect(&php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "view() with no arguments is the factory, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3433,9 +3467,9 @@ function loginUrl(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "url('/login') should keep the selected string branch through template binding, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3462,9 +3496,9 @@ class Runner {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "match ($$v::class) arms should narrow the subject, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3486,7 +3520,7 @@ class Runner {
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "an arm narrowed to C cannot satisfy A|B"
     );
 }
@@ -3499,12 +3533,11 @@ class Runner {
 // calls.
 
 fn collect_via_slow_pass(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out
+    collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_slow_diagnostics,
+    )
 }
 
 #[test]
@@ -3531,9 +3564,9 @@ class Holder {
 "#;
     let diags = collect_via_slow_pass(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "both paths out of the guard give ConcreteType, got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3557,7 +3590,7 @@ class Holder {
 "#;
     let diags = collect_via_slow_pass(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "the branch proves nothing about the implicit-else path"
     );
 }
@@ -3577,7 +3610,7 @@ function returnsInterface() { return SomeInterface::class; }
 /** @return interface-string */
 function returnsClass() { return SomeClass::class; }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("interface-string"), "{messages:?}");
 }
@@ -3595,7 +3628,7 @@ function total(): int {
     return $length;
 }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -3612,7 +3645,7 @@ function total(): int {
     return $length;
 }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -3633,7 +3666,7 @@ function goodKey() { return 'mutable'; }
 /** @return key-of<ID_TABLE> */
 function badKey() { return 'nope'; }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'nope'"), "{messages:?}");
     assert!(
@@ -3660,7 +3693,7 @@ function goodString() { return 'two'; }
 /** @return value-of<ID_TABLE> */
 function badValue() { return 3.5; }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("3.5"), "{messages:?}");
 }
@@ -3681,7 +3714,7 @@ class Ids {
     public function good() { return 'immutable'; }
 }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("'nope'"), "{messages:?}");
 }
@@ -3696,7 +3729,7 @@ namespace App;
 /** @return key-of<\Vendor\Config::MAP> */
 function unknownKey() { return 'anything'; }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
@@ -3721,7 +3754,7 @@ function badCount(string $text): int { return words($text, 1); }
 
 function badList(string $text): array { return words($text); }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 2, "got {messages:?}");
     assert!(
         messages[0].contains("list<string>") && messages[0].contains("int"),
@@ -3864,9 +3897,9 @@ fn relation_chained_builder_method_returns_relation_not_builder() {
     ] {
         let diags = collect(&relation_forwarding_php("BelongsTo", body));
         assert!(
-            !has_return_error(&diags),
+            messages_with_code(&diags, "type_mismatch_return").is_empty(),
             "`{body}` should return BelongsTo, not a Builder; got: {}",
-            return_error_messages(&diags).join("; ")
+            messages_with_code(&diags, "type_mismatch_return").join("; ")
         );
     }
 }
@@ -3880,7 +3913,7 @@ fn relation_chained_builder_method_still_reports_a_wrong_relation() {
         "HasMany",
         "$this->belongsTo(Author::class)->withTrashed()",
     ));
-    let messages = return_error_messages(&diags).join("; ");
+    let messages = messages_with_code(&diags, "type_mismatch_return").join("; ");
     assert!(
         messages.contains("BelongsTo") && messages.contains("HasMany"),
         "belongsTo()->withTrashed() declared as HasMany should still be reported; got: {messages}"
@@ -3898,13 +3931,13 @@ fn relation_chain_continues_past_a_forwarded_builder_method() {
 
     let diags = collect(&relation_forwarding_php("?Author", body));
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "belongsTo()->withTrashed()->first() should resolve to ?Author; got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 
     let diags = collect(&relation_forwarding_php("BelongsTo", body));
-    let messages = return_error_messages(&diags).join("; ");
+    let messages = messages_with_code(&diags, "type_mismatch_return").join("; ");
     assert!(
         messages.contains("App\\Models\\Author"),
         "belongsTo()->withTrashed()->first() should be reported as Author, not a relation; \
@@ -3920,7 +3953,7 @@ fn relation_forwarded_builder_return_keeps_its_nullability() {
     let body = "$this->belongsTo(Author::class)->maybeTrashed()";
 
     let diags = collect(&relation_forwarding_php("BelongsTo", body));
-    let messages = return_error_messages(&diags).join("; ");
+    let messages = messages_with_code(&diags, "type_mismatch_return").join("; ");
     assert!(
         messages.contains("BelongsTo") && messages.contains("null"),
         "a nullable forwarded return should stay nullable; got: {messages}"
@@ -3928,9 +3961,9 @@ fn relation_forwarded_builder_return_keeps_its_nullability() {
 
     let diags = collect(&relation_forwarding_php("?BelongsTo", body));
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "a nullable forwarded return satisfies `?BelongsTo`; got: {}",
-        return_error_messages(&diags).join("; ")
+        messages_with_code(&diags, "type_mismatch_return").join("; ")
     );
 }
 
@@ -3946,7 +3979,7 @@ function words(string $text, int $format = 0) { return $format === 0 ? 1 : ['a']
 
 function counted(string $text, int $format): int { return words($text, $format); }
 "#;
-    let messages = return_error_messages(&collect(php));
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("list<string>"), "{messages:?}");
 }
@@ -3983,9 +4016,9 @@ function gate(?string $grade): string {{
 "#
         );
         assert!(
-            !has_return_error(&collect(&php)),
+            messages_with_code(&collect(&php), "type_mismatch_return").is_empty(),
             "`{haystack}` should narrow `$grade` to its literals; got: {}",
-            return_error_messages(&collect(&php)).join("; ")
+            messages_with_code(&collect(&php), "type_mismatch_return").join("; ")
         );
     }
 }
@@ -4007,9 +4040,9 @@ function gate(?string $grade): string {
 }
 "#;
     assert!(
-        !has_return_error(&collect(php)),
+        messages_with_code(&collect(php), "type_mismatch_return").is_empty(),
         "a bare name should fall back to the global constant; got: {}",
-        return_error_messages(&collect(php)).join("; ")
+        messages_with_code(&collect(php), "type_mismatch_return").join("; ")
     );
 }
 
@@ -4024,7 +4057,7 @@ function bad(): array {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter().any(|m| m.contains("array<string, int>")),
         "Expected the docblock map type to be checked, not the bare `array` hint, got: {msgs:?}"
@@ -4040,7 +4073,7 @@ function bad(): array {
 }
 "#;
     let diags = collect(php);
-    let msgs = return_error_messages(&diags);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
     assert!(
         msgs.iter().any(|m| m.contains("list<int>")),
         "Expected the docblock list type to be checked, got: {msgs:?}"
@@ -4067,9 +4100,49 @@ function goodEmpty(): array {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Expected no return type error, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
+    );
+}
+
+// ── An array's type arguments are not a coercion site ───────────────────────
+
+#[test]
+fn flags_int_key_against_string_key_map_without_strict_types() {
+    let php = r#"<?php
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "PHP never coerces an array's keys or values when it is passed whole, so an \
+         `array<int, string>` should not satisfy `array<string, string>` even in a \
+         file without `declare(strict_types=1)`, got: {diags:?}"
+    );
+}
+
+#[test]
+fn flags_int_key_against_string_key_map_with_strict_types() {
+    let php = r#"<?php
+declare(strict_types=1);
+/** @return array<string, string> */
+function f(int $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Expected return type error for array<int, string> where array<string, string> \
+         is required under strict_types, got: {diags:?}"
     );
 }
 
@@ -4097,10 +4170,10 @@ function dup(): array {
     let mut diags = Vec::new();
     backend.collect_return_type_diagnostics(uri, php, &mut diags);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "This file declares `dup(): array` with no docblock, so the other file's \
          `@return array<string, int>` must not be checked against this body, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4121,10 +4194,10 @@ function cast(): int
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "The standalone `@var int` cast above `return` should make the return \
          type check as `int`, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4143,10 +4216,10 @@ function cast(): array
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "The `@var int` cast is incompatible with the declared `array` return \
          type, so this must still be flagged, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4166,10 +4239,10 @@ function giveString(): string {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "The named `@var int $x` form already worked before this fix and must \
          keep working, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4190,9 +4263,9 @@ function offsetFromLine(int $offset): int
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "`__LINE__` is an int, so arithmetic on it stays an int, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4212,9 +4285,9 @@ class Widget
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Every magic constant but `__LINE__` is a string, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4228,9 +4301,9 @@ function lines(): array
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "`__LINE__ + 1` is an int, which an `array` return type rejects, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4249,9 +4322,9 @@ function to_whole_days(int $length): int
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "Without strict_types, int/int returned as int should be allowed, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4272,9 +4345,9 @@ function to_whole_days(int $length): int
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "int/int returned as int should be allowed under strict_types, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4293,9 +4366,9 @@ function to_whole_days($length): int
 "#;
     let diags = collect(php);
     assert!(
-        has_return_error(&diags),
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "A declared int|float returned as int should be flagged, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4314,9 +4387,9 @@ function pow2(int $exp): int
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "int**int returned as int should be allowed under strict_types, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4348,9 +4421,9 @@ namespace App {
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "new self() inside App\\Error should resolve to App\\Error, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4386,9 +4459,9 @@ class Square implements Shape
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "return $this in a trait should satisfy the using class's interface, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4414,9 +4487,9 @@ trait ShapeTrait
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "@phpstan-require-implements should let `return $this` satisfy the interface, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
     );
 }
 
@@ -4440,7 +4513,7 @@ trait ShapeTrait
 }
 "#;
     assert!(
-        has_return_error(&collect(unused)),
+        !messages_with_code(&collect(unused), "type_mismatch_return").is_empty(),
         "an unused trait offers no proof that $this is a Shape"
     );
 
@@ -4462,9 +4535,9 @@ class Loose
 }
 "#;
     assert!(
-        has_return_error(&collect(&mixed)),
+        !messages_with_code(&collect(&mixed), "type_mismatch_return").is_empty(),
         "a user that is not a Shape means $this is not guaranteed to be one, got: {:?}",
-        return_error_messages(&collect(&mixed))
+        messages_with_code(&collect(&mixed), "type_mismatch_return")
     );
 }
 
@@ -4504,8 +4577,330 @@ class Square implements Shape
 "#;
     let diags = collect(php);
     assert!(
-        !has_return_error(&diags),
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
         "trait and interface members should both resolve on $this, got: {:?}",
-        return_error_messages(&diags)
+        messages_with_code(&diags, "type_mismatch_return")
+    );
+}
+
+// ─── A template parameter named like a class is still the template ─────────
+
+#[test]
+fn class_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T1 {}
+
+/**
+ * @template T1
+ */
+trait Holds {
+    /** @return T1 */
+    public function first() { return null; }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded template accepts any value, even beside a class of the same name, got: {diags:?}"
+    );
+}
+
+#[test]
+fn class_template_is_not_a_same_named_class_in_another_namespace_block() {
+    let php = r#"<?php
+namespace A {
+    /**
+     * @template T1
+     */
+    trait Holds {
+        /** @return T1 */
+        public function first() { return null; }
+    }
+}
+namespace B {
+    trait T1 {}
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "The template must not resolve to another block's class, got: {diags:?}"
+    );
+}
+
+#[test]
+fn function_template_named_like_a_class_is_not_that_class() {
+    let php = r#"<?php
+namespace App;
+
+class T2 {}
+
+/**
+ * @template T2
+ * @param T2 $x
+ * @return T2
+ */
+function pass($x) { return null; }
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "An unbounded function template accepts any value, got: {diags:?}"
+    );
+}
+
+#[test]
+fn bounded_template_return_is_checked_against_its_bound() {
+    let php = r#"<?php
+interface Shape {}
+class Circle implements Shape {}
+class Plain {}
+
+/**
+ * @template T of Shape
+ */
+class Holder {
+    /** @return T */
+    public function wrong() { return new Plain(); }
+
+    /** @return T */
+    public function withinBound() { return new Circle(); }
+}
+"#;
+    let diags = collect(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "Only the value outside the bound is flagged, got: {msgs:?}"
+    );
+    assert!(msgs[0].contains("Plain"), "got: {msgs:?}");
+}
+
+/// A Laravel model operator is a name for a class, so it has to be
+/// resolved before the returned and declared types are compared — and
+/// before the message is written. Leaving it until the comparison
+/// reported the operator's own spelling back at the reader, who wrote a
+/// type that does name something.
+///
+/// `static` here is bound to the trait that wrote the annotation, which
+/// is no model at all, so the operator stands for the framework's own
+/// collection.
+#[test]
+fn a_model_operator_is_resolved_before_the_return_type_is_reported() {
+    let php = r#"<?php
+namespace App;
+
+use Illuminate\Database\Eloquent\Collection;
+
+/** @phpstan-require-extends \Illuminate\Database\Eloquent\Model */
+trait HasFactory
+{
+    /** @return collection-of<static> */
+    public static function many(): Collection
+    {
+        return new Collection();
+    }
+
+    /** @return static|Collection */
+    public static function caller(): mixed
+    {
+        return static::many();
+    }
+}
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_return");
+    assert!(
+        !messages.iter().any(|m| m.contains("collection-of")),
+        "the operator should be resolved, not reported as itself: {messages:?}"
+    );
+}
+
+/// A `@template TFactory of Factory` the class declares is ruled out by
+/// `! $x instanceof Factory` exactly as its bound would be: every value of
+/// the parameter is a `Factory`, which is what the bound says.
+///
+/// One written on a trait and read through `static::` inside that trait
+/// has nothing to bind it, so the alternative reaches narrowing under its
+/// own name. Narrowing kept it, and the return-type check then substituted
+/// the bound and reported a `Factory` the guard had already excluded.
+#[test]
+fn an_instanceof_guard_rules_out_a_template_bounded_by_the_checked_class() {
+    let php = r#"<?php
+namespace App;
+
+class Collection {}
+class Factory {}
+
+/** @template TFactory of Factory */
+trait HasFactory
+{
+    /** @return static|TFactory */
+    public static function make(): static|Collection|Factory
+    {
+        return null;
+    }
+
+    /** @return static|Collection */
+    public static function caller(): static|Collection
+    {
+        $model = static::make();
+
+        if (! $model instanceof Factory) {
+            return $model;
+        }
+
+        return new Collection();
+    }
+}
+"#;
+    let messages: Vec<String> = messages_with_code(&collect(php), "type_mismatch_return")
+        .into_iter()
+        .filter(|m| !m.starts_with("Return type null"))
+        .collect();
+    assert!(
+        messages.is_empty(),
+        "the guard rules the template out, so the return satisfies the declared type: {messages:?}"
+    );
+}
+
+/// A key whose type nobody measured is PHP's whole key domain, so an array
+/// written through it is not held to both `int` and `string`.
+#[test]
+fn a_write_through_an_unknown_key_keeps_the_keys_benevolent() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function typed(mixed $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+/** @return array<int, string> */
+function untyped($k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+#[test]
+fn a_write_through_a_declared_array_key_is_still_enforced() {
+    let php = r#"<?php
+/** @return array<int, string> */
+function f(int|string $k): array {
+    $r = [];
+    $r[$k] = 'a';
+    return $r;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        !messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+/// A class name can never be a decimal integer, so PHP stores it as the key
+/// it is and an array built by writing through it keeps `class-string` keys.
+#[test]
+fn a_write_through_a_class_string_key_keeps_the_class_string() {
+    let php = r#"<?php
+/**
+ * @param class-string $n
+ * @return array<class-string, string>
+ */
+function f(string $n): array {
+    $mapping = [];
+    $mapping[$n] = 'y';
+    return $mapping;
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "got: {diags:?}"
+    );
+}
+
+// ─── Multi-namespace files: short names resolve in their own block ─────────
+
+/// A later `namespace` block that reuses an earlier block's short class
+/// names must resolve them against itself, both for `new` and for a
+/// closure literal's native parameter and return hints.
+#[test]
+fn short_names_in_a_later_namespace_block_resolve_against_that_block() {
+    let php = r#"<?php
+namespace First {
+    class A {}
+    class C {}
+}
+
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    function make(): C {
+        return new C;
+    }
+
+    /**
+     * @return \Closure(C2):A
+     */
+    function wrap(): \Closure {
+        return function (C $x): A {
+            return new A;
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the enclosing namespace block, got: {diags:?}"
+    );
+}
+
+/// A line comment above each `namespace` block (the layout of the ported
+/// Psalm suites) must not hide the block's declaration, or everything in
+/// it resolves against the block before.
+#[test]
+fn a_comment_above_a_namespace_block_does_not_hide_it() {
+    let php = r#"<?php
+// Test: first
+namespace First {
+    class A {}
+    class C {}
+}
+
+// Test: second
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    /**
+     * @param \Closure(C):A $f
+     * @return \Closure(C2):A
+     */
+    function wrap(\Closure $f): \Closure {
+        return function (C $x) use ($f): A {
+            return $f($x);
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the commented namespace block, got: {diags:?}"
     );
 }

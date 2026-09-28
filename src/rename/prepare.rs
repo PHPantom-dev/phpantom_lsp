@@ -11,12 +11,14 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::code_actions::multi_file_edit;
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
 use crate::util::build_fqn;
 
+use super::RenameOutcome;
 use super::namespace::find_namespace_segment_at_offset;
-use super::validate::span_spells_its_name;
+use super::validate::{is_valid_new_name, range_text, span_spells_its_name};
 
 /// The text a single function or constant reference should be replaced
 /// with, or `None` when it must be left exactly as it is.
@@ -82,6 +84,15 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<PrepareRenameResponse> {
+        // A YAML/XML occurrence is not a rename site.  Its text may be the
+        // escaped `App\\Handler` form the document's quoting requires
+        // rather than the PHP spelling, so nothing here can plan the edit
+        // that replaces it, and the PHP occurrences are reached from the
+        // declaration instead.
+        if crate::resource_navigation::is_resource_document(uri) {
+            return None;
+        }
+
         let span = self.lookup_symbol_at_position(uri, content, position)?;
 
         // The range below is built from this span's byte offsets, and the
@@ -123,7 +134,7 @@ impl Backend {
         // user can change the namespace to move the class.
         let placeholder = if let SymbolKind::ClassDeclaration { ref name } = span.kind {
             let ctx = self.file_context(uri);
-            build_fqn(name, ctx.namespace.as_deref())
+            build_fqn(name, ctx.namespace_at(span.start).as_deref())
         } else {
             name
         };
@@ -131,35 +142,83 @@ impl Backend {
         Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder })
     }
 
+    /// Whether this rename can reach a file that is not open.
+    ///
+    /// A variable and `$this` are scoped to the current file, so the
+    /// refresh that discovers a file created without a watcher event has
+    /// nothing to find for them. A property declaration is stored as a
+    /// variable span, and that one does cross files.
+    pub(crate) fn rename_needs_workspace_refresh(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> bool {
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return false;
+        };
+        match &span.kind {
+            SymbolKind::Variable { name } | SymbolKind::CompactVariable { name } => {
+                matches!(
+                    self.lookup_var_def_kind_at(uri, name, span.start),
+                    Some(crate::symbol_map::VarDefKind::Property)
+                ) || self.is_promoted_property_param(uri, span.start)
+            }
+            SymbolKind::SelfStaticParent(crate::symbol_map::SelfStaticParentKind::This) => false,
+            _ => true,
+        }
+    }
+
     /// Handle `textDocument/rename`.
     ///
     /// Produces a `WorkspaceEdit` that renames every occurrence of the
     /// symbol under the cursor to `new_name`.
+    ///
+    /// `Ok(None)` is the "nothing to rename here" answer the editor
+    /// reports in its own words.  `Err(message)` is a refusal the user
+    /// needs to read: a move whose destination is already taken would
+    /// either clobber a file or leave two classes claiming one name, and
+    /// saying so beats emitting an edit the editor half-applies.
     pub(crate) fn handle_rename(
         &self,
         uri: &str,
         content: &str,
         position: Position,
         new_name: &str,
-    ) -> Option<WorkspaceEdit> {
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+    ) -> RenameOutcome {
+        // A YAML/XML occurrence is not a rename site.  Its text may be the
+        // escaped `App\\Handler` form the document's quoting requires
+        // rather than the PHP spelling, so nothing here can plan the edit
+        // that replaces it, and the PHP occurrences are reached from the
+        // declaration instead.
+        if crate::resource_navigation::is_resource_document(uri) {
+            return Ok(None);
+        }
+
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return Ok(None);
+        };
 
         // Every edit below is derived, directly or through find-references,
         // from this span.  If the map it came from predates the buffer the
         // whole response is nonsense, so drop it rather than rename the
         // wrong symbol.
         if !self.rename_map_matches(uri, content) || !span_spells_its_name(content, &span) {
-            return None;
+            return Ok(None);
         }
 
         // Reject non-renameable symbols (same logic as prepare_rename).
         if let SymbolKind::SelfStaticParent(_) = &span.kind {
             // self, static, parent, and $this are never renameable.
-            return None;
+            return Ok(None);
         }
 
         if self.is_vendor_symbol(uri, content, position) {
-            return None;
+            return Ok(None);
+        }
+
+        if !is_valid_new_name(&span.kind, new_name) {
+            return Err(format!("`{new_name}` is not a valid PHP name"));
         }
 
         if let SymbolKind::NamespaceDeclaration { ref name } = span.kind {
@@ -167,26 +226,60 @@ impl Backend {
                 return self.build_namespace_prefix_rename_edit(name, new_name);
             }
             let cursor_byte = crate::text_position::position_to_byte_offset(content, position);
-            let (segment, _seg_start, _seg_end) =
-                find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)?;
-            let segment_idx = name.split('\\').position(|s| s == segment)?;
+            let Some((segment, _seg_start, _seg_end)) =
+                find_namespace_segment_at_offset(name, span.start, cursor_byte as u32)
+            else {
+                return Ok(None);
+            };
+            let Some(segment_idx) = name.split('\\').position(|s| s == segment) else {
+                return Ok(None);
+            };
             return self.build_namespace_rename_edit(name, segment_idx, new_name);
         }
 
         let class_rename_fqn = self.resolve_class_rename_fqn(&span.kind, uri, span.start);
 
+        // Direct resource APIs spell only the child name while generic config
+        // calls spell its full dotted key. Until Laravel string-key rename is
+        // implemented, applying one replacement to their shared reference set
+        // would corrupt one representation.
+        if is_config_resource_identity(&span.kind) {
+            return Ok(None);
+        }
+
         // Find all references (including the declaration).
-        let locations = self.find_references_for_rename(uri, content, position, true)?;
+        let Some(locations) = self.find_references_for_rename(uri, content, position, true) else {
+            return Ok(None);
+        };
 
         if locations.is_empty() {
-            return None;
+            return Ok(None);
         }
+
+        // A scope or an accessor is also used under a name the model derives
+        // from the method's (`active` for `scopeActive`), and those uses
+        // have to follow the rename.
+        let magic_rename = match &span.kind {
+            SymbolKind::MemberDeclaration { name, .. } => self
+                .eloquent_magic_member_at(uri, span.start, name)
+                .map(|magic| match magic.kind.use_name(new_name) {
+                    Some(new_use) => Ok((magic.use_name, new_use)),
+                    None => Err(format!(
+                        "`{new_name}` does not follow the naming convention that makes \
+                         `{name}` usable as `{}`, so its uses could not be renamed",
+                        magic.use_name
+                    )),
+                })
+                .transpose()?,
+            _ => None,
+        };
 
         // The reference finders read one symbol map per file, so each
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
-        if !self.rename_locations_verified(&span.kind, &locations) {
-            return None;
+        let magic_use = magic_rename.as_ref().map(|(old_use, _)| old_use.as_str());
+        if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
+            return Ok(None);
         }
 
         // A function is named three different ways across its references,
@@ -224,7 +317,7 @@ impl Backend {
             if new_name.contains('\\') {
                 return self.build_class_move_edit(fqn, new_name, &locations);
             }
-            return self.build_class_rename_edit(fqn, new_name, &locations);
+            return Ok(self.build_class_rename_edit(fqn, new_name, &locations));
         }
 
         // Build the workspace edit.  Group text edits by document URI.
@@ -234,11 +327,13 @@ impl Backend {
             let loc_uri_str = location.uri.to_string();
 
             // For each reference location, we need the file content to
-            // inspect what text is at that range.
+            // inspect what text is at that range.  A template's locations
+            // index the virtual PHP it lowers to, which is what the
+            // request's own buffer already holds for it.
             let loc_content = if loc_uri_str == uri {
                 Some(content.to_string())
             } else {
-                self.get_file_content(&loc_uri_str)
+                self.reference_file_content(&loc_uri_str)
             };
 
             // An import names the function qualified (`use function
@@ -297,6 +392,13 @@ impl Backend {
                 } else {
                     bare_name.to_string()
                 }
+            } else if let Some((old_use, new_use)) = &magic_rename
+                && loc_content
+                    .as_deref()
+                    .and_then(|c| range_text(c, location.range))
+                    .is_some_and(|text| text == old_use.as_str())
+            {
+                new_use.clone()
             } else {
                 new_name.to_string()
             };
@@ -312,11 +414,15 @@ impl Backend {
                 .push(text_edit);
         }
 
-        Some(WorkspaceEdit {
-            changes: Some(changes),
-            document_changes: None,
-            change_annotations: None,
-        })
+        // A template's references were found in the virtual PHP it lowers
+        // to, so its edits still have to come back to the template's own
+        // coordinates.
+        for (loc_uri, edits) in &mut changes {
+            self.translate_template_edits(loc_uri.as_str(), edits);
+        }
+        changes.retain(|_, edits| !edits.is_empty());
+
+        Ok(Some(multi_file_edit(changes)))
     }
 
     /// Extract the renameable symbol name and its source range.
@@ -424,5 +530,54 @@ impl Backend {
             SymbolKind::CompactVariable { .. } => false,
             _ => false,
         }
+    }
+}
+
+fn is_config_resource_identity(kind: &SymbolKind) -> bool {
+    let SymbolKind::LaravelStringKey { kind, key, .. } = kind else {
+        return false;
+    };
+    match kind {
+        crate::symbol_map::LaravelStringKind::ConfigResource(_) => true,
+        crate::symbol_map::LaravelStringKind::Config => {
+            crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some()
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod config_resource_identity_tests {
+    use super::*;
+    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+
+    fn string_kind(kind: LaravelStringKind, key: &str) -> SymbolKind {
+        SymbolKind::LaravelStringKey {
+            kind,
+            key: key.to_string(),
+            is_write: false,
+            is_optional: false,
+        }
+    }
+
+    #[test]
+    fn only_config_resource_identities_are_held_for_laravel_string_rename() {
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore),
+            "redis",
+        )));
+        assert!(is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "cache.stores.redis",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::Config,
+            "app.name",
+        )));
+        assert!(!is_config_resource_identity(&string_kind(
+            LaravelStringKind::View,
+            "dashboard",
+        )));
+        assert!(!is_config_resource_identity(&SymbolKind::Keyword));
     }
 }
