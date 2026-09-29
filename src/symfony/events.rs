@@ -91,6 +91,19 @@ struct PhpArgument<'a> {
     value_end: usize,
 }
 
+/// A method carrying one configured attribute: what a publisher or
+/// subscriber rule reads from it.
+#[derive(Clone, Copy)]
+struct AttributedMethod<'a> {
+    uri: &'a str,
+    content: &'a str,
+    arguments: &'a [PhpArgument<'a>],
+    owner_fqn: &'a str,
+    method: &'a str,
+    method_start: usize,
+    method_end: usize,
+}
+
 impl Backend {
     pub(crate) fn symfony_event_outgoing_calls(
         &self,
@@ -406,13 +419,25 @@ impl Backend {
         if !uri_path(uri).ends_with(".php") {
             return;
         }
-        let event_config = self.config().symfony.events;
-        if event_config.publishers.is_empty() && event_config.subscribers.is_empty() {
-            self.symfony_events
-                .write()
-                .replace_source(uri.to_string(), Vec::new());
+        let event_config = {
+            let config = self.workspace.config.lock();
+            let events = &config.symfony.events;
+            if events.publishers.is_empty() && events.subscribers.is_empty() {
+                None
+            } else {
+                Some(events.clone())
+            }
+        };
+        let Some(event_config) = event_config else {
+            // Nothing to scan for: only sites a previous rule set recorded
+            // for this file need dropping, which most projects never have.
+            if self.symfony_events.read().sources.contains_key(uri) {
+                self.symfony_events
+                    .write()
+                    .replace_source(uri.to_string(), Vec::new());
+            }
             return;
-        }
+        };
 
         let classes = self
             .symbols
@@ -448,40 +473,29 @@ impl Backend {
             let arguments = attribute
                 .args
                 .map_or_else(Vec::new, |(start, end)| php_arguments(content, start, end));
+            let target = AttributedMethod {
+                uri,
+                content,
+                arguments: &arguments,
+                owner_fqn: &owner_fqn,
+                method: &method,
+                method_start,
+                method_end,
+            };
 
             for rule in event_config
                 .publishers
                 .iter()
                 .filter(|rule| normalize_fqn(&rule.attribute).eq_ignore_ascii_case(&attribute_fqn))
             {
-                scan_publisher_attribute(
-                    uri,
-                    content,
-                    &arguments,
-                    rule,
-                    &owner_fqn,
-                    &method,
-                    method_start,
-                    method_end,
-                    &mut sites,
-                );
+                scan_publisher_attribute(&target, rule, &mut sites);
             }
             for rule in event_config
                 .subscribers
                 .iter()
                 .filter(|rule| normalize_fqn(&rule.attribute).eq_ignore_ascii_case(&attribute_fqn))
             {
-                scan_subscriber_attribute(
-                    uri,
-                    content,
-                    &arguments,
-                    rule,
-                    &owner_fqn,
-                    &method,
-                    method_start,
-                    method_end,
-                    &mut sites,
-                );
+                scan_subscriber_attribute(&target, rule, &mut sites);
             }
         }
 
@@ -918,18 +932,20 @@ fn dedupe_incoming_calls(
     calls
 }
 
-#[allow(clippy::too_many_arguments)]
 fn scan_publisher_attribute(
-    uri: &str,
-    content: &str,
-    arguments: &[PhpArgument<'_>],
+    target: &AttributedMethod<'_>,
     rule: &SymfonyEventPublisherConfig,
-    owner_fqn: &str,
-    method: &str,
-    method_start: usize,
-    method_end: usize,
     sites: &mut Vec<EventSite>,
 ) {
+    let AttributedMethod {
+        uri,
+        content,
+        arguments,
+        owner_fqn,
+        method,
+        method_start,
+        method_end,
+    } = *target;
     if rule.name_template.trim().is_empty() {
         return;
     }
@@ -1003,18 +1019,20 @@ fn scan_publisher_attribute(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn scan_subscriber_attribute(
-    uri: &str,
-    content: &str,
-    arguments: &[PhpArgument<'_>],
+    target: &AttributedMethod<'_>,
     rule: &SymfonyEventSubscriberConfig,
-    owner_fqn: &str,
-    method: &str,
-    method_start: usize,
-    method_end: usize,
     sites: &mut Vec<EventSite>,
 ) {
+    let AttributedMethod {
+        uri,
+        content,
+        arguments,
+        owner_fqn,
+        method,
+        method_start,
+        method_end,
+    } = *target;
     let Some(argument) =
         configured_argument(arguments, rule.name_argument.as_deref(), rule.name_position)
     else {
@@ -1543,14 +1561,16 @@ mod tests {
         let arguments = php_arguments(content, 0, content.len());
         let mut sites = Vec::new();
         scan_publisher_attribute(
-            "file:///project/PublishCourse.php",
-            content,
-            &arguments,
+            &AttributedMethod {
+                uri: "file:///project/PublishCourse.php",
+                content,
+                arguments: &arguments,
+                owner_fqn: "App\\UseCase\\PublishCourse",
+                method: "execute",
+                method_start: 0,
+                method_end: "execute".len(),
+            },
             &example_publisher_rule(),
-            "App\\UseCase\\PublishCourse",
-            "execute",
-            0,
-            "execute".len(),
             &mut sites,
         );
 
@@ -1564,14 +1584,16 @@ mod tests {
         let arguments = php_arguments(content, 0, content.len());
         let mut sites = Vec::new();
         scan_publisher_attribute(
-            "file:///project/PublishCourse.php",
-            content,
-            &arguments,
+            &AttributedMethod {
+                uri: "file:///project/PublishCourse.php",
+                content,
+                arguments: &arguments,
+                owner_fqn: "App\\UseCase\\PublishCourse",
+                method: "execute",
+                method_start: 0,
+                method_end: "execute".len(),
+            },
             &example_publisher_rule(),
-            "App\\UseCase\\PublishCourse",
-            "execute",
-            0,
-            "execute".len(),
             &mut sites,
         );
 
