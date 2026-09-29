@@ -2261,7 +2261,7 @@ async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
 #[tokio::test]
 async fn doctrine_repository_convention_links_back_to_entity() {
     let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
-    let repo_php = "<?php\nnamespace App\\Repository;\nclass UserRepository {}\n";
+    let repo_php = "<?php\nnamespace {\nclass ServiceEntityRepository {}\n}\nnamespace App\\Repository {\nclass UserRepository extends \\ServiceEntityRepository {}\n}\n";
     let (backend, dir) = create_psr4_workspace(
         COMPOSER,
         &[
@@ -2288,6 +2288,37 @@ async fn doctrine_repository_convention_links_back_to_entity() {
         titles.contains(&"Doctrine entity: User"),
         "expected conventional entity lens, got {titles:?}"
     );
+}
+
+/// A class that only shares Doctrine's naming convention is not a Doctrine
+/// repository: a project without Doctrine keeps its own `UserRepository`
+/// free of Doctrine lenses, and so does the model it is named after.
+#[tokio::test]
+async fn a_repository_by_name_alone_gets_no_doctrine_lenses() {
+    let model_php = "<?php\nnamespace App\\Models;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repositories;\nclass UserRepository {}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Models/User.php", model_php),
+            ("src/Repositories/UserRepository.php", repo_php),
+        ],
+    );
+    let model_uri = uri_for(&dir, "src/Models/User.php");
+    let repo_uri = uri_for(&dir, "src/Repositories/UserRepository.php");
+    open_document(&backend, &model_uri, "php", model_php).await;
+    open_document(&backend, &repo_uri, "php", repo_php).await;
+
+    for (uri, content) in [(&model_uri, model_php), (&repo_uri, repo_php)] {
+        let lenses = backend
+            .handle_code_lens(uri.as_ref(), content)
+            .unwrap_or_default();
+        let titles = lens_titles(&lenses);
+        assert!(
+            titles.iter().all(|title| !title.starts_with("Doctrine")),
+            "no Doctrine lens expected on {uri}, got {titles:?}"
+        );
+    }
 }
 
 #[tokio::test]
