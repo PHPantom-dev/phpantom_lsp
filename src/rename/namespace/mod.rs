@@ -204,17 +204,20 @@ impl Backend {
             }
         }
 
+        self.collect_framework_namespace_edits(old_prefix, new_prefix, &mut changes);
+        let psr4_rename_ops = self
+            .build_namespace_psr4_rename_ops(old_prefix, new_prefix)
+            .unwrap_or_default();
+        self.collect_framework_path_edits_for_directory_renames(&psr4_rename_ops, &mut changes);
+
         if changes.is_empty() {
             return Ok(None);
         }
 
         // PSR-4 directory rename: if a mapping exists, emit RenameFile
         // operations to move the directory.
-        if let Some(ops) = self.build_namespace_psr4_rename_ops(old_prefix, new_prefix)
-            && !ops.is_empty()
-            && self.supports_file_rename.load(Ordering::Acquire)
-        {
-            let renames = ops.iter().map(|(old_uri, new_uri)| {
+        if !psr4_rename_ops.is_empty() && self.supports_file_rename.load(Ordering::Acquire) {
+            let renames = psr4_rename_ops.iter().map(|(old_uri, new_uri)| {
                 ResourceOp::Rename(RenameFile {
                     old_uri: old_uri.clone(),
                     new_uri: new_uri.clone(),
@@ -231,7 +234,7 @@ impl Backend {
             // names keeps its own URI, which is what leaves a skipped file
             // edited in place.
             let edits = changes.into_iter().map(|(uri, edits)| {
-                let target_uri = ops
+                let target_uri = psr4_rename_ops
                     .iter()
                     .find_map(|(old_u, new_u)| {
                         let rest = uri.as_str().strip_prefix(old_u.as_str())?;

@@ -4068,10 +4068,11 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
         "    $notifications->find(1);\n", // L11
         "    $base->find(2);\n",          // L12
         "    $users->find(3);\n",         // L13
-        "    $notificationRepository = $managerRegistry->getManager()->getRepository(NotificationImpl::class);\n", // L14
-        "    $notificationRepository->find(4);\n", // L15
-        "    $unknown->find(5);\n",                // L16
-        "}\n",                                     // L17
+        "    $repo = $managerRegistry->getManager()->getRepository(NotificationImpl::class);\n", // L14
+        "    $repo->find(4);\n", // L15
+        "    $managerRegistry->getManager()->getRepository(NotificationImpl::class)->find(6);\n", // L16
+        "    $unknown->find(5);\n", // L17
+        "}\n",                      // L18
     );
 
     open_php(&backend, &uri, text).await;
@@ -4090,8 +4091,13 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
         lines
     );
     assert!(
-        !lines.contains(&15),
-        "Should NOT include unresolved $notificationRepository->find() on L15 — receivers are matched by resolved type, never by variable name; got lines: {:?}",
+        lines.contains(&15),
+        "Should include $repo->find() typed from getRepository(NotificationImpl::class) on L15; got lines: {:?}",
+        lines
+    );
+    assert!(
+        lines.contains(&16),
+        "Should include inline getRepository(NotificationImpl::class)->find() on L16; got lines: {:?}",
         lines
     );
     assert!(
@@ -4115,9 +4121,53 @@ async fn test_overridden_find_excludes_base_repository_and_unresolved_calls() {
         lines
     );
     assert!(
-        !lines.contains(&16),
-        "Should NOT include unresolved $unknown->find() on L16; got lines: {:?}",
+        !lines.contains(&17),
+        "Should NOT include unresolved $unknown->find() on L17; got lines: {:?}",
         lines
+    );
+}
+
+/// A `getRepository()` assignment only types the variable inside the
+/// function it is written in: a same-named parameter of another method keeps
+/// its declared type.
+#[tokio::test]
+async fn test_repository_assignment_does_not_leak_into_another_method() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",                                                   // L0
+        "class ServiceEntityRepository {}\n",                        // L1
+        "class UserRepository extends ServiceEntityRepository {\n",  // L2
+        "    public function find(int $id): object {}\n",            // L3
+        "}\n",                                                       // L4
+        "class OrderRepository extends ServiceEntityRepository {\n", // L5
+        "    public function find(int $id): object {}\n",            // L6
+        "}\n",                                                       // L7
+        "class Service {\n",                                         // L8
+        "    public function a($em): void {\n",                      // L9
+        "        $repo = $em->getRepository(User::class);\n",        // L10
+        "        $repo->find(1);\n",                                 // L11
+        "    }\n",                                                   // L12
+        "    public function b(OrderRepository $repo): void {\n",    // L13
+        "        $repo->find(2);\n",                                 // L14
+        "        if ($repo == null) {}\n",                           // L15
+        "    }\n",                                                   // L16
+        "}\n",                                                       // L17
+    );
+    open_php(&backend, &uri, text).await;
+
+    let lines: Vec<u32> = references_at(&backend, &uri, 3, 21, false)
+        .await
+        .iter()
+        .map(|l| l.range.start.line)
+        .collect();
+    assert!(
+        lines.contains(&11),
+        "the assignment in a() types $repo there: {lines:?}"
+    );
+    assert!(
+        !lines.contains(&14),
+        "b()'s $repo is an OrderRepository parameter: {lines:?}"
     );
 }
 

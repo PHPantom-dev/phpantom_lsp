@@ -29,8 +29,8 @@ impl Backend {
         // Resource documents are not PHP source. Build a lightweight symbol
         // map so navigation, references, rename, and PHP declaration lenses
         // all consume the same indexed occurrences.
-        if crate::resource_navigation::is_resource_document(&uri) {
-            self.update_resource_symbol_index(&uri, &text);
+        if is_non_php_resource(&uri) {
+            self.index_resource_text(&uri, &text);
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -125,9 +125,9 @@ impl Backend {
         // service loop for every keystroke would stall interactive
         // requests, and refreshing lenses per keystroke would make the
         // client re-pull them faster than it can render them.
-        if crate::resource_navigation::is_resource_document(&uri) {
+        if is_non_php_resource(&uri) {
             if self.sync_ast_updates {
-                self.update_resource_symbol_index(&uri, &text);
+                self.index_resource_text(&uri, &text);
                 return;
             }
             let backend = self.clone_for_blocking();
@@ -142,7 +142,7 @@ impl Backend {
                     if !is_latest_text {
                         return false;
                     }
-                    backend.update_resource_symbol_index(&uri, &text);
+                    backend.index_resource_text(&uri, &text);
                     true
                 })
                 .await;
@@ -234,11 +234,16 @@ impl Backend {
             coalesce.last.lock().retain(|k, _| !k.ends_with(&suffix));
         }
 
-        if crate::resource_navigation::is_resource_document(&uri) {
-            if let Some(content) = self.get_file_content(&uri) {
-                self.update_resource_symbol_index(&uri, &content);
-            } else {
-                self.clear_file_maps(&uri);
+        if is_non_php_resource(&uri) {
+            if crate::resource_navigation::is_resource_document(&uri) {
+                if let Some(content) = self.get_file_content(&uri) {
+                    self.update_resource_symbol_index(&uri, &content);
+                } else {
+                    self.clear_file_maps(&uri);
+                }
+            }
+            if crate::framework::is_framework_resource_uri(&uri) {
+                self.reindex_framework_uri_from_disk(&uri);
             }
         } else if let Some(path) = self.workspace_index_path(&uri) {
             // A workspace file stays in the index once closed, as the file
@@ -272,6 +277,11 @@ impl Backend {
                 });
             }
         } else {
+            if crate::framework::is_framework_php_config_uri(&uri)
+                || self.framework_references.read().contains_key(&uri)
+            {
+                self.reindex_framework_uri_from_disk(&uri);
+            }
             self.clear_file_maps(&uri);
         }
 
@@ -284,7 +294,7 @@ impl Backend {
 
     pub(crate) async fn on_did_save(&self, params: DidSaveTextDocumentParams) {
         let uri = params.text_document.uri.to_string();
-        let is_resource = crate::resource_navigation::is_resource_document(&uri);
+        let is_resource = is_non_php_resource(&uri);
 
         if let Some(text) = params.text {
             let text = Arc::new(text);
@@ -292,7 +302,7 @@ impl Backend {
                 .write()
                 .insert(uri.clone(), Arc::clone(&text));
             if is_resource {
-                self.update_resource_symbol_index(&uri, &text);
+                self.index_resource_text(&uri, &text);
             } else {
                 self.update_ast(&uri, &text);
             }
@@ -356,4 +366,23 @@ impl Backend {
             self.request_code_lens_refresh().await;
         }
     }
+
+    /// Refresh whichever indexes cover a non-PHP resource document: the
+    /// PHP symbols its YAML/XML names, and its Symfony and Doctrine
+    /// references.
+    fn index_resource_text(&self, uri: &str, text: &str) {
+        if crate::resource_navigation::is_resource_document(uri) {
+            self.update_resource_symbol_index(uri, text);
+        }
+        if crate::framework::is_framework_resource_uri(uri) {
+            self.index_framework_uri_content(uri, text);
+        }
+    }
+}
+
+/// A YAML, XML, or Twig document: indexed for the PHP names and framework
+/// symbols it holds, never parsed as PHP.
+fn is_non_php_resource(uri: &str) -> bool {
+    crate::resource_navigation::is_resource_document(uri)
+        || crate::framework::is_framework_resource_uri(uri)
 }
