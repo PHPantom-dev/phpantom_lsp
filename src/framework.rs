@@ -131,8 +131,14 @@ fn is_framework_resource_path(path: &Path) -> bool {
     )
 }
 
-fn is_skipped_resource_path(path: &Path) -> bool {
-    path.components().any(|component| match component {
+/// Whether `path` sits in a dependency, VCS, or generated directory of the
+/// workspace. Only the part below `root` is inspected: a workspace that itself
+/// lives under `/var/www` or a temp directory is not a cache directory.
+fn is_skipped_resource_path(root: Option<&Path>, path: &Path) -> bool {
+    let relative = root
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    relative.components().any(|component| match component {
         Component::Normal(name) => {
             let name = name.to_string_lossy();
             matches!(
@@ -238,7 +244,9 @@ impl Backend {
             .filter_map(Result::ok)
             .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
             .map(|entry| entry.into_path())
-            .filter(|path| is_framework_resource_path(path) && !is_skipped_resource_path(path))
+            .filter(|path| {
+                is_framework_resource_path(path) && !is_skipped_resource_path(Some(&root), path)
+            })
             .collect();
         if let Some(progress) = progress {
             progress.set_scope(91, 99, "Indexing framework resources");
@@ -328,7 +336,8 @@ impl Backend {
         path: &Path,
         change_type: tower_lsp::lsp_types::FileChangeType,
     ) -> bool {
-        if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
+        let root = self.workspace.workspace_root.read().clone();
+        if !is_framework_resource_path(path) || is_skipped_resource_path(root.as_deref(), path) {
             return false;
         }
 
@@ -1335,6 +1344,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn workspace_inside_a_var_directory_is_indexed_but_its_own_cache_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("var/www/app");
+        let yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+        for relative in ["config/routes.yaml", "var/cache/dev/routes.yaml"] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, yaml).unwrap();
+        }
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(root.clone());
+
+        assert_eq!(backend.index_framework_workspace(None), 1);
+        let indexed: Vec<String> = backend
+            .framework_references
+            .read()
+            .keys()
+            .cloned()
+            .collect();
+        assert!(indexed[0].ends_with("/config/routes.yaml"), "{indexed:?}");
+    }
+
+    #[test]
     fn namespace_segments_count_only_names_in_escaped_and_rooted_spellings() {
         // `App\\Domain\\` as a quoted YAML string: `Domain` is segment 1.
         let escaped = "App\\\\Domain\\\\";
@@ -1351,7 +1384,7 @@ mod tests {
 
     #[test]
     fn framework_workspace_index_reports_counted_progress() {
-        let dir = tempfile::tempdir_in(".").unwrap();
+        let dir = tempfile::tempdir().unwrap();
         let config_dir = dir.path().join("config");
         std::fs::create_dir(&config_dir).unwrap();
         std::fs::write(
