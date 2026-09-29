@@ -65,6 +65,7 @@ impl Backend {
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         let changes = self.spell_changes_as_indexed(&params.changes);
+        let mut framework_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
@@ -150,6 +151,9 @@ impl Backend {
                             continue;
                         }
                     }
+                    if crate::framework::is_framework_resource_uri(&uri_str) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
                     resource_changes.push((uri_str, file_path, change.typ));
                     continue;
                 }
@@ -158,6 +162,15 @@ impl Backend {
                     .and_then(|ext| ext.to_str())
                     .is_some_and(|ext| filters.is_php_extension(ext));
                 if !is_php {
+                    // A Twig template names routes, translations, and other
+                    // templates the framework index tracks.
+                    if crate::framework::is_framework_resource_uri(&uri_str)
+                        && !open.contains_key(&uri_str)
+                        && let Ok(file_path) = change.uri.to_file_path()
+                        && !filters.is_excluded_path(&file_path, false)
+                    {
+                        framework_changes.push((uri_str, file_path, change.typ));
+                    }
                     continue;
                 }
 
@@ -175,6 +188,9 @@ impl Backend {
                     continue;
                 }
 
+                if crate::framework::is_framework_php_config_path(&file_path) {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                }
                 if change.typ == FileChangeType::CHANGED {
                     // `parsed_uris` records the editor URI for open files and
                     // the canonical `file://` URI for lazily loaded ones;
@@ -185,6 +201,14 @@ impl Backend {
                     if !loaded {
                         continue;
                     }
+                    if !crate::framework::is_framework_php_config_path(&file_path) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
+                } else if change.typ == FileChangeType::DELETED
+                    && self.framework_references.read().contains_key(&uri_str)
+                    && !crate::framework::is_framework_php_config_path(&file_path)
+                {
+                    framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
                 }
 
                 php_changes.push((uri_str, file_path, change.typ));
@@ -197,6 +221,7 @@ impl Backend {
             && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
+            && framework_changes.is_empty()
         {
             return false;
         }
@@ -276,6 +301,16 @@ impl Backend {
                 migration_changes.len()
             );
             self.update_laravel_migrations(&migration_changes);
+        }
+
+        if !framework_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} Symfony/Doctrine resource file(s) changed on disk",
+                framework_changes.len()
+            );
+            for (uri, path, typ) in &framework_changes {
+                self.apply_framework_file_change(uri, path, *typ);
+            }
         }
 
         true
@@ -399,6 +434,8 @@ impl Backend {
             ("**/*.php".to_string(), watch_all),
             ("**/*.{yaml,yml,xml}".to_string(), watch_all),
             ("**/*.{yaml,yml,xml}.dist".to_string(), watch_all),
+            ("**/*.twig".to_string(), watch_all),
+            ("**/*.{xlf,xliff}".to_string(), watch_all),
             ("**/composer.json".to_string(), WatchKind::Change),
             ("**/composer.lock".to_string(), WatchKind::Change),
             ("**/.phpantom.toml".to_string(), watch_all),
@@ -559,6 +596,51 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// XLIFF catalogs are watched like the other framework resources, so a
+    /// key added on disk while the catalog is closed is known without a
+    /// restart.
+    #[test]
+    fn an_xliff_catalog_changed_on_disk_is_reindexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = dir.path().join("translations/messages.en.xlf");
+        std::fs::create_dir_all(catalog.parent().unwrap()).unwrap();
+        let xliff = |keys: &[&str]| {
+            let units: String = keys
+                .iter()
+                .map(|key| format!("<trans-unit id=\"{key}\"><source>{key}</source></trans-unit>"))
+                .collect();
+            format!(
+                "<?xml version=\"1.0\"?><xliff version=\"1.2\"><file><body>{units}</body></file></xliff>"
+            )
+        };
+        std::fs::write(&catalog, xliff(&["app.hello"])).unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend.index_framework_workspace();
+        assert_eq!(
+            backend.framework_translation_names("messages"),
+            vec!["app.hello"]
+        );
+
+        let (registration, _) = backend.build_watched_file_registration();
+        let options = registration.register_options.unwrap().to_string();
+        assert!(options.contains("xlf"), "{options}");
+
+        std::fs::write(&catalog, xliff(&["app.hello", "app.bye"])).unwrap();
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&catalog).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        };
+        assert!(backend.apply_watched_file_changes(&params, dir.path()));
+        assert_eq!(
+            backend.framework_translation_names("messages"),
+            vec!["app.bye", "app.hello"]
+        );
+    }
 
     #[test]
     fn non_laravel_projects_ignore_schema_watch_changes() {

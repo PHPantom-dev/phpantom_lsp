@@ -413,6 +413,14 @@ impl Backend {
                 }
             }
 
+            let framework_count = self.index_framework_workspace();
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
+            }
+
             if let Some(poller) = poller {
                 poller.finish().await;
             }

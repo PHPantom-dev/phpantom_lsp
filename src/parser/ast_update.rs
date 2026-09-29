@@ -298,6 +298,16 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
+        // Symfony's PHP configurators contain semantic class and callable
+        // strings that the normal PHP symbol map deliberately treats as
+        // plain strings. Keep their lightweight framework index in step with
+        // every parse, including incomplete edits where the main parse fails.
+        if crate::framework::should_index_framework_php_content(uri, content)
+            || self.framework_references.read().contains_key(uri)
+        {
+            self.index_framework_uri_content(uri, content);
+        }
+
         let blade = self.lower_blade_template(uri, content);
         let content_to_parse = blade.as_ref().map_or_else(
             || Arc::new(content.to_string()),
