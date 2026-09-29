@@ -131,8 +131,14 @@ fn is_framework_resource_path(path: &Path) -> bool {
     )
 }
 
-fn is_skipped_resource_path(path: &Path) -> bool {
-    path.components().any(|component| match component {
+/// Whether `path` sits in a dependency, VCS, or generated directory of the
+/// workspace. Only the part below `root` is inspected: a workspace that itself
+/// lives under `/var/www` or a temp directory is not a cache directory.
+fn is_skipped_resource_path(root: Option<&Path>, path: &Path) -> bool {
+    let relative = root
+        .and_then(|root| path.strip_prefix(root).ok())
+        .unwrap_or(path);
+    relative.components().any(|component| match component {
         Component::Normal(name) => {
             let name = name.to_string_lossy();
             matches!(
@@ -154,13 +160,14 @@ impl Backend {
         Self::remove_framework_lookup_uri(lookup, uri);
 
         let uri: Arc<str> = Arc::from(uri);
+        let line_index = LineIndex::new(content);
         let mut keys = FrameworkLookupUriKeys::default();
         for reference in references {
             let location = IndexedFrameworkLocation {
                 uri: Arc::clone(&uri),
                 range: Range::new(
-                    offset_to_position(content, reference.start as usize),
-                    offset_to_position(content, reference.end as usize),
+                    line_index.position(reference.start as usize),
+                    line_index.position(reference.end as usize),
                 ),
             };
             match &reference.kind {
@@ -237,7 +244,7 @@ impl Backend {
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
-            if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
+            if !is_framework_resource_path(path) || is_skipped_resource_path(Some(&root), path) {
                 continue;
             }
             let Ok(content) = std::fs::read_to_string(path) else {
@@ -313,7 +320,8 @@ impl Backend {
         path: &Path,
         change_type: tower_lsp::lsp_types::FileChangeType,
     ) -> bool {
-        if !is_framework_resource_path(path) || is_skipped_resource_path(path) {
+        let root = self.workspace.workspace_root.read().clone();
+        if !is_framework_resource_path(path) || is_skipped_resource_path(root.as_deref(), path) {
             return false;
         }
 
@@ -1318,6 +1326,30 @@ fn normalize_path(path: PathBuf) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workspace_inside_a_var_directory_is_indexed_but_its_own_cache_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("var/www/app");
+        let yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+        for relative in ["config/routes.yaml", "var/cache/dev/routes.yaml"] {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, yaml).unwrap();
+        }
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(root.clone());
+
+        assert_eq!(backend.index_framework_workspace(), 1);
+        let indexed: Vec<String> = backend
+            .framework_references
+            .read()
+            .keys()
+            .cloned()
+            .collect();
+        assert!(indexed[0].ends_with("/config/routes.yaml"), "{indexed:?}");
+    }
 
     #[test]
     fn namespace_segments_count_only_names_in_escaped_and_rooted_spellings() {

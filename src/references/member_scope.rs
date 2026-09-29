@@ -202,17 +202,13 @@ impl Backend {
         access_offset: u32,
         content: &str,
     ) -> Vec<String> {
-        let doctrine_repository_fqns = self.resolve_doctrine_repository_subject_to_fqns(
+        let resolved = match self.resolve_subject_type_at(
             subject_text,
+            is_static,
             ctx,
             access_offset,
             content,
-        );
-        if !doctrine_repository_fqns.is_empty() {
-            return doctrine_repository_fqns;
-        }
-
-        match self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content) {
+        ) {
             Some(php_type) => {
                 self.class_names_to_fqns(php_type.top_level_class_names(), ctx, access_offset)
             }
@@ -226,7 +222,27 @@ impl Backend {
                     ctx.namespace_at(access_offset),
                 ),
             ),
+        };
+
+        // Doctrine types `getRepository()` as its generic repository, so when
+        // that (or nothing) is all the type engine knows, the entity class the
+        // call names picks the concrete repository instead.
+        if resolved
+            .iter()
+            .all(|fqn| is_generic_doctrine_repository(fqn))
+            && (subject_text.contains("getRepository") || subject_text.starts_with('$'))
+        {
+            let doctrine_repository_fqns = self.resolve_doctrine_repository_subject_to_fqns(
+                subject_text,
+                ctx,
+                access_offset,
+                content,
+            );
+            if !doctrine_repository_fqns.is_empty() {
+                return doctrine_repository_fqns;
+            }
         }
+        resolved
     }
 
     /// The type a member-access subject resolves to, through the shared
@@ -372,21 +388,17 @@ impl Backend {
         let entity_short = crate::util::short_name(&entity);
         let repository_short = doctrine_repository_short_name(entity_short);
         let mut candidate_fqns = self.framework_doctrine_repository_fqns_for_entity(&entity);
+        let mapped = candidate_fqns.len();
         candidate_fqns.extend(doctrine_repository_convention_candidates(
             &entity,
             &repository_short,
         ));
-
-        {
-            let class_index = self.symbols.fqn_class_index.read();
-            for (class_fqn, class_info) in class_index.iter() {
-                if crate::util::short_name(class_fqn).eq_ignore_ascii_case(&repository_short)
-                    && looks_like_doctrine_repository(class_info)
-                {
-                    candidate_fqns.push(normalize_fqn(class_fqn));
-                }
-            }
-        }
+        let conventional = candidate_fqns.len();
+        candidate_fqns.extend(
+            self.doctrine_repository_classes()
+                .into_iter()
+                .filter(|fqn| crate::util::short_name(fqn).eq_ignore_ascii_case(&repository_short)),
+        );
 
         for fallback in [
             "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
@@ -400,7 +412,7 @@ impl Backend {
         }
 
         let mut resolved = Vec::new();
-        for candidate in candidate_fqns {
+        for (index, candidate) in candidate_fqns.into_iter().enumerate() {
             let normalized = normalize_fqn(&candidate);
             if resolved
                 .iter()
@@ -408,11 +420,51 @@ impl Backend {
             {
                 continue;
             }
-            if let Some(class_info) = class_loader(&normalized) {
-                resolved.push(normalize_fqn(&class_info.fqn()));
+            let Some(class_info) = class_loader(&normalized) else {
+                continue;
+            };
+            // A class the mapping names is the repository whatever it extends;
+            // one found by its name has to actually be a Doctrine repository,
+            // or a project's own `UserRepository` would pass for one.
+            if (mapped..conventional).contains(&index)
+                && !self.is_doctrine_repository_class(&class_info.fqn())
+            {
+                continue;
             }
+            resolved.push(normalize_fqn(&class_info.fqn()));
         }
         resolved
+    }
+
+    /// Whether `class_fqn` extends or implements one of Doctrine's
+    /// repository types, directly or through its ancestors.
+    pub(crate) fn is_doctrine_repository_class(&self, class_fqn: &str) -> bool {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let mut ancestors = HashSet::new();
+        self.collect_ancestors(class_fqn, &class_loader, &mut ancestors);
+        ancestors
+            .iter()
+            .any(|ancestor| is_generic_doctrine_repository(ancestor))
+    }
+
+    /// Every class the inheritance index records as a Doctrine repository.
+    fn doctrine_repository_classes(&self) -> Vec<String> {
+        let gti = self.symbols.gti_index.read();
+        let mut pending: Vec<&str> = DOCTRINE_REPOSITORY_BASES.to_vec();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out = Vec::new();
+        while let Some(parent) = pending.pop() {
+            let Some(children) = gti.get(parent) else {
+                continue;
+            };
+            for child in children {
+                if seen.insert(child.to_ascii_lowercase()) {
+                    out.push(child.clone());
+                    pending.push(child.as_str());
+                }
+            }
+        }
+        out
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -960,32 +1012,81 @@ fn doctrine_repository_convention_candidates(
     candidates
 }
 
-pub(crate) fn looks_like_doctrine_repository(class_info: &ClassInfo) -> bool {
-    if class_info.name.to_string().ends_with("Repository") {
-        return true;
-    }
-    class_info.parent_class.as_ref().is_some_and(|parent| {
-        let short = crate::util::short_name(parent);
-        matches!(
-            short,
-            "ServiceEntityRepository" | "EntityRepository" | "ObjectRepository"
-        )
-    })
+/// Doctrine's own repository types, spelled the way a class may name them.
+const DOCTRINE_REPOSITORY_BASES: [&str; 6] = [
+    "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
+    "Doctrine\\ORM\\EntityRepository",
+    "Doctrine\\Persistence\\ObjectRepository",
+    "ServiceEntityRepository",
+    "EntityRepository",
+    "ObjectRepository",
+];
+
+/// Whether `fqn` is one of Doctrine's generic repository types rather than a
+/// project's concrete repository.
+fn is_generic_doctrine_repository(fqn: &str) -> bool {
+    let fqn = fqn.trim_start_matches('\\');
+    DOCTRINE_REPOSITORY_BASES
+        .iter()
+        .any(|base| base.eq_ignore_ascii_case(fqn))
 }
 
+/// The expression last assigned to `var_name` before `access_offset`, within
+/// the function the access sits in.
+///
+/// Only a plain `$var = …` counts: `$var == …`, `$var => …`, and a longer
+/// name such as `$variable = …` are skipped.  Assignments in another
+/// function body are out of reach of the access, so the search stops at the
+/// nearest `function` keyword before it.
 fn last_assignment_expression_before<'a>(
     content: &'a str,
     access_offset: u32,
     var_name: &str,
 ) -> Option<&'a str> {
     let prefix = content.get(..access_offset as usize)?;
-    let pattern = format!("{var_name} =");
-    let assign_start = prefix.rfind(&pattern)?;
-    let after_equals = prefix[assign_start + pattern.len()..].trim_start();
-    let end = after_equals
-        .find(';')
-        .or_else(|| after_equals.find('\n'))
-        .unwrap_or(after_equals.len());
-    let expr = after_equals[..end].trim();
-    if expr.is_empty() { None } else { Some(expr) }
+    let scope = &prefix[enclosing_function_start(prefix)..];
+    let mut search_end = scope.len();
+    while let Some(at) = scope[..search_end].rfind(var_name) {
+        search_end = at;
+        let after = &scope[at + var_name.len()..];
+        if after.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Some(value) = after.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        if value.starts_with(['=', '>']) {
+            continue;
+        }
+        let value = value.trim_start();
+        let end = value
+            .find(';')
+            .or_else(|| value.find('\n'))
+            .unwrap_or(value.len());
+        let expr = value[..end].trim();
+        return (!expr.is_empty()).then_some(expr);
+    }
+    None
+}
+
+/// Byte offset just past the last `function` keyword in `prefix`, or `0`.
+fn enclosing_function_start(prefix: &str) -> usize {
+    let bytes = prefix.as_bytes();
+    let mut end = prefix.len();
+    while let Some(at) = prefix[..end].rfind("function") {
+        let before_ok = at == 0 || !is_identifier_byte(bytes[at - 1]);
+        let after = at + "function".len();
+        let after_ok = bytes
+            .get(after)
+            .is_none_or(|byte| !is_identifier_byte(*byte));
+        if before_ok && after_ok {
+            return after;
+        }
+        end = at;
+    }
+    0
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte == b'_' || byte == b'$' || byte.is_ascii_alphanumeric()
 }
