@@ -40,6 +40,178 @@ pub struct Config {
     pub mago: MagoConfig,
     /// Laravel-specific analysis settings.
     pub laravel: LaravelConfig,
+    /// Symfony runtime metadata settings.
+    pub symfony: SymfonyConfig,
+}
+
+/// `[symfony]` section — statically recovered Symfony runtime metadata.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SymfonyConfig {
+    /// Compiled dependency-injection container discovery.
+    pub container: SymfonyContainerConfig,
+    /// Event publisher and name-matching rules.
+    pub events: SymfonyEventsConfig,
+    /// ExpressionLanguage arguments and their PHP type contracts.
+    #[serde(rename = "expression-language")]
+    pub expression_language: SymfonyExpressionLanguageConfig,
+}
+
+/// `[symfony.container]` section.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SymfonyContainerConfig {
+    /// Read compiled-container metadata. Defaults to enabled.
+    pub enabled: Option<bool>,
+    /// Cache environment used by automatic discovery. Defaults to `dev`.
+    pub environment: Option<String>,
+    /// Optional workspace-relative compiled-container paths or glob patterns.
+    pub paths: Vec<String>,
+}
+
+impl SymfonyContainerConfig {
+    pub fn enabled(&self) -> bool {
+        self.enabled.unwrap_or(true)
+    }
+
+    pub fn environment(&self) -> &str {
+        self.environment.as_deref().unwrap_or("dev")
+    }
+}
+
+/// `[symfony.events]` section.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SymfonyEventsConfig {
+    /// Attribute-driven publisher rules.
+    pub publishers: Vec<SymfonyEventPublisherConfig>,
+    /// Attribute-driven subscriber rules.
+    pub subscribers: Vec<SymfonyEventSubscriberConfig>,
+    /// Prefixes ignored when comparing event names.
+    #[serde(rename = "ignored-prefixes")]
+    pub ignored_prefixes: Vec<String>,
+    /// Suffixes ignored when comparing event names.
+    #[serde(rename = "ignored-suffixes")]
+    pub ignored_suffixes: Vec<String>,
+}
+
+/// One `[[symfony.events.publishers]]` attribute rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyEventPublisherConfig {
+    /// Fully-qualified PHP attribute class.
+    pub attribute: String,
+    /// Named argument containing an explicit event name.
+    #[serde(rename = "name-argument")]
+    pub name_argument: Option<String>,
+    /// Zero-based positional fallback for the event-name argument.
+    #[serde(rename = "name-position")]
+    pub name_position: Option<usize>,
+    /// Named argument containing dispatch enum cases.
+    #[serde(rename = "dispatch-argument")]
+    pub dispatch_argument: Option<String>,
+    /// Zero-based positional fallback for the dispatch argument.
+    #[serde(rename = "dispatch-position")]
+    pub dispatch_position: Option<usize>,
+    /// Dispatch names used when the attribute omits the dispatch argument.
+    #[serde(rename = "default-dispatch")]
+    pub default_dispatch: Vec<String>,
+    /// Enum case to event-name segment mapping.
+    #[serde(rename = "dispatch-cases")]
+    pub dispatch_cases: std::collections::HashMap<String, String>,
+    /// Template used for derived names.
+    #[serde(rename = "name-template")]
+    pub name_template: String,
+    /// Template used when an explicit name is present. Defaults to `{name}`.
+    #[serde(rename = "explicit-name-template")]
+    pub explicit_name_template: Option<String>,
+    /// Method names that do not add a method suffix.
+    #[serde(rename = "default-methods")]
+    pub default_methods: Vec<String>,
+    /// Conditional dispatch omissions.
+    pub skip: Vec<SymfonyEventSkipConfig>,
+}
+
+/// One conditional omission inside a publisher rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyEventSkipConfig {
+    /// Dispatch name to omit.
+    pub dispatch: String,
+    /// Named argument whose non-null value activates the omission.
+    pub argument: String,
+    /// Zero-based positional fallback for the argument.
+    pub position: Option<usize>,
+}
+
+/// One `[[symfony.events.subscribers]]` attribute rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyEventSubscriberConfig {
+    /// Fully-qualified PHP attribute class.
+    pub attribute: String,
+    /// Named argument containing the event name.
+    #[serde(rename = "name-argument")]
+    pub name_argument: Option<String>,
+    /// Zero-based positional fallback for the event-name argument.
+    #[serde(rename = "name-position")]
+    pub name_position: Option<usize>,
+    /// Optional named transport argument.
+    #[serde(rename = "transport-argument")]
+    pub transport_argument: Option<String>,
+    /// Zero-based positional fallback for the transport argument.
+    #[serde(rename = "transport-position")]
+    pub transport_position: Option<usize>,
+    /// Enum case to event-name suffix mapping.
+    #[serde(rename = "transport-cases")]
+    pub transport_cases: std::collections::HashMap<String, String>,
+}
+
+/// `[symfony.expression-language]` section.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct SymfonyExpressionLanguageConfig {
+    /// Attribute arguments that contain ExpressionLanguage strings.
+    pub attributes: Vec<SymfonyExpressionAttributeConfig>,
+    /// Expression object constructors nested inside PHP attributes.
+    pub constructors: Vec<SymfonyExpressionConstructorConfig>,
+}
+
+/// One `[[symfony.expression-language.attributes]]` argument rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyExpressionAttributeConfig {
+    /// Fully-qualified PHP attribute class.
+    pub attribute: String,
+    /// Named argument containing the expression string or string array.
+    pub argument: Option<String>,
+    /// Zero-based positional fallback for the argument.
+    pub position: Option<usize>,
+    /// Bind expression roots to method parameters with the same name.
+    #[serde(rename = "method-parameters")]
+    pub method_parameters: bool,
+    /// Expression root to PHP type-source mapping.
+    pub bindings: std::collections::HashMap<String, String>,
+}
+
+/// One `[[symfony.expression-language.constructors]]` object rule.
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct SymfonyExpressionConstructorConfig {
+    /// Fully-qualified PHP class instantiated for the expression object.
+    pub class: String,
+    /// Named constructor argument containing the expression string.
+    pub argument: Option<String>,
+    /// Zero-based positional fallback for the constructor argument.
+    pub position: Option<usize>,
+    /// Only match constructors nested in these attribute FQN prefixes.
+    #[serde(rename = "inside-attribute-prefixes")]
+    pub inside_attribute_prefixes: Vec<String>,
+    /// Bind expression roots to method parameters with the same name.
+    #[serde(rename = "method-parameters")]
+    pub method_parameters: bool,
+    /// Expression root to PHP type-source mapping.
+    pub bindings: std::collections::HashMap<String, String>,
 }
 
 /// `[semantic_tokens]` section — controls LSP semantic highlighting.
@@ -1046,6 +1218,102 @@ mod tests {
         std::fs::write(&path, "[php]\nversion = \"8.3\"\n").unwrap();
         let config = load_config(dir.path()).unwrap();
         assert_eq!(config.php.version.as_deref(), Some("8.3"));
+    }
+
+    #[test]
+    fn parses_symfony_container_and_event_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[symfony.container]
+environment = "dev"
+
+[symfony.events]
+ignored-prefixes = ["use_case."]
+ignored-suffixes = [".async"]
+
+[[symfony.events.publishers]]
+attribute = 'Acme\Event\Publish'
+name-argument = "name"
+name-position = 2
+dispatch-argument = "dispatch"
+dispatch-position = 4
+default-dispatch = ["post"]
+dispatch-cases = { PRE = "pre", POST = "post" }
+name-template = "{dispatch}.{class_snake}{method_suffix_snake}"
+explicit-name-template = "{name}"
+default-methods = ["execute", "__invoke"]
+
+[[symfony.events.publishers.skip]]
+dispatch = "post"
+argument = "messageClass"
+position = 5
+
+[[symfony.events.subscribers]]
+attribute = 'Acme\Event\Listen'
+name-argument = "name"
+name-position = 0
+transport-argument = "transport"
+transport-position = 2
+transport-cases = { ASYNC = ".async" }
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(dir.path()).unwrap();
+        assert!(config.symfony.container.enabled());
+        assert_eq!(config.symfony.container.environment(), "dev");
+        assert_eq!(config.symfony.events.publishers.len(), 1);
+        assert_eq!(
+            config.symfony.events.publishers[0].dispatch_cases["POST"],
+            "post"
+        );
+        assert_eq!(config.symfony.events.publishers[0].skip.len(), 1);
+        assert_eq!(config.symfony.events.subscribers.len(), 1);
+        assert_eq!(
+            config.symfony.events.subscribers[0].transport_cases["ASYNC"],
+            ".async"
+        );
+    }
+
+    #[test]
+    fn parses_symfony_expression_language_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(CONFIG_FILE_NAME);
+        std::fs::write(
+            &path,
+            r#"
+[[symfony.expression-language.attributes]]
+attribute = 'Acme\Attribute\Cache'
+argument = "tags"
+position = 3
+method-parameters = true
+
+[[symfony.expression-language.constructors]]
+class = 'Symfony\Component\ExpressionLanguage\Expression'
+position = 0
+inside-attribute-prefixes = ['Acme\Attribute\']
+bindings = { request = "parameter:0", response = "return", subject = 'class:App\Model\Subject' }
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(dir.path()).unwrap();
+        let expression = config.symfony.expression_language;
+        assert_eq!(expression.attributes.len(), 1);
+        assert!(expression.attributes[0].method_parameters);
+        assert_eq!(expression.attributes[0].argument.as_deref(), Some("tags"));
+        assert_eq!(expression.constructors.len(), 1);
+        assert_eq!(
+            expression.constructors[0].bindings["request"],
+            "parameter:0"
+        );
+        assert_eq!(
+            expression.constructors[0].bindings["subject"],
+            "class:App\\Model\\Subject"
+        );
     }
 
     #[test]
