@@ -31,6 +31,9 @@ impl Backend {
         // all consume the same indexed occurrences.
         if crate::resource_navigation::is_resource_document(&uri) {
             self.update_resource_symbol_index(&uri, &text);
+            if crate::framework::is_framework_resource_uri(&uri) {
+                self.index_framework_uri_content(&uri, &text);
+            }
             self.log(MessageType::INFO, format!("Opened resource file: {}", uri))
                 .await;
             return;
@@ -128,6 +131,9 @@ impl Backend {
         if crate::resource_navigation::is_resource_document(&uri) {
             if self.sync_ast_updates {
                 self.update_resource_symbol_index(&uri, &text);
+                if crate::framework::is_framework_resource_uri(&uri) {
+                    self.index_framework_uri_content(&uri, &text);
+                }
                 return;
             }
             let backend = self.clone_for_blocking();
@@ -143,6 +149,9 @@ impl Backend {
                         return false;
                     }
                     backend.update_resource_symbol_index(&uri, &text);
+                    if crate::framework::is_framework_resource_uri(&uri) {
+                        backend.index_framework_uri_content(&uri, &text);
+                    }
                     true
                 })
                 .await;
@@ -240,6 +249,9 @@ impl Backend {
             } else {
                 self.clear_file_maps(&uri);
             }
+            if crate::framework::is_framework_resource_uri(&uri) {
+                self.reindex_framework_uri_from_disk(&uri);
+            }
         } else if let Some(path) = self.workspace_index_path(&uri) {
             // A workspace file stays in the index once closed, as the file
             // on disk rather than the buffer: unsaved edits are discarded
@@ -293,6 +305,9 @@ impl Backend {
                 .insert(uri.clone(), Arc::clone(&text));
             if is_resource {
                 self.update_resource_symbol_index(&uri, &text);
+                if crate::framework::is_framework_resource_uri(&uri) {
+                    self.index_framework_uri_content(&uri, &text);
+                }
             } else {
                 self.update_ast(&uri, &text);
             }
