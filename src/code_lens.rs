@@ -16,9 +16,7 @@ use crate::definition::member::MemberKind;
 use crate::framework::{FrameworkReferenceKind, SymfonySymbolKind};
 use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
-use crate::references::{
-    doctrine_repository_matches_entity_convention, looks_like_doctrine_repository,
-};
+use crate::references::doctrine_repository_matches_entity_convention;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
 use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
@@ -1173,45 +1171,46 @@ impl Backend {
         if !out.is_empty() {
             return out;
         }
-        let Some(repository_class) = class_loader(&repository) else {
-            return out;
-        };
-        if !looks_like_doctrine_repository(&repository_class) {
+        if class_loader(&repository).is_none() || !self.is_doctrine_repository_class(&repository) {
             return out;
         }
 
-        let mut candidates: Vec<String> = Vec::new();
-        {
-            let index = self.symbols.fqn_class_index.read();
-            candidates.extend(index.keys().map(|key| key.to_string()));
-        }
-        {
-            let uri_index = self.symbols.uri_classes_index.read();
-            for classes in uri_index.values() {
-                for class in classes {
-                    candidates.push(class.fqn().to_string());
+        // The conventional spellings first: `Repository\UserRepository`
+        // belongs to `Entity\User` (or `Entities`, `Model`, `Models`, or its
+        // own namespace).  Only an entity kept somewhere else is looked for
+        // among the indexed classes.
+        for entity_fqn in doctrine_entity_convention_candidates(&repository) {
+            if let Some(entity) = class_loader(&entity_fqn) {
+                let entity_fqn = normalize_class_name(&entity.fqn());
+                if !out
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(&entity_fqn))
+                {
+                    out.push(entity_fqn);
                 }
             }
         }
-        candidates.sort();
-        candidates.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+        if !out.is_empty() {
+            return out;
+        }
 
-        for entity_fqn in candidates {
-            if entity_fqn.eq_ignore_ascii_case(&repository) {
+        let index = self.symbols.fqn_class_index.read();
+        for entity_fqn in index.keys() {
+            let entity_fqn: &str = entity_fqn;
+            if entity_fqn.eq_ignore_ascii_case(&repository)
+                || !looks_like_doctrine_entity_name(entity_fqn)
+                || !doctrine_repository_matches_entity_convention(entity_fqn, &repository)
+            {
                 continue;
             }
-            if !looks_like_doctrine_entity_name(&entity_fqn) {
-                continue;
-            }
-            if doctrine_repository_matches_entity_convention(&entity_fqn, &repository)
-                && !out
-                    .iter()
-                    .any(|known| known.eq_ignore_ascii_case(&entity_fqn))
+            let entity_fqn = normalize_class_name(entity_fqn);
+            if !out
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(&entity_fqn))
             {
                 out.push(entity_fqn);
             }
         }
-
         out
     }
 
@@ -1760,6 +1759,43 @@ fn is_builtin_doctrine_repository_fqn(fqn: &str) -> bool {
             short_name(&normalized),
             "ServiceEntityRepository" | "EntityRepository" | "ObjectRepository"
         )
+}
+
+/// Where a repository's entity conventionally lives, from the repository's
+/// own name: `App\Repository\UserRepository` → `App\Entity\User` and its
+/// siblings, and a class of the same stem next to the repository.
+fn doctrine_entity_convention_candidates(repository_fqn: &str) -> Vec<String> {
+    let short = short_name(repository_fqn);
+    let Some(stem) = short
+        .strip_suffix("Repository")
+        .filter(|stem| !stem.is_empty())
+    else {
+        return Vec::new();
+    };
+    let namespace = repository_fqn
+        .rsplit_once('\\')
+        .map_or("", |(namespace, _)| namespace);
+    let mut out = Vec::new();
+    let names = [
+        stem.to_string(),
+        format!("{stem}Entity"),
+        format!("{stem}Impl"),
+    ];
+    for name in &names {
+        if namespace.is_empty() {
+            out.push(name.clone());
+            continue;
+        }
+        out.push(format!("{namespace}\\{name}"));
+        for suffix in ["\\Repository", "\\Repositories"] {
+            if let Some(root) = namespace.strip_suffix(suffix) {
+                for folder in ["Entity", "Entities", "Model", "Models"] {
+                    out.push(format!("{root}\\{folder}\\{name}"));
+                }
+            }
+        }
+    }
+    out
 }
 
 fn looks_like_doctrine_entity_name(fqn: &str) -> bool {

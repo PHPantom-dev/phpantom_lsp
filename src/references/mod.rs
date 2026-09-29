@@ -39,9 +39,7 @@ mod members;
 mod receivers;
 mod variables;
 
-pub(crate) use member_scope::{
-    MemberScope, doctrine_repository_matches_entity_convention, looks_like_doctrine_repository,
-};
+pub(crate) use member_scope::{MemberScope, doctrine_repository_matches_entity_convention};
 pub(crate) use members::MemberDeclarationReferenceQuery;
 
 use std::collections::HashSet;
