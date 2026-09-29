@@ -18,30 +18,32 @@ impl Backend {
         let Some(references) = self.framework_references.read().get(uri).cloned() else {
             return;
         };
-        let known_services = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::Service)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let known_parameters = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::Parameter)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let known_routes = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::Route)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let known_templates = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::Template)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let known_events = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::Event)
-            .into_iter()
-            .collect::<HashSet<_>>();
-        let known_buses = self
-            .framework_symfony_symbol_names(SymfonySymbolKind::MessengerBus)
-            .into_iter()
-            .collect::<HashSet<_>>();
+        // The workspace's declarations are only gathered for a file that
+        // uses a name, and in one pass over the index for every kind.
+        let uses_a_name = references.iter().any(|reference| {
+            matches!(
+                reference.kind,
+                FrameworkReferenceKind::SymfonySymbol {
+                    declaration: false,
+                    ..
+                } | FrameworkReferenceKind::Translation {
+                    declaration: false,
+                    ..
+                } | FrameworkReferenceKind::ConfigKey {
+                    declaration: false,
+                    ..
+                }
+            )
+        });
+        if !uses_a_name {
+            return;
+        }
+        let declared = self.framework_declared_symfony_symbols();
+        let is_declared = |kind: SymfonySymbolKind, name: &str| {
+            declared
+                .get(&kind)
+                .is_some_and(|names| names.contains(name))
+        };
         let mut translation_domains = HashSet::new();
         let mut known_translations = HashSet::new();
         let mut config_roots = HashSet::new();
@@ -133,16 +135,16 @@ impl Backend {
 
             let known = match kind {
                 SymfonySymbolKind::Service => {
-                    known_services.contains(name)
+                    is_declared(*kind, name)
                         || (name.starts_with("App\\") && self.find_or_load_class(name).is_some())
                 }
-                SymfonySymbolKind::Parameter => known_parameters.contains(name),
-                SymfonySymbolKind::Route => known_routes.contains(name),
+                SymfonySymbolKind::Parameter => is_declared(*kind, name),
+                SymfonySymbolKind::Route => is_declared(*kind, name),
                 SymfonySymbolKind::RouteParameter => true,
-                SymfonySymbolKind::Template => known_templates.contains(name),
+                SymfonySymbolKind::Template => is_declared(*kind, name),
                 SymfonySymbolKind::Translation => true,
-                SymfonySymbolKind::Event => known_events.contains(name),
-                SymfonySymbolKind::MessengerBus => known_buses.contains(name),
+                SymfonySymbolKind::Event => is_declared(*kind, name),
+                SymfonySymbolKind::MessengerBus => is_declared(*kind, name),
             };
             if known || !is_project_local_name(*kind, name) {
                 continue;
