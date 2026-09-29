@@ -1,21 +1,26 @@
 //! Code Lens (`textDocument/codeLens`) support.
 //!
-//! Shows reference and implementation counts plus override/implement
-//! annotations.
+//! Shows reference and implementation counts plus override/implement,
+//! Symfony, and Doctrine relationship annotations.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::atom::Atom;
+use crate::class_lookup::find_class_at_offset;
 use crate::definition::implementation::member_implementation_providers;
 use crate::definition::member::MemberKind;
+use crate::framework::{FrameworkReferenceKind, SymfonySymbolKind};
 use crate::inheritance::find_declaring_ancestor;
 use crate::reference_index::ReferenceIndexKey;
+use crate::references::doctrine_repository_matches_entity_convention;
 use crate::symbol_map::{SymbolKind, SymbolMap};
 use crate::text_position::{LineIndex, offset_to_position};
-use crate::types::{ClassInfo, ClassLikeKind, Visibility};
+use crate::types::{ClassInfo, ClassLikeKind, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
+use crate::util::short_name;
 
 /// Shown while a declaration's references are being counted, so the lens
 /// keeps its line instead of vanishing and shifting the file, and reads as
@@ -66,9 +71,10 @@ impl Backend {
     /// Handle a `textDocument/codeLens` request.
     ///
     /// Returns reference lenses for PHP declarations, implementation
-    /// lenses for interfaces and abstract classes and their methods, and
+    /// lenses for interfaces and abstract classes and their methods,
     /// navigation lenses for methods that override or implement an
-    /// ancestor declaration.
+    /// ancestor declaration, and indexed Symfony and Doctrine relationship
+    /// lenses.
     pub fn handle_code_lens(&self, uri: &str, content: &str) -> Option<Vec<CodeLens>> {
         let classes = {
             let map = self.symbols.uri_classes_index.read();
@@ -83,6 +89,7 @@ impl Backend {
 
         let mut lenses = Vec::new();
         let class_loader = |name: &str| self.find_or_load_class(name);
+        let mut seen = HashSet::new();
 
         for class in &classes {
             let class_fqn = class.fqn();
@@ -113,7 +120,17 @@ impl Backend {
             if let Some(lens) = self.build_covers_lens(class, uri, &index) {
                 lenses.push(lens);
             }
-
+            self.push_framework_class_lenses(
+                uri,
+                content,
+                &index,
+                class,
+                &class_loader,
+                (&mut lenses, &mut seen),
+            );
+            // The ancestors a framework route may name a method through, built
+            // on the first method some framework resource mentions.
+            let framework_scope = std::cell::OnceCell::new();
             for method in &class.methods {
                 if method.name_offset == 0
                     || method.is_virtual
@@ -177,12 +194,25 @@ impl Backend {
 
                     let command = self.build_code_lens_command(title, target_uri, proto.position);
 
-                    lenses.push(CodeLens {
-                        range,
-                        command: Some(command),
-                        data: None,
-                    });
+                    push_unique_lens(
+                        &mut lenses,
+                        &mut seen,
+                        CodeLens {
+                            range,
+                            command: Some(command),
+                            data: None,
+                        },
+                    );
                 }
+
+                self.push_framework_method_lenses(
+                    uri,
+                    &index,
+                    class,
+                    &framework_scope,
+                    method,
+                    (&mut lenses, &mut seen),
+                );
             }
 
             for property in &class.properties {
@@ -243,6 +273,33 @@ impl Backend {
                 }
             }
         }
+
+        self.push_symfony_route_attribute_lenses(
+            uri,
+            content,
+            &index,
+            &classes,
+            &mut lenses,
+            &mut seen,
+        );
+        self.push_doctrine_get_repository_lenses(
+            uri,
+            content,
+            &index,
+            &class_loader,
+            &mut lenses,
+            &mut seen,
+        );
+        self.push_symfony_resource_lenses(uri, content, &index, &mut lenses, &mut seen);
+
+        lenses.sort_by(|a, b| {
+            a.range
+                .start
+                .line
+                .cmp(&b.range.start.line)
+                .then(a.range.start.character.cmp(&b.range.start.character))
+                .then(lens_title(a).cmp(&lens_title(b)))
+        });
 
         if lenses.is_empty() {
             None
@@ -713,6 +770,435 @@ impl Backend {
         })
     }
 
+    fn push_symfony_resource_lenses(
+        &self,
+        uri: &str,
+        content: &str,
+        index: &LineIndex,
+        lenses: &mut Vec<CodeLens>,
+        seen: &mut HashSet<String>,
+    ) {
+        let Some(references) = self.framework_references.read().get(uri).cloned() else {
+            return;
+        };
+
+        for (idx, declaration) in references.iter().enumerate() {
+            let FrameworkReferenceKind::SymfonySymbol {
+                kind,
+                name,
+                declaration: true,
+            } = &declaration.kind
+            else {
+                continue;
+            };
+            if !matches!(
+                kind,
+                SymfonySymbolKind::Service | SymfonySymbolKind::Parameter
+            ) {
+                continue;
+            }
+
+            let pos = index.position(declaration.start as usize);
+            let usages = self.framework_symfony_symbol_locations(*kind, name, false, true);
+            if !usages.is_empty() {
+                let title = format!(
+                    "Symfony {}: {} {}",
+                    kind.label(),
+                    usages.len(),
+                    if usages.len() == 1 { "ref" } else { "refs" }
+                );
+                self.push_locations_lens(uri, pos, title, usages, lenses, seen);
+            }
+
+            if *kind != SymfonySymbolKind::Service {
+                continue;
+            }
+            let block_end = references
+                .iter()
+                .skip(idx + 1)
+                .find_map(|candidate| {
+                    matches!(
+                        candidate.kind,
+                        FrameworkReferenceKind::SymfonySymbol {
+                            kind: SymfonySymbolKind::Service,
+                            declaration: true,
+                            ..
+                        }
+                    )
+                    .then_some(candidate.start)
+                })
+                .unwrap_or(content.len() as u32);
+
+            if let Some(class_fqn) = references.iter().find_map(|candidate| {
+                if candidate.start <= declaration.start || candidate.start >= block_end {
+                    return None;
+                }
+                let FrameworkReferenceKind::Class { fqn } = &candidate.kind else {
+                    return None;
+                };
+                Some(fqn.as_str())
+            }) && let Some(location) = self.class_location(class_fqn, uri, content)
+            {
+                self.push_locations_lens(
+                    uri,
+                    pos,
+                    format!("Symfony service class: {}", short_name(class_fqn)),
+                    vec![location],
+                    lenses,
+                    seen,
+                );
+            }
+        }
+    }
+
+    fn push_framework_class_lenses(
+        &self,
+        uri: &str,
+        content: &str,
+        index: &LineIndex,
+        class: &ClassInfo,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        output: (&mut Vec<CodeLens>, &mut HashSet<String>),
+    ) {
+        let (lenses, seen) = output;
+        let class_fqn = class.fqn();
+        let Some(source_pos) = class_lens_position(index, class) else {
+            return;
+        };
+
+        let config_locations = self.framework_class_reference_locations(class_fqn.as_str());
+        if !config_locations.is_empty() {
+            let title = if config_locations.len() == 1 {
+                "Symfony/Doctrine config: 1 ref".to_string()
+            } else {
+                format!("Symfony/Doctrine config: {} refs", config_locations.len())
+            };
+            self.push_locations_lens(
+                uri,
+                source_pos,
+                title,
+                config_locations,
+                &mut *lenses,
+                &mut *seen,
+            );
+        }
+
+        for repo_fqn in self
+            .doctrine_repository_fqns_for_entity(class_fqn.as_str(), class_loader)
+            .into_iter()
+            .filter(|fqn| !is_builtin_doctrine_repository_fqn(fqn))
+        {
+            if let Some(location) = self.class_location(&repo_fqn, uri, content) {
+                let title = format!("Doctrine repository: {}", short_name(&repo_fqn));
+                self.push_locations_lens(
+                    uri,
+                    source_pos,
+                    title,
+                    vec![location],
+                    &mut *lenses,
+                    &mut *seen,
+                );
+            }
+        }
+
+        for entity_fqn in self.doctrine_entities_for_repository(class_fqn.as_str(), class_loader) {
+            if let Some(location) = self.class_location(&entity_fqn, uri, content) {
+                let title = format!("Doctrine entity: {}", short_name(&entity_fqn));
+                self.push_locations_lens(
+                    uri,
+                    source_pos,
+                    title,
+                    vec![location],
+                    &mut *lenses,
+                    &mut *seen,
+                );
+            }
+        }
+    }
+
+    fn push_framework_method_lenses(
+        &self,
+        uri: &str,
+        index: &LineIndex,
+        class: &ClassInfo,
+        scope: &std::cell::OnceCell<crate::references::MemberScope>,
+        method: &MethodInfo,
+        output: (&mut Vec<CodeLens>, &mut HashSet<String>),
+    ) {
+        let (lenses, seen) = output;
+        let method_name = method.name.as_str();
+        if !self.has_framework_member_references(method_name) {
+            return;
+        }
+        let scope = scope.get_or_init(|| {
+            let mut hierarchy = HashSet::new();
+            hierarchy.insert(class.fqn().to_string());
+            hierarchy.extend(self.class_hierarchy_names(class));
+            crate::references::MemberScope::exact(hierarchy)
+        });
+
+        let route_locations = self.framework_member_reference_locations(method_name, Some(scope));
+        if route_locations.is_empty() {
+            return;
+        }
+        let pos = index.position(method.name_offset as usize);
+
+        let title = if route_locations.len() == 1 {
+            "Symfony route config: 1 ref".to_string()
+        } else {
+            format!("Symfony route config: {} refs", route_locations.len())
+        };
+        self.push_locations_lens(uri, pos, title, route_locations, lenses, seen);
+    }
+
+    fn push_symfony_route_attribute_lenses(
+        &self,
+        uri: &str,
+        content: &str,
+        index: &LineIndex,
+        classes: &[Arc<ClassInfo>],
+        lenses: &mut Vec<CodeLens>,
+        seen: &mut HashSet<String>,
+    ) {
+        let attributes = route_attributes(content);
+        if attributes.is_empty() {
+            return;
+        }
+        let declarations = code_lens_declarations(index, classes);
+        if declarations.is_empty() {
+            return;
+        }
+
+        for attr in attributes {
+            // `declarations` is sorted by offset, so the first one past the
+            // attribute is the declaration it decorates.
+            let next = declarations.partition_point(|decl| decl.offset <= attr.end);
+            let Some(decl) = declarations.get(next) else {
+                continue;
+            };
+            if decl.offset.saturating_sub(attr.end) > 1024 {
+                continue;
+            }
+            let between = &content[attr.end..decl.offset];
+            if between.contains(';') || between.contains('{') || between.contains('}') {
+                continue;
+            }
+            let Some(title) = route_attribute_lens_title(&attr, decl.kind) else {
+                continue;
+            };
+
+            let source_pos = decl.position;
+            let Ok(parsed_uri) = Url::parse(uri) else {
+                continue;
+            };
+            let location = Location {
+                uri: parsed_uri,
+                range: Range {
+                    start: source_pos,
+                    end: source_pos,
+                },
+            };
+            self.push_locations_lens(uri, source_pos, title, vec![location], lenses, seen);
+        }
+    }
+
+    fn push_doctrine_get_repository_lenses(
+        &self,
+        uri: &str,
+        content: &str,
+        index: &LineIndex,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+        lenses: &mut Vec<CodeLens>,
+        seen: &mut HashSet<String>,
+    ) {
+        let calls = get_repository_calls(content);
+        if calls.is_empty() {
+            return;
+        }
+        let ctx = self.file_context(uri);
+        for call in calls {
+            let offset = call.offset as u32;
+            let Some(entity_fqn) = class_expr_arg_to_fqn(
+                &call.first_arg,
+                ctx.use_map_at(offset),
+                ctx.namespace_at(offset),
+                &ctx.classes,
+                offset,
+            ) else {
+                continue;
+            };
+            let mut locations = Vec::new();
+            let mut title = None;
+
+            for repo_fqn in self
+                .doctrine_repository_fqns_for_entity(&entity_fqn, class_loader)
+                .into_iter()
+                .filter(|fqn| !is_builtin_doctrine_repository_fqn(fqn))
+            {
+                if let Some(location) = self.class_location(&repo_fqn, uri, content) {
+                    title = Some(format!("Doctrine repository: {}", short_name(&repo_fqn)));
+                    locations.push(location);
+                    break;
+                }
+            }
+
+            if locations.is_empty()
+                && let Some(location) = self.class_location(&entity_fqn, uri, content)
+            {
+                title = Some(format!("Doctrine entity: {}", short_name(&entity_fqn)));
+                locations.push(location);
+            }
+
+            let Some(title) = title else {
+                continue;
+            };
+            let pos = index.position(call.offset);
+            self.push_locations_lens(uri, pos, title, locations, lenses, seen);
+        }
+    }
+
+    fn push_locations_lens(
+        &self,
+        origin_uri: &str,
+        source_pos: Position,
+        title: String,
+        locations: Vec<Location>,
+        lenses: &mut Vec<CodeLens>,
+        seen: &mut HashSet<String>,
+    ) {
+        if locations.is_empty() {
+            return;
+        }
+        let Ok(origin_url) = Url::parse(origin_uri) else {
+            return;
+        };
+        let range = Range {
+            start: Position {
+                line: source_pos.line,
+                character: 0,
+            },
+            end: Position {
+                line: source_pos.line,
+                character: 0,
+            },
+        };
+        let command =
+            self.build_code_lens_locations_command(title, origin_url, source_pos, locations);
+        push_unique_lens(
+            lenses,
+            seen,
+            CodeLens {
+                range,
+                command: Some(command),
+                data: None,
+            },
+        );
+    }
+
+    fn class_location(
+        &self,
+        fqn: &str,
+        current_uri: &str,
+        current_content: &str,
+    ) -> Option<Location> {
+        let class_info = self.find_or_load_class(fqn)?;
+        let class_fqn = class_info.fqn();
+        let (file_uri, file_content) =
+            self.find_class_file_content(&class_fqn, current_uri, current_content)?;
+        let offset = class_info
+            .keyword_offset
+            .max(class_info.decl_start_offset)
+            .min(file_content.len() as u32);
+        if offset == 0 {
+            return None;
+        }
+        let uri = Url::parse(&file_uri).ok()?;
+        let pos = offset_to_position(&file_content, offset as usize);
+        Some(Location {
+            uri,
+            range: Range {
+                start: pos,
+                end: pos,
+            },
+        })
+    }
+
+    fn doctrine_entities_for_repository(
+        &self,
+        repository_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let mut out = self.framework_doctrine_entity_fqns_for_repository(repository_fqn);
+        let repository = normalize_class_name(repository_fqn);
+        if !out.is_empty() {
+            return out;
+        }
+        if class_loader(&repository).is_none() || !self.is_doctrine_repository_class(&repository) {
+            return out;
+        }
+
+        // The conventional spellings first: `Repository\UserRepository`
+        // belongs to `Entity\User` (or `Entities`, `Model`, `Models`, or its
+        // own namespace).  Only an entity kept somewhere else is looked for
+        // among the indexed classes.
+        for entity_fqn in doctrine_entity_convention_candidates(&repository) {
+            if let Some(entity) = class_loader(&entity_fqn) {
+                let entity_fqn = normalize_class_name(&entity.fqn());
+                if !out
+                    .iter()
+                    .any(|known| known.eq_ignore_ascii_case(&entity_fqn))
+                {
+                    out.push(entity_fqn);
+                }
+            }
+        }
+        if !out.is_empty() {
+            return out;
+        }
+
+        let index = self.symbols.fqn_class_index.read();
+        for entity_fqn in index.keys() {
+            let entity_fqn: &str = entity_fqn;
+            if entity_fqn.eq_ignore_ascii_case(&repository)
+                || !looks_like_doctrine_entity_name(entity_fqn)
+                || !doctrine_repository_matches_entity_convention(entity_fqn, &repository)
+            {
+                continue;
+            }
+            let entity_fqn = normalize_class_name(entity_fqn);
+            if !out
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(&entity_fqn))
+            {
+                out.push(entity_fqn);
+            }
+        }
+        out
+    }
+
+    fn class_hierarchy_names(&self, class: &ClassInfo) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let mut parent_name = class.parent_class;
+        for _ in 0..MAX_INHERITANCE_DEPTH {
+            let Some(name) = parent_name else {
+                break;
+            };
+            let parent_fqn = name.to_string();
+            if out
+                .iter()
+                .any(|known| known.eq_ignore_ascii_case(&parent_fqn))
+            {
+                break;
+            }
+            out.push(parent_fqn);
+            let Some(parent) = self.find_or_load_class(&name) else {
+                break;
+            };
+            parent_name = parent.parent_class;
+        }
+        out
+    }
+
     /// The closest ancestor that declares a method with the given name,
     /// as a navigation target.
     ///
@@ -791,6 +1277,24 @@ impl Backend {
         }
     }
 
+    fn build_code_lens_locations_command(
+        &self,
+        title: String,
+        origin_uri: Url,
+        origin_position: Position,
+        locations: Vec<Location>,
+    ) -> Command {
+        Command {
+            title,
+            command: "editor.action.showReferences".to_string(),
+            arguments: Some(vec![
+                serde_json::json!(origin_uri),
+                serde_json::json!(origin_position),
+                serde_json::json!(locations),
+            ]),
+        }
+    }
+
     /// Build a `Prototype` by locating the method's position in the
     /// ancestor's source file.
     fn build_prototype(
@@ -820,4 +1324,467 @@ impl Backend {
             position,
         })
     }
+}
+
+#[derive(Clone, Copy)]
+struct CodeLensDeclaration {
+    offset: usize,
+    position: Position,
+    kind: RouteDeclarationKind,
+}
+
+#[derive(Clone, Copy)]
+enum RouteDeclarationKind {
+    Class,
+    Method,
+}
+
+struct RouteAttribute {
+    end: usize,
+    path: Option<String>,
+    name: Option<String>,
+    methods: Vec<String>,
+}
+
+struct GetRepositoryCall {
+    offset: usize,
+    first_arg: String,
+}
+
+fn class_lens_position(index: &LineIndex, class: &ClassInfo) -> Option<Position> {
+    let offset = if class.keyword_offset > 0 {
+        class.keyword_offset
+    } else {
+        class.decl_start_offset
+    };
+    if offset == 0 || offset as usize > index.content().len() {
+        None
+    } else {
+        Some(index.position(offset as usize))
+    }
+}
+
+fn code_lens_declarations(
+    index: &LineIndex,
+    classes: &[Arc<ClassInfo>],
+) -> Vec<CodeLensDeclaration> {
+    let mut declarations = Vec::new();
+    for class in classes {
+        if let Some(position) = class_lens_position(index, class) {
+            let offset = if class.keyword_offset > 0 {
+                class.keyword_offset
+            } else {
+                class.decl_start_offset
+            };
+            declarations.push(CodeLensDeclaration {
+                offset: offset as usize,
+                position,
+                kind: RouteDeclarationKind::Class,
+            });
+        }
+        for method in &class.methods {
+            if method.name_offset == 0 || method.is_virtual {
+                continue;
+            }
+            declarations.push(CodeLensDeclaration {
+                offset: method.name_offset as usize,
+                position: index.position(method.name_offset as usize),
+                kind: RouteDeclarationKind::Method,
+            });
+        }
+    }
+    declarations.sort_by_key(|decl| decl.offset);
+    declarations
+}
+
+fn route_attributes(content: &str) -> Vec<RouteAttribute> {
+    let mut attributes = Vec::new();
+    let mut search = 0usize;
+    while let Some(rel) = content[search..].find("#[") {
+        let start = search + rel;
+        let Some(end) = find_attribute_end(content, start) else {
+            break;
+        };
+        let attr = &content[start..end];
+        if !is_route_attribute(attr) {
+            search = end;
+            continue;
+        }
+        let args = attr
+            .find('(')
+            .zip(attr.rfind(')'))
+            .and_then(|(open, close)| (close > open).then_some(&attr[open + 1..close]))
+            .unwrap_or("");
+        let path = find_named_string_arg(args, "path").or_else(|| first_string_literal(args));
+        let name = find_named_string_arg(args, "name");
+        let methods = find_methods_arg(args);
+        attributes.push(RouteAttribute {
+            end,
+            path,
+            name,
+            methods,
+        });
+        search = end;
+    }
+    attributes
+}
+
+fn route_attribute_lens_title(
+    attr: &RouteAttribute,
+    decl_kind: RouteDeclarationKind,
+) -> Option<String> {
+    let mut title = String::new();
+    match decl_kind {
+        RouteDeclarationKind::Class => title.push_str("Symfony route prefix"),
+        RouteDeclarationKind::Method => title.push_str("Symfony route"),
+    }
+
+    let mut parts = Vec::new();
+    if !attr.methods.is_empty() {
+        parts.push(attr.methods.join("|"));
+    }
+    if let Some(path) = &attr.path
+        && !path.is_empty()
+    {
+        parts.push(path.clone());
+    }
+    if let Some(name) = &attr.name
+        && !name.is_empty()
+    {
+        parts.push(format!("({name})"));
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        title.push_str(": ");
+        title.push_str(&parts.join(" "));
+        Some(title)
+    }
+}
+
+fn find_attribute_end(content: &str, start: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut i = start + 2;
+    let mut depth = 1usize;
+    let mut quote: Option<u8> = None;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if let Some(q) = quote {
+            if byte == b'\\' {
+                i += 2;
+                continue;
+            }
+            if byte == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'[' => depth += 1,
+            b']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(i + 1);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn is_route_attribute(attr: &str) -> bool {
+    let lower = attr.to_ascii_lowercase();
+    lower.starts_with("#[route")
+        || lower.starts_with("#[\\symfony\\component\\routing\\attribute\\route")
+        || lower.starts_with("#[symfony\\component\\routing\\attribute\\route")
+        || lower.starts_with("#[\\symfony\\component\\routing\\annotation\\route")
+        || lower.starts_with("#[symfony\\component\\routing\\annotation\\route")
+}
+
+fn find_named_string_arg(args: &str, name: &str) -> Option<String> {
+    let pattern = format!("{name}:");
+    let mut search = 0usize;
+    while let Some(rel) = args[search..].find(&pattern) {
+        let start = search + rel;
+        if start > 0 {
+            let prev = args.as_bytes()[start - 1];
+            if prev == b'_' || prev.is_ascii_alphanumeric() {
+                search = start + pattern.len();
+                continue;
+            }
+        }
+        let value_start = start + pattern.len();
+        return first_string_literal(&args[value_start..]);
+    }
+    None
+}
+
+fn first_string_literal(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let quote = bytes[i];
+        if quote != b'\'' && quote != b'"' {
+            i += 1;
+            continue;
+        }
+        let mut value = String::new();
+        i += 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                value.push(bytes[i + 1] as char);
+                i += 2;
+                continue;
+            }
+            if bytes[i] == quote {
+                return Some(value);
+            }
+            value.push(bytes[i] as char);
+            i += 1;
+        }
+        return None;
+    }
+    None
+}
+
+fn find_methods_arg(args: &str) -> Vec<String> {
+    let Some(start) = args.find("methods:") else {
+        return Vec::new();
+    };
+    let tail = &args[start + "methods:".len()..];
+    let end = tail.find("]").map(|idx| idx + 1).unwrap_or_else(|| {
+        tail.find(',')
+            .or_else(|| tail.find(')'))
+            .unwrap_or(tail.len())
+    });
+    let segment = &tail[..end];
+    let mut out = Vec::new();
+    let mut search = 0usize;
+    while let Some(method) = first_string_literal(&segment[search..]) {
+        let Some(pos) = segment[search..].find(&method) else {
+            break;
+        };
+        let method_len = method.len();
+        if !out.iter().any(|known: &String| known == &method) {
+            out.push(method);
+        }
+        search += pos + method_len + 1;
+        if search >= segment.len() {
+            break;
+        }
+    }
+    out
+}
+
+fn get_repository_calls(content: &str) -> Vec<GetRepositoryCall> {
+    let mut calls = Vec::new();
+    let mut search = 0usize;
+    while let Some(rel) = content[search..].find("getRepository") {
+        let name_start = search + rel;
+        let name_end = name_start + "getRepository".len();
+        if name_start > 0 && is_ident_byte(content.as_bytes()[name_start - 1]) {
+            search = name_end;
+            continue;
+        }
+        if content
+            .as_bytes()
+            .get(name_end)
+            .is_some_and(|byte| is_ident_byte(*byte))
+        {
+            search = name_end;
+            continue;
+        }
+        let Some(open) = content[name_end..].find('(').map(|open| name_end + open) else {
+            break;
+        };
+        if !content[name_end..open].trim().is_empty() {
+            search = name_end;
+            continue;
+        }
+        let Some(close) = find_matching_paren(content, open) else {
+            break;
+        };
+        let args = &content[open + 1..close];
+        if let Some(first_arg) = split_first_arg(args) {
+            calls.push(GetRepositoryCall {
+                offset: name_start,
+                first_arg: first_arg.to_string(),
+            });
+        }
+        search = close + 1;
+    }
+    calls
+}
+
+fn class_expr_arg_to_fqn(
+    first_arg: &str,
+    use_map: &std::collections::HashMap<String, String>,
+    namespace: &Option<String>,
+    local_classes: &[Arc<ClassInfo>],
+    access_offset: u32,
+) -> Option<String> {
+    let class_expr = first_arg.trim().strip_suffix("::class")?.trim();
+    let class_expr = class_expr.trim_start_matches('\\');
+    if class_expr.is_empty() {
+        return None;
+    }
+    match class_expr {
+        "self" | "static" => {
+            find_class_at_offset(local_classes, access_offset).map(|class| class.fqn().to_string())
+        }
+        "parent" => find_class_at_offset(local_classes, access_offset)
+            .and_then(|class| class.parent_class.map(|parent| parent.to_string())),
+        _ => Some(Backend::resolve_to_fqn(class_expr, use_map, namespace)),
+    }
+}
+
+fn find_matching_paren(content: &str, open: usize) -> Option<usize> {
+    let bytes = content.as_bytes();
+    let mut depth = 0usize;
+    let mut quote: Option<u8> = None;
+    let mut i = open;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if let Some(q) = quote {
+            if byte == b'\\' {
+                i += 2;
+                continue;
+            }
+            if byte == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match byte {
+            b'\'' | b'"' => quote = Some(byte),
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+fn split_first_arg(args: &str) -> Option<&str> {
+    let bytes = args.as_bytes();
+    let mut quote: Option<u8> = None;
+    let mut paren_depth = 0usize;
+    let mut bracket_depth = 0usize;
+    for (i, byte) in bytes.iter().enumerate() {
+        if let Some(q) = quote {
+            if *byte == b'\\' {
+                continue;
+            }
+            if *byte == q {
+                quote = None;
+            }
+            continue;
+        }
+        match *byte {
+            b'\'' | b'"' => quote = Some(*byte),
+            b'(' => paren_depth += 1,
+            b')' => paren_depth = paren_depth.saturating_sub(1),
+            b'[' => bracket_depth += 1,
+            b']' => bracket_depth = bracket_depth.saturating_sub(1),
+            b',' if paren_depth == 0 && bracket_depth == 0 => return Some(args[..i].trim()),
+            _ => {}
+        }
+    }
+    let trimmed = args.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
+fn is_ident_byte(byte: u8) -> bool {
+    byte == b'_' || byte.is_ascii_alphanumeric()
+}
+
+fn is_builtin_doctrine_repository_fqn(fqn: &str) -> bool {
+    let normalized = normalize_class_name(fqn);
+    normalized.starts_with("Doctrine\\")
+        || matches!(
+            short_name(&normalized),
+            "ServiceEntityRepository" | "EntityRepository" | "ObjectRepository"
+        )
+}
+
+/// Where a repository's entity conventionally lives, from the repository's
+/// own name: `App\Repository\UserRepository` → `App\Entity\User` and its
+/// siblings, and a class of the same stem next to the repository.
+fn doctrine_entity_convention_candidates(repository_fqn: &str) -> Vec<String> {
+    let short = short_name(repository_fqn);
+    let Some(stem) = short
+        .strip_suffix("Repository")
+        .filter(|stem| !stem.is_empty())
+    else {
+        return Vec::new();
+    };
+    let namespace = repository_fqn
+        .rsplit_once('\\')
+        .map_or("", |(namespace, _)| namespace);
+    let mut out = Vec::new();
+    let names = [
+        stem.to_string(),
+        format!("{stem}Entity"),
+        format!("{stem}Impl"),
+    ];
+    for name in &names {
+        if namespace.is_empty() {
+            out.push(name.clone());
+            continue;
+        }
+        out.push(format!("{namespace}\\{name}"));
+        for suffix in ["\\Repository", "\\Repositories"] {
+            if let Some(root) = namespace.strip_suffix(suffix) {
+                for folder in ["Entity", "Entities", "Model", "Models"] {
+                    out.push(format!("{root}\\{folder}\\{name}"));
+                }
+            }
+        }
+    }
+    out
+}
+
+fn looks_like_doctrine_entity_name(fqn: &str) -> bool {
+    let normalized = normalize_class_name(fqn);
+    normalized.contains("\\Entity\\")
+        || normalized.contains("\\Entities\\")
+        || short_name(&normalized).ends_with("Entity")
+}
+
+fn normalize_class_name(name: &str) -> String {
+    name.trim().trim_start_matches('\\').to_string()
+}
+
+fn push_unique_lens(lenses: &mut Vec<CodeLens>, seen: &mut HashSet<String>, lens: CodeLens) {
+    let title = lens_title(&lens);
+    let key = format!(
+        "{}:{}:{}",
+        lens.range.start.line, lens.range.start.character, title
+    );
+    if seen.insert(key) {
+        lenses.push(lens);
+    }
+}
+
+fn lens_title(lens: &CodeLens) -> String {
+    lens.command
+        .as_ref()
+        .map(|command| command.title.clone())
+        .unwrap_or_default()
 }
