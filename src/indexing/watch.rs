@@ -435,6 +435,7 @@ impl Backend {
             ("**/*.{yaml,yml,xml}".to_string(), watch_all),
             ("**/*.{yaml,yml,xml}.dist".to_string(), watch_all),
             ("**/*.twig".to_string(), watch_all),
+            ("**/*.{xlf,xliff}".to_string(), watch_all),
             ("**/composer.json".to_string(), WatchKind::Change),
             ("**/composer.lock".to_string(), WatchKind::Change),
             ("**/.phpantom.toml".to_string(), watch_all),
@@ -595,6 +596,51 @@ impl Backend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// XLIFF catalogs are watched like the other framework resources, so a
+    /// key added on disk while the catalog is closed is known without a
+    /// restart.
+    #[test]
+    fn an_xliff_catalog_changed_on_disk_is_reindexed() {
+        let dir = tempfile::tempdir().unwrap();
+        let catalog = dir.path().join("translations/messages.en.xlf");
+        std::fs::create_dir_all(catalog.parent().unwrap()).unwrap();
+        let xliff = |keys: &[&str]| {
+            let units: String = keys
+                .iter()
+                .map(|key| format!("<trans-unit id=\"{key}\"><source>{key}</source></trans-unit>"))
+                .collect();
+            format!(
+                "<?xml version=\"1.0\"?><xliff version=\"1.2\"><file><body>{units}</body></file></xliff>"
+            )
+        };
+        std::fs::write(&catalog, xliff(&["app.hello"])).unwrap();
+
+        let backend = Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        backend.index_framework_workspace();
+        assert_eq!(
+            backend.framework_translation_names("messages"),
+            vec!["app.hello"]
+        );
+
+        let (registration, _) = backend.build_watched_file_registration();
+        let options = registration.register_options.unwrap().to_string();
+        assert!(options.contains("xlf"), "{options}");
+
+        std::fs::write(&catalog, xliff(&["app.hello", "app.bye"])).unwrap();
+        let params = DidChangeWatchedFilesParams {
+            changes: vec![FileEvent {
+                uri: Url::from_file_path(&catalog).unwrap(),
+                typ: FileChangeType::CHANGED,
+            }],
+        };
+        assert!(backend.apply_watched_file_changes(&params, dir.path()));
+        assert_eq!(
+            backend.framework_translation_names("messages"),
+            vec!["app.bye", "app.hello"]
+        );
+    }
 
     #[test]
     fn non_laravel_projects_ignore_schema_watch_changes() {
