@@ -1,0 +1,7 @@
+{% extends 'base.html.twig' %}
+
+{% block body %}
+  <h1>{{ 'demo.title'|trans }}</h1>
+  {% include 'demo/_card.html.twig' %}
+  <a href="{{ path('app_demo', {'userId': 42}) }}">{{ sender }}</a>
+{% endblock %}

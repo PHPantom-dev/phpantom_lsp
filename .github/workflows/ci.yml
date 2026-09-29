@@ -111,6 +111,7 @@ jobs:
       - run: find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
       - run: php -d zend.assertions=1 examples/php/scaffolding/assertions.php
       - run: php -l examples/laravel/app/Demo.php
+      - run: find examples/symfony/src examples/symfony/config -name '*.php' -print0 | xargs -0 -n1 php -l
 
   benchmark:
     name: Benchmark

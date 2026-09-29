@@ -1,0 +1,3 @@
+app_demo_legacy:
+  path: /legacy
+  controller: App\Controller\DemoController::legacy

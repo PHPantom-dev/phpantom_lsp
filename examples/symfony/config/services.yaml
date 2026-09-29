@@ -1,0 +1,6 @@
+services:
+  App\:
+    resource: '../src/'
+  App\EventListener\OrderPlacedListener:
+    tags:
+      - { name: kernel.event_listener, event: app.order.placed, method: onOrderPlaced }

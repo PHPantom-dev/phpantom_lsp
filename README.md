@@ -34,7 +34,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 | Closure parameter inference              | ✅       | 🚧           | 🚧         | 🚧          | 🚧          |
 | **Frameworks**                           |          |              |            |             |             |
 | Laravel & Blade                          | ✅       | ❌           | 🚧         | ❌          | 🚧🧩          |
-| Symfony & Twig                           | ❌       | ❌           | ❌         | 🚧          | 🧩         |
+| Symfony & Twig                           | ✅       | ❌           | ❌         | 🚧          | 🧩         |
 | Drupal                                   | 🚧       | ❌           | ❌         | ❌          | ✅🧩          |
 | Other frameworks                         | 🚧       | 🚧           | 🚧         | 🚧          | 🧩        |
 | **Refactoring**                          |          |              |            |             |             |
@@ -64,7 +64,7 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 </p>
 
 > [!TIP]
-> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. For Laravel specifically, open [`examples/laravel/`](examples/laravel/) — a standalone project with real Eloquent models, config, routes, views, and translations that exercises Eloquent property resolution, query builder chaining, scopes, custom collections, and go-to-definition for config keys, route names, and translation strings.
+> **Want to verify?** Open [`examples/php/`](examples/php/) in your editor and trigger completion at the marked locations in `completion.php`. It exercises every type intelligence feature in the table, including edge cases where tools diverge. Framework playgrounds live in [`examples/laravel/`](examples/laravel/) and [`examples/symfony/`](examples/symfony/).
 
 ## Context-Aware Intelligence
 
@@ -75,6 +75,8 @@ Independent, re-runnable type-inference conformance results across twelve PHP en
 - **Type aliases and shapes.** `@phpstan-type`, `@phpstan-import-type`, and `object{...}` shapes all resolve through to completions.
 - **The full modern language.** PHP 8.4 and 8.5 features resolve end-to-end: property hooks, asymmetric visibility, and the pipe operator behave like any other code.
 - **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string completion on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
+- **Laravel.** Eloquent relationships, scopes, accessors, casts, and Builder chains resolve end-to-end. Macros behave like real methods. Container strings like `app('cache')` resolve to the bound class, `auth()->user()` resolves to your configured model, authorization strings resolve to the gate definition or policy method that declares them, and query string compleation on both relation and column names. Blade templates get completion, hover, go-to-definition, and diagnostics through virtual PHP preprocessing. No ide-helper or database access required.
+- **Symfony.** Container configuration, routes, Twig templates, translations, events, Messenger, forms, validation mappings, Doctrine metadata, and local configuration schemas participate in completion, navigation, references, rename, diagnostics, and code lenses across PHP, YAML, XML, XLIFF, and Twig.
 - **Everything else you'd expect.** Generics, type narrowing, named arguments, destructuring, first-class callables, anonymous classes, `@deprecated` detection, and namespace segment drilling.
 
 ## Project Awareness

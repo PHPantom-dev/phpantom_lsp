@@ -1,0 +1,7 @@
+App\Entity\User:
+  properties:
+    email:
+      - NotBlank: ~
+    displayName:
+      - Length:
+          min: 2

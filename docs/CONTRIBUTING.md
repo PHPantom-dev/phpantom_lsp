@@ -10,7 +10,7 @@ Thanks for your interest in contributing!
 
 ## Before Submitting a PR
 
-All six CI checks must pass with zero warnings and zero failures:
+All CI checks must pass with zero warnings and zero failures:
 
 ```bash
 cargo test
@@ -19,10 +19,11 @@ cargo fmt --check
 find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l
 php -d zend.assertions=1 examples/php/scaffolding/assertions.php
 php -l examples/laravel/app/Demo.php
+find examples/symfony/src examples/symfony/config -name '*.php' -exec php -l {} \;
 phpantom_lsp analyze --project-root examples/laravel --no-colour
 ```
 
-Note that clippy runs twice, once for library code and once including test code. The `php -l` checks ensure the `examples/php/` playground remains valid PHP. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. The final `php -l` and `phpantom_lsp analyze` runs check `examples/laravel/` for syntax errors and diagnostic regressions. `app/Demo.php` carries three deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 3 errors` on those two lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
+Note that clippy runs twice, once for library code and once including test code. The `php -l` checks keep the PHP and framework playgrounds valid. The `php -d zend.assertions=1` run executes `assertions.php`'s `runDemoAssertions()` to verify that `scaffolding/scaffolding.php`'s stubs actually return what their docblocks claim. The final `php -l` and `phpantom_lsp analyze` runs check `examples/laravel/` for syntax errors and diagnostic regressions. `app/Demo.php` carries three deliberate mistakes: `Artisan::call('does:not-exist')` demonstrates `invalid_laravel_command`, and one `view('welcome', …)` call both leaves out a variable the template declares and passes a misspelled key, demonstrating `missing_view_variable` and `unused_view_variable`. So the analyze run must report exactly `[ERROR] Found 3 errors` on those two lines, not `[OK] No errors`; any other count, or an error on a different line, is a regression.
 
 ## Code Style
 
@@ -38,7 +39,7 @@ Note that clippy runs twice, once for library code and once including test code.
 - A helper (a request wrapper, a label extractor, a position finder) that three or more test files would define belongs in `tests/integration/common/mod.rs`, not copied into each file; check there before writing one
 - Inline `#[cfg(test)]` modules in `src/` are for unit tests of private helpers; a test that drives a `Backend` through a public handler goes in `tests/integration/`
 - Test the happy path, edge cases, and interactions with existing features
-- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`).
+- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`). Put other framework-specific examples in the matching `examples/<framework>/` project and lint its PHP files.
 
 See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 
