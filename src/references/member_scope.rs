@@ -60,7 +60,7 @@ struct MemberScopeInner {
 
 impl MemberScope {
     /// A scope that is exactly `fqns`, with no walk behind it.
-    pub(super) fn exact(fqns: HashSet<String>) -> Self {
+    pub(crate) fn exact(fqns: HashSet<String>) -> Self {
         Self(Arc::new(MemberScopeInner {
             indexed: fqns,
             roots: HashSet::new(),
@@ -85,7 +85,7 @@ impl MemberScope {
     }
 
     /// Whether a receiver resolved to `fqn` carries the searched member.
-    pub(super) fn contains(&self, backend: &Backend, fqn: &str) -> bool {
+    pub(crate) fn contains(&self, backend: &Backend, fqn: &str) -> bool {
         let fqn = strip_fqn_prefix(fqn);
         if self.0.indexed.contains(fqn) {
             return true;
@@ -202,7 +202,13 @@ impl Backend {
         access_offset: u32,
         content: &str,
     ) -> Vec<String> {
-        match self.resolve_subject_type_at(subject_text, is_static, ctx, access_offset, content) {
+        let resolved = match self.resolve_subject_type_at(
+            subject_text,
+            is_static,
+            ctx,
+            access_offset,
+            content,
+        ) {
             Some(php_type) => {
                 self.class_names_to_fqns(php_type.top_level_class_names(), ctx, access_offset)
             }
@@ -216,7 +222,27 @@ impl Backend {
                     ctx.namespace_at(access_offset),
                 ),
             ),
+        };
+
+        // Doctrine types `getRepository()` as its generic repository, so when
+        // that (or nothing) is all the type engine knows, the entity class the
+        // call names picks the concrete repository instead.
+        if resolved
+            .iter()
+            .all(|fqn| is_generic_doctrine_repository(fqn))
+            && (subject_text.contains("getRepository") || subject_text.starts_with('$'))
+        {
+            let doctrine_repository_fqns = self.resolve_doctrine_repository_subject_to_fqns(
+                subject_text,
+                ctx,
+                access_offset,
+                content,
+            );
+            if !doctrine_repository_fqns.is_empty() {
+                return doctrine_repository_fqns;
+            }
         }
+        resolved
     }
 
     /// The type a member-access subject resolves to, through the shared
@@ -277,6 +303,168 @@ impl Backend {
                 }
             })
             .collect()
+    }
+
+    fn resolve_doctrine_repository_subject_to_fqns(
+        &self,
+        subject_text: &str,
+        ctx: &crate::types::FileContext,
+        access_offset: u32,
+        content: &str,
+    ) -> Vec<String> {
+        let use_map = ctx.use_map_at(access_offset);
+        let namespace = ctx.namespace_at(access_offset);
+        let class_loader = self.class_loader_with(&ctx.classes, use_map, namespace);
+        let expr = crate::type_engine::subject_expr::SubjectExpr::parse(subject_text);
+        let mut candidates = self.doctrine_repository_fqns_from_expr(
+            &expr,
+            use_map,
+            namespace,
+            &ctx.classes,
+            access_offset,
+            &class_loader,
+        );
+
+        if candidates.is_empty()
+            && let crate::type_engine::subject_expr::SubjectExpr::Variable(var_name) = &expr
+            && let Some(assigned_expr) =
+                last_assignment_expression_before(content, access_offset, var_name)
+        {
+            let assigned = crate::type_engine::subject_expr::SubjectExpr::parse(assigned_expr);
+            candidates = self.doctrine_repository_fqns_from_expr(
+                &assigned,
+                use_map,
+                namespace,
+                &ctx.classes,
+                access_offset,
+                &class_loader,
+            );
+        }
+
+        candidates
+    }
+
+    fn doctrine_repository_fqns_from_expr(
+        &self,
+        expr: &crate::type_engine::subject_expr::SubjectExpr,
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+        local_classes: &[Arc<ClassInfo>],
+        access_offset: u32,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let crate::type_engine::subject_expr::SubjectExpr::CallExpr { callee, args_text } = expr
+        else {
+            return Vec::new();
+        };
+        let crate::type_engine::subject_expr::SubjectExpr::MethodCall { method, .. } =
+            callee.as_ref()
+        else {
+            return Vec::new();
+        };
+        if !method.eq_ignore_ascii_case("getRepository") {
+            return Vec::new();
+        }
+
+        let Some(entity_fqn) = doctrine_repository_entity_arg(
+            args_text,
+            use_map,
+            namespace,
+            local_classes,
+            access_offset,
+        ) else {
+            return Vec::new();
+        };
+
+        self.doctrine_repository_fqns_for_entity(&entity_fqn, class_loader)
+    }
+
+    pub(crate) fn doctrine_repository_fqns_for_entity(
+        &self,
+        entity_fqn: &str,
+        class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    ) -> Vec<String> {
+        let entity = normalize_fqn(entity_fqn);
+        let entity_short = crate::util::short_name(&entity);
+        let repository_short = doctrine_repository_short_name(entity_short);
+        let mut candidate_fqns = self.framework_doctrine_repository_fqns_for_entity(&entity);
+        let mapped = candidate_fqns.len();
+        candidate_fqns.extend(doctrine_repository_convention_candidates(
+            &entity,
+            &repository_short,
+        ));
+        let conventional = candidate_fqns.len();
+        candidate_fqns.extend(
+            self.doctrine_repository_classes()
+                .into_iter()
+                .filter(|fqn| crate::util::short_name(fqn).eq_ignore_ascii_case(&repository_short)),
+        );
+
+        for fallback in [
+            "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
+            "Doctrine\\ORM\\EntityRepository",
+            "Doctrine\\Persistence\\ObjectRepository",
+            "ServiceEntityRepository",
+            "EntityRepository",
+            "ObjectRepository",
+        ] {
+            candidate_fqns.push(fallback.to_string());
+        }
+
+        let mut resolved = Vec::new();
+        for (index, candidate) in candidate_fqns.into_iter().enumerate() {
+            let normalized = normalize_fqn(&candidate);
+            if resolved
+                .iter()
+                .any(|known: &String| known.eq_ignore_ascii_case(&normalized))
+            {
+                continue;
+            }
+            let Some(class_info) = class_loader(&normalized) else {
+                continue;
+            };
+            // A class the mapping names is the repository whatever it extends;
+            // one found by its name has to actually be a Doctrine repository,
+            // or a project's own `UserRepository` would pass for one.
+            if (mapped..conventional).contains(&index)
+                && !self.is_doctrine_repository_class(&class_info.fqn())
+            {
+                continue;
+            }
+            resolved.push(normalize_fqn(&class_info.fqn()));
+        }
+        resolved
+    }
+
+    /// Whether `class_fqn` extends or implements one of Doctrine's
+    /// repository types, directly or through its ancestors.
+    pub(crate) fn is_doctrine_repository_class(&self, class_fqn: &str) -> bool {
+        let class_loader = |name: &str| -> Option<Arc<ClassInfo>> { self.find_or_load_class(name) };
+        let mut ancestors = HashSet::new();
+        self.collect_ancestors(class_fqn, &class_loader, &mut ancestors);
+        ancestors
+            .iter()
+            .any(|ancestor| is_generic_doctrine_repository(ancestor))
+    }
+
+    /// Every class the inheritance index records as a Doctrine repository.
+    fn doctrine_repository_classes(&self) -> Vec<String> {
+        let gti = self.symbols.gti_index.read();
+        let mut pending: Vec<&str> = DOCTRINE_REPOSITORY_BASES.to_vec();
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut out = Vec::new();
+        while let Some(parent) = pending.pop() {
+            let Some(children) = gti.get(parent) else {
+                continue;
+            };
+            for child in children {
+                if seen.insert(child.to_ascii_lowercase()) {
+                    out.push(child.clone());
+                    pending.push(child.as_str());
+                }
+            }
+        }
+        out
     }
 
     fn resolve_static_laravel_builder_subject_to_fqns(
@@ -457,7 +645,7 @@ impl Backend {
         closure
     }
 
-    fn collect_member_receiver_scope(
+    pub(super) fn collect_member_receiver_scope(
         &self,
         seed_fqns: &[String],
         member_name: &str,
@@ -743,4 +931,162 @@ impl Backend {
             }
         }
     }
+}
+
+fn doctrine_repository_entity_arg(
+    args_text: &str,
+    use_map: &HashMap<String, String>,
+    namespace: &Option<String>,
+    local_classes: &[Arc<ClassInfo>],
+    access_offset: u32,
+) -> Option<String> {
+    let first_arg = crate::type_engine::conditional_resolution::split_text_args(args_text)
+        .into_iter()
+        .next()?
+        .trim();
+    let class_expr = first_arg.strip_suffix("::class")?.trim();
+    let class_expr = class_expr.trim_start_matches('\\');
+    if class_expr.is_empty() {
+        return None;
+    }
+
+    match class_expr {
+        "self" | "static" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            Some(current.fqn().to_string())
+        }
+        "parent" => {
+            let current = find_class_at_offset(local_classes, access_offset)?;
+            current.parent_class.map(|parent| parent.to_string())
+        }
+        _ => Some(Backend::resolve_to_fqn(class_expr, use_map, namespace)),
+    }
+}
+
+fn doctrine_repository_short_name(entity_short: &str) -> String {
+    let stem = entity_short
+        .strip_suffix("Entity")
+        .or_else(|| entity_short.strip_suffix("Impl"))
+        .unwrap_or(entity_short);
+    format!("{stem}Repository")
+}
+
+pub(crate) fn doctrine_repository_matches_entity_convention(
+    entity_fqn: &str,
+    repository_fqn: &str,
+) -> bool {
+    let entity = normalize_fqn(entity_fqn);
+    let repository = normalize_fqn(repository_fqn);
+    let repository_short = doctrine_repository_short_name(crate::util::short_name(&entity));
+    crate::util::short_name(&repository).eq_ignore_ascii_case(&repository_short)
+        || doctrine_repository_convention_candidates(&entity, &repository_short)
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&repository))
+}
+
+fn doctrine_repository_convention_candidates(
+    entity_fqn: &str,
+    repository_short: &str,
+) -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some((entity_ns, _)) = entity_fqn.rsplit_once('\\') {
+        candidates.push(format!("{entity_ns}\\{repository_short}"));
+
+        for marker in ["\\Entity\\", "\\Entities\\", "\\Model\\", "\\Models\\"] {
+            if let Some((root, _tail)) = entity_fqn.rsplit_once(marker) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+
+        for suffix in ["\\Entity", "\\Entities", "\\Model", "\\Models"] {
+            if let Some(root) = entity_ns.strip_suffix(suffix) {
+                candidates.push(format!("{root}\\Repository\\{repository_short}"));
+                candidates.push(format!("{root}\\Repositories\\{repository_short}"));
+            }
+        }
+    } else {
+        candidates.push(repository_short.to_string());
+    }
+
+    candidates
+}
+
+/// Doctrine's own repository types, spelled the way a class may name them.
+const DOCTRINE_REPOSITORY_BASES: [&str; 6] = [
+    "Doctrine\\Bundle\\DoctrineBundle\\Repository\\ServiceEntityRepository",
+    "Doctrine\\ORM\\EntityRepository",
+    "Doctrine\\Persistence\\ObjectRepository",
+    "ServiceEntityRepository",
+    "EntityRepository",
+    "ObjectRepository",
+];
+
+/// Whether `fqn` is one of Doctrine's generic repository types rather than a
+/// project's concrete repository.
+fn is_generic_doctrine_repository(fqn: &str) -> bool {
+    let fqn = fqn.trim_start_matches('\\');
+    DOCTRINE_REPOSITORY_BASES
+        .iter()
+        .any(|base| base.eq_ignore_ascii_case(fqn))
+}
+
+/// The expression last assigned to `var_name` before `access_offset`, within
+/// the function the access sits in.
+///
+/// Only a plain `$var = …` counts: `$var == …`, `$var => …`, and a longer
+/// name such as `$variable = …` are skipped.  Assignments in another
+/// function body are out of reach of the access, so the search stops at the
+/// nearest `function` keyword before it.
+fn last_assignment_expression_before<'a>(
+    content: &'a str,
+    access_offset: u32,
+    var_name: &str,
+) -> Option<&'a str> {
+    let prefix = content.get(..access_offset as usize)?;
+    let scope = &prefix[enclosing_function_start(prefix)..];
+    let mut search_end = scope.len();
+    while let Some(at) = scope[..search_end].rfind(var_name) {
+        search_end = at;
+        let after = &scope[at + var_name.len()..];
+        if after.starts_with(|c: char| c == '_' || c.is_ascii_alphanumeric()) {
+            continue;
+        }
+        let Some(value) = after.trim_start().strip_prefix('=') else {
+            continue;
+        };
+        if value.starts_with(['=', '>']) {
+            continue;
+        }
+        let value = value.trim_start();
+        let end = value
+            .find(';')
+            .or_else(|| value.find('\n'))
+            .unwrap_or(value.len());
+        let expr = value[..end].trim();
+        return (!expr.is_empty()).then_some(expr);
+    }
+    None
+}
+
+/// Byte offset just past the last `function` keyword in `prefix`, or `0`.
+fn enclosing_function_start(prefix: &str) -> usize {
+    let bytes = prefix.as_bytes();
+    let mut end = prefix.len();
+    while let Some(at) = prefix[..end].rfind("function") {
+        let before_ok = at == 0 || !is_identifier_byte(bytes[at - 1]);
+        let after = at + "function".len();
+        let after_ok = bytes
+            .get(after)
+            .is_none_or(|byte| !is_identifier_byte(*byte));
+        if before_ok && after_ok {
+            return after;
+        }
+        end = at;
+    }
+    0
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte == b'_' || byte == b'$' || byte.is_ascii_alphanumeric()
 }

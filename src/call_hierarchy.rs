@@ -85,8 +85,11 @@ impl Backend {
         &self,
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyIncomingCall>> {
+        let event_calls = self.symfony_event_incoming_calls(item);
         let mut cache = FileCache::default();
-        let target = self.php_callable_from_item(&mut cache, item)?;
+        let Some(target) = self.php_callable_from_item(&mut cache, item) else {
+            return event_calls;
+        };
         let (content, _) = self.cached_file(&mut cache, target.item.uri.as_str())?;
         let references = self
             .find_references(
@@ -128,6 +131,7 @@ impl Backend {
                 CallHierarchyIncomingCall { from, from_ranges }
             })
             .collect();
+        calls.extend(event_calls.unwrap_or_default());
         calls.sort_by_cached_key(|call| php_item_key(&call.from));
         Some(calls)
     }
@@ -136,10 +140,13 @@ impl Backend {
         &self,
         item: &CallHierarchyItem,
     ) -> Option<Vec<CallHierarchyOutgoingCall>> {
+        let event_calls = self.symfony_event_outgoing_calls(item);
         let mut cache = FileCache::default();
-        let callable = self.php_callable_from_item(&mut cache, item)?;
+        let Some(callable) = self.php_callable_from_item(&mut cache, item) else {
+            return event_calls;
+        };
         let Some((body_start, body_end)) = callable.body else {
-            return Some(Vec::new());
+            return event_calls.or_else(|| Some(Vec::new()));
         };
         let uri = callable.item.uri.as_str();
         let (content, symbol_map) = self.cached_file(&mut cache, uri)?;
@@ -189,6 +196,7 @@ impl Backend {
                 CallHierarchyOutgoingCall { to, from_ranges }
             })
             .collect();
+        calls.extend(event_calls.unwrap_or_default());
         calls.sort_by_cached_key(|call| php_item_key(&call.to));
         Some(calls)
     }
@@ -263,6 +271,14 @@ impl Backend {
         let (content, symbol_map) = self.cached_file(cache, uri)?;
         let offset = position_to_offset(&content, location.range.start);
         self.php_callable_at(uri, &content, &symbol_map, offset)
+    }
+
+    pub(crate) fn call_hierarchy_item_at_location(
+        &self,
+        location: &Location,
+    ) -> Option<CallHierarchyItem> {
+        self.php_callable_at_location(&mut FileCache::default(), location)
+            .map(|callable| callable.item)
     }
 
     /// The innermost function or method whose name token or body contains
