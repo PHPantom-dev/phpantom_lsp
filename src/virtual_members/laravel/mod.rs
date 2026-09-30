@@ -138,6 +138,8 @@ mod route_names;
 mod scopes;
 mod storage;
 mod string_keys;
+mod trans_catalog;
+mod trans_json;
 mod trans_keys;
 mod unique_ids;
 pub(crate) mod validated_shape;
@@ -193,10 +195,9 @@ pub(crate) use storage::{
     FILESYSTEM_MANAGER_FQN, LaravelStorageDriverIndex, StorageDriverRegistration,
     extract_storage_driver_registrations, patch_storage_disk_type,
 };
-pub(crate) use trans_keys::{
-    app_lang_group, collect_trans_declarations, for_each_json_lang_file, published_trans_dirs,
-    trans_line, unresolved_trans_type,
-};
+pub(crate) use trans_catalog::TranslationCatalog;
+pub(crate) use trans_json::find_json_trans_references;
+pub(crate) use trans_keys::unresolved_trans_type;
 pub(crate) use validation_rules::{safe_call_receiver_variable, safe_source_variable};
 pub(crate) use view_data::{SharedViewVar, composer_class_vars, is_view_facade};
 pub(crate) use view_names::canonical_view_name;
