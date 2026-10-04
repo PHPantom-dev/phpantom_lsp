@@ -39,13 +39,16 @@ mod members;
 mod receivers;
 mod variables;
 
+pub(crate) use member_scope::{MemberScope, doctrine_repository_matches_entity_convention};
 pub(crate) use members::MemberDeclarationReferenceQuery;
+
 use std::collections::HashSet;
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 use crate::Backend;
+use crate::framework::FrameworkReferenceKind;
 use crate::reference_index::ReferenceIndexKey;
 use crate::symbol_map::SymbolMap;
 use crate::util::strip_fqn_prefix;

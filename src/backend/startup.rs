@@ -349,6 +349,20 @@ impl Backend {
             self.discover_workspace_symbols(&root, php_version, composer_package, Some(&progress))
                 .await;
 
+            // Symfony's generated container records the final event-listener
+            // wiring after compiler passes have run. Read it statically; the
+            // container PHP is never loaded or executed.
+            let symfony_backend = self.clone_for_blocking();
+            let symfony_root = root.clone();
+            let event_count = run_blocking_cancel_safe("index_symfony_metadata", move || {
+                symfony_backend.rebuild_symfony_metadata(&symfony_root)
+            })
+            .await
+            .unwrap_or(0);
+            if event_count > 0 {
+                tracing::info!("PHPantom: indexed {} Symfony event links", event_count);
+            }
+
             // Laravel-only startup work.  The project classification is
             // set by the init pass above from composer.json, so it has to
             // run after it: a Symfony workspace must never pay for the
@@ -411,6 +425,14 @@ impl Backend {
                 if warmed > 0 {
                     tracing::info!("PHPantom: warmed {} Laravel completion classes", warmed);
                 }
+            }
+
+            let framework_count = self.index_framework_workspace();
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
             }
 
             if let Some(poller) = poller {

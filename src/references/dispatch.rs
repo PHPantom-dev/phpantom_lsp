@@ -99,16 +99,20 @@ impl Backend {
                 include_declaration,
                 mode,
             );
-            // A YAML/XML occurrence is a reference the user can be shown,
-            // but not one an edit can be planned against: its text may be
-            // the escaped `App\\Handler` form the document's own quoting
-            // requires, which is neither the PHP spelling of the name nor
-            // something a PHP-shaped replacement can be written over.
-            // Rename verifies every location before emitting any edit and
-            // drops the whole rename when one fails, so leaving these in
-            // makes a single escaped name in any config file silently turn
-            // the class rename into a no-op.
-            if mode == ReferenceSearchMode::Rename {
+            // A YAML/XML occurrence of a class or namespace is a reference
+            // the user can be shown, but not one a PHP-shaped edit can be
+            // written over: its text may be the escaped `App\\Handler` form
+            // the document's own quoting requires.  Rename rewrites those
+            // through the framework resource index, which keeps each
+            // occurrence's spelling, so they are left out here.  A member
+            // occurrence (`Controller::action`) covers the bare member name,
+            // which the PHP edit replaces as written.
+            if mode == ReferenceSearchMode::Rename
+                && !matches!(
+                    sym.kind,
+                    SymbolKind::MemberAccess { .. } | SymbolKind::MemberDeclaration { .. }
+                )
+            {
                 locations.retain(|location| {
                     !crate::resource_navigation::is_resource_document(location.uri.as_str())
                 });
@@ -151,11 +155,93 @@ impl Backend {
             return Some(locations);
         }
 
+        if let Some(locations) =
+            self.find_framework_references_at(uri, content, position, include_declaration, mode)
+            && !locations.is_empty()
+        {
+            tracing::info!("Find References: found Symfony/Doctrine resource references");
+            tracing::info!(
+                "Find References: total time (framework path): {:?}",
+                start_total.elapsed()
+            );
+            return Some(locations);
+        }
+
         tracing::info!(
             "Find References: no references found in {:?}",
             start_total.elapsed()
         );
         None
+    }
+
+    /// The occurrences a rename of the Symfony or Doctrine name under the
+    /// cursor has to edit.
+    pub(crate) fn find_framework_references_for_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<Vec<Location>> {
+        self.find_framework_references_at(uri, content, position, true, ReferenceSearchMode::Rename)
+    }
+
+    fn find_framework_references_at(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        include_declaration: bool,
+        mode: ReferenceSearchMode,
+    ) -> Option<Vec<Location>> {
+        let reference = self.framework_reference_at_position(uri, content, position)?;
+        let locations = match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => {
+                self.find_class_references_in_mode(&fqn, include_declaration, mode)
+            }
+            FrameworkReferenceKind::Method {
+                class_fqn,
+                member_name,
+            } => {
+                let hierarchy = self
+                    .collect_member_receiver_scope(
+                        std::slice::from_ref(&class_fqn),
+                        &member_name,
+                        false,
+                        mode.include_declaring_interfaces(),
+                    )
+                    .unwrap_or_else(|| self.collect_hierarchy_for_fqns(&[class_fqn]));
+                self.find_member_references(
+                    &member_name,
+                    false,
+                    include_declaration,
+                    Some(&hierarchy),
+                    Some(&hierarchy),
+                )
+            }
+            FrameworkReferenceKind::SymfonySymbol { kind, name, .. } => {
+                self.framework_symfony_symbol_locations(kind, &name, include_declaration, true)
+            }
+            FrameworkReferenceKind::RouteParameter {
+                route_name, name, ..
+            } => self.framework_route_parameter_locations(
+                &route_name,
+                &name,
+                include_declaration,
+                true,
+            ),
+            FrameworkReferenceKind::Translation { domain, name, .. } => {
+                self.framework_translation_locations(&domain, &name, include_declaration, true)
+            }
+            FrameworkReferenceKind::MessengerHandler {
+                message_fqn,
+                handler_fqn,
+                ..
+            } => self.framework_messenger_handler_locations(&message_fqn, &handler_fqn),
+            FrameworkReferenceKind::Namespace { .. } | FrameworkReferenceKind::Path { .. } => {
+                Vec::new()
+            }
+        };
+        Some(locations)
     }
 
     /// Dispatch a symbol-map hit to the appropriate reference finder.
@@ -218,12 +304,12 @@ impl Backend {
                 } else {
                     ctx.resolve_name_at(name, span_start)
                 };
-                self.find_class_references(&fqn, include_declaration)
+                self.find_class_references_in_mode(&fqn, include_declaration, mode)
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
                 let fqn = build_fqn(name, ctx.namespace_at(span_start).as_deref());
-                self.find_class_references(&fqn, include_declaration)
+                self.find_class_references_in_mode(&fqn, include_declaration, mode)
             }
             SymbolKind::MemberAccess {
                 subject_text,
@@ -385,7 +471,7 @@ impl Backend {
                 if let Some(fqn) =
                     crate::class_lookup::resolve_class_keyword(keyword, current_class)
                 {
-                    self.find_class_references(&fqn, include_declaration)
+                    self.find_class_references_in_mode(&fqn, include_declaration, mode)
                 } else {
                     Vec::new()
                 }

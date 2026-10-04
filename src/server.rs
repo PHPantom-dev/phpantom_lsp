@@ -237,7 +237,9 @@ impl LanguageServer for Backend {
                         )
                         .flatten()
                     });
-                    return Ok(location.map(GotoDefinitionResponse::Scalar));
+                    if let Some(location) = location {
+                        return Ok(Some(GotoDefinitionResponse::Scalar(location)));
+                    }
                 }
 
                 // A component tag is HTML, so it has no position in the virtual
@@ -254,6 +256,16 @@ impl LanguageServer for Backend {
                 {
                     return Ok(Some(GotoDefinitionResponse::Scalar(location)));
                 }
+                if let Some(locations) = backend.get_file_content(uri).and_then(|content| {
+                    backend.symfony_event_definitions_at(uri, &content, position)
+                }) {
+                    return Ok(match locations.as_slice() {
+                        [] => None,
+                        [location] => Some(GotoDefinitionResponse::Scalar(location.clone())),
+                        _ => Some(GotoDefinitionResponse::Array(locations)),
+                    });
+                }
+
                 // For Blade files, check if the cursor is on a `{{`/`}}` echo
                 // delimiter first, so go-to-definition agrees with hover on the
                 // same position (the implicit `e()` call) instead of falling
@@ -485,6 +497,16 @@ impl LanguageServer for Backend {
             // Ahead of reading the file: a refresh that parses new files can
             // rewrite a template's virtual PHP (see `Backend::find_references`).
             backend.ensure_workspace_indexed_for_request();
+            if let Some(locations) = backend.get_file_content(&uri_clone).and_then(|content| {
+                backend.symfony_event_references_at(
+                    &uri_clone,
+                    &content,
+                    position,
+                    include_declaration,
+                )
+            }) {
+                return Ok(Some(locations));
+            }
             backend.handle_with_position("references", &uri_clone, position, |content, pos| {
                 backend
                     .find_references(&uri_clone, content, pos, include_declaration)

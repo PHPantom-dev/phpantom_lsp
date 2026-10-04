@@ -168,6 +168,180 @@
         }
       }
     },
+    "symfony": {
+      "type": "object",
+      "description": "Symfony runtime metadata recovered statically from compiled containers and configured PHP attributes.",
+      "properties": {
+        "container": {
+          "type": "object",
+          "description": "Controls static compiled-container discovery. Container PHP is read as text and is never executed.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Read Symfony compiled-container metadata.",
+              "default": true
+            },
+            "environment": {
+              "type": "string",
+              "description": "Cache environment used by automatic var/cache/<environment> discovery.",
+              "default": "dev"
+            },
+            "paths": {
+              "type": "array",
+              "description": "Optional workspace-relative compiled-container files, directories, or glob patterns. The newest useful match wins.",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "description": "Configures event-name matching and attribute adapters. Exact listener wiring comes from the compiled container.",
+          "properties": {
+            "ignored-prefixes": {
+              "type": "array",
+              "description": "Prefixes removed before event names are compared.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ignored-suffixes": {
+              "type": "array",
+              "description": "Suffixes removed before event names are compared.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "publishers": {
+              "type": "array",
+              "description": "Rules that derive Symfony event publishers from PHP method attributes.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified publisher attribute class."
+                  },
+                  "name-argument": {
+                    "type": "string",
+                    "description": "Named argument containing an explicit event name."
+                  },
+                  "name-position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the explicit event-name argument.",
+                    "minimum": 0
+                  },
+                  "dispatch-argument": {
+                    "type": "string",
+                    "description": "Named argument containing dispatch enum cases."
+                  },
+                  "dispatch-position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the dispatch argument.",
+                    "minimum": 0
+                  },
+                  "default-dispatch": {
+                    "type": "array",
+                    "description": "Dispatch names used when the attribute omits its dispatch argument.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "dispatch-cases": {
+                    "type": "object",
+                    "description": "Map from PHP enum case name to the event-name dispatch segment.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "name-template": {
+                    "type": "string",
+                    "description": "Derived event-name template. Supports {dispatch}, {class}, {class_snake}, {method}, {method_snake}, {method_suffix}, and {method_suffix_snake}."
+                  },
+                  "explicit-name-template": {
+                    "type": "string",
+                    "description": "Template used for explicit names. Supports the same placeholders plus {name}.",
+                    "default": "{name}"
+                  },
+                  "default-methods": {
+                    "type": "array",
+                    "description": "Method names that omit the method suffix.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "skip": {
+                    "type": "array",
+                    "description": "Conditions that omit one derived dispatch when another attribute argument is set.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "dispatch": {
+                          "type": "string"
+                        },
+                        "argument": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "dispatch",
+                        "argument"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "attribute",
+                  "name-template"
+                ]
+              }
+            },
+            "subscribers": {
+              "type": "array",
+              "description": "Optional rules that expose event names written in subscriber method attributes before or without a compiled container.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified subscriber attribute class."
+                  },
+                  "name-argument": {
+                    "type": "string"
+                  },
+                  "name-position": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "transport-argument": {
+                    "type": "string"
+                  },
+                  "transport-position": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "transport-cases": {
+                    "type": "object",
+                    "description": "Map from PHP enum case name to an event-name suffix.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "attribute"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "formatting": {
       "type": "object",
       "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",

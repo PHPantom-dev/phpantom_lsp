@@ -119,6 +119,7 @@ mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;
 mod sort_use_statements;
+mod symfony_template;
 mod update_docblock;
 
 mod docblock_edit;
@@ -150,6 +151,11 @@ impl Backend {
         params: &CodeActionParams,
     ) -> Vec<CodeActionOrCommand> {
         let mut actions = Vec::new();
+
+        self.collect_create_symfony_template_actions(uri, content, params, &mut actions);
+        if crate::framework::is_framework_resource_uri(uri) {
+            return actions;
+        }
 
         // Parse the file once and share the result across every collector
         // below.  Each collector resolves cursor context by walking the
