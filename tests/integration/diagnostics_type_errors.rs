@@ -9970,6 +9970,92 @@ takesIntCallback(static function (int $key, string $value): string { return $val
     );
 }
 
+/// A `range()` of integer bounds passed straight into `array_map()` hands
+/// the callback ints, so an `int` closure parameter takes them, and a
+/// character range hands it strings.
+#[test]
+fn array_map_over_an_integer_range_accepts_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+final class RangeInt
+{
+    /** @return list<string> */
+    public function labels(int $n): array
+    {
+        return \array_map(static fn (int $i): string => (string) $i, \range(1, $n));
+    }
+
+    /** @return list<int> */
+    public function evens(int $n): array
+    {
+        return \array_values(\array_filter(\range(0, $n, 2), static fn (int $i): bool => $i > 0));
+    }
+
+    /** @return list<string> */
+    public function lastFirst(int $n): array
+    {
+        return \array_map(static fn (int $i): string => (string) $i, \range($n - 1, 0));
+    }
+
+    /** @return list<string> */
+    public function letters(): array
+    {
+        return \array_map(static fn (string $c): string => \strtoupper($c), \range('a', 'e'));
+    }
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A fractional bound or step makes every element of the range a float,
+/// which an `int` callback parameter cannot take under strict types.
+#[test]
+fn array_map_over_a_fractional_range_rejects_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+function floats(): void
+{
+    \array_map(static fn (int $i): int => $i, \range(0.0, 1.0));
+    \array_map(static fn (int $i): int => $i, \range(0, 1, 0.25));
+    \array_map(static fn (int $i): int => $i, \range(1, 2.5));
+    \array_map(static fn (float $f): float => $f, \range(0, 1, 0.25));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("parameter 1 accepts int, but is passed float")),
+        "{messages:?}"
+    );
+}
+
+/// A quotient is a float unless it comes out even, so a range up to one
+/// may hand the callback floats, whatever its other bound is.
+#[test]
+fn array_map_over_a_range_up_to_a_quotient_rejects_an_int_callback() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+namespace Repro;
+
+function halves(int $n): void
+{
+    \array_map(static fn (int $i): int => $i, \range(0, $n / 2));
+}
+"#;
+    let messages = messages_with_code(&collect_with_full_stubs(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+}
+
 /// Parameters are contravariant: a wider, untyped or surplus-ignoring
 /// closure parameter list takes everything the specification passes.
 #[test]

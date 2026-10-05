@@ -134,6 +134,39 @@ pub(crate) fn fold_int_expression(text: &str, resolve: TextResolver<'_>) -> Opti
     }
 }
 
+/// Whether the operator expression `text` is an `int`, though no value is
+/// known for it — `$n - 1`, `count($items) * 2`.
+///
+/// Every term has to resolve to an integer type and every operator has to
+/// keep one: the bitwise operators, `+`, `-`, `*` and `%` do, while a `/`
+/// is a float unless it comes out even, which only the values can decide.
+/// Like the AST resolver, an overflow into a float is not modelled. Callers
+/// check [`has_top_level_int_operator`] first, for the reason given there.
+pub(crate) fn is_int_expression(text: &str, resolve: TextResolver<'_>) -> bool {
+    let text = strip_wrapping_parens(text.trim());
+    match split_point(text) {
+        Some((_, _, IntOp::Div)) => false,
+        Some((index, op_len, _)) => {
+            is_int_expression(&text[..index], resolve)
+                && is_int_expression(&text[index + op_len..], resolve)
+        }
+        None => is_int_term(text, resolve),
+    }
+}
+
+/// Whether a single operand is an integer: an integer literal, a unary
+/// operator applied to one, or anything the shared resolver types as `int`.
+fn is_int_term(text: &str, resolve: TextResolver<'_>) -> bool {
+    if text.is_empty() {
+        return false;
+    }
+    if let Some(rest) = text.strip_prefix(['~', '-', '+']) {
+        return is_int_expression(rest, resolve);
+    }
+    parse_php_int_literal(text).is_some()
+        || resolve(text).is_some_and(|ty| ty.is_subtype_of(&PhpType::int()))
+}
+
 /// Whether `text` has a bitwise or integer arithmetic operator outside any
 /// nested expression, i.e. whether [`fold_int_expression`] would read it as
 /// an operator expression rather than as a single term.
@@ -528,6 +561,27 @@ mod tests {
         assert_eq!(fold("Foo::NS"), None);
         assert_eq!(fold("UNKNOWN_FLAG"), None);
         assert_eq!(fold(""), None);
+    }
+
+    #[test]
+    fn arithmetic_over_integers_is_an_integer_whatever_their_values() {
+        let int = |text: &str| is_int_expression(text, &resolve);
+        assert!(int("$flags - 1"));
+        assert!(int("($flags + 1) * 2"));
+        assert!(int("$flags % 7 | JSON_PRETTY_PRINT"));
+        assert!(int("-$flags << 2"));
+        assert!(int("2 + 3"));
+    }
+
+    #[test]
+    fn arithmetic_that_may_not_be_an_integer_is_not_one() {
+        let int = |text: &str| is_int_expression(text, &resolve);
+        assert!(!int("$flags / 2"));
+        assert!(!int("$flags - 1 / 2"));
+        assert!(!int("$flags ** 2"));
+        assert!(!int("$flags - UNKNOWN_FLAG"));
+        assert!(!int("Foo::NS . 1"));
+        assert!(!int("$flags - "));
     }
 
     #[test]

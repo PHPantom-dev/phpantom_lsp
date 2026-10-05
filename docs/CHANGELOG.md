@@ -136,6 +136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A class named `Scalar` or `Numeric` is a class.** Only the lowercase spellings are PHPDoc pseudo-types, so `PhpParser\Node\Scalar` resolves.
 - **Two anonymous classes at the same position in different files no longer share one resolution.** Laravel migrations, which all open `new class extends Migration {` at the same offset, now each describe themselves.
 - **Binding a template from `$map[']']` keeps its type.**
+- **A `range()` written straight into a call keeps integer bounds integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports passing `int|float`: integer bounds and step, arithmetic over integers included, give `list<int>`. Contributed by @phcorp (#467).
 
 #### Closures and callables
 
