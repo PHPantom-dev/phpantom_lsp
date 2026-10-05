@@ -4180,6 +4180,47 @@ function test(): void {
     );
 }
 
+/// `($this->highlight)(…)` invokes the closure the property holds, so its
+/// arguments are checked against the closure's signature and never against
+/// a method that happens to share the property's name.
+#[test]
+fn invoked_property_arguments_checked_against_closure_not_method() {
+    let php = r#"<?php
+class A {}
+class B {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(int $x, int $y): void {}
+    public function run(A $a, B $b): void
+    {
+        ($this->highlight)($a, $b);
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+
+    let php = r#"<?php
+class A {}
+class B {}
+final class Highlighter
+{
+    /** @var \Closure(A, B): void */
+    private \Closure $highlight;
+    public function highlight(B $x, B $y): void {}
+    public function run(B $b): void
+    {
+        ($this->highlight)($b, $b);
+    }
+}
+"#;
+    let diags = collect(php);
+    let errors = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(errors.len(), 1, "{diags:#?}");
+}
+
 // ─── Type guard narrowing ──────────────────────────────────────────────
 
 #[test]

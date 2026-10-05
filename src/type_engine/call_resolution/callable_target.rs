@@ -621,6 +621,20 @@ impl Backend {
             ),
         );
 
+        // ── Invoked value: `($this->handler)(…)` ──────────────────
+        // The call runs whatever the expression evaluates to, so it is
+        // checked against that value's signature, never against a method
+        // that happens to share the property's name.
+        if let Some(value) = invoked_value_text(expr) {
+            let mut target = Self::resolve_invoked_value_callable(
+                &SubjectExpr::parse(value),
+                &rctx,
+                call_args_text,
+            )?;
+            evaluate_constant_operands_in_target(&mut target, &rctx);
+            return Some(target);
+        }
+
         let parsed = SubjectExpr::parse(expr);
 
         // Unwrap `CallExpr` wrapper so downstream arms match the inner
@@ -771,6 +785,73 @@ impl Backend {
 
         result
     }
+}
+
+impl Backend {
+    /// Resolve what invoking `value` accepts: a typed callable
+    /// (`Closure(A, B): void`) contributes its parameters, a bare
+    /// `callable` or `Closure` accepts anything, and an object is invoked
+    /// through its `__invoke()` method.
+    fn resolve_invoked_value_callable(
+        value: &SubjectExpr,
+        rctx: &ResolutionCtx<'_>,
+        args_text: Option<&str>,
+    ) -> Option<ResolvedCallableTarget> {
+        let resolved = crate::type_engine::resolver::resolve_target_classes_expr(
+            value,
+            crate::AccessKind::Arrow,
+            rctx,
+        );
+        let mut untyped = None;
+        for ty in invoked_value_types(value, &resolved, rctx) {
+            if let Some(target) = callable_type_as_target(&ty) {
+                if !target.accepts_any_args {
+                    return Some(target);
+                }
+                untyped.get_or_insert(target);
+            }
+        }
+        untyped
+            .or_else(|| Self::resolve_instance_method_callable(value, "__invoke", rctx, args_text))
+    }
+}
+
+/// The types a value invoked as a callable can hold, from its resolved
+/// subject types.
+///
+/// Subject resolution keeps only class-typed results, so a property whose
+/// type is a bare `callable(…): T` comes back empty; its declared hint is
+/// read from the owning class instead.
+pub(crate) fn invoked_value_types(
+    value: &SubjectExpr,
+    resolved: &[ResolvedType],
+    ctx: &ResolutionCtx<'_>,
+) -> Vec<PhpType> {
+    let mut types: Vec<PhpType> = resolved.iter().map(|rt| rt.type_string.clone()).collect();
+    if types.is_empty()
+        && let SubjectExpr::PropertyChain { base, property } = value
+    {
+        let owners = ResolvedType::into_arced_classes(
+            crate::type_engine::resolver::resolve_target_classes_expr(
+                base,
+                crate::AccessKind::Arrow,
+                ctx,
+            ),
+        );
+        types.extend(owners.iter().filter_map(|owner| {
+            crate::inheritance::resolve_property_type_hint(owner, property, ctx.class_loader)
+        }));
+    }
+    types
+}
+
+/// The expression a call expression invokes the value of, when it is one
+/// parenthesised group (`($this->handler)`) rather than a function or
+/// method name.
+fn invoked_value_text(expr: &str) -> Option<&str> {
+    let inner = expr.strip_prefix('(')?.strip_suffix(')')?;
+    (crate::text_scan::find_matching_forward(expr, 0, b'(', b')')? == expr.len() - 1)
+        .then_some(inner)
 }
 
 /// Evaluate the type operators a target's parameter and return types read

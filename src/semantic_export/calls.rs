@@ -66,6 +66,11 @@ fn resolve_call(
     offset: u32,
     member_targets: &mut MemberTargetMemo,
 ) -> (CallKind, Option<String>) {
+    // `($this->handler)` invokes the value the property holds, which names
+    // no function or method, like `$handler` does.
+    if expression.starts_with('(') {
+        return (CallKind::Function, None);
+    }
     if let Some(class_name) = expression.strip_prefix("new ") {
         let loader = backend.class_loader_with(
             &context.classes,

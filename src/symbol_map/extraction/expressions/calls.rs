@@ -416,7 +416,7 @@ fn extract_call<'a>(
                     extract_from_expression(func_call.function, ctx, scope_start);
                 }
             }
-            let func_text = expr_to_subject_text(func_call.function);
+            let func_text = invoked_callee_text(func_call.function);
             if !func_text.is_empty() {
                 emit_call_site(
                     func_text,

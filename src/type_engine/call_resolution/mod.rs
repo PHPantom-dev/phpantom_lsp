@@ -72,6 +72,7 @@ mod template_subs;
 
 pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_for_call};
 
+pub(crate) use callable_target::invoked_value_types;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{
     is_reflected_property_call, is_reflected_property_class, resolve_reflected_property_at_call,
