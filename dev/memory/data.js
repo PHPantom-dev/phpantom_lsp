@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791151963705,
+  "lastUpdate": 1791234376085,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34441,6 +34441,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77.7,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "b944e6e523392ceed3b28b661a133b8158baff25",
+          "message": "Fix phpcbf on projects with no config",
+          "timestamp": "2026-10-05T22:36:35+02:00",
+          "tree_id": "0884cf4a74b0542b53f60a86bae4f93a6885240e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/b944e6e523392ceed3b28b661a133b8158baff25"
+        },
+        "date": 1791234366702,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.1,
             "unit": "MiB"
           }
         ]
