@@ -3347,6 +3347,252 @@ class MyTest extends TestCase {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
+// `@phpstan-assert` naming a method template the call's arguments bind
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// PHPUnit's `assertSame()` signature: the template is bound by the
+/// `$expected` argument, and `$actual` is asserted equal to it.
+const ASSERT_SAME: &str = r#"
+abstract class Assert {
+    /**
+     * @template ExpectedType
+     * @param ExpectedType $expected
+     * @phpstan-assert =ExpectedType $actual
+     */
+    public static function assertSame(mixed $expected, mixed $actual): void {}
+
+    /**
+     * @template ExpectedType of object
+     * @param class-string<ExpectedType> $expected
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertInstanceOf(string $expected, mixed $actual): void {}
+
+    /**
+     * @template ExpectedType
+     * @phpstan-assert ExpectedType $actual
+     */
+    public static function assertUnbound(mixed $actual): void {}
+}
+abstract class TestCase extends Assert {}
+"#;
+
+#[test]
+fn equality_assertion_binds_its_template_from_a_static_call() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class AssertSame {{
+    public function run(string $line): int {{
+        $width = \strlen($line);
+        Assert::assertSame(4, $width);
+        return $this->half($width);
+    }}
+    private function half(int $n): int {{ return \intdiv($n, 2); }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "`assertSame(4, $width)` must not narrow an int to object, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn equality_assertion_binds_its_template_from_an_instance_call() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class WidthTest extends TestCase {{
+    public function testWidth(string $line): void {{
+        $width = \strlen($line);
+        $this->assertSame(4, $width);
+        self::assertSame(4, $width);
+        $this->half($width);
+    }}
+    private function half(int $n): int {{ return \intdiv($n, 2); }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "`$this->assertSame(4, $width)` must not narrow an int to object, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn equality_assertion_narrows_a_union_to_the_bound_type() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class WidthTest extends TestCase {{
+    public function testWidth(int|string $width): void {{
+        $this->assertSame(4, $width);
+        $this->half($width);
+    }}
+    private function half(int $n): int {{ return \intdiv($n, 2); }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "`assertSame(4, $width)` proves `int|string $width` an int, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn equality_assertion_to_a_float_narrows_a_union_to_float() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class RatioTest extends TestCase {{
+    public function testRatio(int|float|string $ratio): void {{
+        $this->assertSame(1.5, $ratio);
+        $this->scale($ratio);
+    }}
+    private function scale(float $by): float {{ return $by * 2; }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "`assertSame(1.5, $ratio)` proves `int|float|string $ratio` a float, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn literal_float_assertion_narrows_to_float() {
+    let php = r#"<?php
+declare(strict_types=1);
+final class Ratio {
+    /** @phpstan-assert 1.5 $x */
+    public static function assertHalf(mixed $x): void {}
+    public function run(int|float|string $r): void {
+        self::assertHalf($r);
+        $this->scale($r);
+        $this->half($r);
+    }
+    private function scale(float $by): float { return $by * 2; }
+    private function half(int $n): int { return \intdiv($n, 2); }
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        msgs.len(),
+        1,
+        "asserted to be `1.5`, `$r` is a float: only the int parameter objects, got: {msgs:?}"
+    );
+    assert!(
+        msgs[0].contains("($n)") && msgs[0].ends_with("got float"),
+        "got: {msgs:?}"
+    );
+}
+
+#[test]
+fn equality_assertion_to_a_string_still_reports_an_int_parameter() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class WidthTest extends TestCase {{
+    public function testWidth(int|string $width): void {{
+        $this->assertSame('four', $width);
+        $this->half($width);
+    }}
+    private function half(int $n): int {{ return \intdiv($n, 2); }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().any(|m| m.ends_with("got string")),
+        "a value asserted to be a string does not satisfy an int parameter, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn class_string_template_assertion_narrows_to_the_named_class() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+class Animal {{}}
+final class Dog extends Animal {{}}
+final class PetTest extends TestCase {{
+    public function testPet(Animal $pet): void {{
+        $this->assertInstanceOf(Dog::class, $pet);
+        $this->walk($pet);
+    }}
+    private function walk(Dog $dog): void {{}}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "`assertInstanceOf(Dog::class, $pet)` proves `$pet` a Dog, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn equality_assertion_on_a_class_constant_asserts_the_string() {
+    // `@param ExpectedType $expected` takes the value, so `Dog::class`
+    // binds the class-string, and `$name` stays a string rather than
+    // becoming a `Dog`.
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class Dog {{}}
+final class NameTest extends TestCase {{
+    public function testName(string $name): void {{
+        $this->assertSame(Dog::class, $name);
+        $this->walk($name);
+    }}
+    private function walk(Dog $dog): void {{}}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().any(|m| m.ends_with("got string")),
+        "a class name is a string, not an instance, got: {msgs:?}"
+    );
+}
+
+#[test]
+fn unbound_template_assertion_keeps_the_previous_type() {
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class WidthTest extends TestCase {{
+    public function testWidth(string $line): void {{
+        $width = \strlen($line);
+        $this->assertUnbound($width);
+        $this->half($width);
+    }}
+    private function half(int $n): int {{ return \intdiv($n, 2); }}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        !has_type_error(&diags),
+        "a template no argument binds says nothing about `$width`, got: {msgs:?}"
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Class-level template parameter substitution
 // ═══════════════════════════════════════════════════════════════════════════
 

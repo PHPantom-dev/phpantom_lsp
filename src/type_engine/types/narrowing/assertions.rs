@@ -4,14 +4,15 @@
 
 use std::sync::Arc;
 
-use crate::atom::{Atom, atom, bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ParameterInfo, SharedVec, TypeAssertion};
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 
 use super::super::conditional::extract_class_string_from_expr;
+use crate::type_engine::call_resolution::{TemplateCallee, bind_template_args};
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::*;
@@ -49,6 +50,8 @@ pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     template_params: Vec<Atom>,
     /// Template parameter → parameter name bindings (e.g. `("T", "$class")`).
     template_bindings: Vec<(Atom, Atom)>,
+    /// The `of …` bounds of the callee's templates.
+    template_param_bounds: AtomMap<PhpType>,
 }
 
 /// Try to extract assertion metadata from a call expression.
@@ -83,6 +86,7 @@ pub(in crate::type_engine) fn extract_call_assertions<'a>(
                 receiver_key: None,
                 template_params: func_info.template_params,
                 template_bindings: func_info.template_bindings,
+                template_param_bounds: func_info.template_param_bounds,
             })
         }
         Call::StaticMethod(static_call) => {
@@ -214,6 +218,7 @@ fn build_method_assertion_info<'a>(
         receiver_key,
         template_params: method.template_params,
         template_bindings: method.template_bindings,
+        template_param_bounds: method.template_param_bounds,
     })
 }
 
@@ -392,6 +397,25 @@ pub(in crate::type_engine) fn scalar_assert_guard_kind(ty: &PhpType) -> Option<T
     }
 }
 
+/// [`scalar_assert_guard_kind`] for an assertion that the subject *is* `ty`.
+///
+/// A single value of a scalar type is first of all a value of that type,
+/// so a template bound from a literal argument (`assertSame(4, $x)`) or a
+/// `Foo::class` keeps only the subject's ints or strings.  Only inclusion
+/// reads it that way: ruling out `''` (Laravel's `filled()`) says nothing
+/// about every other string.
+pub(in crate::type_engine) fn scalar_inclusion_guard_kind(ty: &PhpType) -> Option<TypeGuardKind> {
+    match ty.kind() {
+        TypeKind::Literal(value) => Some(match **value {
+            LiteralValue::Int(_) => TypeGuardKind::Int,
+            LiteralValue::Float(_) => TypeGuardKind::Float,
+            LiteralValue::String(_) => TypeGuardKind::String,
+        }),
+        TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(TypeGuardKind::String),
+        _ => scalar_assert_guard_kind(ty),
+    }
+}
+
 /// Scalar and pseudo-type assertions (PHPUnit's `assertIsString`,
 /// `assertIsObject`, `assertIsArray`, and their negations) name no class, so
 /// they cannot be narrowed through `apply_instanceof_*`.  When one is
@@ -444,22 +468,27 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
         {
             // Resolve the asserted type.  When the type is a template
             // parameter (e.g. `ExpectedType` from `@phpstan-assert
-            // ExpectedType $actual`), substitute it using the call-site
-            // argument bound via `class-string<T>`.
-            let effective_type =
+            // ExpectedType $actual`), substitute what the call-site
+            // arguments bind it to.
+            let mut effective_type =
                 resolve_assertion_template_type(&assertion.asserted_type, &info, ctx);
 
             // The substitution failed when the effective type is still a
-            // template parameter — the bound `class-string` argument was a
-            // variable whose concrete class could not be determined.  A
-            // positive assertion still guarantees the subject is an object,
-            // so defer to the caller's `object` narrowing instead of
-            // clearing the subject's prior type.
-            if !assertion.negated
-                && matches!(&effective_type.kind(), TypeKind::Named(n) if info.template_params.iter().any(|t| t == n))
+            // template parameter: no argument told the call what it stands
+            // for (a `class-string` variable whose class could not be
+            // determined, an argument nothing resolves, or a template no
+            // parameter names).  All the tag then promises is the
+            // template's declared bound — `object` for PHPUnit's
+            // `assertInstanceOf($variableClass, $x)` — and a template
+            // without one, or a negated tag, promises nothing at all, so
+            // the subject keeps the type it had.
+            if let TypeKind::Named(n) = effective_type.kind()
+                && info.template_params.iter().any(|t| t == n)
             {
-                *type_guard = Some((TypeGuardKind::Object, false));
-                continue;
+                match info.template_param_bounds.get(n) {
+                    Some(bound) if !assertion.negated => effective_type = bound.clone(),
+                    _ => continue,
+                }
             }
 
             // Scalar / pseudo-type assertions (`assertIsString`,
@@ -468,7 +497,12 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
             // pseudo-type resolves to no class, so `apply_instanceof_inclusion`
             // would clear the subject and `apply_instanceof_exclusion` would
             // exclude nothing.  Route them through the type-guard machinery.
-            if let Some(kind) = scalar_assert_guard_kind(&effective_type) {
+            let guard_kind = if assertion.negated {
+                scalar_assert_guard_kind(&effective_type)
+            } else {
+                scalar_inclusion_guard_kind(&effective_type)
+            };
+            if let Some(kind) = guard_kind {
                 *type_guard = Some((kind, assertion.negated));
                 continue;
             }
@@ -627,18 +661,17 @@ fn resolve_assertion_template_type(
         TypeKind::Named(n) if info.template_params.iter().any(|t| t == n) => n.as_str(),
         _ => return asserted_type.clone(),
     };
-    template_argument_at_call(
-        tpl_name,
-        &info.template_bindings,
-        &info.parameters,
-        info.argument_list,
-        ctx,
-    )
-    .unwrap_or_else(|| asserted_type.clone())
+    let callee = TemplateCallee {
+        parameters: &info.parameters,
+        template_bindings: &info.template_bindings,
+        template_param_bounds: &info.template_param_bounds,
+    };
+    template_argument_at_call(tpl_name, &callee, info.argument_list, ctx, &mut None)
+        .unwrap_or_else(|| asserted_type.clone())
 }
 
 /// `asserted` with each of the callee's own `@template` parameters replaced
-/// by the class the call binds it to through a `class-string<T>` argument.
+/// by the type the call's arguments bind it to.
 ///
 /// [`resolve_assertion_template_type`] answers the case where the tag names
 /// the template bare; a tag can also name it inside another type
@@ -649,6 +682,7 @@ pub(in crate::type_engine) fn bind_call_templates(
     asserted: &PhpType,
     template_params: &[Atom],
     template_bindings: &[(Atom, Atom)],
+    template_param_bounds: &AtomMap<PhpType>,
     parameters: &[ParameterInfo],
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
@@ -656,13 +690,19 @@ pub(in crate::type_engine) fn bind_call_templates(
     if template_params.is_empty() {
         return asserted.clone();
     }
+    let callee = TemplateCallee {
+        parameters,
+        template_bindings,
+        template_param_bounds,
+    };
+    let mut argument_bindings = None;
     let mut subs = std::collections::HashMap::new();
     for tpl in template_params {
         if !asserted.references_any_template_param(&[tpl.to_string()]) {
             continue;
         }
         if let Some(bound) =
-            template_argument_at_call(tpl, template_bindings, parameters, argument_list, ctx)
+            template_argument_at_call(tpl, &callee, argument_list, ctx, &mut argument_bindings)
         {
             subs.insert(tpl.to_string(), bound);
         }
@@ -674,23 +714,81 @@ pub(in crate::type_engine) fn bind_call_templates(
     }
 }
 
-/// The class a call binds the template `tpl_name` to, read off the
-/// `class-string<T>` argument its binding names.
+/// The type a call binds the template `tpl_name` to.
+///
+/// A `class-string<T>` argument names the class directly and is read off
+/// here, including a variable the walker's scope holds a class-string in.
+/// Every other binding site (`@param T $expected` taking `4`, an array of
+/// `T`, a generic wrapper) goes through the binder every call-site
+/// template substitution shares, which runs once per call and is kept in
+/// `argument_bindings` for the call's other templates.
 fn template_argument_at_call(
     tpl_name: &str,
-    template_bindings: &[(Atom, Atom)],
-    parameters: &[ParameterInfo],
+    callee: &TemplateCallee<'_>,
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+    argument_bindings: &mut Option<std::collections::HashMap<String, PhpType>>,
+) -> Option<PhpType> {
+    if let Some(class) = class_string_template_argument(tpl_name, callee, argument_list, ctx) {
+        return Some(class);
+    }
+    argument_bindings
+        .get_or_insert_with(|| {
+            let arg_texts =
+                crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                    argument_list,
+                    ctx.content,
+                );
+            let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+            let walker_types =
+                crate::type_engine::variable::rhs_resolution::walker_arg_types(argument_list, ctx);
+            bind_template_args(
+                callee,
+                &arg_refs,
+                Some(&walker_types),
+                &ctx.as_resolution_ctx(),
+            )
+        })
+        .get(tpl_name)
+        .cloned()
+}
+
+/// The class a call binds the template `tpl_name` to, read off the
+/// `class-string<T>` argument its binding names.
+fn class_string_template_argument(
+    tpl_name: &str,
+    callee: &TemplateCallee<'_>,
     argument_list: &ArgumentList<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Option<PhpType> {
     // Find the parameter name that binds this template param.
-    let bound_param = template_bindings
+    let bound_param = callee
+        .template_bindings
         .iter()
         .find(|(tpl, _)| tpl == tpl_name)
         .map(|(_, param)| param.as_str())?;
 
     // Find the positional index of that parameter.
-    let param_idx = parameters.iter().position(|p| p.name == bound_param)?;
+    let param_idx = callee
+        .parameters
+        .iter()
+        .position(|p| p.name == bound_param)?;
+
+    // A parameter that takes the template's value itself (`@param T
+    // $expected`) binds `T` to whatever the argument is, so `Foo::class`
+    // there binds the class-string, not the class it names.
+    let takes_the_value = callee.parameters[param_idx]
+        .type_hint
+        .as_ref()
+        .is_some_and(|hint| {
+            let hint = hint.non_null_type().unwrap_or_else(|| hint.clone());
+            hint.union_members()
+                .iter()
+                .any(|member| matches!(member.kind(), TypeKind::Named(n) if n == tpl_name))
+        });
+    if takes_the_value {
+        return None;
+    }
 
     // Get the call-site argument at that position.
     let arg_expr = match argument_list.arguments.iter().nth(param_idx)? {
