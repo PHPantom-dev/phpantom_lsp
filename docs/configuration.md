@@ -61,6 +61,102 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | --------- | ------ | --------------------------- | ----------- |
 | `version` | string | Inferred from composer.json | Override the detected PHP version (e.g. `"8.3"`). |
 
+### `[symfony]`
+
+PHPantom can read Symfony's generated dependency-injection container as text to
+recover final event-listener wiring. It never includes or executes the
+container PHP. By default it checks `var/cache/dev`, tries the newest generated
+container first, and skips stale wrapper files that contain no useful wiring.
+
+#### `[symfony.container]`
+
+| Key           | Type     | Default | Description |
+| ------------- | -------- | ------- | ----------- |
+| `enabled`     | bool     | `true`  | Read compiled-container metadata. |
+| `environment` | string   | `"dev"` | Cache environment used by automatic discovery. |
+| `paths`       | string[] | unset   | Optional workspace-relative files, directories, or globs. The newest useful match wins. |
+
+#### `[symfony.events]`
+
+The compiled container supplies exact `addListener()` registrations. Publisher
+attributes and their naming convention are package choices, so they are
+declarative rules. This example models an attribute package without adding that
+package to PHPantom:
+
+```toml
+[symfony.container]
+environment = "dev"
+
+[symfony.events]
+ignored-prefixes = ["use_case."]
+ignored-suffixes = [".async"]
+
+[[symfony.events.publishers]]
+attribute = 'Acme\Event\Publish'
+name-argument = "name"
+name-position = 2
+dispatch-argument = "dispatch"
+dispatch-position = 4
+default-dispatch = ["post"]
+dispatch-cases = { PRE = "pre", POST = "post", EXCEPTION = "exception" }
+name-template = "{dispatch}.{class_snake}{method_suffix_snake}"
+explicit-name-template = "{name}"
+default-methods = ["execute", "__invoke"]
+
+[[symfony.events.publishers.skip]]
+dispatch = "post"
+argument = "messageClass"
+position = 5
+
+[[symfony.events.subscribers]]
+attribute = 'Acme\Event\Listen'
+name-argument = "name"
+name-position = 0
+transport-argument = "transport"
+transport-position = 2
+transport-cases = { ASYNC = ".async" }
+```
+
+Argument positions are zero-based fallbacks for positional PHP attribute
+arguments. Named arguments win. Publisher templates support `{dispatch}`,
+`{class}`, `{class_snake}`, `{method}`, `{method_snake}`, `{method_suffix}`,
+`{method_suffix_snake}`, and `{name}`. A `skip` rule omits one derived dispatch
+when another argument is set, such as an event sent to Messenger instead of
+Symfony's event dispatcher.
+
+The result is bidirectional go-to-definition, references, and `Symfony event`
+code lenses between publisher and listener methods.
+
+#### `[symfony.expression-language]`
+
+Declare which attribute or constructor arguments contain ExpressionLanguage
+strings. PHPantom then uses the normal PHP type engine for member navigation and
+`unknown_member` diagnostics.
+
+```toml
+[[symfony.expression-language.attributes]]
+attribute = 'Acme\Expression\Attribute\Rule'
+argument = "tags"
+position = 3
+method-parameters = true
+
+[[symfony.expression-language.constructors]]
+class = 'Symfony\Component\ExpressionLanguage\Expression'
+position = 0
+inside-attribute-prefixes = [
+  'Acme\Expression\Attribute\',
+  'Vendor\Policy\Attribute\',
+]
+bindings = { request = "parameter:0", response = "return" }
+```
+
+An attribute rule accepts one string or an array of strings. Named arguments
+win over the zero-based positional fallback. `method-parameters = true` maps
+each expression root to a same-named method parameter. Explicit `bindings` can
+map a root to `parameter:0`, `parameter:name`, `return`, or `class:FQN`.
+Constructor prefixes keep a shared expression class scoped to attributes that
+use the declared variable contract; an empty prefix list matches any attribute.
+
 ### `[diagnostics]`
 
 | Key                        | Type   | Default | Description |
