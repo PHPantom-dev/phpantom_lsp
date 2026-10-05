@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend, open_php};
+use crate::common::{create_psr4_workspace, create_test_backend, open_document, open_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -827,6 +827,11 @@ class User extends Model {}
         Some("1 reference")
     );
 }
+fn uri_for(dir: &tempfile::TempDir, rel: &str) -> Url {
+    Url::from_file_path(dir.path().join(rel)).unwrap()
+}
+
+const COMPOSER: &str = r#"{ "autoload": { "psr-4": { "App\\": "src/" } } }"#;
 
 // ─── Basic Override Detection ───────────────────────────────────────────────
 
@@ -2131,5 +2136,277 @@ function list_author(\App\Author $author): void {
     assert_eq!(
         unresolved_title_on_line(&lenses, 8).as_deref(),
         Some("2 references")
+    );
+}
+
+// ─── Symfony / Doctrine Framework Lenses ───────────────────────────────────
+
+#[tokio::test]
+async fn symfony_yaml_route_and_config_lenses() {
+    let controller_php = r#"<?php
+namespace App\Controller;
+
+class HomeController {
+    public function index(): void {}
+}
+"#;
+    let routes_yaml = "home:\n  path: /\n  controller: App\\Controller\\HomeController::index\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Controller/HomeController.php", controller_php),
+            ("config/routes.yaml", routes_yaml),
+        ],
+    );
+
+    let controller_uri = uri_for(&dir, "src/Controller/HomeController.php");
+    let routes_uri = uri_for(&dir, "config/routes.yaml");
+    open_document(&backend, &controller_uri, "php", controller_php).await;
+    open_document(&backend, &routes_uri, "yaml", routes_yaml).await;
+
+    let lenses = backend
+        .handle_code_lens(controller_uri.as_ref(), controller_php)
+        .unwrap_or_default();
+    let titles = lens_titles(&lenses);
+
+    assert!(
+        titles.contains(&"Symfony/Doctrine config: 1 ref"),
+        "expected class config lens, got {titles:?}"
+    );
+    assert!(
+        titles.contains(&"Symfony route config: 1 ref"),
+        "expected method route config lens, got {titles:?}"
+    );
+}
+
+#[tokio::test]
+async fn doctrine_mapping_lenses_link_entity_and_configured_repository() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let doctrine_yaml =
+        "App\\Entity\\User:\n  type: entity\n  repositoryClass: App\\Storage\\SpecialUserStore\n";
+    let doctrine_xml = r#"<doctrine-mapping>
+  <entity name="App\Entity\User" repository-class="App\Storage\SpecialUserStore" />
+</doctrine-mapping>
+"#;
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", entity_php),
+            ("src/Storage/SpecialUserStore.php", repo_php),
+            ("config/doctrine/User.orm.yaml", doctrine_yaml),
+            ("config/doctrine/User.orm.xml", doctrine_xml),
+        ],
+    );
+
+    let entity_uri = uri_for(&dir, "src/Entity/User.php");
+    let repo_uri = uri_for(&dir, "src/Storage/SpecialUserStore.php");
+    open_document(&backend, &entity_uri, "php", entity_php).await;
+    open_document(&backend, &repo_uri, "php", repo_php).await;
+    open_document(
+        &backend,
+        &uri_for(&dir, "config/doctrine/User.orm.yaml"),
+        "yaml",
+        doctrine_yaml,
+    )
+    .await;
+    open_document(
+        &backend,
+        &uri_for(&dir, "config/doctrine/User.orm.xml"),
+        "xml",
+        doctrine_xml,
+    )
+    .await;
+
+    let entity_lenses = backend
+        .handle_code_lens(entity_uri.as_ref(), entity_php)
+        .unwrap_or_default();
+    let entity_titles = lens_titles(&entity_lenses);
+    assert!(
+        entity_titles.contains(&"Symfony/Doctrine config: 2 refs"),
+        "expected entity config refs from YAML and XML, got {entity_titles:?}"
+    );
+    assert!(
+        entity_titles.contains(&"Doctrine repository: SpecialUserStore"),
+        "expected configured repository lens, got {entity_titles:?}"
+    );
+    let config_lens = entity_lenses
+        .iter()
+        .find(|lens| {
+            lens.command
+                .as_ref()
+                .is_some_and(|command| command.title == "Symfony/Doctrine config: 2 refs")
+        })
+        .unwrap();
+    let config_command = config_lens.command.as_ref().unwrap();
+    assert_eq!(config_command.command, "editor.action.showReferences");
+    let args = config_command.arguments.as_ref().unwrap();
+    let locations: Vec<Location> = serde_json::from_value(args[2].clone()).unwrap();
+    assert_eq!(locations.len(), 2);
+
+    let repo_lenses = backend
+        .handle_code_lens(repo_uri.as_ref(), repo_php)
+        .unwrap_or_default();
+    let repo_titles = lens_titles(&repo_lenses);
+    assert!(
+        repo_titles.contains(&"Symfony/Doctrine config: 2 refs"),
+        "expected repository config refs from YAML and XML, got {repo_titles:?}"
+    );
+    assert!(
+        repo_titles.contains(&"Doctrine entity: User"),
+        "expected reverse entity lens, got {repo_titles:?}"
+    );
+}
+
+#[tokio::test]
+async fn doctrine_repository_convention_links_back_to_entity() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace {\nclass ServiceEntityRepository {}\n}\nnamespace App\\Repository {\nclass UserRepository extends \\ServiceEntityRepository {}\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", entity_php),
+            ("src/Repository/UserRepository.php", repo_php),
+        ],
+    );
+
+    open_document(
+        &backend,
+        &uri_for(&dir, "src/Entity/User.php"),
+        "php",
+        entity_php,
+    )
+    .await;
+    let repo_uri = uri_for(&dir, "src/Repository/UserRepository.php");
+    open_document(&backend, &repo_uri, "php", repo_php).await;
+
+    let lenses = backend
+        .handle_code_lens(repo_uri.as_ref(), repo_php)
+        .unwrap_or_default();
+    let titles = lens_titles(&lenses);
+    assert!(
+        titles.contains(&"Doctrine entity: User"),
+        "expected conventional entity lens, got {titles:?}"
+    );
+}
+
+/// A class that only shares Doctrine's naming convention is not a Doctrine
+/// repository: a project without Doctrine keeps its own `UserRepository`
+/// free of Doctrine lenses, and so does the model it is named after.
+#[tokio::test]
+async fn a_repository_by_name_alone_gets_no_doctrine_lenses() {
+    let model_php = "<?php\nnamespace App\\Models;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Repositories;\nclass UserRepository {}\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Models/User.php", model_php),
+            ("src/Repositories/UserRepository.php", repo_php),
+        ],
+    );
+    let model_uri = uri_for(&dir, "src/Models/User.php");
+    let repo_uri = uri_for(&dir, "src/Repositories/UserRepository.php");
+    open_document(&backend, &model_uri, "php", model_php).await;
+    open_document(&backend, &repo_uri, "php", repo_php).await;
+
+    for (uri, content) in [(&model_uri, model_php), (&repo_uri, repo_php)] {
+        let lenses = backend
+            .handle_code_lens(uri.as_ref(), content)
+            .unwrap_or_default();
+        let titles = lens_titles(&lenses);
+        assert!(
+            titles.iter().all(|title| !title.starts_with("Doctrine")),
+            "no Doctrine lens expected on {uri}, got {titles:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn doctrine_get_repository_lens_uses_repository_class_mapping() {
+    let entity_php = "<?php\nnamespace App\\Entity;\nclass User {}\n";
+    let repo_php = "<?php\nnamespace App\\Storage;\nclass SpecialUserStore {}\n";
+    let service_php = r#"<?php
+namespace App\Service;
+
+use App\Entity\User;
+
+class UserLookup {
+    public function __construct(private object $em) {}
+
+    public function lookup(int $id): void {
+        $this->em->getRepository(User::class)->find($id);
+    }
+}
+"#;
+    let doctrine_yaml =
+        "App\\Entity\\User:\n  type: entity\n  repositoryClass: App\\Storage\\SpecialUserStore\n";
+    let (backend, dir) = create_psr4_workspace(
+        COMPOSER,
+        &[
+            ("src/Entity/User.php", entity_php),
+            ("src/Storage/SpecialUserStore.php", repo_php),
+            ("src/Service/UserLookup.php", service_php),
+            ("config/doctrine/User.orm.yaml", doctrine_yaml),
+        ],
+    );
+
+    let service_uri = uri_for(&dir, "src/Service/UserLookup.php");
+    open_document(
+        &backend,
+        &uri_for(&dir, "src/Entity/User.php"),
+        "php",
+        entity_php,
+    )
+    .await;
+    open_document(
+        &backend,
+        &uri_for(&dir, "src/Storage/SpecialUserStore.php"),
+        "php",
+        repo_php,
+    )
+    .await;
+    open_document(&backend, &service_uri, "php", service_php).await;
+    open_document(
+        &backend,
+        &uri_for(&dir, "config/doctrine/User.orm.yaml"),
+        "yaml",
+        doctrine_yaml,
+    )
+    .await;
+
+    let lenses = backend
+        .handle_code_lens(service_uri.as_ref(), service_php)
+        .unwrap_or_default();
+    let titles = lens_titles(&lenses);
+
+    assert!(
+        titles.contains(&"Doctrine repository: SpecialUserStore"),
+        "expected getRepository lens to use Doctrine mapping, got {titles:?}"
+    );
+}
+
+#[test]
+fn symfony_route_attribute_lenses() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+use Symfony\Component\Routing\Attribute\Route;
+
+#[Route('/admin')]
+class AdminController {
+    #[Route('/users/{id}', name: 'admin_user_show', methods: ['GET'])]
+    public function show(): void {}
+}
+"#;
+    let uri = "file:///controller.php";
+    let lenses = get_code_lenses(&backend, uri, content);
+    let titles = lens_titles(&lenses);
+
+    assert!(
+        titles.contains(&"Symfony route prefix: /admin"),
+        "expected class route prefix lens, got {titles:?}"
+    );
+    assert!(
+        titles.contains(&"Symfony route: GET /users/{id} (admin_user_show)"),
+        "expected method route lens, got {titles:?}"
     );
 }

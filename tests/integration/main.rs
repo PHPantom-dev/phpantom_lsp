@@ -173,6 +173,7 @@ mod fix_cli;
 mod folding_blade;
 mod folding_ranges;
 mod formatting_blade;
+mod framework_resources;
 mod hover;
 mod implementation;
 mod inlay_hints;

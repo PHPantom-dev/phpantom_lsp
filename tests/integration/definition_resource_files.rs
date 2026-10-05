@@ -319,13 +319,13 @@ async fn navigates_class_constants_from_yaml() {
     assert_eq!(location.range.start.line, 3);
 }
 
-/// A resource occurrence is a reference the user can be shown, but never an
-/// edit target: the escaped `"App\\Widget"` spelling YAML quoting requires
-/// is not a PHP name token, and rename drops every edit as soon as one
-/// location fails verification.  Leaving them in turned a single escaped
-/// name anywhere in the workspace into a silent no-op rename.
+/// A class rename rewrites a Symfony/Doctrine resource occurrence in the
+/// spelling its document uses: the escaped `"App\\Widget"` YAML quoting
+/// requires keeps its doubled backslashes.  A resource the framework index
+/// does not cover (`.yaml.dist`) is left as it is, and never cancels the
+/// edits around it.
 #[tokio::test]
-async fn rename_ignores_resource_occurrences() {
+async fn rename_rewrites_resource_occurrences_in_their_own_spelling() {
     let backend = Backend::new_test();
     let php_uri = Url::parse("file:///test.php").unwrap();
     let php = concat!(
@@ -339,6 +339,9 @@ async fn rename_ignores_resource_occurrences() {
     let yaml_uri = Url::parse("file:///config/widgets.yaml").unwrap();
     let yaml = "plain: App\\Widget\nescaped: \"App\\\\Widget\"\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
+
+    let dist_uri = Url::parse("file:///config/widgets.yaml.dist").unwrap();
+    open_document(&backend, &dist_uri, "yaml", "plain: App\\Widget\n").await;
 
     // Both spellings are found by Find References.
     let references = backend
@@ -366,7 +369,6 @@ async fn rename_ignores_resource_occurrences() {
         2
     );
 
-    // The rename still happens, and touches only the PHP file.
     let edit = backend
         .rename(RenameParams {
             text_document_position: TextDocumentPositionParams {
@@ -382,12 +384,25 @@ async fn rename_ignores_resource_occurrences() {
         .expect("rename should not be refused")
         .expect("rename should produce an edit");
     let changes = edit.changes.expect("rename should carry changes");
-    assert_eq!(changes.keys().collect::<Vec<_>>(), vec![&php_uri]);
     assert_eq!(changes[&php_uri].len(), 2);
+    assert!(!changes.contains_key(&dist_uri), "{changes:?}");
+
+    let mut yaml_edits: Vec<(u32, &str)> = changes[&yaml_uri]
+        .iter()
+        .map(|edit| (edit.range.start.line, edit.new_text.as_str()))
+        .collect();
+    yaml_edits.sort();
+    assert_eq!(
+        yaml_edits,
+        vec![(0, "App\\Gadget"), (1, "App\\\\Gadget")],
+        "each occurrence keeps its own spelling"
+    );
 }
 
+/// Renaming a class from a resource file renames the PHP class it names,
+/// with the same edits a rename started on the declaration produces.
 #[tokio::test]
-async fn rename_is_refused_from_inside_a_resource_file() {
+async fn rename_from_inside_a_resource_file_renames_the_php_class() {
     let backend = Backend::new_test();
     let php_uri = Url::parse("file:///test.php").unwrap();
     let php = "<?php\nnamespace App;\nclass Widget {}\n";
@@ -397,30 +412,48 @@ async fn rename_is_refused_from_inside_a_resource_file() {
     let yaml = "primary: App\\Widget\n";
     open_document(&backend, &yaml_uri, "yaml", yaml).await;
 
-    assert!(
-        backend
-            .prepare_rename(TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: yaml_uri.clone()
-                },
-                position: Position::new(0, 13),
-            })
-            .await
-            .expect("prepare rename should succeed")
-            .is_none()
+    let prepared = backend
+        .prepare_rename(TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier {
+                uri: yaml_uri.clone(),
+            },
+            position: Position::new(0, 13),
+        })
+        .await
+        .expect("prepare rename should succeed");
+    let Some(PrepareRenameResponse::RangeWithPlaceholder { range, placeholder }) = prepared else {
+        panic!("expected a rename range, got {prepared:?}");
+    };
+    assert_eq!(placeholder, "Widget");
+    assert_eq!(
+        range,
+        Range::new(Position::new(0, 13), Position::new(0, 19))
     );
-    assert!(
-        backend
-            .rename(RenameParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: yaml_uri },
-                    position: Position::new(0, 13),
-                },
-                new_name: "Gadget".to_string(),
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .expect("rename should not be refused")
-            .is_none()
-    );
+
+    let rename_from = |uri: Url, position: Position| {
+        let backend = &backend;
+        async move {
+            backend
+                .rename(RenameParams {
+                    text_document_position: TextDocumentPositionParams {
+                        text_document: TextDocumentIdentifier { uri },
+                        position,
+                    },
+                    new_name: "Gadget".to_string(),
+                    work_done_progress_params: WorkDoneProgressParams::default(),
+                })
+                .await
+                .expect("rename should not be refused")
+                .expect("rename should produce an edit")
+        }
+    };
+    let from_resource = rename_from(yaml_uri.clone(), Position::new(0, 13)).await;
+    let from_declaration = rename_from(php_uri.clone(), Position::new(2, 8)).await;
+    assert_eq!(from_resource, from_declaration);
+
+    let changes = from_resource.changes.expect("rename should carry changes");
+    assert_eq!(changes[&yaml_uri].len(), 1);
+    assert_eq!(changes[&yaml_uri][0].new_text, "App\\Gadget");
+    assert_eq!(changes[&php_uri].len(), 1);
+    assert_eq!(changes[&php_uri][0].new_text, "Gadget");
 }
