@@ -24,6 +24,7 @@ use super::point_location;
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::composer;
+use crate::framework::FrameworkReferenceKind;
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind};
 use crate::text_position::position_to_offset;
 use crate::types::{AccessKind, ClassInfo};
@@ -67,9 +68,90 @@ impl Backend {
 
         // Path helpers: `base_path('routes/web.php')` and friends name a file
         // under a conventional directory of the project root.
-        laravel::resolve_path_helper_definition(self, content, position)
-            .into_iter()
-            .collect()
+        if let Some(loc) = laravel::resolve_path_helper_definition(self, content, position) {
+            return vec![loc];
+        }
+
+        self.resolve_framework_resource_definition(uri, content, position)
+    }
+
+    fn resolve_framework_resource_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Vec<Location> {
+        let Some(reference) = self.framework_reference_at_position(uri, content, position) else {
+            return Vec::new();
+        };
+        match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => self
+                .resolve_class_reference(uri, content, &fqn, true, reference.start)
+                .into_iter()
+                .collect(),
+            FrameworkReferenceKind::Method {
+                class_fqn,
+                member_name,
+            } => self
+                .resolve_framework_member_definition(uri, content, &class_fqn, &member_name)
+                .into_iter()
+                .collect(),
+            FrameworkReferenceKind::SymfonySymbol {
+                kind,
+                name,
+                declaration: false,
+            } => self.framework_symfony_symbol_locations(kind, &name, true, false),
+            FrameworkReferenceKind::RouteParameter {
+                route_name,
+                name,
+                declaration: false,
+            } => self.framework_route_parameter_locations(&route_name, &name, true, false),
+            FrameworkReferenceKind::Translation {
+                domain,
+                name,
+                declaration: false,
+            } => self.framework_translation_locations(&domain, &name, true, false),
+            FrameworkReferenceKind::Namespace { .. }
+            | FrameworkReferenceKind::Path { .. }
+            | FrameworkReferenceKind::SymfonySymbol {
+                declaration: true, ..
+            }
+            | FrameworkReferenceKind::RouteParameter {
+                declaration: true, ..
+            }
+            | FrameworkReferenceKind::Translation {
+                declaration: true, ..
+            } => Vec::new(),
+        }
+    }
+
+    pub(crate) fn resolve_framework_member_definition(
+        &self,
+        uri: &str,
+        content: &str,
+        class_fqn: &str,
+        member_name: &str,
+    ) -> Option<Location> {
+        let ctx = self.file_context(uri);
+        let class_loader = self.class_loader(&ctx);
+        let raw_class = class_loader(class_fqn)?;
+        let resolved = crate::virtual_members::resolve_class_fully_maybe_cached(
+            &raw_class,
+            &class_loader,
+            Some(&self.resolved_class_cache),
+        );
+        let (declaring_class, declaring_fqn) =
+            Self::find_declaring_class(&resolved, member_name, &class_loader)
+                .unwrap_or_else(|| (resolved.as_ref().clone(), class_fqn.to_string()));
+        let (class_uri, class_content) =
+            self.find_class_file_content(&declaring_fqn, uri, content)?;
+        let position = Self::find_member_position(
+            &class_content,
+            member_name,
+            MemberKind::Method,
+            declaring_class.member_name_offset(member_name, "method"),
+        )?;
+        Some(point_location(Url::parse(&class_uri).ok()?, position))
     }
 
     /// Look up the symbol at the given byte offset in the precomputed
