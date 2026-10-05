@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xliff version="1.2">
+  <file source-language="en" datatype="plaintext" original="validators">
+    <body>
+      <trans-unit id="invalid-email" resname="user.invalid_email">
+        <source>user.invalid_email</source>
+        <target>Please enter a valid email address.</target>
+      </trans-unit>
+    </body>
+  </file>
+</xliff>

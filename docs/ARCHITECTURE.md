@@ -67,6 +67,7 @@ src/
 │
 │   # Class & type resolution
 ├── resolution.rs           # Multi-phase class/function lookup across files (find_or_load_class)
+├── symfony/                # Compiled-container, event, and ExpressionLanguage adapters
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
@@ -119,7 +120,8 @@ src/
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
 ├── self_update.rs          # Binary self-update
 │
-│   # Blade & shared utilities
+│   # Framework resources & shared utilities
+├── framework.rs            # Symfony/Doctrine PHP, YAML, XML, XLIFF, and Twig reference index
 ├── blade/                  # Laravel Blade template support (directives, preprocessor, source map)
 └── util.rs, text_position.rs, text_scan.rs, atom.rs, call_args.rs, return_collection.rs, toposort.rs, ci_map.rs, process.rs, progress.rs
 
@@ -142,6 +144,29 @@ diagnostics, hover, go-to-definition, and signature help, not just completion
 (see [Forward Walker](#forward-walker) and [Name Resolution](#name-resolution)
 below). Do not build a second type-resolution path: extend the engine here so
 every consumer benefits.
+
+### Framework Resource Index
+
+**Symfony and Doctrine resources use a lightweight parallel reference index.**
+`framework.rs` scans PHP configurators and attributes alongside YAML, XML,
+XLIFF, and Twig resources. It records classes, members, paths, named framework
+symbols, form and validation properties, Messenger relationships, and local
+`TreeBuilder` keys. Definition, references, rename, highlights, completion,
+diagnostics, and code lenses consume that shared index without parsing
+non-PHP resources as PHP.
+
+### Framework Runtime Metadata
+
+Framework-generated files feed small metadata adapters instead of creating a
+second symbol resolver. `symfony/container.rs` reads compiled containers as text and exposes
+listener registrations and proxied service candidates; it never includes PHP.
+`symfony/events.rs` combines that exact runtime wiring with configured
+attribute rules, then serves go-to-definition, references, and code lenses.
+`symfony/expressions.rs` maps configured attribute and constructor arguments to
+method parameter, return, or fixed-class types, then delegates member chains to
+the shared PHP type engine for navigation and diagnostics.
+Both inputs name the real classes: a compiled container records the class it
+hands to a proxy factory, not the generated subclass.
 
 ## External Crates
 

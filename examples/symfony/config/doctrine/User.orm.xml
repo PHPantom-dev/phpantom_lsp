@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<doctrine-mapping>
+  <entity
+    name="App\Entity\User"
+    repository-class="App\Repository\UserRepository"
+  />
+</doctrine-mapping>

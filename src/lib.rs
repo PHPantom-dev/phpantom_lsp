@@ -262,6 +262,7 @@ pub mod fix;
 mod folding;
 pub mod format_cli;
 pub mod formatting;
+mod framework;
 mod highlight;
 mod hover;
 mod indexing;
@@ -308,6 +309,7 @@ pub mod stub_patches;
 pub mod stubs;
 mod symbol_index;
 pub(crate) mod symbol_map;
+mod symfony;
 pub(crate) mod text_position;
 pub(crate) mod text_scan;
 pub(crate) mod toposort;
@@ -619,6 +621,20 @@ pub struct Backend {
     /// variables, function calls, etc.).  Consulted by `resolve_definition`
     /// to replace character-level backward-walking with a binary search.
     pub(crate) symbol_maps: Arc<RwLock<HashMap<String, Arc<symbol_map::SymbolMap>>>>,
+    /// Per-file Symfony/Doctrine YAML/XML references.
+    ///
+    /// PHP files are represented by [`symbol_maps`]. Framework resource files
+    /// are not PHP ASTs, so class names, namespace-prefix service keys,
+    /// controller method strings, and path-like resource imports are indexed
+    /// here and queried by definition, references, rename, and highlights.
+    pub(crate) framework_references: framework::FrameworkReferenceIndex,
+    /// Cross-file framework class/member locations derived while resources
+    /// are scanned, with a reverse URI map for incremental watched updates.
+    pub(crate) framework_reference_lookup: framework::FrameworkReferenceLookupIndex,
+    /// Doctrine entity-to-repository pairs derived alongside framework
+    /// resources, keyed by source URI so CodeLens lookups never rescan every
+    /// YAML/XML file and watched changes can update one entry at a time.
+    pub(crate) framework_doctrine_repositories: framework::DoctrineRepositoryIndex,
     /// Cross-file candidate index for find-references.
     ///
     /// Maintained from each file's [`symbol_maps`] entry during parsing.
@@ -626,6 +642,9 @@ pub struct Backend {
     /// candidate files, then run their existing semantic checks for aliases,
     /// inheritance, Laravel declarations, and `self/static/parent`.
     pub(crate) reference_index: reference_index::ReferenceIndex,
+    /// Symfony event wiring recovered from compiled containers and configured
+    /// PHP attributes.
+    pub(crate) symfony_events: Arc<RwLock<symfony::SymfonyEventIndex>>,
     /// Skip building [`reference_index`] from `update_ast`.
     ///
     /// Set by [`Backend::new_headless`] for the `analyze`/`fix` CLI
@@ -1231,7 +1250,11 @@ impl Backend {
             client_name: Mutex::new(String::new()),
             open_files: Arc::new(RwLock::new(HashMap::new())),
             symbol_maps: Arc::new(RwLock::new(HashMap::new())),
+            framework_references: framework::new_framework_reference_index(),
+            framework_reference_lookup: framework::new_framework_reference_lookup_index(),
+            framework_doctrine_repositories: framework::new_doctrine_repository_index(),
             reference_index: reference_index::new_reference_index(),
+            symfony_events: Arc::new(RwLock::new(symfony::SymfonyEventIndex::default())),
             skip_reference_index: false,
             symbols: SymbolIndex::new(),
             workspace,
@@ -2034,7 +2057,11 @@ impl Backend {
             client_name: Mutex::new(self.client_name.lock().clone()),
             open_files: Arc::clone(&self.open_files),
             symbol_maps: Arc::clone(&self.symbol_maps),
+            framework_references: Arc::clone(&self.framework_references),
+            framework_reference_lookup: Arc::clone(&self.framework_reference_lookup),
+            framework_doctrine_repositories: Arc::clone(&self.framework_doctrine_repositories),
             reference_index: Arc::clone(&self.reference_index),
+            symfony_events: Arc::clone(&self.symfony_events),
             skip_reference_index: self.skip_reference_index,
             symbols: self.symbols.clone(),
             parse_errors: Arc::clone(&self.parse_errors),

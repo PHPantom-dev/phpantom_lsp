@@ -298,6 +298,16 @@ impl Backend {
         // served after a file changes.
         crate::virtual_members::phpdoc::bump_mixin_generation();
 
+        // Symfony's PHP configurators contain semantic class and callable
+        // strings that the normal PHP symbol map deliberately treats as
+        // plain strings. Keep their lightweight framework index in step with
+        // every parse, including incomplete edits where the main parse fails.
+        if crate::framework::should_index_framework_php_content(uri, content)
+            || self.framework_references.read().contains_key(uri)
+        {
+            self.index_framework_uri_content(uri, content);
+        }
+
         let blade = self.lower_blade_template(uri, content);
         let content_to_parse = blade.as_ref().map_or_else(
             || Arc::new(content.to_string()),
@@ -326,6 +336,12 @@ impl Backend {
             self.update_ast_inner(&uri_owned, &content_owned, blade)
         });
 
+        // Attribute rules are project configuration, while listener wiring
+        // comes from Symfony's compiled container. Refresh the source side
+        // only after the class/import indexes above have been published.
+        if result.is_some() {
+            self.refresh_symfony_event_sites(uri, content);
+        }
         // The refreshes below that rebuild from the registered provider list
         // share one read of it.
         let providers = crate::backend::laravel::ProvidersOnce::new(self);

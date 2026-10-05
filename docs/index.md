@@ -23,6 +23,8 @@ You may want to jump to:
 - **Deep type intelligence.** Generics, conditional return types, closure parameter inference, array shapes, PHPStan types.
 - **Laravel support.** Eloquent relationships, scopes, accessors, casts, Builder chains, macros, Blade templates -- no ide-helper or database access required.
 - **Fast.** Ready in 2 seconds on a 30K-file Laravel codebase, cold or warm. No disk cache.
+- **Symfony support.** Navigate and refactor container services, routes, Twig templates, translations, events, Messenger handlers, forms, validation mappings, Doctrine metadata, and configuration schemas across PHP and resource files.
+- **Fast.** 5 seconds to ready on a 21K-file codebase. 360 MB RAM. No disk cache.
 - **PHPStan, PHPCS, and Mago integration.** Run external tools on save and surface their diagnostics in the editor.
 - **CLI tools.** Batch diagnostics (`analyze`) and automated fixes (`fix`) for CI and bulk cleanup.
 - **Refactoring.** Rename, extract method/function/variable/constant/interface, implement interface methods, promote constructor parameters, modernize syntax.

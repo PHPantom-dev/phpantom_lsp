@@ -168,6 +168,267 @@
         }
       }
     },
+    "symfony": {
+      "type": "object",
+      "description": "Symfony runtime metadata recovered statically from compiled containers and configured PHP attributes.",
+      "properties": {
+        "container": {
+          "type": "object",
+          "description": "Controls static compiled-container discovery. Container PHP is read as text and is never executed.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "description": "Read Symfony compiled-container metadata.",
+              "default": true
+            },
+            "environment": {
+              "type": "string",
+              "description": "Cache environment used by automatic var/cache/<environment> discovery.",
+              "default": "dev"
+            },
+            "paths": {
+              "type": "array",
+              "description": "Optional workspace-relative compiled-container files, directories, or glob patterns. The newest useful match wins.",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "events": {
+          "type": "object",
+          "description": "Configures event-name matching and attribute adapters. Exact listener wiring comes from the compiled container.",
+          "properties": {
+            "ignored-prefixes": {
+              "type": "array",
+              "description": "Prefixes removed before event names are compared.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ignored-suffixes": {
+              "type": "array",
+              "description": "Suffixes removed before event names are compared.",
+              "items": {
+                "type": "string"
+              }
+            },
+            "publishers": {
+              "type": "array",
+              "description": "Rules that derive Symfony event publishers from PHP method attributes.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified publisher attribute class."
+                  },
+                  "name-argument": {
+                    "type": "string",
+                    "description": "Named argument containing an explicit event name."
+                  },
+                  "name-position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the explicit event-name argument.",
+                    "minimum": 0
+                  },
+                  "dispatch-argument": {
+                    "type": "string",
+                    "description": "Named argument containing dispatch enum cases."
+                  },
+                  "dispatch-position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the dispatch argument.",
+                    "minimum": 0
+                  },
+                  "default-dispatch": {
+                    "type": "array",
+                    "description": "Dispatch names used when the attribute omits its dispatch argument.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "dispatch-cases": {
+                    "type": "object",
+                    "description": "Map from PHP enum case name to the event-name dispatch segment.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  },
+                  "name-template": {
+                    "type": "string",
+                    "description": "Derived event-name template. Supports {dispatch}, {class}, {class_snake}, {method}, {method_snake}, {method_suffix}, and {method_suffix_snake}."
+                  },
+                  "explicit-name-template": {
+                    "type": "string",
+                    "description": "Template used for explicit names. Supports the same placeholders plus {name}.",
+                    "default": "{name}"
+                  },
+                  "default-methods": {
+                    "type": "array",
+                    "description": "Method names that omit the method suffix.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "skip": {
+                    "type": "array",
+                    "description": "Conditions that omit one derived dispatch when another attribute argument is set.",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "dispatch": {
+                          "type": "string"
+                        },
+                        "argument": {
+                          "type": "string"
+                        },
+                        "position": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "dispatch",
+                        "argument"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "attribute",
+                  "name-template"
+                ]
+              }
+            },
+            "subscribers": {
+              "type": "array",
+              "description": "Optional rules that expose event names written in subscriber method attributes before or without a compiled container.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified subscriber attribute class."
+                  },
+                  "name-argument": {
+                    "type": "string"
+                  },
+                  "name-position": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "transport-argument": {
+                    "type": "string"
+                  },
+                  "transport-position": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "transport-cases": {
+                    "type": "object",
+                    "description": "Map from PHP enum case name to an event-name suffix.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "attribute"
+                ]
+              }
+            }
+          }
+        },
+        "expression-language": {
+          "type": "object",
+          "description": "Maps configured PHP attribute and constructor arguments to Symfony ExpressionLanguage strings and their PHP type contracts.",
+          "properties": {
+            "attributes": {
+              "type": "array",
+              "description": "Method-attribute arguments that contain an expression string or an array of expression strings.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "attribute": {
+                    "type": "string",
+                    "description": "Fully-qualified PHP method attribute class."
+                  },
+                  "argument": {
+                    "type": "string",
+                    "description": "Named argument containing expressions."
+                  },
+                  "position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the expression argument.",
+                    "minimum": 0
+                  },
+                  "method-parameters": {
+                    "type": "boolean",
+                    "description": "Bind expression roots to method parameters with the same name.",
+                    "default": false
+                  },
+                  "bindings": {
+                    "type": "object",
+                    "description": "Map expression roots to return, parameter:<name-or-index>, or class:<FQN> type sources.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "attribute"
+                ]
+              }
+            },
+            "constructors": {
+              "type": "array",
+              "description": "Expression object constructors nested inside PHP method attributes.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "class": {
+                    "type": "string",
+                    "description": "Fully-qualified expression object class."
+                  },
+                  "argument": {
+                    "type": "string",
+                    "description": "Named constructor argument containing the expression."
+                  },
+                  "position": {
+                    "type": "integer",
+                    "description": "Zero-based positional fallback for the constructor argument.",
+                    "minimum": 0
+                  },
+                  "inside-attribute-prefixes": {
+                    "type": "array",
+                    "description": "Only match constructors nested in attributes whose FQN starts with one of these prefixes. An empty list matches any attribute.",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "method-parameters": {
+                    "type": "boolean",
+                    "description": "Bind expression roots to method parameters with the same name.",
+                    "default": false
+                  },
+                  "bindings": {
+                    "type": "object",
+                    "description": "Map expression roots to return, parameter:<name-or-index>, or class:<FQN> type sources.",
+                    "additionalProperties": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "required": [
+                  "class"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "formatting": {
       "type": "object",
       "description": "Controls the formatting strategy. PHPantom ships a built-in formatter (PER-CS 2.0 style). Projects with php-cs-fixer or PHP_CodeSniffer in composer.json require-dev automatically use those tools instead. Explicit configuration here always takes priority.",

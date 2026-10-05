@@ -116,6 +116,9 @@
 //! - **Invalid class kind diagnostics** — report a class-like name used
 //!   in a syntactic position (`new`, `implements`, `instanceof`, …) that
 //!   its kind (class/interface/trait/enum) cannot satisfy.
+//! - **Symfony ExpressionLanguage member diagnostics** — report members
+//!   missing from PHP types supplied by configured attribute and constructor
+//!   contracts.
 //! - **Laravel string key / command parameter diagnostics** (Laravel
 //!   projects only) — report route/config/view/translation/command
 //!   names and morph aliases that don't resolve to a known declaration,
@@ -249,6 +252,8 @@ mod stale;
 pub(crate) mod state;
 mod subject_cache;
 pub(crate) mod suppression;
+mod symfony;
+mod symfony_expressions;
 mod syntax_errors;
 mod type_errors;
 pub(crate) mod undefined_variables;
@@ -300,6 +305,9 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        if crate::framework::is_framework_resource_uri(uri_str) {
+            return;
+        }
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
@@ -401,6 +409,10 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
         mut observe: Option<SlowDiagnosticObserver<'_>>,
     ) {
+        if crate::framework::is_framework_resource_uri(uri_str) {
+            self.collect_unknown_symfony_resource_diagnostics(uri_str, content, out);
+            return;
+        }
         // Activate the chain resolution cache so that all slow
         // diagnostic collectors share cached intermediate chain
         // prefix results (e.g. `$model->where(...)` resolved once
@@ -476,6 +488,10 @@ impl Backend {
             step!(
                 "unknown_member",
                 self.collect_unknown_member_diagnostics_with_context(ctx, uri_str, content, out)
+            );
+            step!(
+                "symfony_expression",
+                self.collect_symfony_expression_diagnostics(uri_str, content, out)
             );
             step!(
                 "unknown_function",
@@ -571,6 +587,7 @@ impl Backend {
                 self.collect_blade_section_diagnostics(uri_str, out)
             );
         }
+        self.collect_unknown_symfony_resource_diagnostics(uri_str, content, out);
     }
 }
 
