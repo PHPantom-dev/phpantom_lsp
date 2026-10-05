@@ -108,6 +108,27 @@ impl Backend {
         )
     }
 
+    /// [`find_class_references`](Self::find_class_references) plus the
+    /// Symfony and Doctrine resources that name the class.
+    ///
+    /// A rename leaves the resource occurrences out: the framework index
+    /// rewrites those itself, in the spelling each one is written in, where
+    /// a PHP-shaped edit could not be planned over an escaped string.
+    pub(super) fn find_class_references_in_mode(
+        &self,
+        target_fqn: &str,
+        include_declaration: bool,
+        mode: ReferenceSearchMode,
+    ) -> Vec<Location> {
+        let mut locations = self.find_class_references(target_fqn, include_declaration);
+        if mode != ReferenceSearchMode::Rename {
+            locations
+                .extend(self.framework_class_reference_locations(strip_fqn_prefix(target_fqn)));
+            sort_locations_for_references(&mut locations);
+        }
+        locations
+    }
+
     /// Find all references to a constructor (`__construct`).
     ///
     /// Unlike ordinary methods, constructors are not invoked through

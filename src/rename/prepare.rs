@@ -12,8 +12,11 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::code_actions::multi_file_edit;
+use crate::framework::{
+    FrameworkReferenceKind, namespace_segment_range_at_offset, short_segment_range,
+};
 use crate::symbol_map::SymbolKind;
-use crate::text_position::offset_to_position;
+use crate::text_position::{offset_to_position, position_to_byte_offset};
 use crate::util::build_fqn;
 
 use super::RenameOutcome;
@@ -84,16 +87,19 @@ impl Backend {
         content: &str,
         position: Position,
     ) -> Option<PrepareRenameResponse> {
-        // A YAML/XML occurrence is not a rename site.  Its text may be the
-        // escaped `App\\Handler` form the document's quoting requires
-        // rather than the PHP spelling, so nothing here can plan the edit
-        // that replaces it, and the PHP occurrences are reached from the
-        // declaration instead.
+        // A YAML/XML occurrence is a rename site only through the Symfony
+        // and Doctrine resource index, which edits a single segment of the
+        // name.  Anything else there may be the escaped `App\\Handler` form
+        // the document's quoting requires rather than the PHP spelling, so
+        // nothing here can plan the edit that replaces it, and the PHP
+        // occurrences are reached from the declaration instead.
         if crate::resource_navigation::is_resource_document(uri) {
-            return None;
+            return self.handle_framework_prepare_rename(uri, content, position);
         }
 
-        let span = self.lookup_symbol_at_position(uri, content, position)?;
+        let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
+            return self.handle_framework_prepare_rename(uri, content, position);
+        };
 
         // The range below is built from this span's byte offsets, and the
         // editor shows it as the text about to be replaced.  A map that
@@ -186,17 +192,21 @@ impl Backend {
         position: Position,
         new_name: &str,
     ) -> RenameOutcome {
-        // A YAML/XML occurrence is not a rename site.  Its text may be the
-        // escaped `App\\Handler` form the document's quoting requires
-        // rather than the PHP spelling, so nothing here can plan the edit
-        // that replaces it, and the PHP occurrences are reached from the
-        // declaration instead.
+        // A YAML/XML occurrence is a rename site only through the Symfony
+        // and Doctrine resource index, which edits a single segment of the
+        // name.  Anything else there may be the escaped `App\\Handler` form
+        // the document's quoting requires rather than the PHP spelling, so
+        // nothing here can plan the edit that replaces it, and the PHP
+        // occurrences are reached from the declaration instead.
         if crate::resource_navigation::is_resource_document(uri) {
-            return Ok(None);
+            return self.handle_framework_rename(uri, content, position, new_name);
         }
 
+        // A string a Symfony PHP configurator or container call gives
+        // meaning to (a service id, a `Class::method` controller) has no
+        // PHP symbol of its own.
         let Some(span) = self.lookup_symbol_at_position(uri, content, position) else {
-            return Ok(None);
+            return self.handle_framework_rename(uri, content, position, new_name);
         };
 
         // Every edit below is derived, directly or through find-references,
@@ -278,9 +288,19 @@ impl Backend {
         // location has to be checked against *that* file's text, not the
         // buffer this request arrived on.
         let magic_use = magic_rename.as_ref().map(|(old_use, _)| old_use.as_str());
+        let (resource_locations, mut locations): (Vec<Location>, Vec<Location>) =
+            locations.into_iter().partition(|location| {
+                crate::resource_navigation::is_resource_document(location.uri.as_str())
+            });
         if !self.rename_locations_verified(&span.kind, magic_use, &locations) {
             return Ok(None);
         }
+        // A YAML/XML occurrence rides along with the PHP rename, so one the
+        // resource index no longer matches is left out on its own rather
+        // than cancelling every PHP edit with it.
+        locations.extend(resource_locations.into_iter().filter(|location| {
+            self.rename_locations_verified(&span.kind, None, std::slice::from_ref(location))
+        }));
 
         // A function is named three different ways across its references,
         // and only one of them is the plain new name.  The old short name
@@ -425,6 +445,138 @@ impl Backend {
         Ok(Some(multi_file_edit(changes)))
     }
 
+    fn handle_framework_prepare_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<PrepareRenameResponse> {
+        let reference = self.framework_reference_at_position(uri, content, position)?;
+        let (start, end, placeholder) = match reference.kind {
+            FrameworkReferenceKind::Class { fqn } => {
+                let source = content.get(reference.start as usize..reference.end as usize)?;
+                let (start, end) = short_segment_range(source, reference.start);
+                (start, end, crate::util::short_name(&fqn).to_string())
+            }
+            FrameworkReferenceKind::Method { member_name, .. } => {
+                (reference.start, reference.end, member_name)
+            }
+            FrameworkReferenceKind::Namespace { prefix } => {
+                let source = content.get(reference.start as usize..reference.end as usize)?;
+                let cursor = position_to_byte_offset(content, position) as u32;
+                let (segment_idx, start, end) =
+                    namespace_segment_range_at_offset(source, reference.start, cursor)?;
+                let placeholder = prefix
+                    .split('\\')
+                    .nth(segment_idx)
+                    .unwrap_or(prefix.as_str())
+                    .to_string();
+                (start, end, placeholder)
+            }
+            FrameworkReferenceKind::SymfonySymbol { name, .. } => {
+                (reference.start, reference.end, name)
+            }
+            FrameworkReferenceKind::Path { .. } => return None,
+        };
+
+        Some(PrepareRenameResponse::RangeWithPlaceholder {
+            range: Range {
+                start: offset_to_position(content, start as usize),
+                end: offset_to_position(content, end as usize),
+            },
+            placeholder,
+        })
+    }
+
+    /// Rename the PHP symbol a Symfony or Doctrine resource names.
+    ///
+    /// A class or controller action is renamed from its PHP declaration, the
+    /// one go-to-definition lands on, so starting the rename in the resource
+    /// or in the PHP file produces the same edits: the PHP ones, and the
+    /// resource ones the framework index rewrites in each document's own
+    /// spelling.  A namespace-prefix service key renames the namespace
+    /// segment under the cursor.
+    fn handle_framework_rename(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+        new_name: &str,
+    ) -> RenameOutcome {
+        let Some(reference) = self.framework_reference_at_position(uri, content, position) else {
+            return Ok(None);
+        };
+
+        match reference.kind {
+            FrameworkReferenceKind::Class { .. } | FrameworkReferenceKind::Method { .. } => {
+                let Some((target_uri, target_content, target_position)) =
+                    self.framework_rename_target(uri, content, position)
+                else {
+                    return Ok(None);
+                };
+                self.handle_rename(&target_uri, &target_content, target_position, new_name)
+            }
+            FrameworkReferenceKind::Namespace { prefix } => {
+                let cursor = position_to_byte_offset(content, position) as u32;
+                let Some((segment_idx, _start, _end)) = content
+                    .get(reference.start as usize..reference.end as usize)
+                    .and_then(|source| {
+                        namespace_segment_range_at_offset(source, reference.start, cursor)
+                    })
+                else {
+                    return Ok(None);
+                };
+                self.build_namespace_rename_edit(&prefix, segment_idx, new_name)
+            }
+            FrameworkReferenceKind::SymfonySymbol { kind, name, .. } => {
+                let locations = self.framework_symfony_symbol_locations(kind, &name, true, true);
+                Ok(build_simple_rename_edit(
+                    self, uri, content, &locations, new_name, true,
+                ))
+            }
+            FrameworkReferenceKind::Path { .. } => Ok(None),
+        }
+    }
+
+    /// The PHP declaration a resource occurrence names, resolved the way
+    /// go-to-definition resolves it, as the file, its text, and the position
+    /// of the declared name.
+    fn framework_rename_target(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<(String, String, Position)> {
+        let target = self
+            .resolve_resource_definition(content, position)
+            .or_else(|| {
+                let mut definitions = self.resolve_definition(uri, content, position);
+                (definitions.len() == 1).then(|| definitions.remove(0))
+            })?;
+        let target_uri = target.uri.to_string();
+        if crate::resource_navigation::is_resource_document(&target_uri) {
+            return None;
+        }
+        let target_content = self.get_file_content(&target_uri)?;
+
+        // A class's definition sits on its `class` keyword; the rename has
+        // to start on the name that follows it.
+        let offset = position_to_byte_offset(&target_content, target.range.start) as u32;
+        let symbol_map = self.symbol_maps.read().get(&target_uri).cloned()?;
+        let name_start = symbol_map
+            .spans
+            .iter()
+            .find(|span| span.start <= offset && offset < span.end)
+            .or_else(|| {
+                symbol_map.spans.iter().find(|span| {
+                    span.start >= offset && matches!(span.kind, SymbolKind::ClassDeclaration { .. })
+                })
+            })?
+            .start;
+        let target_position = offset_to_position(&target_content, name_start as usize);
+        Some((target_uri, target_content, target_position))
+    }
+
     /// Extract the renameable symbol name and its source range.
     ///
     /// Returns `None` for symbols that cannot be renamed.
@@ -543,6 +695,65 @@ fn is_config_resource_identity(kind: &SymbolKind) -> bool {
             crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some()
         }
         _ => false,
+    }
+}
+
+fn build_simple_rename_edit(
+    backend: &Backend,
+    current_uri: &str,
+    current_content: &str,
+    locations: &[Location],
+    new_name: &str,
+    preserve_php_escaping: bool,
+) -> Option<WorkspaceEdit> {
+    if locations.is_empty() {
+        return None;
+    }
+
+    let mut changes: HashMap<Url, Vec<TextEdit>> = HashMap::new();
+    for location in locations {
+        let loc_uri_str = location.uri.to_string();
+        let loc_content = if loc_uri_str == current_uri {
+            Some(current_content.to_string())
+        } else {
+            backend.get_file_content(&loc_uri_str)
+        };
+        let Some(loc_content) = loc_content else {
+            continue;
+        };
+        let replacement = if preserve_php_escaping && loc_uri_str.ends_with(".php") {
+            let start =
+                crate::text_position::position_to_offset(&loc_content, location.range.start);
+            let end = crate::text_position::position_to_offset(&loc_content, location.range.end);
+            let source = loc_content
+                .get(start as usize..end as usize)
+                .unwrap_or_default();
+            if source.contains("\\\\") {
+                new_name.replace('\\', "\\\\")
+            } else {
+                new_name.to_string()
+            }
+        } else {
+            new_name.to_string()
+        };
+
+        changes
+            .entry(location.uri.clone())
+            .or_default()
+            .push(TextEdit {
+                range: location.range,
+                new_text: replacement,
+            });
+    }
+
+    if changes.is_empty() {
+        None
+    } else {
+        Some(WorkspaceEdit {
+            changes: Some(changes),
+            document_changes: None,
+            change_annotations: None,
+        })
     }
 }
 
