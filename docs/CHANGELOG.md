@@ -187,6 +187,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **An import added to a `namespace` written on one line goes inside it.** A `use` from a code action, completion, or class move is no longer written after the closing `}` of `namespace B { class Foo {} }`, outside the block, where PHP refuses the file. A `namespace` whose `{` is on the next line no longer gets the `use` between its name and the brace.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
 - **Callbacks returning arrays keep their PHPDoc return type.** A parameter such as `(callable(string): string[])|null` now accepts an array-returning closure without a false type mismatch, including Symfony Console's autocompleter callback. Contributed by @shuvroroy. Closes #456.
+- **A closure created in a narrowed ternary, `&&`, `||` or `match` branch sees the narrowed variable.** `$c ? fn () => $this->take($c) : null` no longer reports `$c` as nullable inside the closure. Contributed by @phcorp. Closes #459.
 
 ## [0.11.0] - 2026-10-05
 
