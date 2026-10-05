@@ -411,7 +411,12 @@ pub(super) fn apply_assertion_to_key(
     // check never contradicted, and a class inclusion comes back empty
     // when the loader cannot find the class.
     let mut exhaustible = false;
-    if let Some(kind) = condition_facts::scalar_assert_guard_kind(asserted_type) {
+    let guard_kind = if should_exclude {
+        condition_facts::scalar_assert_guard_kind(asserted_type)
+    } else {
+        condition_facts::scalar_inclusion_guard_kind(asserted_type)
+    };
+    if let Some(kind) = guard_kind {
         exhaustible = true;
         if should_exclude {
             condition_facts::apply_type_guard_exclusion(
