@@ -192,6 +192,10 @@ impl Backend {
             });
 
         if let Some(content) = content {
+            if crate::framework::is_framework_resource_uri(&uri) {
+                return Ok(self.try_symfony_completion(&uri, &content, position));
+            }
+
             let response = (|| -> Result<Option<CompletionResponse>> {
                 // Activate the chain resolution cache so that shared chain
                 // prefixes are resolved once and reused within this completion
@@ -350,6 +354,15 @@ impl Backend {
                 if !matches!(string_ctx, StringContext::SimpleInterpolation)
                     && let Some(response) =
                         self.try_array_shape_completion(&content, position, &ctx)
+                {
+                    return Ok(Some(response));
+                }
+
+                // ── Symfony named resources (services and parameters) ───────
+                if matches!(
+                    string_ctx,
+                    StringContext::InStringLiteral | StringContext::NotInString
+                ) && let Some(response) = self.try_symfony_completion(&uri, &content, position)
                 {
                     return Ok(Some(response));
                 }
