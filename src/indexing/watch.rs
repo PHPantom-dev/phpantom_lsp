@@ -65,6 +65,7 @@ impl Backend {
         let is_laravel = self.resolved_class_cache.read().is_laravel();
         let config_path = root.join(crate::config::CONFIG_FILE_NAME);
         let changes = self.spell_changes_as_indexed(&params.changes);
+        let mut framework_changes: Vec<(String, PathBuf, FileChangeType)> = Vec::new();
         {
             let open = self.open_files.read();
             let parsed = self.parsed_uris.read();
@@ -150,6 +151,9 @@ impl Backend {
                             continue;
                         }
                     }
+                    if crate::framework::is_framework_resource_uri(&uri_str) {
+                        framework_changes.push((uri_str.clone(), file_path.clone(), change.typ));
+                    }
                     resource_changes.push((uri_str, file_path, change.typ));
                     continue;
                 }
@@ -197,6 +201,7 @@ impl Backend {
             && !config_changed
             && !schema_full_rebuild
             && migration_changes.is_empty()
+            && framework_changes.is_empty()
         {
             return false;
         }
@@ -276,6 +281,16 @@ impl Backend {
                 migration_changes.len()
             );
             self.update_laravel_migrations(&migration_changes);
+        }
+
+        if !framework_changes.is_empty() {
+            tracing::info!(
+                "PHPantom: {} Symfony/Doctrine resource file(s) changed on disk",
+                framework_changes.len()
+            );
+            for (uri, path, typ) in &framework_changes {
+                self.apply_framework_file_change(uri, path, *typ);
+            }
         }
 
         true

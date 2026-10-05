@@ -490,7 +490,7 @@ impl Backend {
         let candidate_keys = member_candidate_keys(target_member, target_is_static, hierarchy);
         let member = crate::atom::atom(target_member);
         let target_name = target_member.strip_prefix('$').unwrap_or(target_member);
-        self.scan_reference_candidates(
+        let mut locations = self.scan_reference_candidates(
             &candidate_keys,
             "Scanning for member references",
             |file, symbol_map, locations| {
@@ -605,7 +605,10 @@ impl Backend {
                     }
                 }
             },
-        )
+        );
+        locations.extend(self.framework_member_reference_locations(target_member, hierarchy));
+        sort_locations_for_references(&mut locations);
+        locations
     }
 
     /// The accesses to `member` in one file that Find References reports.
