@@ -43,6 +43,16 @@ fn collect_slow(php: &str) -> Vec<Diagnostic> {
     )
 }
 
+/// [`collect_slow`] with the full PHP stubs, for code that calls into the
+/// standard library (`fclose()`, `strlen()`).
+fn collect_slow_with_full_stubs(php: &str) -> Vec<Diagnostic> {
+    collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    )
+}
+
 fn has_type_error(diags: &[Diagnostic]) -> bool {
     diags.iter().any(|d| {
         d.code.as_ref().is_some_and(
@@ -12980,4 +12990,149 @@ function probe(Method $m): void {
 "#;
     let diags = collect_slow(php);
     assert!(!has_type_error(&diags), "{diags:#?}");
+}
+
+// ─── Type-check functions narrow property accesses (#466) ──────────────────
+
+#[test]
+fn is_resource_narrows_nullable_resource_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (\is_resource($this->stream)) {
+            \fclose($this->stream);
+        }
+    }
+    public function closeUnqualified(): void
+    {
+        if (is_resource($this->stream)) {
+            fclose($this->stream);
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_resource() should narrow $this->stream to resource: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn is_resource_narrows_nullable_resource_local_variable() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+/** @param resource|null $stream */
+function close($stream): void
+{
+    if (\is_resource($stream)) {
+        \fclose($stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "is_resource() should narrow $stream to resource: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn negated_is_resource_early_return_narrows_property() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (!\is_resource($this->stream)) {
+            return;
+        }
+        \fclose($this->stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "!is_resource() guard clause should narrow $this->stream after it: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
+}
+
+#[test]
+fn nullable_resource_property_outside_guard_still_flagged() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class IsResource
+{
+    /** @var resource|null */
+    private $stream = null;
+    public function close(): void
+    {
+        if (\is_resource($this->stream)) {
+            echo 'open';
+        }
+        \fclose($this->stream);
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert_eq!(
+        messages.len(),
+        1,
+        "passing the unguarded nullable property should still be flagged: {messages:?}"
+    );
+    assert!(
+        messages[0].contains("null does not satisfy resource"),
+        "unexpected message: {messages:?}"
+    );
+}
+
+#[test]
+fn fully_qualified_type_guard_narrows_property() {
+    // `\is_string($this->name)` names the same guard as `is_string(...)`;
+    // the leading backslash must not hide the property from narrowing.
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class Named
+{
+    /** @var string|null */
+    private $name = null;
+    /** @var iterable<int>|null */
+    private $items = null;
+    public function run(): void
+    {
+        if (\is_string($this->name)) {
+            \strlen($this->name);
+        }
+        if (\is_iterable($this->items)) {
+            $this->walk($this->items);
+        }
+    }
+    /** @param iterable<int> $items */
+    private function walk(iterable $items): void {}
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !has_type_error(&diags),
+        "a fully-qualified type guard should narrow the property: {:?}",
+        messages_with_code(&diags, "type_mismatch_argument")
+    );
 }
