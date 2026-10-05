@@ -413,6 +413,24 @@ impl Backend {
                 }
             }
 
+            // The workspace walk reads every YAML/XML/Twig file, so it runs
+            // off the async runtime like the other startup indexes.
+            let framework_backend = self.clone_for_blocking();
+            let framework_progress = Arc::clone(&progress);
+            let framework_count =
+                run_blocking_cancel_safe("index_framework_workspace", move || {
+                    framework_backend.index_framework_workspace(Some(&framework_progress))
+                })
+                .await
+                .unwrap_or(0);
+            if framework_count > 0 {
+                tracing::info!(
+                    "PHPantom: indexed {} Symfony/Doctrine resource file(s)",
+                    framework_count
+                );
+            }
+            progress.set_percentage(99, "Finalizing startup indexes");
+
             if let Some(poller) = poller {
                 poller.finish().await;
             }

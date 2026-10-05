@@ -59,13 +59,15 @@ impl Backend {
         }
 
         crate::parallel::map_indexed("autoload-preload", file_count, |_, i| {
-            if let Some(p) = progress {
-                p.add_done(1);
-            }
             let path = pending[i];
             if let Ok(content) = std::fs::read_to_string(path) {
                 let uri = crate::util::path_to_uri(path);
                 self.update_ast(&uri, &content);
+            }
+            // Counted once the file is parsed, so the reported progress
+            // never runs ahead of the work behind it.
+            if let Some(p) = progress {
+                p.add_done(1);
             }
             None::<()>
         });

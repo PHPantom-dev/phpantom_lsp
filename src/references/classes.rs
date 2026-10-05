@@ -32,7 +32,7 @@ impl Backend {
         let target_short = crate::util::short_name(target);
 
         let candidate_keys = class_candidate_keys(target, target_short);
-        self.scan_reference_candidates(
+        let mut locations = self.scan_reference_candidates(
             &candidate_keys,
             "Scanning for class references",
             |file, symbol_map, locations| {
@@ -105,7 +105,10 @@ impl Backend {
                     }
                 }
             },
-        )
+        );
+        locations.extend(self.framework_class_reference_locations(target));
+        sort_locations_for_references(&mut locations);
+        locations
     }
 
     /// Find all references to a constructor (`__construct`).
