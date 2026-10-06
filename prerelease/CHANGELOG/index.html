@@ -5002,12 +5002,13 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
 <ul>
-<li><strong>Indexing Blade templates with no DocBlock is now much faster.</strong> Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster: a project that took nearly four minutes to analyze now finishes in under fifteen seconds. Closes #485.</li>
+<li><strong>Indexing Blade templates with no DocBlock is now much faster.</strong> Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
 <li><strong>laravel-ide-helper files are skipped.</strong> <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading <code>!</code> in <code>[indexing] exclude</code> to index them anyway.</li>
-<li><strong>An integer <code>range()</code> passed straight into a call is a list of integers.</strong> <code>array_map(fn (int $i) =&gt; …, range(0, $n - 1))</code> no longer reports that the callback is passed <code>int|float</code>. Contributed by @phcorp. Closes #467.</li>
+<li><strong>PHP_CodeSniffer only runs on projects that use it.</strong> A <code>vendor/bin/phpcs</code> installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need <code>squizlabs/php_codesniffer</code> in <code>require-dev</code>, a PHPCS ruleset file, or a <code>[phpcs] standard</code> in <code>.phpantom.toml</code>.</li>
+<li><strong>An integer <code>range()</code> passed straight into a call is a list of integers.</strong> <code>array_map(fn (int $i) =&gt; …, range(0, $n - 1))</code> no longer reports that the callback is passed <code>int|float</code>. Contributed by @phcorp.</li>
 </ul>
 <h2 id="0110-2026-10-05"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0">0.11.0</a> - 2026-10-05<a class="headerlink" href="#0110-2026-10-05" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>

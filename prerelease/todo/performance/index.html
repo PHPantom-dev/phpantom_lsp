@@ -3435,6 +3435,75 @@ the name of the declaration that follows each one would give a per-file
 set of removed names, turning the filter into set lookups.</p>
 <p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
 <code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
+<hr />
+<h2 id="p67-the-blade-refresh-pass-forgets-every-inferred-return-type-between-caller-files">P67. The Blade refresh pass forgets every inferred return type between caller files<a class="headerlink" href="#p67-the-blade-refresh-pass-forgets-every-inferred-return-type-between-caller-files" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>refresh_blade_injected_vars</code> runs once after workspace indexing (and in
+<code>analyze</code>) to type the variables each template receives from its
+<code>view()</code> call sites. The type-engine memos are scoped to one caller
+file, so a controller that renders many templates is walked again for
+each of them, and every method-body inference it triggers is repeated.
+On a Laravel 8 project with ~600 files and largely untyped controllers,
+one controller rendering 48 templates accounted for a fifth of the
+pass, and the pass as a whole is still about 2.7 s of a 4.2 s release
+<code>analyze</code>, all on one core.</p>
+<p>The body-inference memo is keyed by <code>(class FQN, method, argument
+types)</code> and holds nothing tied to a particular text buffer, so it can
+safely span the whole pass. The variable-type memo cannot: its key
+includes the address of the content it walked, and the pass replaces
+templates' virtual PHP as it goes, so a freed buffer reused at the same
+address would serve stale entries. Activate the body-inference memo
+around the whole pass and keep the per-file guard for the others.</p>
+<p><strong>Where to look:</strong> <code>refresh_blade_injected_vars</code> and
+<code>extract_call_site_vars</code> in <code>blade/call_site_inference.rs</code>;
+<code>activate_type_engine_caches</code> in
+<code>type_engine/call_resolution/target_cache.rs</code>.</p>
+<hr />
+<h2 id="p68-body-return-type-inference-re-parses-the-declaring-file-every-time">P68. Body return-type inference re-parses the declaring file every time<a class="headerlink" href="#p68-body-return-type-inference-re-parses-the-declaring-file-every-time" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>infer_return_type_for_function</code> reads the declaring file's text and
+parses it from scratch through <code>with_parsed_program</code> for every body it
+infers, and <code>infer_body_return_type</code> additionally splits the whole file
+into lines twice to locate the declaration. The cost is proportional to
+the size of the declaring file rather than the method. A 23,000-line
+<code>_ide_helper.php</code> (now excluded by default) made every inference of one
+of its facade methods cost a full parse of the file, and memo misses
+across call sites multiplied that into minutes. Any large hand-written
+or generated class with untyped methods has the same shape.</p>
+<p>Caching the parsed program per file for the duration of a pass (or
+inferring from an AST the caller already holds when the method lives in
+the file being walked), and locating the body by <code>name_offset</code> instead
+of by scanning lines, would make each inference cost the size of the
+method body.</p>
+<p>The forward walker has the same shape closer to home:
+<code>function_invokes_callable_arg_immediately</code> re-parses the very file
+being walked to find out whether a function declared in it is tagged
+<code>@param-later-invoked-callable</code>, once per closure argument passed to a
+function call. It no longer runs for arguments that are not closures,
+but a template or script that passes many closures pays one full parse
+of itself for each.</p>
+<p><strong>Where to look:</strong> <code>infer_body_return_type</code> in
+<code>type_engine/call_resolution/target_cache.rs</code>,
+<code>infer_return_type_for_function</code> in
+<code>code_actions/phpstan/fix_return_type/inference.rs</code>, and
+<code>function_invokes_callable_arg_immediately</code> in
+<code>type_engine/variable/forward_walk/by_ref.rs</code>.</p>
+<hr />
+<h2 id="p69-the-blade-refresh-pass-runs-on-a-single-core">P69. The Blade refresh pass runs on a single core<a class="headerlink" href="#p69-the-blade-refresh-pass-runs-on-a-single-core" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p><code>refresh_blade_injected_vars</code> re-infers every template serially, in
+render order, while the remaining cores sit idle. On a project with
+many templates and untyped controllers this is the bulk of workspace
+indexing (users see "Full index running" at 100% of one core).</p>
+<p>The order matters only along render edges: a partial is re-inferred
+after the templates that <code>@include</code> it, because its types are read out
+of their virtual PHP. Templates in the same layer of
+<code>blade_render_order</code> do not depend on each other, so each layer can be
+inferred in parallel, as long as <code>update_ast</code> for one layer has
+finished before the next starts. Caller files that are plain PHP never
+change during the pass.</p>
+<p><strong>Where to look:</strong> <code>refresh_blade_injected_vars</code> and
+<code>blade_render_order</code> in <code>blade/call_site_inference.rs</code>.</p>
 
 
 

@@ -963,6 +963,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Blade">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b544-blade-directives-are-recognized-whether-or-not-the-installed-laravel-has-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B544. Blade directives are recognized whether or not the installed Laravel has them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -984,6 +1012,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1590,6 +1635,34 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Blade">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b544-blade-directives-are-recognized-whether-or-not-the-installed-laravel-has-them" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B544. Blade directives are recognized whether or not the installed Laravel has them
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -1611,6 +1684,23 @@
       </span>
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Miscellaneous">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1709,11 +1799,59 @@ references against the block they are written in.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="blade">Blade<a class="headerlink" href="#blade" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b544-blade-directives-are-recognized-whether-or-not-the-installed-laravel-has-them">B544. Blade directives are recognized whether or not the installed Laravel has them<a class="headerlink" href="#b544-blade-directives-are-recognized-whether-or-not-the-installed-laravel-has-them" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>&lt;script type=&quot;application/ld+json&quot;&gt;
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>    {
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>        &quot;@context&quot;: &quot;https://schema.org&quot;,
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        &quot;@type&quot;: &quot;BreadcrumbList&quot;
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>    }
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>&lt;/script&gt;
+</code></pre></div>
+<p>On Laravel 8 this is plain text: Blade only compiles an <code>@name</code> it has a
+<code>compileName()</code> method (or a registered custom directive) for, and
+<code>@context</code> arrived with <code>CompilesContexts</code> in Laravel 11. The preprocessor
+lowers every name in the fixed list in <code>blade/directives.rs</code> regardless of
+version, so <code>"@context":</code> opens an <code>if</code> block and the rest of the JSON-LD
+reports a cascade of syntax errors (around 200 in one Laravel 8 project,
+from schema.org snippets alone). The recognized set should come from the
+installed compiler, by reading which <code>compile*</code> methods
+<code>Illuminate\View\Compilers\BladeCompiler</code> and its <code>Concerns</code> traits
+actually define, the way the alias tables are read from the installed
+framework, with the fixed list as the fallback when no framework is
+installed.</p>
+<h3 id="b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php">B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP<a class="headerlink" href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>&lt;span :class=&quot;{&#39;is-empty&#39;: !selected?.text}&quot;&gt;&lt;/span&gt;
+</code></pre></div>
+<p>Blade only evaluates <code>:name</code> attributes on <code>&lt;x-…&gt;</code> component tags; on any
+other tag the attribute is client-side (Alpine, Vue) and Blade emits it
+verbatim. <code>tag::bound_attr</code> in <code>blade/preprocessor/tag.rs</code> fires on
+<code>html.in_tag</code> alone, so the JavaScript object literal is parsed as PHP and
+reports a run of syntax errors per attribute. The check needs to require
+that the enclosing tag is a component tag.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<p>No outstanding items.</p>
+<h3 id="b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates">B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates<a class="headerlink" href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>analyse::stages::index_project</code> parses the user files and runs
+<code>refresh_blade_injected_vars</code> itself, but never publishes
+<code>workspace_indexed</code>. The first diagnostic that asks for every user file's
+symbol map (<code>enumerate_all_routes</code> through <code>user_file_symbol_maps</code>) then
+runs the editor's <code>ensure_workspace_indexed</code> from inside a diagnostic
+worker: it walks the workspace, indexes the resource files, and refreshes
+every template a second time, re-parsing the ones whose inferred variables
+changed, while the other workers are diagnosing those same templates. Which
+state a template is checked against depends on timing. On one Laravel 8
+project the CLI reports 16 fewer diagnostics than a run where the refresh
+happens once, after the resource indexing, which is what the editor sees.</p>
+<p>Calling <code>ensure_workspace_index_ready_with_progress</code> from <code>index_project</code> in
+place of the bare refresh makes the run deterministic and costs nothing on a
+full run, but a run limited to a few paths then parses the whole workspace
+(about 0.1s and 70-80 MB more on a single file). The fix should index only
+what the selected files' diagnostics need, or settle the index before the
+diagnostic pass starts in a way a path-limited run can afford.</p>
 
 
 
