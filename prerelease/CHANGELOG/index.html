@@ -5009,6 +5009,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Faster reference counts and hover in untyped code.</strong> Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.</li>
 <li><strong>Code that calls undefined functions is analyzed much faster.</strong> Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.</li>
 <li><strong>Files with many diagnostics are reported much faster.</strong> Large files that produce thousands of diagnostics no longer spend most of their time locating each one.</li>
+<li><strong>Long scripts are analyzed much faster and in far less memory.</strong> A long file of top-level code, such as a legacy procedural script or a generated configuration file, no longer takes minutes and gigabytes of memory to analyze.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
