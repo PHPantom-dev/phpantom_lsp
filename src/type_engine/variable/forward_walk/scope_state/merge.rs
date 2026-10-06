@@ -20,6 +20,7 @@ impl ScopeState {
             || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
             || self.closure_captures != other.closure_captures
+            || self.closure_literals != other.closure_literals
             || self.key_facts != other.key_facts
             || !same_implied_narrowings(&self.implied_narrowings, &other.implied_narrowings)
         {
@@ -143,6 +144,10 @@ impl ScopeState {
         // was assigned when every incoming path assigned it the same one.
         for key in disagreeing(&self.closure_captures, &other.closure_captures) {
             self.closure_captures.remove(&key);
+        }
+        if !self.closure_literals.is_empty() {
+            self.closure_literals
+                .retain(|name, offset| other.closure_literals.get(name) == Some(offset));
         }
 
         // A key fact holds past the join only where every path left it

@@ -8,6 +8,7 @@ use super::*;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
+use mago_syntax::walker::Walker;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::with_parsed_program;
@@ -57,6 +58,16 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
                     process_by_ref_closure_captures(arg_expr, scope, ctx);
                 }
             }
+
+            // `$write()` on a variable still holding the closure literal it
+            // was assigned runs that body here, after the arguments, just
+            // as the immediately invoked closure above does.
+            if let Call::Function(fc) = call
+                && let Expression::Variable(Variable::Direct(var)) =
+                    crate::parser::unwrap_parens(fc.function)
+            {
+                invoke_closure_literal_held_by(bytes_to_str(var.name), scope, ctx);
+            }
         }
         // A closure that is defined but not provably invoked (stored in a
         // variable, passed somewhere opaque) may still run any time later,
@@ -92,6 +103,50 @@ pub(crate) fn process_by_ref_closure_captures<'b>(
             process_by_ref_closure_captures(assignment.rhs, scope, ctx);
         }
         _ => {}
+    }
+}
+
+/// Run the by-reference capturing closure literal `var_name` holds, if
+/// [`ScopeState::closure_literal_offset`] says it holds one.
+///
+/// The scope only keeps the closure's offset, since it outlives the
+/// syntax tree being walked, so the closure is found again in the parsed
+/// file.  Not finding it leaves the captures as the definition widened
+/// them.
+fn invoke_closure_literal_held_by(
+    var_name: &str,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let Some(offset) = scope.closure_literal_offset(var_name) else {
+        return;
+    };
+    with_parsed_program(ctx.content, "invoke_closure_literal", |program, _| {
+        let mut found = None;
+        for stmt in program.statements.iter() {
+            Walker::walk_statement(&ClosureAtOffset(offset), stmt, &mut found);
+            if found.is_some() {
+                break;
+            }
+        }
+        if let Some(closure) = found {
+            process_by_ref_closure_capture(closure, scope, ctx, true, true);
+        }
+    });
+}
+
+/// Finds the closure literal starting at an offset.
+struct ClosureAtOffset(u32);
+
+impl<'ast, 'arena> Walker<'ast, 'arena, Option<&'ast Closure<'arena>>> for ClosureAtOffset {
+    fn walk_in_closure(
+        &self,
+        closure: &'ast Closure<'arena>,
+        found: &mut Option<&'ast Closure<'arena>>,
+    ) {
+        if closure.span().start.offset == self.0 {
+            *found = Some(closure);
+        }
     }
 }
 

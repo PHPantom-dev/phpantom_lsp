@@ -14,7 +14,8 @@ function (): void {
 	};
 	$callback();
 
-	assertType('DateTime|null', $value);
+	// PHPantom is more precise than PHPStan here: calling `$callback` runs the closure, which always assigns the capture.
+	assertType('DateTime', $value);
 	assertNativeType('DateTime|null', $value);
 
 	assertType('null', $other);
