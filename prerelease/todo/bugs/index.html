@@ -949,17 +949,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1593,17 +1582,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1728,16 +1706,6 @@ installed compiler, by reading which <code>compile*</code> methods
 actually define, the way the alias tables are read from the installed
 framework, with the fixed list as the fallback when no framework is
 installed.</p>
-<h3 id="b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php">B545. A <code>:name="…"</code> attribute on a plain HTML tag is lowered as PHP<a class="headerlink" href="#b545-a-name-attribute-on-a-plain-html-tag-is-lowered-as-php" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Low</strong></p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>&lt;span :class=&quot;{&#39;is-empty&#39;: !selected?.text}&quot;&gt;&lt;/span&gt;
-</code></pre></div>
-<p>Blade only evaluates <code>:name</code> attributes on <code>&lt;x-…&gt;</code> component tags; on any
-other tag the attribute is client-side (Alpine, Vue) and Blade emits it
-verbatim. <code>tag::bound_attr</code> in <code>blade/preprocessor/tag.rs</code> fires on
-<code>html.in_tag</code> alone, so the JavaScript object literal is parsed as PHP and
-reports a run of syntax errors per attribute. The check needs to require
-that the enclosing tag is a component tag.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>

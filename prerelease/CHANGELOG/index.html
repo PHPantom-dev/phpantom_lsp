@@ -5009,6 +5009,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Alpine and Vue <code>:attr</code> bindings in Blade.</strong> A <code>:name="…"</code> attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only <code>&lt;x-…&gt;</code> component tags evaluate bound attributes.</li>
 <li><strong>laravel-ide-helper files are skipped.</strong> <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading <code>!</code> in <code>[indexing] exclude</code> to index them anyway.</li>
 <li><strong>PHP_CodeSniffer only runs on projects that use it.</strong> A <code>vendor/bin/phpcs</code> installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need <code>squizlabs/php_codesniffer</code> in <code>require-dev</code>, a PHPCS ruleset file, or a <code>[phpcs] standard</code> in <code>.phpantom.toml</code>.</li>
 <li><strong>An integer <code>range()</code> passed straight into a call is a list of integers.</strong> <code>array_map(fn (int $i) =&gt; …, range(0, $n - 1))</code> no longer reports that the callback is passed <code>int|float</code>. Contributed by @phcorp.</li>
