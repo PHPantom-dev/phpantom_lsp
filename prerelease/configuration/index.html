@@ -1947,7 +1947,7 @@ present on a rule; omitted constraints match anything.</p>
 <td><code>exclude</code></td>
 <td>string[]</td>
 <td><code>[]</code></td>
-<td>Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing <code>/</code> anchors to the root, a trailing <code>/</code> restricts to directories, and a leading <code>!</code> re-includes. Applies to background discovery and to the directories <code>analyze</code> walks. A file you open in the editor, or name outright on the <code>analyze</code> command line, is always served.</td>
+<td>Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing <code>/</code> anchors to the root, a trailing <code>/</code> restricts to directories, and a leading <code>!</code> re-includes. Applies to background discovery and to the directories <code>analyze</code> walks. A file you open in the editor, or name outright on the <code>analyze</code> command line, is always served. The <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> files laravel-ide-helper generates are always skipped; list them with a leading <code>!</code> to index them anyway.</td>
 </tr>
 <tr>
 <td><code>extensions</code></td>
