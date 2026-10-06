@@ -904,56 +904,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d6-unreachable-code-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D6. Unreachable code diagnostic
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D6. Unreachable code diagnostic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Behaviour
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#debugging-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Debugging value
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1118,6 +1068,28 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         D27. Destructuring offsets an array cannot have is not reported
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D28. "Remove unreachable code" is wired to PHPStan only
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow
       </span>
     </span>
   </a>
@@ -1560,56 +1532,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d6-unreachable-code-diagnostic" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D6. Unreachable code diagnostic
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D6. Unreachable code diagnostic">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#behaviour" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Behaviour
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#debugging-value" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Debugging value
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1780,6 +1702,28 @@
   
 </li>
       
+        <li class="md-nav__item">
+  <a href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D28. "Remove unreachable code" is wired to PHPStan only
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
     </ul>
   
 </nav>
@@ -1880,60 +1824,6 @@ proxies:</p>
   rule's class is not in the report, so the action has to map the rule
   name to its <code>PHPMD\Rule\…</code> class.</li>
 </ul>
-<hr />
-<h2 id="d6-unreachable-code-diagnostic">D6. Unreachable code diagnostic<a class="headerlink" href="#d6-unreachable-code-diagnostic" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p>Dim code that appears after unconditional control flow exits:
-<code>return</code>, <code>throw</code>, <code>exit</code>, <code>die</code>, <code>continue</code>, <code>break</code>. This is a
-Phase 1 (fast) diagnostic since it requires only AST structure, not
-type resolution.</p>
-<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
-<table>
-<thead>
-<tr>
-<th>Scenario</th>
-<th>Rendering</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Code after <code>return $x;</code> in same block</td>
-<td>Dimmed (DiagnosticTag::UNNECESSARY)</td>
-</tr>
-<tr>
-<td>Code after <code>throw new \Exception()</code></td>
-<td>Dimmed</td>
-</tr>
-<tr>
-<td>Code after <code>exit(1)</code> or <code>die()</code></td>
-<td>Dimmed</td>
-</tr>
-<tr>
-<td>Code after <code>continue</code> or <code>break</code> in a loop</td>
-<td>Dimmed</td>
-</tr>
-<tr>
-<td>Code after <code>if (...) { return; } else { return; }</code></td>
-<td>Dimmed (both branches exit)</td>
-</tr>
-</tbody>
-</table>
-<p>Severity: <strong>Hint</strong> with <code>DiagnosticTag::UNNECESSARY</code> so editors dim
-the text rather than underlining it. This matches how unused imports
-are rendered.</p>
-<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
-<p>Walk the AST statement list. After encountering a statement that
-unconditionally exits the current scope (return, throw, expression
-statement containing <code>exit</code>/<code>die</code>), mark all subsequent statements in
-the same block as unreachable. The span covers from the start of the
-first unreachable statement to the end of the last statement in the
-block.</p>
-<p>Phase 1 only handles the simple single-block case. Whole-branch
-analysis (both if/else branches exit) is a future refinement.</p>
-<h3 id="debugging-value">Debugging value<a class="headerlink" href="#debugging-value" title="Permanent link">&para;</a></h3>
-<p>When our type engine silently resolves a method to a <code>never</code> return
-type (e.g. an incorrectly resolved overload), unreachable code after
-the call becomes visible, signalling the bug.</p>
 <hr />
 <h2 id="d15-unused-parameter-diagnostic">D15. Unused parameter diagnostic<a class="headerlink" href="#d15-unused-parameter-diagnostic" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
@@ -2236,6 +2126,50 @@ positional destructure of a string-keyed array, and a keyed one (<code>['x' =&gt
 = …</code>) of a shape that lacks the key.</p>
 <p>Found running the php-typing-conformance suite
 (<code>regressions_list_destructure_string_key.php</code>). PHPStan and mago report it.</p>
+<h2 id="d28-remove-unreachable-code-is-wired-to-phpstan-only">D28. "Remove unreachable code" is wired to PHPStan only<a class="headerlink" href="#d28-remove-unreachable-code-is-wired-to-phpstan-only" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The action reads <code>phpstan_tool.last_diags</code> and nothing else
+(<code>code_actions/phpstan/remove_unreachable.rs</code>), so the native
+<code>unreachable_code</code> diagnostic never offers it. Adding the code to the
+trigger is not enough on its own: the resolve step deletes from the
+diagnostic's line to the next closing brace rather than using the
+diagnostic's own range, which</p>
+<ul>
+<li>has nothing to delete for a dead run at the top level of a file, where
+  no closing brace follows;</li>
+<li>ignores the reported span, so it would remove more than was dimmed;</li>
+<li>can swallow a hoisted declaration or a <code>goto</code> label sitting inside the
+  run, both of which the diagnostic deliberately leaves reachable.</li>
+</ul>
+<p><strong>Fix:</strong> Take the range from the diagnostic and carry it through to the
+resolve payload, and let the action accept a native diagnostic rather
+than only a proxied one. Moving the file out of <code>phpstan/</code> is the
+smallest part of it.</p>
+<h2 id="d29-namespace-and-declare-bodies-break-the-reachability-flow">D29. <code>namespace</code> and <code>declare</code> bodies break the reachability flow<a class="headerlink" href="#d29-namespace-and-declare-bodies-break-the-reachability-flow" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>unreachable_code</code> treats a braced <code>namespace</code> and a <code>declare</code> body as
+fresh statement lists rather than as the transparent wrappers they are,
+so reachability neither flows into them nor out of them:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="cp">&lt;?php</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="k">namespace</span> <span class="nx">First</span> <span class="p">{</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>    <span class="k">return</span><span class="p">;</span>          <span class="c1">// ends the whole file</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">}</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="k">namespace</span> <span class="nx">Second</span> <span class="p">{</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>    <span class="k">echo</span> <span class="s1">&#39;never&#39;</span><span class="p">;</span>    <span class="c1">// not reported</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="p">}</span>
+</code></pre></div>
+<p>and, inside a function:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">return;</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">declare(ticks=1) {</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    echo &#39;never&#39;;    // not reported</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="x">}</span>
+</code></pre></div>
+<p>Neither wrapper is itself a runtime statement, so neither should be
+dimmed, but the state on either side of it has to carry through.</p>
+<p><strong>Fix:</strong> Thread the reachable/unreachable state through both wrappers
+instead of restarting the scan inside them.</p>
 
 
 
