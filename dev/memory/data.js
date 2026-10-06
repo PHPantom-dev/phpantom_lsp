@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791319633451,
+  "lastUpdate": 1791320277991,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -35019,6 +35019,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 77,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "shuvro.nsu.cse@gmail.com",
+            "name": "Shuvro Roy",
+            "username": "shuvroroy"
+          },
+          "committer": {
+            "email": "noreply@github.com",
+            "name": "GitHub",
+            "username": "web-flow"
+          },
+          "distinct": true,
+          "id": "23584977d665026ef2c1ab1deeb6b0a5c5b4a2ce",
+          "message": "Improve translation completion, navigation, and quick fixes",
+          "timestamp": "2026-10-06T22:43:51+02:00",
+          "tree_id": "a7c41f7b3d4068c42dde680f5aedfbd3445438d5",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/23584977d665026ef2c1ab1deeb6b0a5c5b4a2ce"
+        },
+        "date": 1791320253925,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.5,
             "unit": "MiB"
           }
         ]
