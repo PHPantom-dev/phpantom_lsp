@@ -3270,28 +3270,6 @@ cloning only the items that survive.</p>
 <p><strong>Where to look:</strong> <code>member_completion_cache</code> and
 <code>filter_member_completion_items</code> in
 <code>completion/handler/member_access.rs</code>.</p>
-<h2 id="p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file">P63. Every diagnostic converts its offsets by counting from the top of the file<a class="headerlink" href="#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: High · Complexity: Low</strong></p>
-<p><code>offset_range_to_lsp_range</code> (<code>diagnostics/mod.rs</code>) turns a diagnostic's
-byte span into an LSP range through <code>byte_range_to_lsp_range</code>, which
-calls <code>offset_to_position</code> twice, and that walks <code>content.char_indices()</code>
-from byte 0 every time. There are around fifty call sites building
-diagnostic ranges this way, so a file reports each of its diagnostics at
-a cost proportional to how far down the file it sits, and a pass over one
-file costs O(size × diagnostics).</p>
-<p><code>vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php</code> (2,927 lines,
-150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
-there puts 69% of the stacks in <code>byte_range_to_lsp_range</code> alone, ahead of
-the whole type engine.</p>
-<p><code>text_position::LineIndex</code> already exists for exactly this and documents
-the quadratic it avoids; semantic tokens, code lenses, and inlay hints
-were moved onto it. The diagnostic collectors were not, and they produce
-far more positions per file than any of those. Build one index per file
-per pass and answer every collector's range from it.</p>
-<p><strong>Where to look:</strong> the free <code>offset_range_to_lsp_range</code> and
-<code>Backend::offset_range_to_lsp_range</code> in <code>diagnostics/mod.rs</code>,
-<code>offset_to_position</code>/<code>LineIndex</code> in <code>text_position.rs</code>, and the
-collectors under <code>diagnostics/</code> that call them.</p>
 <h2 id="p64-a-file-with-one-very-large-scope-copies-it-at-every-branch">P64. A file with one very large scope copies it at every branch<a class="headerlink" href="#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p><code>ScopeState::merge_branch</code> joins two paths by comparing and then unioning
