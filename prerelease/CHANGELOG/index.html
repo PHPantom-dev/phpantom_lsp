@@ -5024,6 +5024,8 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Blade only recognizes the directives your Laravel version has.</strong> A directive newer than the installed Laravel is plain text, the way Blade itself treats it. A <code>"@context"</code> key in a JSON-LD block no longer produces a cascade of syntax errors on Laravel versions before 11.</li>
 <li><strong>A container binding removed from a service provider stops resolving.</strong> Deleting the last <code>$this-&gt;app-&gt;bind(...)</code> from your providers no longer leaves the old key resolving to its class until restart.</li>
 <li><strong>Member actions appear when the selection starts in the indentation.</strong> Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.</li>
+<li><strong>Imports of non-ASCII class names no longer break a file.</strong> An import such as <code>use App\Models\Øl;</code> no longer stops the file's diagnostics and code actions.</li>
+<li><strong>Files outside the project no longer break indexing.</strong> A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.</li>
 </ul>
 <h2 id="0110-2026-10-05"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0">0.11.0</a> - 2026-10-05<a class="headerlink" href="#0110-2026-10-05" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
