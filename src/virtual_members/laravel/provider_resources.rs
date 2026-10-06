@@ -1801,6 +1801,33 @@ mod tests {
     }
 
     #[test]
+    fn config_registrations_require_a_key() {
+        let content = "<?php\n\
+            class AppServiceProvider {\n\
+                public function register(): void {\n\
+                    $this->mergeConfigFrom();\n\
+                    $this->mergeConfigFrom(base_path('config/incomplete.php'));\n\
+                    $this->mergeConfigFrom(base_path('config/null.php'), null);\n\
+                    $this->mergeConfigFrom(base_path('config/bakery.php'), 'bakery');\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/app/Providers/AppServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.config_files,
+            vec![ProviderResource {
+                path: PathBuf::from("/ws/config/bakery.php"),
+                namespace: "bakery".to_string(),
+            }]
+        );
+    }
+
+    #[test]
     fn detects_a_database_backed_translation_loader() {
         // An application that keeps its strings in a database still builds a
         // FileLoader to hand to its own loader, so the decision has to follow
