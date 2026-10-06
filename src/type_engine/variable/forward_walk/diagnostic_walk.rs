@@ -462,21 +462,31 @@ pub(crate) fn walk_closures_in_expr<'b>(
 /// written in the right operand of `$c && …`, in a ternary branch or in a
 /// `match` arm sees them as that branch's condition left them, exactly as
 /// a closure written inside an `if ($c)` block does.  The scope is only
-/// copied and narrowed when the branch holds a closure at all.
+/// copied and narrowed when the branch holds something
+/// [`ClosureFinder`] reports.
 fn walk_closures_in_branch<'b>(
     branch: &'b Expression<'b>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     narrow: impl FnOnce(&mut ScopeState),
 ) {
-    let mut holds_closure = false;
-    mago_syntax::walker::Walker::walk_expression(&ClosureFinder, branch, &mut holds_closure);
-    if !holds_closure {
+    let mut last_closure_end = None;
+    mago_syntax::walker::Walker::walk_expression(&ClosureFinder, branch, &mut last_closure_end);
+    let Some(last_closure_end) = last_closure_end else {
         return;
-    }
+    };
     let mut branch_scope = outer_scope.clone();
     narrow(&mut branch_scope);
     walk_closures_in_expr(branch, &branch_scope, ctx, None);
+
+    // A closure or anonymous class puts the scope it was walked in back
+    // just past its end.  When it is the last thing in the branch, that
+    // lands outside the branch, where the narrowing no longer holds: the
+    // `$c` in `f($c && fn () => 1, $c)` is not proven truthy.
+    let restore = last_closure_end + 1;
+    if restore >= branch.span().end.offset {
+        record_scope_snapshot(restore, outer_scope);
+    }
 }
 
 /// Narrow `scope` by what `condition` proves when it is truthy, or by
@@ -494,17 +504,29 @@ fn narrow_by_condition<'b>(
     }
 }
 
-/// Sets its flag on reaching a closure or arrow function, without
-/// descending into one.
+/// Records where the last closure, arrow function or anonymous class it
+/// reaches ends, without descending into one.  These are everything
+/// [`walk_closures_in_expr`] walks a body of; a branch holding none of
+/// them has nothing to walk.
 struct ClosureFinder;
 
-impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for ClosureFinder {
-    fn walk_closure(&self, _: &'ast Closure<'arena>, found: &mut bool) {
-        *found = true;
+impl ClosureFinder {
+    fn found(end: u32, last_end: &mut Option<u32>) {
+        *last_end = Some(last_end.map_or(end, |last| last.max(end)));
+    }
+}
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, Option<u32>> for ClosureFinder {
+    fn walk_closure(&self, closure: &'ast Closure<'arena>, last_end: &mut Option<u32>) {
+        Self::found(closure.span().end.offset, last_end);
     }
 
-    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, found: &mut bool) {
-        *found = true;
+    fn walk_arrow_function(&self, arrow: &'ast ArrowFunction<'arena>, last_end: &mut Option<u32>) {
+        Self::found(arrow.span().end.offset, last_end);
+    }
+
+    fn walk_anonymous_class(&self, anon: &'ast AnonymousClass<'arena>, last_end: &mut Option<u32>) {
+        Self::found(anon.right_brace.end.offset, last_end);
     }
 }
 

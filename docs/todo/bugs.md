@@ -37,7 +37,26 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B552. A by-reference closure capture keeps the narrowing from where the closure was created
+
+**Impact: Low · Complexity: Medium**
+
+```php
+if ($c !== null) {
+    $f = function () use (&$c) { take($c); };   // `$c` reads as non-null
+    $c = null;
+    $f();                                        // TypeError at runtime, not reported
+}
+```
+
+A by-value capture is copied when the closure is created, so seeding it from
+the scope at that point is right. A by-reference capture is read when the
+closure runs, and the variable can be reassigned in between, so the
+narrowing at the creation point does not hold inside the body.
+`seed_closure_captures` seeds both kinds the same way, in an `if` block as in
+a ternary, `&&` or `match` branch. A by-reference capture should also
+carry every type the enclosing function assigns to the variable after the
+closure is created.
 
 ## Array types
 

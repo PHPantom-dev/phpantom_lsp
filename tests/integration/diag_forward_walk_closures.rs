@@ -1261,6 +1261,70 @@ fn closures_outside_the_narrowed_branch_still_see_null() {
     );
 }
 
+/// The narrowing a closure is walked under ends with the branch it is
+/// written in, even when the closure is the last thing in that branch.
+#[test]
+fn code_after_a_narrowed_branch_ending_in_a_closure_sees_null() {
+    let cases = [
+        ("&& right operand", "f($c && fn () => 1, $this->take($c));"),
+        (
+            "|| right operand",
+            "f($c === null || fn () => 1, $this->take($c));",
+        ),
+        (
+            "ternary else branch",
+            "f($c === null ? null : fn () => 1, $this->take($c));",
+        ),
+        (
+            "parenthesized ternary else branch",
+            "f($c === null ? null : (fn () => 1), $this->take($c));",
+        ),
+        (
+            "closure in a ternary else branch",
+            "f($c === null ? null : function () { return 1; }, $this->take($c));",
+        ),
+        (
+            "match (true) arm",
+            "f(match (true) { $c !== null => fn () => 1, default => null }, $this->take($c));",
+        ),
+    ];
+    let failing = failing_cases(&cases, |messages| messages.len() == 1);
+    assert!(
+        failing.is_empty(),
+        "expected exactly one mismatch, got: {failing:#?}"
+    );
+}
+
+/// An anonymous class written in a ternary branch still has its method
+/// bodies walked, as it does anywhere else in an expression.
+#[test]
+fn anonymous_class_in_a_ternary_branch_is_walked() {
+    let backend = create_test_backend();
+    let uri = "file:///anon_in_ternary.php";
+    let text = r#"<?php
+class Conversation { public function hi(): void {} }
+
+class Repro
+{
+    public function run(bool $flag): object
+    {
+        return $flag ? new class {
+            public function m(): void {
+                $x = new Conversation();
+                $x->nope();
+            }
+        } : new \stdClass();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "`nope` is unknown on Conversation, got: {diags:?}"
+    );
+}
+
 /// A by-reference capture reads the variable when the closure runs, not
 /// when it is created, so a reassignment after the closure reaches it.
 /// The ternary branch treats it the way an `if` block does.
