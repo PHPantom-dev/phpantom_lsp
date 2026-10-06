@@ -241,6 +241,14 @@ impl Backend {
                 }),
             );
         }
+        // CLI roots may be relative; normalize before deduplication and URI creation.
+        for root in &mut roots {
+            if root.path.is_relative()
+                && let Ok(path) = std::path::absolute(&root.path)
+            {
+                root.path = path;
+            }
+        }
         roots.sort_by(|a, b| (&a.path, &a.namespace).cmp(&(&b.path, &b.namespace)));
         roots.dedup();
         let mut catalog = TranslationCatalog::default();

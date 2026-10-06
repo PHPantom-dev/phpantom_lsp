@@ -84,6 +84,54 @@ fn translation_catalog_merges_roots_locales_groups_and_providers() {
 }
 
 #[test]
+fn translation_catalog_resolves_relative_workspace_roots_and_absolute_providers() {
+    let backend = make_backend();
+    let cwd = std::env::current_dir().unwrap();
+    let dir = tempfile::tempdir_in(&cwd).unwrap();
+    *backend.workspace.workspace_root.write() =
+        Some(dir.path().strip_prefix(&cwd).unwrap().to_path_buf());
+    for directory in ["lang/en", "package/en"] {
+        std::fs::create_dir_all(dir.path().join(directory)).unwrap();
+    }
+    for (path, content) in [
+        ("lang/en/messages.php", "<?php return ['hello' => 'Hello'];"),
+        ("lang/en.json", r#"{"Welcome":"Welcome home"}"#),
+        (
+            "package/en/provider.php",
+            "<?php return ['registered' => 'Registered'];",
+        ),
+    ] {
+        std::fs::write(dir.path().join(path), content).unwrap();
+    }
+    backend
+        .laravel_provider_resources
+        .write()
+        .trans_dirs
+        .extend(["package", "lang"].map(|path| ProviderResource {
+            path: dir.path().join(path),
+            namespace: String::new(),
+        }));
+
+    let catalog = backend.cached_translations();
+    for (key, path, value) in [
+        ("messages.hello", "lang/en/messages.php", "Hello"),
+        ("Welcome", "lang/en.json", "Welcome home"),
+        (
+            "provider.registered",
+            "package/en/provider.php",
+            "Registered",
+        ),
+    ] {
+        let uri = Url::from_file_path(dir.path().join(path)).unwrap();
+        let found = backend.translation_definitions(key);
+        assert_eq!(found.len(), 1, "{key}: got {found:?}");
+        assert_eq!(found[0].uri, uri, "{key}");
+        assert_eq!(catalog.entries[key][0].value.as_deref(), Some(value));
+        assert!(catalog.contains_uri(uri.as_str()), "{key}: {uri}");
+    }
+}
+
+#[test]
 fn translation_catalog_refreshes_buffers_close_and_watched_files() {
     let backend = make_backend();
     backend.resolved_class_cache.write().set_laravel(true);

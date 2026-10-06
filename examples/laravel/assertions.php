@@ -1627,6 +1627,17 @@ $translationLoader = new \Illuminate\Translation\FileLoader(
     [__DIR__ . '/lang', __DIR__ . '/resources/lang']
 );
 $translationDemo = new \Illuminate\Translation\Translator($translationLoader, 'en');
+$translationContainer = new \Illuminate\Container\Container();
+$translationContainer->instance('translator', $translationDemo);
+$translationProvider = new \App\Providers\DemoServiceProvider($translationContainer);
+$loadTranslations = new ReflectionMethod($translationProvider, 'loadTranslationsFrom');
+$loadTranslations->invoke($translationProvider, __DIR__ . '/resources/bakery-lang');
+
+check(
+    'loadTranslationsFrom() without a namespace registers PHP translation keys',
+    $translationDemo->get('bakery.greeting', ['name' => 'Ada']) === 'Welcome to the bakery, Ada!'
+);
+
 check(
     'JSON translation keys resolve with replacements',
     $translationDemo->get('Fresh bread for :name', ['name' => 'Ada']) === 'Fresh bread for Ada'

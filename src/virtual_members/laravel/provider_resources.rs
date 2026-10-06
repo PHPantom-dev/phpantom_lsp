@@ -684,25 +684,33 @@ pub(crate) fn extract_provider_resources(
 
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
-        // The namespaced `load*From(path, namespace)` registrations differ
-        // only in which list they land in. `loadViewsFrom` is handled
-        // separately below: unlike the other two, it has a published-package
-        // override to check for first.
-        let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
+        // Config registrations require a key, while translations can omit
+        // their namespace to add a global path. Views also check for a
+        // published-package override, so they are handled separately below.
+        let registrations: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
             b"mergeconfigfrom" => Some(&mut resources.config_files),
             b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
             _ => None,
         };
-        if let Some(target) = namespaced {
-            if args.len() >= 2
+        if let Some(target) = registrations {
+            let namespace = match args.get(1).map(|arg| arg.value()) {
+                None | Some(Expression::Literal(Literal::Null(_)))
+                    if method_lower == b"loadtranslationsfrom" =>
+                {
+                    Some("")
+                }
+                Some(arg) => super::helpers::extract_string_literal(arg, content)
+                    .map(|(namespace, _, _)| namespace),
+                None => None,
+            };
+            if !args.is_empty()
+                && let Some(namespace) = namespace
                 && let Some(path) =
                     resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
             {
                 target.push(ProviderResource {
                     path,
-                    namespace: ns.to_string(),
+                    namespace: namespace.to_string(),
                 });
             }
         } else if method_lower == b"loadviewsfrom" {

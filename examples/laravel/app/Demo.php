@@ -776,6 +776,11 @@ class Demo
         Lang::has('validation.required');
         Lang::hasForLocale('validation.required', 'en');
 
+        // DemoServiceProvider registers resources/bakery-lang with the
+        // one-argument loadTranslationsFrom() form. Try completing this key
+        // or Ctrl+Click to reach its declaration there.
+        __('bakery.greeting', ['name' => 'Ada']);
+
         // The framework declares string|array|null for all three helpers,
         // because a key may name a whole group and the keyless form hands
         // its own null back.  The key at the call site settles which of

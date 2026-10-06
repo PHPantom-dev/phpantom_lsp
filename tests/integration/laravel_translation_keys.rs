@@ -727,6 +727,107 @@ async fn a_package_translation_is_not_an_application_group() {
 
 // ─── How a provider names its directory ─────────────────────────────────────
 
+/// An omitted or null namespace adds both group files and JSON catalogues
+/// to the application's global translations.
+#[tokio::test]
+async fn unnamespaced_provider_translations_support_php_and_json_keys() {
+    for namespace_argument in ["", ", null"] {
+        let provider = format!(
+            "<?php\nnamespace Acme\\Billing;\nclass BillingServiceProvider {{
+    public function boot(): void {{
+        $path = __DIR__.'/../lang';
+        $this->loadTranslationsFrom($path{namespace_argument});
+    }}
+}}\n"
+        );
+        let (backend, _dir, uri, content) = workspace(
+            PACKAGE_COMPOSER,
+            &[
+                ("bootstrap/providers.php", PACKAGE_PROVIDER_LIST),
+                ("packages/billing/src/BillingServiceProvider.php", &provider),
+                ("packages/billing/lang/en/invoice.php", BILLING_INVOICE),
+                (
+                    "packages/billing/lang/en.json",
+                    "{\"Pay now\": \"Pay your invoice\"}",
+                ),
+                ("lang/en/auth.php", AUTH_EN),
+            ],
+            "__('invoice.total');\n        __('Pay now');\n        __('invoice.nope');",
+        )
+        .await;
+
+        for (key, suffix, expected) in [
+            (
+                "invoice.total",
+                "/packages/billing/lang/en/invoice.php",
+                "`Total`",
+            ),
+            (
+                "Pay now",
+                "/packages/billing/lang/en.json",
+                "`Pay your invoice`",
+            ),
+        ] {
+            let found = definitions_at(&backend, &uri, &content, key).await;
+            assert!(
+                location_in(&found, suffix).is_some(),
+                "{namespace_argument:?}: {key}: got {found:?}"
+            );
+            let text = hover_on(&backend, &uri, &content, key).await;
+            assert!(
+                text.contains(expected),
+                "{namespace_argument:?}: {key}: got {text}"
+            );
+        }
+
+        for (prefix, expected) in [("__('invoice.", "invoice.total"), ("__('Pay", "Pay now")] {
+            let position = position_after(&content, prefix);
+            let labels =
+                complete_labels_at_opened(&backend, &uri, position.line, position.character).await;
+            assert!(
+                labels.iter().any(|label| label == expected),
+                "{namespace_argument:?}: expected {expected}, got {labels:?}"
+            );
+        }
+
+        let messages = trans_diagnostics(&backend, &uri, &content);
+        assert_eq!(
+            messages.len(),
+            1,
+            "{namespace_argument:?}: got {messages:?}"
+        );
+        assert!(messages[0].contains("'invoice.nope'"), "got {messages:?}");
+    }
+}
+
+/// A namespace expression that cannot be evaluated is not a global registration.
+#[tokio::test]
+async fn an_unresolved_provider_namespace_does_not_register_global_translations() {
+    let provider = BILLING_PROVIDER.replace("'billing'", "$this->translationNamespace()");
+    let (backend, _dir, uri, content) = workspace(
+        PACKAGE_COMPOSER,
+        &[
+            ("bootstrap/providers.php", PACKAGE_PROVIDER_LIST),
+            ("packages/billing/src/BillingServiceProvider.php", &provider),
+            ("packages/billing/lang/en/invoice.php", BILLING_INVOICE),
+            (
+                "packages/billing/lang/en.json",
+                "{\"Pay now\": \"Pay your invoice\"}",
+            ),
+            ("lang/en/auth.php", AUTH_EN),
+        ],
+        "__('invoice.total');\n        __('Pay now');",
+    )
+    .await;
+
+    for key in ["invoice.total", "Pay now"] {
+        let found = definitions_at(&backend, &uri, &content, key).await;
+        assert!(found.is_empty(), "{key}: got {found:?}");
+    }
+    let messages = trans_diagnostics(&backend, &uri, &content);
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
 /// An application provider registering `lang/app` through `lang_path()`.
 const LANG_PATH_PROVIDER: &str = "\
 <?php
