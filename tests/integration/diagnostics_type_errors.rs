@@ -6828,6 +6828,61 @@ function test(): void {
     );
 }
 
+// ─── A ternary inside the object of a property access ──────────────────────
+
+/// A ternary built into the value a property is read off narrows its
+/// branches as it does anywhere else: `$resolved` in the truthy branch is
+/// the string `realpath()` returned, also when the whole expression is
+/// wrapped for `?->` or `->`.
+#[test]
+fn a_ternary_in_the_object_of_a_property_access_narrows_its_branches() {
+    let php = r#"<?php
+declare(strict_types=1);
+
+final class Doc
+{
+    public string $text = '';
+}
+
+final class Registry
+{
+    public function get(string $path): ?Doc
+    {
+        return null;
+    }
+
+    public function sure(string $path): Doc
+    {
+        return new Doc();
+    }
+}
+
+final class Reader
+{
+    public function __construct(private readonly Registry $buffers) {}
+
+    public function nullsafe(string $path): ?string
+    {
+        return ($this->buffers->get($path) ?? $this->buffers->get(($resolved = \realpath($path)) ? $resolved : $path))?->text;
+    }
+
+    public function plain(string $path): string
+    {
+        return $this->buffers->sure(($resolved = \realpath($path)) ? $resolved : $path)->text;
+    }
+}
+"#;
+    // The full pipeline, with the stubs that type `realpath()`: the
+    // branch narrowing is recorded by the forward walk it runs.
+    let diags = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    let messages = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
 // ─── array_map callback return type (#147) ──────────────────────────────────
 
 #[test]
