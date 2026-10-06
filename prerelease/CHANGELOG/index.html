@@ -5014,6 +5014,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>A function added by a watched file is found right away.</strong> A function declared in a file created or changed on disk no longer keeps being reported as undefined while a diagnostic pass or hover is running.</li>
 <li><strong>Global Laravel translation paths are recognised.</strong> Translations registered with <code>loadTranslationsFrom($path)</code> now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly <code>null</code>. Analysis also finds translation files when <code>--project-root</code> is a relative path. Contributed by @shuvroroy.</li>
 <li><strong>Alpine and Vue <code>:attr</code> bindings in Blade.</strong> A <code>:name="…"</code> attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only <code>&lt;x-…&gt;</code> component tags evaluate bound attributes.</li>
 <li><strong>laravel-ide-helper files are skipped.</strong> <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading <code>!</code> in <code>[indexing] exclude</code> to index them anyway.</li>

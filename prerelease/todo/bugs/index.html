@@ -902,23 +902,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b547-a-function-a-watched-file-adds-can-stay-not-found-until-the-next-change" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B547. A function a watched file adds can stay "not found" until the next change
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1574,23 +1557,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Symbol resolution">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b547-a-function-a-watched-file-adds-can-stay-not-found-until-the-next-change" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B547. A function a watched file adds can stay "not found" until the next change
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -1757,20 +1723,7 @@ surfaced: one entry is one root cause, however many shapes it shows up in.</p>
 <h2 id="arithmetic">Arithmetic<a class="headerlink" href="#arithmetic" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="symbol-resolution">Symbol resolution<a class="headerlink" href="#symbol-resolution" title="Permanent link">&para;</a></h2>
-<h3 id="b547-a-function-a-watched-file-adds-can-stay-not-found-until-the-next-change">B547. A function a watched file adds can stay "not found" until the next change<a class="headerlink" href="#b547-a-function-a-watched-file-adds-can-stay-not-found-until-the-next-change" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p><code>reindex_files_batch</code> (<code>src/lib.rs</code>) clears <code>function_not_found_cache</code>
-before it adds the batch's functions to <code>autoload_function_index</code>. A
-lookup running on another thread (a diagnostic pass, a hover) that read the
-index before the insert and records its miss after the clear writes a miss
-for a function the batch just declared. <code>find_or_load_function</code>
-(<code>src/resolution.rs</code>) re-checks only <code>global_functions</code> under the cache's
-write lock, which a byte-scanned file never reaches, and every later lookup
-stops at the negative cache before the index check, so the call is
-reported as an undefined function until the next watched-file change or a
-re-parse of the declaring file. Clear the cache after the index inserts,
-and record a miss only when no index write happened since the lookup
-started (a generation counter compared under the cache's write lock).</p>
+<p>No outstanding items.</p>
 <h2 id="array-types">Array types<a class="headerlink" href="#array-types" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="laravel">Laravel<a class="headerlink" href="#laravel" title="Permanent link">&para;</a></h2>
