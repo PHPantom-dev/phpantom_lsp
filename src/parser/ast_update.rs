@@ -1590,7 +1590,7 @@ impl Backend {
         } else {
             for update in &prepared {
                 self.evict_typed_receiver_view_spans(&update.uri);
-                self.morph_column_spans_cache.write().remove(&update.uri);
+                self.evict_morph_column_spans(&update.uri);
             }
         }
 

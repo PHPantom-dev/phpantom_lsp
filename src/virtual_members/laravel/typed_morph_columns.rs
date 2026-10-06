@@ -26,6 +26,16 @@ impl Backend {
         if map.morph_column_sites.is_empty() {
             return empty_spans();
         }
+        // A confirmed span only ever names a morph-map alias, so a project
+        // that is not Laravel, or whose map neither registers an alias nor is
+        // enforced, has nothing for confirmation to find. Skipping it spares
+        // the re-parse and receiver resolution for every ordinary
+        // `$model->status === 'active'` comparison.
+        if !self.resolved_class_cache.read().is_laravel()
+            || self.laravel_morph_map.read().is_empty()
+        {
+            return empty_spans();
+        }
         let content = self
             .blade_virtual_php_arc(uri)
             .or_else(|| self.get_file_content_arc(uri));
@@ -54,6 +64,16 @@ impl Backend {
             (generation, Arc::clone(map), Arc::clone(&spans)),
         );
         spans
+    }
+
+    /// Drop one file's confirmed spans so the next reader recomputes them.
+    pub(crate) fn evict_morph_column_spans(&self, uri: &str) {
+        // Only files with confirmed candidates get an entry, so the common
+        // case is a miss on an empty map that needs no write lock.
+        if self.morph_column_spans_cache.read().is_empty() {
+            return;
+        }
+        self.morph_column_spans_cache.write().remove(uri);
     }
 
     fn confirm_morph_columns(

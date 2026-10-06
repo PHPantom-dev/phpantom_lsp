@@ -327,6 +327,13 @@ impl LaravelMorphMapIndex {
         self.aliases.keys().cloned().collect()
     }
 
+    /// Whether the map can say anything about an alias: no alias is
+    /// registered and nothing enforces the map, so no literal is either
+    /// known or reportable as unknown.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.aliases.is_empty() && !self.enforced
+    }
+
     /// Whether `alias` is registered.
     pub(crate) fn has_alias(&self, alias: &str) -> bool {
         self.aliases.contains_key(alias)

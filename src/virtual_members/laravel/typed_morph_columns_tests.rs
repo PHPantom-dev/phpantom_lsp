@@ -8,9 +8,47 @@ fn symbol_map(content: &str) -> Arc<SymbolMap> {
     })
 }
 
+/// Mark `backend` as a Laravel project whose morph map registers `post`.
+fn with_morph_map(backend: Backend) -> Backend {
+    backend.resolved_class_cache.write().set_laravel(true);
+    backend.refresh_laravel_morph_map(
+        "file:///phpantom-morph-provider.php",
+        "<?php \\Illuminate\\Database\\Eloquent\\Relations\\Relation::morphMap(['post' => \\Post::class]);",
+    );
+    assert!(!backend.laravel_morph_map.read().is_empty());
+    backend
+}
+
+#[test]
+fn morph_columns_are_not_confirmed_without_a_laravel_morph_map() {
+    let source = "<?php class Comment extends \\Illuminate\\Database\\Eloquent\\Model { public function subject() { return $this->morphTo(); } } Comment::where('subject_type', 'post');";
+    let uri = "file:///phpantom-morph-gate.php";
+    let open = |backend: &Backend| {
+        backend
+            .open_files
+            .write()
+            .insert(uri.to_string(), Arc::new(source.to_string()));
+        backend.update_ast(uri, source);
+        backend.symbol_map_for(uri).unwrap()
+    };
+
+    let plain = Backend::new_headless();
+    let map = open(&plain);
+    assert!(plain.morph_column_spans_for(uri, &map).is_empty());
+
+    let laravel = Backend::new_headless();
+    laravel.resolved_class_cache.write().set_laravel(true);
+    let map = open(&laravel);
+    assert!(laravel.morph_column_spans_for(uri, &map).is_empty());
+
+    let mapped = with_morph_map(Backend::new_headless());
+    let map = open(&mapped);
+    assert_eq!(mapped.morph_column_spans_for(uri, &map).len(), 1);
+}
+
 #[test]
 fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
-    let backend = Backend::new_headless();
+    let backend = with_morph_map(Backend::new_headless());
     let uri = "file:///phpantom-morph-cache.php";
     let source = "<?php class Comment extends \\Illuminate\\Database\\Eloquent\\Model { public function subject() { return $this->morphTo(); } } Comment::where('subject_type', 'post');";
     let map = symbol_map(source);
@@ -151,7 +189,7 @@ fn morph_qualified_columns_require_a_known_effective_table() {
 
 #[test]
 fn morph_column_confirmation_reads_trait_table_metadata_from_source() {
-    let backend = Backend::new_test();
+    let backend = with_morph_map(Backend::new_test());
     let uri = "file:///phpantom-morph-trait-table.php";
     let content = r#"<?php
 trait TableSource { protected $table = 'entries'; }
@@ -176,7 +214,7 @@ Comment::where('comments.subject_type', 'post');
 
 #[test]
 fn morph_column_confirmation_preserves_array_values_across_nested_calls() {
-    let backend = Backend::new_test();
+    let backend = with_morph_map(Backend::new_test());
     let uri = "file:///phpantom-morph-array.php";
     let content = r#"<?php
 class Comment extends \Illuminate\Database\Eloquent\Model {
