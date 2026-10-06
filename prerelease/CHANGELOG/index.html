@@ -4967,6 +4967,9 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>An integer <code>range()</code> passed straight into a call is a list of integers.</strong> <code>array_map(fn (int $i) =&gt; …, range(0, $n - 1))</code> no longer reports that the callback is passed <code>int|float</code>. Contributed by @phcorp. Closes #467.</li>
+</ul>
 <h2 id="0110-2026-10-05"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0">0.11.0</a> - 2026-10-05<a class="headerlink" href="#0110-2026-10-05" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
 <h4 id="command-line">Command line<a class="headerlink" href="#command-line" title="Permanent link">&para;</a></h4>
