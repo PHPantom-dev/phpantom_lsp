@@ -54,7 +54,7 @@ PHPantom focuses on deep type intelligence. Here's how it compares:
 <sup>2</sup> Call hierarchy, type hierarchy, go-to implementation / type-definition, code lens.<br>
 <sup>3</sup> Semantic tokens, inlay hints, auto-import, smart select, folding ranges, formatting, document links.<br>
 <sup>4</sup> Undefined and unused variables, type errors, unknown symbols and members, argument counts.<br>
-<sup>5</sup> PHPantom runs PHPStan, PHPCS, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
+<sup>5</sup> PHPantom runs PHPStan, PHPCS, PHPMD, and Mago in-server and turns their reports into quick fixes. Phpactor proxies PHPStan, Psalm, and PHP-CS-Fixer, and PHPStorm bundles PHPStan and Psalm runners, but both only relay the errors.<br>
 <sup>6</sup> Conditional return types, type aliases (`@phpstan-type` / `@phpstan-import-type`), pseudo-types, `@mixin`.<br>
 <sup>8</sup> Extract method/function, extract/inline variable, extract constant, extract interface, promote constructor parameter, generate constructor, generate getters/setters, implement interface methods.<br>
 <sup>9</sup> Null-check simplification, string interpolation conversion, converting between arrow functions and closures, and switch statements to match expressions.<br>
@@ -89,7 +89,7 @@ PHPantom understands Composer projects out of the box, but works without setup o
 - **Drupal project support.** Detects Drupal projects via `composer.json`, resolves the web root, and indexes Drupal-specific directories and PHP extensions (`.module`, `.install`, `.theme`, etc.) with `.gitignore` bypassed so that Composer-managed core and contrib code is always available.
 - **`require_once` discovery.** Functions from required files are available for completion.
 - **Go-to-implementation.** Jump from an interface or abstract class to all concrete implementations. Scans open files, classmap, PSR-4 directories, and embedded stubs.
-- **Workspace-wide diagnostics.** After startup, diagnostics run in the background across every file in the project, not just the ones you have open, so problems are already visible when you navigate to a file. Configured external tools (PHPStan, PHPCS, Mago) run project-wide too, once the background pass finishes. Both are deferred until after startup so they never slow down time to ready.
+- **Workspace-wide diagnostics.** After startup, diagnostics run in the background across every file in the project, not just the ones you have open, so problems are already visible when you navigate to a file. Configured external tools (PHPStan, PHPCS, PHPMD, Mago) run project-wide too, once the background pass finishes. Both are deferred until after startup so they never slow down time to ready.
 
 ## Acknowledgements
 

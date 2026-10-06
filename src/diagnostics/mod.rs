@@ -147,6 +147,12 @@
 //!   runs at a time, with the same debounce and pending-URI slot
 //!   design.
 //!
+//! - **PHPMD proxy diagnostics** — run PHP Mess Detector 3 via
+//!   `phpmd analyze --format=json -` and surface its findings as LSP
+//!   diagnostics.  Auto-detected via `vendor/bin/phpmd` or `$PATH` when
+//!   the project has a PHPMD config file; configurable under `[phpmd]`.
+//!   Runs in its own **dedicated worker task**, like PHPCS.
+//!
 //! - **Mago lint proxy diagnostics** — run `mago lint --reporting-format
 //!   json --stdin-input` and surface AST-level lint issues (style,
 //!   naming, code smells) as LSP diagnostics.  Auto-detected when
@@ -174,6 +180,7 @@
 //! | `diag_last_slow`           | type resolution    |
 //! | `phpstan_tool.last_diags`  | PHPStan            |
 //! | `phpcs_tool.last_diags`    | PHPCS              |
+//! | `phpmd_tool.last_diags`    | PHPMD              |
 //! | `mago_lint_tool.last_diags`| Mago lint          |
 //! | `mago_analyze_tool.last_diags` | Mago analyze  |
 //!
@@ -778,6 +785,12 @@ impl Backend {
             }
         }
         {
+            let cache = self.phpmd_tool.last_diags.lock();
+            if let Some(phpmd_diags) = cache.get(uri_str) {
+                full.extend(phpmd_diags.iter().cloned());
+            }
+        }
+        {
             let cache = self.mago_lint_tool.last_diags.lock();
             if let Some(mago_diags) = cache.get(uri_str) {
                 full.extend(mago_diags.iter().cloned());
@@ -965,7 +978,7 @@ impl Backend {
         // at a time).
     }
 
-    /// Schedule all external tool runs (PHPStan, PHPCS, Mago) for a
+    /// Schedule all external tool runs (PHPStan, PHPCS, PHPMD, Mago) for a
     /// single file.
     ///
     /// External tools are expensive (seconds per run) and at most one
@@ -977,6 +990,7 @@ impl Backend {
         }
         self.schedule_phpstan(uri.clone());
         self.schedule_phpcs(uri.clone());
+        self.schedule_phpmd(uri.clone());
         self.schedule_mago_lint(uri.clone());
         self.schedule_mago_analyze(uri);
     }
@@ -1163,7 +1177,7 @@ impl Backend {
             .workspace_diag_pass_started
             .load(Ordering::Acquire)
         {
-            let migrations: [(&'static str, Vec<Diagnostic>); 4] = [
+            let migrations: [(&'static str, Vec<Diagnostic>); 5] = [
                 (
                     "phpstan",
                     self.phpstan_tool
@@ -1176,6 +1190,15 @@ impl Backend {
                 (
                     "phpcs",
                     self.phpcs_tool
+                        .last_diags
+                        .lock()
+                        .get(uri_str)
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+                (
+                    "phpmd",
+                    self.phpmd_tool
                         .last_diags
                         .lock()
                         .get(uri_str)
@@ -1210,9 +1233,10 @@ impl Backend {
         // Remove all per-source caches so we don't leak memory.
         self.diag.last_fast.lock().remove(uri_str);
         self.diag.last_slow.lock().remove(uri_str);
-        // Remove cached PHPStan, PHPCS, and Mago diagnostics too.
+        // Remove cached PHPStan, PHPCS, PHPMD, and Mago diagnostics too.
         self.phpstan_tool.forget(uri_str);
         self.phpcs_tool.forget(uri_str);
+        self.phpmd_tool.forget(uri_str);
         self.mago_lint_tool.forget(uri_str);
         self.mago_analyze_tool.forget(uri_str);
         // Remove pull-diagnostic caches.

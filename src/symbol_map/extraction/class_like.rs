@@ -357,10 +357,11 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     );
                 }
 
-                // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
-                // 'bar')], #[CoversFunction('baz')] — the target is a
-                // string literal, so nothing else makes it navigable.
-                try_emit_coverage_attribute_spans(
+                // PHPUnit metadata attributes: #[CoversMethod(Foo::class,
+                // 'bar')], #[CoversFunction('baz')], #[DataProvider('qux')]
+                // — the target is a string literal, so nothing else makes
+                // it navigable.
+                try_emit_phpunit_attribute_spans(
                     class_name,
                     arg_list,
                     &mut ctx.has_phpunit_attrs,

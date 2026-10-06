@@ -109,6 +109,7 @@ impl Backend {
         content: &str,
         sites: &[ViewReceiverSite],
     ) -> Vec<SymbolSpan> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let by_offset: HashMap<u32, &ViewReceiverSite> =
             sites.iter().map(|site| (site.start, site)).collect();
 

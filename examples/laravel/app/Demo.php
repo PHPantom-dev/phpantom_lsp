@@ -19,6 +19,7 @@ use App\Models\Bakery;
 use App\Models\BakeryOrder;
 use App\Models\BlogAuthor;
 use App\Models\BlogPost;
+use App\Models\CastSample;
 use App\Models\Customer;
 use App\Models\Danish;
 use App\Models\Delivery;
@@ -157,6 +158,27 @@ class Demo
         $danish->sku;                 // inherited $fillable        → mixed
     }
 
+    // Class-based casts return the value the cast produces, not the cast
+    // class. AsEnumCollection::of(OrderStatus::class) is a collection of that
+    // enum, so pluck() and the enum's own methods are both available.
+    public function classCasts(CastSample $sample): void
+    {
+        $sample->statuses->pluck('value');       // AsEnumCollection::of → Collection<array-key, OrderStatus>
+        $sample->statuses->first()?->label();    // item is OrderStatus
+        $sample->flavors;                        // AsEnumArrayObject::of → ArrayObject<array-key, JamFlavor>
+        $sample->options;                        // AsArrayObject → ArrayObject<array-key, mixed>
+        $sample->tags;                           // AsCollection → Collection<array-key, mixed>
+        $sample->toppings->first()?->isSweet();  // AsCollection::of → Collection<array-key, Frosting>
+        $sample->notes;                          // AsCollection::using → PostCollection
+        $sample->secrets;                        // AsEncryptedCollection::of → Collection<array-key, Frosting>
+        $sample->secret_options;                 // AsEncryptedArrayObject → ArrayObject
+        $sample->directory;                      // AsStringable → Stringable
+        $sample->settings;                       // AsFluent → Fluent
+        $sample->homepage;                       // AsUri → Uri
+        $sample->blurb;                          // AsHtmlString → HtmlString
+        $sample->embedding;                      // AsBinary::uuid → string
+        $sample->ulid;                           // AsBinary::ulid → string
+    }
 
     // ── Eloquent Query Builder ──────────────────────────────────────────────
 

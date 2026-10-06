@@ -125,9 +125,12 @@ impl Backend {
                     member_name,
                     is_static,
                     is_method_call,
+                    docblock_ref,
                     ..
                 } => {
-                    if !is_method_call {
+                    // A name in metadata (`#[DataProvider('old')]`) is not a
+                    // call that a replacement template could be spliced into.
+                    if !is_method_call || docblock_ref.is_reference() {
                         continue;
                     }
 

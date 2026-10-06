@@ -76,7 +76,10 @@ full set of CI checks, testing conventions, and code style rules.
 - **Update the changelog.** Add an entry under `## [Unreleased]` in
   `docs/CHANGELOG.md` for bug fixes and new features. Skip purely
   internal refactors that don't change observable behaviour. Write
-  for end users, not developers. Include `Contributed by @username`
+  for end users, not developers, and keep entries short: a bolded
+  summary plus one or two sentences, with no explanation of the
+  internal cause. Follow the entry rules in the Changelog section of
+  `docs/CONTRIBUTING.md`. Include `Contributed by @username`
   with the GitHub username of the author.
 - **Reference issues in commits.** When fixing a GitHub issue, include
   `Closes #123` in the commit message body.

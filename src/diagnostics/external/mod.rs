@@ -1,4 +1,4 @@
-//! External-tool proxy pipelines: PHPStan, PHPCS, and Mago (lint + analyze).
+//! External-tool proxy pipelines: PHPStan, PHPCS, PHPMD, and Mago (lint + analyze).
 //!
 //! Every pipeline shares one worker loop, [`Backend::external_tool_worker`]:
 //! wait for a notification, drain extra permits, snapshot the pending URI
@@ -24,6 +24,7 @@ use crate::config::Config;
 
 pub(crate) mod mago;
 pub(crate) mod phpcs;
+pub(crate) mod phpmd;
 pub(crate) mod phpstan;
 
 /// A tool run whose binary and configuration are already resolved.

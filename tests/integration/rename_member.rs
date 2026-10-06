@@ -1030,3 +1030,45 @@ async fn rename_method_on_crlf_file_with_multibyte_prefix_uses_utf16_columns() {
     let column = usage_prefix.encode_utf16().count() as u32;
     assert_eq!(ranges, vec![(2, 20, 23), (5, column, column + 3)]);
 }
+
+// ─── PHPUnit Metadata ───────────────────────────────────────────────────────
+
+/// Renaming a data provider must carry the name its tests refer to it by,
+/// or the rename silently breaks them.
+#[tokio::test]
+async fn rename_data_provider_updates_the_metadata_naming_it() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "use PHPUnit\\Framework\\Attributes\\DataProvider;\n",
+        "final class PlaceholdersTest {\n",
+        "    #[DataProvider('fitting')]\n",
+        "    public function testFits(string $s): void {}\n",
+        "    /** @dataProvider fitting */\n",
+        "    public function testFitsAgain(string $s): void {}\n",
+        "    public static function fitting(): iterable { yield ['a']; }\n",
+        "}\n",
+    );
+    open_php(&backend, &uri, text).await;
+
+    let (line, character) = line_char_of(text, "function fitting");
+    let edit = rename(&backend, &uri, line, character + 10, "matching")
+        .await
+        .expect("expected a workspace edit");
+    let renamed = apply_edits(text, &edits_for_uri(&edit, &uri));
+    assert_eq!(
+        renamed,
+        concat!(
+            "<?php\n",
+            "use PHPUnit\\Framework\\Attributes\\DataProvider;\n",
+            "final class PlaceholdersTest {\n",
+            "    #[DataProvider('matching')]\n",
+            "    public function testFits(string $s): void {}\n",
+            "    /** @dataProvider matching */\n",
+            "    public function testFitsAgain(string $s): void {}\n",
+            "    public static function matching(): iterable { yield ['a']; }\n",
+            "}\n",
+        )
+    );
+}

@@ -107,13 +107,13 @@ src/
 │   # Diagnostics
 ├── diagnostics/
 │   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
 │   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
 │   └── <collector>.rs      # One module per diagnostic (unknown_classes, unknown_functions,
 │                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
 │
 │   # External tools & CLI subcommands
-├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 ├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
@@ -668,7 +668,7 @@ Provider priority order (highest first):
 
 Two providers are currently registered in `default_providers()`:
 
-- **`LaravelModelProvider`** (`virtual_members/laravel.rs`): synthesizes virtual members for classes extending `Illuminate\Database\Eloquent\Model`. Produces relationship properties (methods returning `HasMany`, `HasOne`, `BelongsTo`, etc. generate a virtual property typed from the relationship's generic parameters), scope methods (both the `scopeActive` naming convention and the `#[Scope]` attribute from Laravel 11+ are supported; either style becomes `active()` as both static and instance), Builder-as-static forwarding (`User::where()->get()` resolves end-to-end), accessors (legacy `getXAttribute()` and modern `Attribute` casts), and cast properties (`$casts` array or `casts()` method entries are mapped to PHP types like `datetime` to `\Carbon\Carbon`, `boolean` to `bool`, custom cast classes to their `get()` return type). Highest priority among virtual member providers. Scope methods are also injected onto `Builder<Model>` instances via a post-generic-substitution hook in `type_hint_to_classes_depth` (see "Scope Methods on Builder Instances" below).
+- **`LaravelModelProvider`** (`virtual_members/laravel.rs`): synthesizes virtual members for classes extending `Illuminate\Database\Eloquent\Model`. Produces relationship properties (methods returning `HasMany`, `HasOne`, `BelongsTo`, etc. generate a virtual property typed from the relationship's generic parameters), scope methods (both the `scopeActive` naming convention and the `#[Scope]` attribute from Laravel 11+ are supported; either style becomes `active()` as both static and instance), Builder-as-static forwarding (`User::where()->get()` resolves end-to-end), accessors (legacy `getXAttribute()` and modern `Attribute` casts), and cast properties (`$casts` array or `casts()` method entries are mapped to PHP types like `datetime` to `\Carbon\Carbon`, `boolean` to `bool`, framework class casts such as `AsEnumCollection::of(Status::class)` to `Collection<array-key, Status>`, custom cast classes to their `get()` return type). Highest priority among virtual member providers. Scope methods are also injected onto `Builder<Model>` instances via a post-generic-substitution hook in `type_hint_to_classes_depth` (see "Scope Methods on Builder Instances" below).
 - **`PHPDocProvider`** (`virtual_members/phpdoc.rs`): surfaces `@method`, `@property`, `@property-read`, `@property-write`, and `@mixin` tags from the class-level docblock. Explicit `@method` / `@property` tags are parsed once during AST extraction into `ClassInfo.doc_members` (an `Arc<DocblockMembers>`, `None` when the docblock declares neither), so `provide` only reads structured data and applies the per-consumer generic substitutions. The provider collects those tags from the class itself, its used traits, its parent chain, and its implemented interfaces. For `@mixin` tags, it loads the referenced classes and merges their public members. Within the provider, explicit tags take precedence over mixin members. Recurses into mixin-of-mixin chains up to `MAX_MIXIN_DEPTH`.
 
 ### Laravel Class Patches
@@ -1158,6 +1158,7 @@ Diagnostics run in three independent background `tokio::spawn` tasks so they nev
 1. **Native diagnostic worker** — collects fast (syntax errors, unused imports, deprecated usage) and slow (unknown classes/members/functions, argument count, implementation errors) diagnostics. Debounces at 500 ms.
 2. **PHPStan worker** — runs PHPStan in editor mode (`--tmp-file` / `--instead-of`). Debounces at 2 000 ms.
 3. **PHPCS worker** — runs PHP_CodeSniffer via `phpcs --report=json` with stdin piping. Debounces at 2 000 ms.
+4. **PHPMD worker** — runs PHP Mess Detector 3 via `phpmd analyze --format=json -` with stdin piping.
 
 ### Native transport choice
 
