@@ -633,10 +633,11 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
 }
 
 /// Apply a postfix to the innermost unparenthesized callable return type.
-/// Mago binds `[]` and `[K]` outside `callable(): T`; PHPDoc binds them to
-/// `T`. Keep the CST's parentheses until this is settled, so `(callable(): T)[]`
-/// remains an array of callables. Composing postfixes preserves their order
-/// without allocating an intermediate list or rebuilding a callable twice.
+/// Mago binds `[]` and `[K]` outside `callable(): T`; PHPStan's phpdoc-parser
+/// binds them to `T`. A parenthesized callable is left alone, so
+/// `(callable(): T)[]` stays an array of callables. Composing postfixes
+/// preserves their order without allocating an intermediate list or
+/// rebuilding a callable twice.
 fn convert_with_postfix(
     src: &str,
     ty: &cst::Type<'_>,
