@@ -24,6 +24,10 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
         // For array access keys, narrow the shape on the base variable.
         strip_null_from_subject(&var_name, scope, ctx);
     }
+    // `($x ?? null) !== null` proves the same of `$x`.
+    if let Some(var_name) = extract_coalesced_non_null_check_var(condition) {
+        strip_null_from_subject(&var_name, scope, ctx);
+    }
     // Check for `$x !== false` or `false !== $x` — the truthy branch
     // rules out `false` alone, which is what the `T|false` handle idiom
     // (`fopen()`, `finfo_open()`, `strpos()`, …) is written to do.
@@ -147,6 +151,10 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
         // shape on the base variable directly rather than using a
         // synthetic scope entry.  This ensures the narrowed shape
         // survives scope merges.
+        strip_null_from_subject(&var_name, scope, ctx);
+    }
+    // And failing `($x ?? null) === null` proves the same of `$x`.
+    if let Some(var_name) = extract_coalesced_null_equality_check_var(condition) {
         strip_null_from_subject(&var_name, scope, ctx);
     }
     // When the condition is `$x !== null`, the inverse (else/guard)

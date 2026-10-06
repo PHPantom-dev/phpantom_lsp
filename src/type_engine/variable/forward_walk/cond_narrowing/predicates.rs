@@ -32,6 +32,16 @@ fn extract_sentinel_check(
     sentinel: Sentinel,
     is_sentinel: fn(&Expression<'_>) -> bool,
 ) -> Option<String> {
+    extract_sentinel_check_by(expr, sentinel, is_sentinel, expr_to_subject)
+}
+
+/// [`extract_sentinel_check`] with the compared operand read by `subject`.
+fn extract_sentinel_check_by(
+    expr: &Expression<'_>,
+    sentinel: Sentinel,
+    is_sentinel: fn(&Expression<'_>) -> bool,
+    subject: fn(&Expression<'_>) -> Option<String>,
+) -> Option<String> {
     let (inner, negated) = narrowing::unwrap_condition_negation(expr);
     let Expression::Binary(bin) = inner else {
         return None;
@@ -52,12 +62,55 @@ fn extract_sentinel_check(
         return None;
     }
     if is_sentinel(bin.rhs) {
-        return expr_to_subject(bin.lhs);
+        return subject(bin.lhs);
     }
     if is_sentinel(bin.lhs) {
-        return expr_to_subject(bin.rhs);
+        return subject(bin.rhs);
     }
     None
+}
+
+/// The subject `($x ?? null)` coalesces, or `None` for any other operand.
+///
+/// The coalesce is `null` exactly when `$x` is unset or `null`, so a check
+/// that it is *not* `null` proves `$x` set and non-null. The converse proves
+/// nothing about `$x`'s type — an unset entry of an `array<int, ?object>`
+/// is still described as `object|null` — so callers only ever strip `null`
+/// with it. Only a `null` fallback ties the coalesce to `$x`:
+/// `($x ?? 'none') !== null` is always true.
+fn coalesced_onto_null_subject(operand: &Expression<'_>) -> Option<String> {
+    let mut inner = operand;
+    while let Expression::Parenthesized(parens) = inner {
+        inner = parens.expression;
+    }
+    match inner {
+        Expression::Binary(bin) if bin.operator.is_null_coalesce() && is_null_expr(bin.rhs) => {
+            expr_to_subject(bin.lhs)
+        }
+        _ => None,
+    }
+}
+
+/// The subject of `($x ?? null) !== null`, whose truthy branch proves `$x`
+/// set and non-null.
+pub(crate) fn extract_coalesced_non_null_check_var(expr: &Expression<'_>) -> Option<String> {
+    extract_sentinel_check_by(
+        expr,
+        Sentinel::IsNot,
+        is_null_expr,
+        coalesced_onto_null_subject,
+    )
+}
+
+/// The subject of `($x ?? null) === null`, whose failing (an `else`, or the
+/// code after an early-returning `if`) proves `$x` set and non-null.
+pub(crate) fn extract_coalesced_null_equality_check_var(expr: &Expression<'_>) -> Option<String> {
+    extract_sentinel_check_by(
+        expr,
+        Sentinel::Is,
+        is_null_expr,
+        coalesced_onto_null_subject,
+    )
 }
 
 /// Extract the subjects of an `isset(…)` call, `wanted` saying whether the
