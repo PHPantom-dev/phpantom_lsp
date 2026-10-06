@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791325409529,
+  "lastUpdate": 1791326536523,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -35223,6 +35223,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 82.6,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "287716f7e74da68affdfa962ac9724b20c2ad4a1",
+          "message": "Untyped methods in large classes are inferred much faster",
+          "timestamp": "2026-10-07T00:28:50+02:00",
+          "tree_id": "81ab11551a3b31d36c52f1bb5e1d549efa44027c",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/287716f7e74da68affdfa962ac9724b20c2ad4a1"
+        },
+        "date": 1791326525472,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.6,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 85.4,
             "unit": "MiB"
           }
         ]
