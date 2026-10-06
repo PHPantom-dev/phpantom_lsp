@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791319033514,
+  "lastUpdate": 1791319047864,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34951,6 +34951,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.3,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "1eacee9e45e3d5e23289c93ff7dfc34cfef95d25",
+          "message": "Alpine and Vue `:attr` bindings in Blade",
+          "timestamp": "2026-10-06T22:23:30+02:00",
+          "tree_id": "da417c0955ada5d862fa68e61bb1246cc491cd80",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/1eacee9e45e3d5e23289c93ff7dfc34cfef95d25"
+        },
+        "date": 1791319017240,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.7,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 84.3,
             "unit": "MiB"
           }
         ]
