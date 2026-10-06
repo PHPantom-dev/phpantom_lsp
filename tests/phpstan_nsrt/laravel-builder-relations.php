@@ -5,8 +5,8 @@
 // Framework declarations retain Laravel's callable signatures; none of the
 // model-specific expectations are supplied by the stubs themselves.
 // Known gaps retain the desired type with the corpus's SKIP marker. Arrow
-// callbacks are covered in completion_laravel.rs because this runner replaces
-// the whole assertion line, which would erase an enclosing arrow expression.
+// callbacks are covered in completion_laravel.rs, together with the
+// completion and diagnostics consumers.
 
 namespace Illuminate\Support\Traits {
     trait ForwardsCalls {
@@ -257,7 +257,7 @@ namespace BuilderRelationAudit {
         // PHPantom retains the model argument even on a non-generic custom builder.
         assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', PlainTeam::query()->where('active', true)->orderBy('id')->active());
         assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', PlainTeam::where('active', true)->orderBy('id'));
-        assertType('BuilderRelationAudit\PlainTeamBuilder', $plain->newQuery()->orderBy('id')); // SKIP: newQuery loses the custom builder
+        assertType('BuilderRelationAudit\PlainTeamBuilder<BuilderRelationAudit\PlainTeam>', $plain->newQuery()->orderBy('id')); // SKIP: newQuery loses the custom builder
         assertType('BuilderRelationAudit\PlainTeam', PlainTeam::query()->active()->firstOrFail());
     }
 
@@ -362,11 +362,11 @@ namespace BuilderRelationAudit {
             assertType('string', $type);
         }, relation: 'commentable', types: Team::class);
         Comment::whereHasMorph('commentable', '*', function ($query, $type) {
-            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
             assertType('string', $type);
         });
         Comment::whereHasMorph('commentable', [], function ($query) {
-            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query); // SKIP: morph candidate builders are not inferred
+            assertType('Illuminate\Database\Eloquent\Builder<Illuminate\Database\Eloquent\Model>', $query);
         });
         TeamComment::whereHasMorph('commentable', '*', function ($query) {
             assertType('BuilderRelationAudit\TeamBuilder<BuilderRelationAudit\Team>', $query); // SKIP: morph candidate builders are not inferred

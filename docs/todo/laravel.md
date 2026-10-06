@@ -249,7 +249,7 @@ the collection return-type patches for the argument forms. The property
 lookup already exists for `model-property<Model>`; the work is threading
 a resolved key type through the generic substitution.
 
-#### L55. Preserve custom builders through model instance query factories
+#### L60. Preserve custom builders through model instance query factories
 
 **Impact: Medium · Complexity: Medium**
 
@@ -269,7 +269,7 @@ instance query-factory return in the shared type engine. Check
 Keep the inferred model argument for a builder without its own templates;
 removing that context would break terminal methods such as `firstOrFail()`.
 
-#### L56. Preserve custom builders in relation callbacks
+#### L61. Preserve custom builders in relation callbacks
 
 **Impact: Medium · Complexity: Medium-High**
 
@@ -277,7 +277,7 @@ Two sides of the relation override discard custom-builder context:
 
 - `Team::query()->whereHas('stocks.warehouse', …)` fails to identify the
   receiver's model when `Team` uses `TeamBuilder`. The callback in the
-  assertion fixture becomes `Builder<string>` instead of
+  assertion fixture falls back to `Builder<Model>` instead of
   `Builder<Warehouse>`.
 - `Stock::whereHas('team', …)` resolves the related model but always builds
   `Builder<Team>`, losing `TeamBuilder` and its custom methods. An explicit
@@ -295,13 +295,13 @@ this in the shared callable inference path so completion, hover, and
 diagnostics agree. Refining a bare `Builder` hint to its custom subclass
 must preserve the inferred generic arguments too.
 
-#### L57. Bind named relation callback arguments before inference
+#### L62. Bind named relation callback arguments before inference
 
 **Impact: Medium · Complexity: Medium**
 
 `Team::has(relation: 'stocks.warehouse', callback: …)` types the callback
-correctly, but putting `callback:` first loses the relation and produces
-`Builder<string>` in the assertion fixture. Positional callbacks in the
+correctly, but putting `callback:` first loses the relation and falls back
+to `Builder<Model>` in the assertion fixture. Positional callbacks in the
 fifth argument already work; the missing step is binding named arguments,
 not assuming the first supplied expression names the relation.
 
@@ -316,13 +316,13 @@ parameter, consistently in the cursor and diagnostics walks. Cover static
 and instance calls, arrow functions, omitted defaults, and closures in an
 unrelated argument so the override does not attach to the wrong closure.
 
-#### L58. Infer morph constraint callbacks from candidate models
+#### L63. Infer morph constraint callbacks from candidate models
 
 **Impact: Medium · Complexity: Medium-High**
 
 The `whereHasMorph` family does not participate in relation-query
-inference. A literal model class or an array of candidates yields
-`Builder<string>` in the assertion fixture, losing both the related
+inference. A literal model class or an array of candidates falls back to
+`Builder<Model>` in the assertion fixture, losing both the related
 models and their custom builders. The second `$type` callback parameter
 already resolves to `string` from Laravel's declaration and must stay
 typed when the first parameter is refined.
@@ -332,7 +332,9 @@ typed when the first parameter is refined.
 callback-taking existence methods, single and multiple candidates,
 reordered named arguments, wildcard and empty-list fallbacks, and a
 declared `MorphTo<Team>` target. The desired builder types remain in the
-`SKIP` assertions; the `$type` assertions run normally.
+`SKIP` assertions; the `$type` assertions and the `MorphTo<Model>`
+wildcard and empty-list cases, whose `Builder<Model>` fallback is already
+correct, run normally.
 
 **Where to change:** Extend shared callable inference using bound
 `relation`, `types`, and `callback` arguments. Build a union of candidate
@@ -345,7 +347,7 @@ does. Do not boot the application or query the database for wildcard
 discovery. Check the `whereMorphRelation` shortcuts when sharing the
 callback logic.
 
-#### L59. Infer both callback receivers for withWhereHas
+#### L64. Infer both callback receivers for withWhereHas
 
 **Impact: Medium · Complexity: Medium-High**
 
