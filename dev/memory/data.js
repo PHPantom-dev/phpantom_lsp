@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791316255150,
+  "lastUpdate": 1791316365042,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34781,6 +34781,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 83.4,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "67c627d6020f1e1e07c8097a1cd013abeb638542",
+          "message": "Code that calls undefined functions is analyzed much faster",
+          "timestamp": "2026-10-06T21:39:07+02:00",
+          "tree_id": "5c72e9b420cc8190890968c7ac42e0a55978b2df",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/67c627d6020f1e1e07c8097a1cd013abeb638542"
+        },
+        "date": 1791316326978,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 37.5,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83.6,
             "unit": "MiB"
           }
         ]
