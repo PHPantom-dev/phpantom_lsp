@@ -3320,36 +3320,6 @@ set of removed names, turning the filter into set lookups.</p>
 <p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
 <code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
 <hr />
-<h2 id="p68-body-return-type-inference-re-parses-the-declaring-file-every-time">P68. Body return-type inference re-parses the declaring file every time<a class="headerlink" href="#p68-body-return-type-inference-re-parses-the-declaring-file-every-time" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
-<p><code>infer_return_type_for_function</code> reads the declaring file's text and
-parses it from scratch through <code>with_parsed_program</code> for every body it
-infers, and <code>infer_body_return_type</code> additionally splits the whole file
-into lines twice to locate the declaration. The cost is proportional to
-the size of the declaring file rather than the method. A 23,000-line
-<code>_ide_helper.php</code> (now excluded by default) made every inference of one
-of its facade methods cost a full parse of the file, and memo misses
-across call sites multiplied that into minutes. Any large hand-written
-or generated class with untyped methods has the same shape.</p>
-<p>Caching the parsed program per file for the duration of a pass (or
-inferring from an AST the caller already holds when the method lives in
-the file being walked), and locating the body by <code>name_offset</code> instead
-of by scanning lines, would make each inference cost the size of the
-method body.</p>
-<p>The forward walker has the same shape closer to home:
-<code>function_invokes_callable_arg_immediately</code> re-parses the very file
-being walked to find out whether a function declared in it is tagged
-<code>@param-later-invoked-callable</code>, once per closure argument passed to a
-function call. It no longer runs for arguments that are not closures,
-but a template or script that passes many closures pays one full parse
-of itself for each.</p>
-<p><strong>Where to look:</strong> <code>infer_body_return_type</code> in
-<code>type_engine/call_resolution/target_cache.rs</code>,
-<code>infer_return_type_for_function</code> in
-<code>code_actions/phpstan/fix_return_type/inference.rs</code>, and
-<code>function_invokes_callable_arg_immediately</code> in
-<code>type_engine/variable/forward_walk/by_ref.rs</code>.</p>
-<hr />
 <h2 id="p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning">P70. Diagnostics on a long file find each access's context by scanning<a class="headerlink" href="#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
 <p>Several diagnostic collectors work out the context of a member access or

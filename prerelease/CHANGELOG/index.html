@@ -5010,6 +5010,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <li><strong>Code that calls undefined functions is analyzed much faster.</strong> Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.</li>
 <li><strong>Files with many diagnostics are reported much faster.</strong> Large files that produce thousands of diagnostics no longer spend most of their time locating each one.</li>
 <li><strong>Long scripts are analyzed much faster and in far less memory.</strong> A long file of top-level code, such as a legacy procedural script or a generated configuration file, no longer takes minutes and gigabytes of memory to analyze.</li>
+<li><strong>Untyped methods in large classes are inferred much faster.</strong> Code that calls methods without a declared return type from a large class, such as a generated one, is no longer slowed down in proportion to the size of the file that declares them.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
