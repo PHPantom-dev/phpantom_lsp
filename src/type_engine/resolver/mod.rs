@@ -482,9 +482,14 @@ fn resolve_call_subject(
                 .any(|m| matches!(m.kind(), TypeKind::Intersection(_))),
             _ => false,
         };
+        // A closure signature (`Closure(): User`) resolves to the `Closure`
+        // class, but the signature is what a later call reads its return
+        // type from, so the class must carry it.
+        let is_closure_signature = h.callable_return_type().is_some();
         if is_intersection
             || classes.iter().any(|c| !c.template_params.is_empty())
             || hint_names_a_class
+            || is_closure_signature
         {
             return ResolvedType::from_classes_with_hint(classes, h);
         }
