@@ -16101,3 +16101,81 @@ namespace App\Models {
     assert_eq!(messages.len(), 1, "got {messages:?}");
     assert!(messages[0].contains("Comment"), "{messages:?}");
 }
+
+#[test]
+fn caller_import_still_names_its_own_annotated_types() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nclass Event {}\n");
+    backend.update_ast(
+        "file:///models.php",
+        "<?php\nnamespace App\\Models;\n\nclass Event {}\nfunction takes(Event $e): void {}\n",
+    );
+    let php = r#"<?php
+namespace App\Service;
+
+use App\Models\Event;
+use function App\Models\takes;
+
+class S {
+    /** @var Event */
+    private $e;
+    /** @return Event */
+    public function get() { return $this->e; }
+    /** @param Event $p */
+    public function run($p): void {
+        /** @var Event $v */
+        $v = make();
+        takes($v);
+        takes($p);
+        takes($this->e);
+        takes($this->get());
+        $c = fn(): Event => new Event();
+        takes($c());
+    }
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.is_empty(),
+        "`Event` written in this file means the imported `App\\Models\\Event`, \
+         not the global `Event`: {msgs:?}"
+    );
+}
+
+#[test]
+fn this_bound_to_a_template_names_the_class_not_a_same_named_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global.php", "<?php\nclass Request {}\n");
+    backend.update_ast(
+        "file:///box.php",
+        r#"<?php
+/** @template T of object */
+class Box {
+    /** @param T|class-string<T> $objectOrClass */
+    public function __construct(object|string $objectOrClass) {}
+}
+"#,
+    );
+    let php = r#"<?php
+namespace Acme\Requests;
+
+abstract class Request
+{
+    public function wrap(): \Box
+    {
+        return new \Box($this);
+    }
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+    let mut out = Vec::new();
+    backend.collect_argument_type_diagnostics("file:///test.php", php, &mut out);
+    let msgs = messages_with_code(&out, "type_mismatch_argument");
+    assert!(
+        msgs.is_empty(),
+        "`$this` binds `T` to `Acme\\Requests\\Request`, not the global `Request`: {msgs:?}"
+    );
+}

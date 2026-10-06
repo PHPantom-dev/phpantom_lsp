@@ -17496,12 +17496,110 @@ class CommandBuilder {
     );
     let unknown: Vec<_> = diags
         .iter()
-        .filter(|d| d.code == Some(NumberOrString::String("unknown_member".to_string())))
-        .map(|d| d.message.clone())
+        .filter(|d| d.code == Some(Code::String("unknown_member".to_string())))
+        .map(|d| message_text(&d.message))
         .collect();
     assert!(
         unknown.is_empty(),
         "`Event` inside `namespace App\\Scheduling` is `App\\Scheduling\\Event`, \
          not the global `Event`: {unknown:?}"
+    );
+}
+
+#[test]
+fn param_docblock_and_hook_value_name_their_own_namespace_class_before_a_global_one() {
+    let backend = create_test_backend();
+    backend.update_ast("file:///global_event.php", "<?php\nclass Event {}\n");
+    backend.update_ast(
+        "file:///scheduling/Event.php",
+        "<?php\nnamespace App\\Scheduling;\n\nclass Event {\n    public function mutexName(): string { return ''; }\n}\n",
+    );
+    let php = r#"<?php
+namespace App\Scheduling;
+
+class CommandBuilder {
+    public Event $prop {
+        set { $value->mutexName(); $this->prop = $value; }
+    }
+
+    /** @param Event $event */
+    public function build($event): string {
+        return $event->mutexName();
+    }
+}
+"#;
+    backend.update_ast("file:///scheduling/CommandBuilder.php", php);
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics(
+        "file:///scheduling/CommandBuilder.php",
+        php,
+        &mut diags,
+    );
+    let unknown: Vec<_> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert!(
+        unknown.is_empty(),
+        "`Event` inside `namespace App\\Scheduling` is `App\\Scheduling\\Event`, \
+         not the global `Event`: {unknown:?}"
+    );
+}
+
+#[test]
+fn docblock_return_naming_a_namespace_class_refines_a_same_named_global_hint() {
+    let backend = create_test_backend_with_full_stubs();
+    backend.update_ast(
+        "file:///adapter/ReflectionProperty.php",
+        r#"<?php
+namespace Lib\Adapter;
+
+final class ReflectionProperty extends \ReflectionProperty
+{
+    public function adapterOnly(): string { return ''; }
+}
+"#,
+    );
+    backend.update_ast(
+        "file:///adapter/ReflectionClass.php",
+        r#"<?php
+namespace Lib\Adapter;
+
+use ReflectionClass as CoreReflectionClass;
+
+/** @template-extends CoreReflectionClass<object> */
+final class ReflectionClass extends CoreReflectionClass
+{
+    /**
+     * @param string $name
+     * @return ReflectionProperty
+     */
+    public function getProperty($name): \ReflectionProperty
+    {
+        return new ReflectionProperty('a', 'b');
+    }
+}
+"#,
+    );
+    let php = r#"<?php
+namespace App;
+
+use Lib\Adapter\ReflectionClass;
+
+final class Host
+{
+    public function run(ReflectionClass $class): string
+    {
+        return $class->getProperty('x')->adapterOnly();
+    }
+}
+"#;
+    backend.update_ast("file:///test.php", php);
+
+    let mut diags = Vec::new();
+    backend.collect_unknown_member_diagnostics("file:///test.php", php, &mut diags);
+    let unknown: Vec<_> = diags.iter().map(|d| message_text(&d.message)).collect();
+    assert!(
+        unknown.is_empty(),
+        "`@return ReflectionProperty` inside `Lib\\Adapter` names the adapter \
+         subclass, which refines the native `\\ReflectionProperty`: {unknown:?}"
     );
 }
