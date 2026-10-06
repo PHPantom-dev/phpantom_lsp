@@ -25,11 +25,22 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
 
     match expr {
         Expression::Match(match_expr) if match_expr.expression.is_true() => {
+            let contains_cursor = |body: &Expression<'_>| {
+                let span = body.span();
+                cursor >= span.start.offset && cursor <= span.end.offset
+            };
+            // An arm runs only after every arm above it failed, and
+            // `default` only after all of them did, so the inverse of
+            // their conditions holds in its body.
+            // Built on a copy: a cursor outside every arm body (in a
+            // condition, say) must see the scope untouched.
+            let mut failed_scope = scope.clone();
+            let mut default_expr = None;
             for arm in match_expr.arms.iter() {
                 match arm {
                     MatchArm::Expression(expr_arm) => {
-                        let arm_span = expr_arm.expression.span();
-                        if cursor >= arm_span.start.offset && cursor <= arm_span.end.offset {
+                        if contains_cursor(expr_arm.expression) {
+                            *scope = failed_scope;
                             for condition in expr_arm.conditions.iter() {
                                 apply_condition_narrowing(condition, scope, ctx);
                             }
@@ -37,15 +48,19 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                             apply_cursor_ternary_narrowing(expr_arm.expression, scope, ctx);
                             return;
                         }
-                    }
-                    MatchArm::Default(def_arm) => {
-                        let arm_span = def_arm.expression.span();
-                        if cursor >= arm_span.start.offset && cursor <= arm_span.end.offset {
-                            apply_cursor_ternary_narrowing(def_arm.expression, scope, ctx);
-                            return;
+                        for condition in expr_arm.conditions.iter() {
+                            apply_condition_narrowing_inverse(condition, &mut failed_scope, ctx);
                         }
                     }
+                    MatchArm::Default(def_arm) if contains_cursor(def_arm.expression) => {
+                        default_expr = Some(def_arm.expression);
+                    }
+                    MatchArm::Default(_) => {}
                 }
+            }
+            if let Some(default_expr) = default_expr {
+                *scope = failed_scope;
+                apply_cursor_ternary_narrowing(default_expr, scope, ctx);
             }
         }
         Expression::Conditional(conditional) => {

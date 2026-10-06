@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade only recognizes the directives your Laravel version has.** A directive newer than the installed Laravel is plain text, the way Blade itself treats it. A `"@context"` key in a JSON-LD block no longer produces a cascade of syntax errors on Laravel versions before 11.
 - **A container binding removed from a service provider stops resolving.** Deleting the last `$this->app->bind(...)` from your providers no longer leaves the old key resolving to its class until restart.
 - **Member actions appear when the selection starts in the indentation.** Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in `default`. Contributed by @phcorp. Closes #464.
 
 ## [0.11.0] - 2026-10-05
 
