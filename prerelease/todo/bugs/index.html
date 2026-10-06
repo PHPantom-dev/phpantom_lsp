@@ -974,23 +974,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1607,23 +1590,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Miscellaneous">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
     </ul>
@@ -1709,25 +1675,7 @@ installed.</p>
 <h2 id="templates">Templates<a class="headerlink" href="#templates" title="Permanent link">&para;</a></h2>
 <p>No outstanding items.</p>
 <h2 id="miscellaneous">Miscellaneous<a class="headerlink" href="#miscellaneous" title="Permanent link">&para;</a></h2>
-<h3 id="b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates">B546. <code>analyze</code> re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates<a class="headerlink" href="#b546-analyze-re-runs-the-blade-refresh-on-a-diagnostic-worker-while-other-workers-diagnose-templates" title="Permanent link">&para;</a></h3>
-<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
-<p><code>analyse::stages::index_project</code> parses the user files and runs
-<code>refresh_blade_injected_vars</code> itself, but never publishes
-<code>workspace_indexed</code>. The first diagnostic that asks for every user file's
-symbol map (<code>enumerate_all_routes</code> through <code>user_file_symbol_maps</code>) then
-runs the editor's <code>ensure_workspace_indexed</code> from inside a diagnostic
-worker: it walks the workspace, indexes the resource files, and refreshes
-every template a second time, re-parsing the ones whose inferred variables
-changed, while the other workers are diagnosing those same templates. Which
-state a template is checked against depends on timing. On one Laravel 8
-project the CLI reports 16 fewer diagnostics than a run where the refresh
-happens once, after the resource indexing, which is what the editor sees.</p>
-<p>Calling <code>ensure_workspace_index_ready_with_progress</code> from <code>index_project</code> in
-place of the bare refresh makes the run deterministic and costs nothing on a
-full run, but a run limited to a few paths then parses the whole workspace
-(about 0.1s and 70-80 MB more on a single file). The fix should index only
-what the selected files' diagnostics need, or settle the index before the
-diagnostic pass starts in a way a path-limited run can afford.</p>
+<p>No outstanding items.</p>
 
 
 

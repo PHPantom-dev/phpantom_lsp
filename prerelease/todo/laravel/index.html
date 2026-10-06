@@ -1279,28 +1279,6 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L55. JSON translation key navigation lands on line 0, not the key
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l24-translation-depth-locales-placeholders-hover-quick-fix" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L24. Translation depth: locales, placeholders, hover, quick-fix
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
   <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1998,28 +1976,6 @@
     <span class="md-ellipsis">
       <span class="md-typeset">
         L17. Additional string contexts without booting
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L55. JSON translation key navigation lands on line 0, not the key
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#l24-translation-depth-locales-placeholders-hover-quick-fix" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        L24. Translation depth: locales, placeholders, hover, quick-fix
       </span>
     </span>
   </a>
@@ -2816,46 +2772,6 @@ binding names (<code>app('...')</code>), facade string aliases, and anything els
 requires the live container. These genuinely cannot be resolved without
 booting, and a snapshot of them is the "true for one boot" half-truth we are
 choosing not to ship.</p>
-<h4 id="l55-json-translation-key-navigation-lands-on-line-0-not-the-key">L55. JSON translation key navigation lands on line 0, not the key<a class="headerlink" href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
-<p><code>lang/{locale}.json</code> (the "translation string as key" style) completes
-and resolves go-to-definition, but three related navigation gaps remain:</p>
-<ul>
-<li>The definition always lands on the top of the file rather than the
-  key's actual line, and find-references does not cover JSON keys at
-  all.</li>
-<li><code>Translator::get()</code> consults the JSON catalogue <em>first</em>, even for a
-  dotted key, but go-to-definition and hover list the group file ahead
-  of it.</li>
-<li>A package's <code>loadJsonTranslationsFrom()</code> directory is known to the
-  diagnostic but never navigated to.</li>
-</ul>
-<p>The ignored tests <code>laravel_translation_keys::a_json_phrase_lands_on_its_own_line</code>,
-<code>a_json_line_wins_over_a_group_file_line_for_the_same_key</code>, and
-<code>a_package_json_phrase_reaches_its_catalogue</code> cover all three; un-ignore
-them once this lands.</p>
-<h4 id="l24-translation-depth-locales-placeholders-hover-quick-fix">L24. Translation depth: locales, placeholders, hover, quick-fix<a class="headerlink" href="#l24-translation-depth-locales-placeholders-hover-quick-fix" title="Permanent link">&para;</a></h4>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p>Statically recoverable translation features the Laravel LSP has and we
-still partially lack:</p>
-<ul>
-<li><strong>Locale argument completion.</strong> The <code>$locale</code> parameter of <code>__()</code>,
-  <code>trans()</code>, <code>trans_choice()</code>, <code>Lang::get()/choice()/hasForLocale()</code>
-  (positional or named) completes from the locale set derived from
-  <code>lang/*/</code> directories and <code>lang/*.json</code> files.</li>
-<li><strong>Placeholder parameter completion.</strong> The <code>:name</code> placeholders parsed
-  from the translation value complete as keys of the replacement array
-  (<code>__('welcome', ['name' =&gt; …])</code>).</li>
-<li><strong>Multi-locale hover.</strong> Hover already shows a translation key's value
-  for the resolved locale; show the value per locale (with a link to
-  each file) instead of just the one.</li>
-<li><strong>Insert missing key quick-fix.</strong> When the unknown-translation-key
-  diagnostic fires on a <code>group.item</code> key whose <code>lang/{locale}/group.php</code>
-  array file already exists, offer a quick-fix that inserts the missing
-  <code>'item' =&gt; '...'</code> entry (existing keys as siblings for placement,
-  empty string as the value). No fix when the group file itself doesn't
-  exist yet; that case still just diagnoses.</li>
-</ul>
 <h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
 <p><strong>Impact: Low · Complexity: Low</strong></p>
 <p>We already complete and resolve the modern <code>[Controller::class,

@@ -4999,6 +4999,9 @@
 and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning</a>.</p>
 <h2 id="unreleased"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...HEAD">Unreleased</a><a class="headerlink" href="#unreleased" title="Permanent link">&para;</a></h2>
 <h3 id="added">Added<a class="headerlink" href="#added" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Laravel translations are understood across locales.</strong> JSON and PHP language files under <code>lang/</code> and <code>resources/lang/</code> share navigation, locale and replacement-key completion, and hover with links to each locale's value. Missing keys offer an insertion quick fix when their PHP group file already exists. Contributed by @shuvroroy.</li>
+</ul>
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
 <ul>
@@ -5009,11 +5012,13 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
+<li><strong>Global Laravel translation paths are recognised.</strong> Translations registered with <code>loadTranslationsFrom($path)</code> now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly <code>null</code>. Analysis also finds translation files when <code>--project-root</code> is a relative path. Contributed by @shuvroroy.</li>
 <li><strong>Alpine and Vue <code>:attr</code> bindings in Blade.</strong> A <code>:name="…"</code> attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only <code>&lt;x-…&gt;</code> component tags evaluate bound attributes.</li>
 <li><strong>laravel-ide-helper files are skipped.</strong> <code>_ide_helper.php</code> and <code>_ide_helper_models.php</code> are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading <code>!</code> in <code>[indexing] exclude</code> to index them anyway.</li>
 <li><strong>PHP_CodeSniffer only runs on projects that use it.</strong> A <code>vendor/bin/phpcs</code> installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need <code>squizlabs/php_codesniffer</code> in <code>require-dev</code>, a PHPCS ruleset file, or a <code>[phpcs] standard</code> in <code>.phpantom.toml</code>.</li>
 <li><strong>An integer <code>range()</code> passed straight into a call is a list of integers.</strong> <code>array_map(fn (int $i) =&gt; …, range(0, $n - 1))</code> no longer reports that the callback is passed <code>int|float</code>. Contributed by @phcorp.</li>
 <li><strong>Import edits and unused-import hints respect each <code>namespace</code> block.</strong> In a file with several <code>namespace</code> blocks, an import in one block no longer hides the "Import class" action in another, and an import only another block uses is now dimmed as unused. New imports from code actions, completion, PHPStan quick-fixes and class moves go into the block that needs them, and renaming or moving a class updates each block's own import.</li>
+<li><strong><code>analyze</code> reports the same Blade diagnostics on every run.</strong> In Laravel projects, the diagnostics reported for Blade templates no longer vary between runs, and they now match what the editor shows.</li>
 </ul>
 <h2 id="0110-2026-10-05"><a href="https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0">0.11.0</a> - 2026-10-05<a class="headerlink" href="#0110-2026-10-05" title="Permanent link">&para;</a></h2>
 <h3 id="added_1">Added<a class="headerlink" href="#added_1" title="Permanent link">&para;</a></h3>
