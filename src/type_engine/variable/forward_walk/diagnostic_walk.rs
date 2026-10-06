@@ -1,15 +1,36 @@
 use super::*;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::variable::Variable;
 
 use crate::atom::bytes_to_str;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
+use crate::types::BlockClassLoaders;
 use crate::types::{ClassInfo, ResolvedType};
+
+#[cfg(test)]
+thread_local! {
+    /// How many function bodies a scope walk has seeded and walked, so a
+    /// test can assert a targeted walk skipped the ones nothing asked
+    /// about.
+    static TEST_BODY_WALKS: Cell<usize> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_body_walks() {
+    TEST_BODY_WALKS.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn test_body_walks() -> usize {
+    TEST_BODY_WALKS.with(Cell::get)
+}
 
 /// Walk a sequence of statements for diagnostic scope building.
 ///
@@ -51,7 +72,7 @@ pub(crate) fn walk_body_for_diagnostics<'b>(
         // their parameter types added on top.  The body is fully
         // walked so that scope snapshots are recorded for every
         // statement inside the closure/arrow function.
-        walk_closures_in_statement(stmt, &pre_stmt_scope, ctx);
+        walk_closures_in_statement(stmt, &pre_stmt_scope, scope, ctx);
 
         // Also record at the statement's end offset, which covers
         // member accesses that appear after the last statement in
@@ -76,11 +97,14 @@ pub(crate) fn walk_body_for_diagnostics<'b>(
 pub(crate) fn walk_closures_in_statement<'b>(
     stmt: &'b Statement<'b>,
     outer_scope: &ScopeState,
+    post_stmt_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     match stmt {
         Statement::Expression(expr_stmt) => {
-            walk_closures_in_expr(expr_stmt.expression, outer_scope, ctx, None);
+            let scope_for_walk =
+                self_ref_capture_scope(expr_stmt.expression, outer_scope, post_stmt_scope);
+            walk_closures_in_expr(expr_stmt.expression, &scope_for_walk, ctx, None);
         }
         Statement::Return(ret) => {
             if let Some(val) = ret.value {
@@ -124,6 +148,56 @@ pub(crate) fn walk_closures_in_statement<'b>(
         }
         _ => {}
     }
+}
+
+/// `outer_scope` is a pre-assignment snapshot, which is right for a
+/// closure's `use` variables in general (a plain, non-reference capture of
+/// `$x` in `$x = f($x, function () use ($x) { ... })` must see `$x`'s old
+/// value). But a closure that captures *by reference* the very variable
+/// its literal is being assigned to —
+/// `$callback = function () use (&$callback) { ...$callback... };` —
+/// is different: PHP creates the closure and only then stores it into
+/// `$callback`, so by the time the body ever runs, the reference sees the
+/// closure itself, not whatever `$callback` held (or didn't) before this
+/// statement. `post_stmt_scope` already has the correct, fully-resolved
+/// type for that case (computed by the same assignment pipeline that
+/// would have handled a distinct variable), so borrow it from there
+/// instead of falling into `seed_closure_captures`'s undefined-by-ref-
+/// capture-is-`null` default.
+fn self_ref_capture_scope<'a>(
+    expr: &Expression<'_>,
+    outer_scope: &'a ScopeState,
+    post_stmt_scope: &ScopeState,
+) -> Cow<'a, ScopeState> {
+    let Expression::Assignment(assignment) = expr else {
+        return Cow::Borrowed(outer_scope);
+    };
+    let (Expression::Variable(Variable::Direct(var)), Expression::Closure(closure)) =
+        (assignment.lhs, assignment.rhs)
+    else {
+        return Cow::Borrowed(outer_scope);
+    };
+    let var_name = bytes_to_str(var.name);
+    if !outer_scope.get(var_name).is_empty() {
+        // Already has a type in the pre-assignment scope (e.g. a loop
+        // reassigning the same closure); nothing to fix up.
+        return Cow::Borrowed(outer_scope);
+    }
+    let captures_self_by_ref = closure.use_clause.as_ref().is_some_and(|use_clause| {
+        use_clause.variables.iter().any(|use_var| {
+            use_var.ampersand.is_some() && bytes_to_str(use_var.variable.name) == var_name
+        })
+    });
+    if !captures_self_by_ref {
+        return Cow::Borrowed(outer_scope);
+    }
+    let resolved = post_stmt_scope.get(var_name);
+    if resolved.is_empty() {
+        return Cow::Borrowed(outer_scope);
+    }
+    let mut seeded = outer_scope.clone();
+    seeded.set(var_name, resolved.to_vec());
+    Cow::Owned(seeded)
 }
 
 /// Recursively scan an expression tree for closures/arrow functions
@@ -215,6 +289,9 @@ pub(crate) fn walk_closures_in_expr<'b>(
             // Record the scope at the body expression.
             let body_span = arrow.expression.span();
             record_scope_snapshot(body_span.start.offset, &arrow_scope);
+            // The body is `return <expr>;`, and writes what that statement
+            // would, recording a snapshot at the end of each assignment.
+            process_assignment_expr(arrow.expression, &mut arrow_scope, ctx);
             record_scope_snapshot(body_span.end.offset, &arrow_scope);
 
             // The arrow body is a single return-value expression, so
@@ -257,32 +334,16 @@ pub(crate) fn walk_closures_in_expr<'b>(
             }
             _ => {}
         },
-        Expression::Array(arr) => {
-            for elem in arr.elements.iter() {
-                let elem_expr = match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        walk_closures_in_expr(kv.key, outer_scope, ctx, None);
-                        kv.value
-                    }
-                    ArrayElement::Value(val) => val.value,
-                    ArrayElement::Variadic(v) => v.value,
-                    ArrayElement::Missing(_) => continue,
-                };
-                walk_closures_in_expr(elem_expr, outer_scope, ctx, None);
-            }
-        }
-        Expression::LegacyArray(arr) => {
-            for elem in arr.elements.iter() {
-                let elem_expr = match elem {
-                    ArrayElement::KeyValue(kv) => {
-                        walk_closures_in_expr(kv.key, outer_scope, ctx, None);
-                        kv.value
-                    }
-                    ArrayElement::Value(val) => val.value,
-                    ArrayElement::Variadic(v) => v.value,
-                    ArrayElement::Missing(_) => continue,
-                };
-                walk_closures_in_expr(elem_expr, outer_scope, ctx, None);
+        Expression::Array(_) | Expression::LegacyArray(_) => {
+            let elements =
+                crate::parser::array_literal_elements(expr).expect("an array literal has elements");
+            for elem in elements.iter() {
+                if let Some(key) = crate::parser::array_element_key(elem) {
+                    walk_closures_in_expr(key, outer_scope, ctx, None);
+                }
+                if let Some(value) = crate::parser::array_element_value(elem) {
+                    walk_closures_in_expr(value, outer_scope, ctx, None);
+                }
             }
         }
         Expression::Binary(bin) => {
@@ -315,7 +376,7 @@ pub(crate) fn walk_closures_in_expr<'b>(
         }
         Expression::Instantiation(inst) => {
             if let Some(ref args) = inst.argument_list {
-                walk_closures_in_call_args(&args.arguments, outer_scope, ctx, |_| vec![]);
+                walk_closures_in_call_args(&args.arguments, None, outer_scope, ctx, |_| vec![]);
             }
         }
         Expression::AnonymousClass(anon) => {
@@ -382,22 +443,31 @@ pub(crate) fn walk_closures_in_call<'b>(
                 Expression::Identifier(ident) => Some(bytes_to_str(ident.value()).to_string()),
                 _ => None,
             };
-            walk_closures_in_call_args(&fc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = func_name {
-                    infer_callable_params_from_function_fw(
-                        name,
-                        arg_idx,
-                        &fc.argument_list,
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &fc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = func_name {
+                        infer_callable_params_from_function_fw(
+                            name,
+                            arg_idx,
+                            &fc.argument_list,
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::Method(mc) => {
-            walk_closures_in_expr(mc.object, outer_scope, ctx, None);
+            match closure_call_scope(mc, outer_scope, ctx) {
+                Some(call_scope) => walk_closures_in_expr(mc.object, &call_scope, ctx, None),
+                None => walk_closures_in_expr(mc.object, outer_scope, ctx, None),
+            }
 
             let method_name = if let ClassLikeMemberSelector::Identifier(ident) = &mc.method {
                 Some(bytes_to_str(ident.value).to_string())
@@ -406,21 +476,27 @@ pub(crate) fn walk_closures_in_call<'b>(
             };
             let obj_span = mc.object.span();
             let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::NullSafeMethod(mc) => {
             walk_closures_in_expr(mc.object, outer_scope, ctx, None);
@@ -432,21 +508,27 @@ pub(crate) fn walk_closures_in_call<'b>(
             };
             let obj_span = mc.object.span();
             let first_arg = extract_first_arg_string_fw(&mc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&mc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_receiver_fw(
-                        (obj_span.start.offset, obj_span.end.offset),
-                        name,
-                        arg_idx,
-                        &mc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &mc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_receiver_fw(
+                            (obj_span.start.offset, obj_span.end.offset),
+                            name,
+                            arg_idx,
+                            &mc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
         Call::StaticMethod(sc) => {
             walk_closures_in_expr(sc.class, outer_scope, ctx, None);
@@ -457,21 +539,27 @@ pub(crate) fn walk_closures_in_call<'b>(
                 None
             };
             let first_arg = extract_first_arg_string_fw(&sc.argument_list.arguments, ctx.content);
-            walk_closures_in_call_args(&sc.argument_list.arguments, outer_scope, ctx, |arg_idx| {
-                if let Some(ref name) = method_name {
-                    infer_callable_params_from_static_receiver_fw(
-                        sc.class,
-                        name,
-                        arg_idx,
-                        &sc.argument_list,
-                        first_arg.as_deref(),
-                        outer_scope,
-                        ctx,
-                    )
-                } else {
-                    vec![]
-                }
-            });
+            walk_closures_in_call_args(
+                &sc.argument_list.arguments,
+                Some(call),
+                outer_scope,
+                ctx,
+                |arg_idx| {
+                    if let Some(ref name) = method_name {
+                        infer_callable_params_from_static_receiver_fw(
+                            sc.class,
+                            name,
+                            arg_idx,
+                            &sc.argument_list,
+                            first_arg.as_deref(),
+                            outer_scope,
+                            ctx,
+                        )
+                    } else {
+                        vec![]
+                    }
+                },
+            );
         }
     }
 }
@@ -479,9 +567,12 @@ pub(crate) fn walk_closures_in_call<'b>(
 /// Walk the arguments of a call expression, invoking `infer_fn` for
 /// each argument index to get inferred callable parameter types.
 /// When an argument is a closure/arrow function, the inferred types
-/// are passed through so untyped parameters get the correct types.
+/// are passed through so untyped parameters get the correct types,
+/// and a `@param-closure-this` on the parameter of `call` receiving it
+/// rebinds its `$this`.
 pub(crate) fn walk_closures_in_call_args<'b, F>(
     arguments: &'b TokenSeparatedSequence<'b, Argument<'b>>,
+    call: Option<&Call<'_>>,
     outer_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
     infer_fn: F,
@@ -496,9 +587,11 @@ pub(crate) fn walk_closures_in_call_args<'b, F>(
         match arg_expr {
             Expression::Closure(_) | Expression::ArrowFunction(_) => {
                 let inferred = infer_fn(arg_idx);
+                let rebound = call
+                    .and_then(|call| closure_this_argument_scope(call, arg_idx, outer_scope, ctx));
                 walk_closures_in_expr(
                     arg_expr,
-                    outer_scope,
+                    rebound.as_ref().unwrap_or(outer_scope),
                     ctx,
                     if inferred.is_empty() {
                         None
@@ -633,7 +726,14 @@ pub(crate) fn seed_closure_params(
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
 
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+        // A `null` default makes the parameter accept null whatever its
+        // type says (`bool $a = null` is `?bool`).
+        let default_is_null = crate::parser::param_default_is_null(param);
+        let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
+        let native_type = param
+            .hint
+            .as_ref()
+            .map(|h| accept_default(extract_hint_type(h)));
 
         // Check the `@param` docblock annotation.
         //
@@ -650,12 +750,29 @@ pub(crate) fn seed_closure_params(
             &pname,
         )
         .filter(|_| is_docblock_adjacent(ctx.content, fn_span_start as usize))
-        .map(|t| super::scope_state::resolve_docblock_param_type(&t, ctx));
+        .map(|t| super::param_seeding::resolve_docblock_param_type(&t, ctx));
 
+        // A template can take the `null` itself, so it keeps its own name
+        // (`@param T $t = null` stays `T`).
+        let doc_accepts_default = default_is_null
+            && !raw_docblock_type.as_ref().is_some_and(|doc| {
+                super::super::resolution::references_method_template(
+                    doc,
+                    ctx.content,
+                    fn_span_start as usize,
+                )
+            });
         let effective_type = crate::docblock::resolve_effective_type_typed(
             native_type.as_ref(),
             raw_docblock_type.as_ref(),
-        );
+        )
+        .map(|ty| {
+            if doc_accepts_default {
+                ty.or_null()
+            } else {
+                ty
+            }
+        });
 
         // Substitute method-level template params with their bounds.
         let effective_type = effective_type.map(|ty| {
@@ -803,12 +920,8 @@ pub(crate) fn seed_closure_params(
             vec![]
         };
 
-        // Variadic parameter wrapping.
-        if is_variadic && !param_results.is_empty() {
-            for rt in &mut param_results {
-                rt.type_string = PhpType::list(rt.type_string.clone());
-                rt.class_info = None;
-            }
+        if is_variadic {
+            super::param_seeding::wrap_variadic(&mut param_results);
         }
 
         // Closure/arrow-function parameters shadow same-named outer
@@ -839,7 +952,7 @@ pub(crate) fn seed_closure_params(
 pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loaders: &BlockClassLoaders<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -848,15 +961,101 @@ pub(crate) fn build_diagnostic_scopes(
         return;
     }
 
-    // Skip if the scope cache is already populated (prevents double
-    // walk when both the analyze loop and collect_slow_diagnostics
-    // call this function).
-    let already_populated =
-        DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().as_ref().is_some_and(|m| !m.is_empty()));
-    if already_populated {
+    // Skip if the scope cache is already populated by an earlier
+    // whole-file walk (prevents double walk when both the analyze loop
+    // and collect_slow_diagnostics call this function).  Snapshots left
+    // by a targeted walk cover only part of the file, so they do not
+    // stand in for the whole-file walk a caller asked for here.
+    if scopes_populated() && scope_coverage_is_whole() {
+        return;
+    }
+    set_whole_scope_coverage();
+
+    walk_file_for_scopes(
+        content,
+        local_classes,
+        class_loaders,
+        backend,
+        loaders,
+        resolved_class_cache,
+        &[],
+    );
+}
+
+/// Build diagnostic scope snapshots for just the bodies that enclose
+/// `offsets`.
+///
+/// A member-reference search asks about one or two accesses in a
+/// candidate file; walking the file's other few dozen bodies to answer
+/// costs a pass of the type engine each and answers nothing.  This walks
+/// only the function, method, property hook, or top-level region holding
+/// each offset, into the same [`DIAGNOSTIC_SCOPE`] cache the whole-file
+/// walk populates, so the two consumers cannot disagree about a type.
+///
+/// Offsets a previous walk already covered are not walked again, so a
+/// second access in a body the first one walked is free.
+///
+/// The caller must have activated the cache via
+/// [`with_diagnostic_scope_cache`] before calling this function.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn build_diagnostic_scopes_for_offsets(
+    content: &str,
+    local_classes: &[Arc<ClassInfo>],
+    class_loaders: &BlockClassLoaders<'_>,
+    backend: Option<&crate::Backend>,
+    loaders: Loaders<'_>,
+    resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
+    offsets: &[u32],
+) {
+    if !is_diagnostic_scope_active() || offsets.is_empty() {
         return;
     }
 
+    // A whole-file walk already answers for every offset.
+    if scopes_populated() && scope_coverage_is_whole() {
+        return;
+    }
+    begin_targeted_coverage();
+
+    let mut targets: Vec<u32> = offsets
+        .iter()
+        .copied()
+        .filter(|offset| !scope_snapshots_cover(*offset))
+        .collect();
+    if targets.is_empty() {
+        return;
+    }
+    targets.sort_unstable();
+    targets.dedup();
+
+    walk_file_for_scopes(
+        content,
+        local_classes,
+        class_loaders,
+        backend,
+        loaders,
+        resolved_class_cache,
+        &targets,
+    );
+}
+
+/// Whether the active scope cache holds any snapshots.
+fn scopes_populated() -> bool {
+    DIAGNOSTIC_SCOPE.with(|cell| cell.borrow().as_ref().is_some_and(|m| !m.is_empty()))
+}
+
+/// Parse `content` and walk it for scope snapshots, restricted to the
+/// bodies enclosing `targets` when that slice is non-empty.
+#[allow(clippy::too_many_arguments)]
+fn walk_file_for_scopes(
+    content: &str,
+    local_classes: &[Arc<ClassInfo>],
+    class_loaders: &BlockClassLoaders<'_>,
+    backend: Option<&crate::Backend>,
+    loaders: Loaders<'_>,
+    resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
+    targets: &[u32],
+) {
     // Mark that we are building the scope cache so that nested
     // resolution calls (e.g. resolve_variable_types) do not read
     // from the partially-populated cache.
@@ -867,10 +1066,12 @@ pub(crate) fn build_diagnostic_scopes(
     let diag_ctx = DiagnosticWalkCtx {
         content,
         local_classes,
-        class_loader,
+        class_loader: *class_loaders.at(0),
+        class_loaders,
         backend,
         loaders,
         resolved_class_cache,
+        targets,
     };
 
     with_parsed_program(content, "build_diagnostic_scopes", |program, _content| {
@@ -905,12 +1106,16 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         resolved_class_cache: diag_ctx.resolved_class_cache,
         enclosing_return_type: None,
         top_level_scope: None,
+        in_loop: false,
+        template_markers: None,
     };
 
     let mut top_level_scope = ScopeState::new();
 
     // Seed superglobals for top-level code.
     seed_superglobals(&mut top_level_scope);
+
+    let last_target = diag_ctx.last_target();
 
     for stmt in statements {
         match stmt {
@@ -922,9 +1127,17 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 let ns_class = crate::class_lookup::placeholder_in_namespace(
                     ns.name.as_ref().map(|ident| bytes_to_str(ident.value())),
                 );
-                walk_top_level_statements(ns.statements().iter(), &ns_class, diag_ctx);
+                // The block's own imports apply inside it, not the file's.
+                let block_ctx = DiagnosticWalkCtx {
+                    class_loader: *diag_ctx.class_loaders.at(ns.span().start.offset),
+                    ..*diag_ctx
+                };
+                walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
             }
             Statement::Class(class) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     class.left_brace.start.offset,
@@ -935,6 +1148,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Interface(iface) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     iface.left_brace.start.offset,
@@ -945,6 +1161,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Trait(trait_def) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     trait_def.left_brace.start.offset,
@@ -955,6 +1174,9 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Enum(enum_def) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
                 let enclosing = find_enclosing_class_for_offset(
                     diag_ctx.local_classes,
                     enum_def.left_brace.start.offset,
@@ -965,6 +1187,10 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 }
             }
             Statement::Function(func) => {
+                if !diag_ctx.wants(stmt.span()) {
+                    continue;
+                }
+                diag_ctx.mark_walked(stmt.span());
                 analyze_function_body(
                     func.parameter_list.parameters.iter(),
                     func.body.statements.iter(),
@@ -979,22 +1205,35 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
             // `if (!function_exists('name')) { function name() {} }`)
             // must be analyzed the same way as top-level functions.
             Statement::If(if_stmt) => {
-                record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
-                let pre_stmt_scope = top_level_scope.clone();
-                process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
-                record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
-                walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+                if stmt.span().start.offset <= last_target {
+                    diag_ctx.mark_walked(stmt.span());
+                    record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
+                    let pre_stmt_scope = top_level_scope.clone();
+                    process_statement(stmt, &mut top_level_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
+                    record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
+                }
+                if diag_ctx.wants(stmt.span()) {
+                    walk_functions_in_if_body(&if_stmt.body, default_class, diag_ctx);
+                }
             }
             // Top-level code: walk it with the shared scope so that
             // variable assignments accumulate and subsequent accesses
             // can be served from the scope cache instead of remaining
-            // unresolved.
+            // unresolved.  A targeted walk still has to carry the scope
+            // through every statement before the last offset it was
+            // asked about, since any of them can be what gives a
+            // variable its type; past that point nothing it learns can
+            // change an answer.
             _ => {
+                if stmt.span().start.offset > last_target {
+                    continue;
+                }
+                diag_ctx.mark_walked(stmt.span());
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
             }
         }
@@ -1017,6 +1256,10 @@ pub(crate) fn walk_functions_in_if_body<'b>(
             if let Statement::Block(block) = stmt_body.statement {
                 block.statements.as_slice()
             } else if let Statement::Function(func) = stmt_body.statement {
+                if !diag_ctx.wants(func.span()) {
+                    return;
+                }
+                diag_ctx.mark_walked(func.span());
                 analyze_function_body(
                     func.parameter_list.parameters.iter(),
                     func.body.statements.iter(),
@@ -1036,6 +1279,10 @@ pub(crate) fn walk_functions_in_if_body<'b>(
 
     for inner_stmt in statements.iter() {
         if let Statement::Function(func) = inner_stmt {
+            if !diag_ctx.wants(func.span()) {
+                continue;
+            }
+            diag_ctx.mark_walked(func.span());
             analyze_function_body(
                 func.parameter_list.parameters.iter(),
                 func.body.statements.iter(),
@@ -1058,6 +1305,10 @@ pub(crate) fn walk_class_member_body<'b>(
     use mago_syntax::cst::class_like::member::ClassLikeMember;
     use mago_syntax::cst::class_like::method::MethodBody;
 
+    if !diag_ctx.wants(member.span()) {
+        return;
+    }
+
     match member {
         ClassLikeMember::Method(method) => {
             // A constructor-promoted property carries its hooks in the
@@ -1079,6 +1330,7 @@ pub(crate) fn walk_class_member_body<'b>(
             };
             let method_name = bytes_to_str(method.name.value).to_string();
             let is_static = method.modifiers.contains_static();
+            diag_ctx.mark_walked(method.span());
             analyze_function_body(
                 method.parameter_list.parameters.iter(),
                 block.statements.iter(),
@@ -1119,8 +1371,12 @@ fn walk_property_hook_bodies(
         let PropertyHookBody::Concrete(body) = &hook.body else {
             continue;
         };
+        if !diag_ctx.wants(hook.span()) {
+            continue;
+        }
 
         let mut scope = seed_property_hook_scope(property_hint, hook, &ctx);
+        diag_ctx.mark_walked(hook.span());
         record_scope_snapshot(hook.span().start.offset, &scope);
 
         match body {
@@ -1141,16 +1397,50 @@ fn walk_property_hook_bodies(
 
 /// Bundles the immutable context needed by [`analyze_function_body`] and
 /// the AST walkers so we don't pass 5+ individual arguments everywhere.
+#[derive(Clone, Copy)]
 pub(crate) struct DiagnosticWalkCtx<'a> {
     content: &'a str,
     local_classes: &'a [Arc<ClassInfo>],
+    /// The loader for the `namespace` block being walked.
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Every block's loader, to switch to at a block boundary.
+    class_loaders: &'a BlockClassLoaders<'a>,
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
+    /// Sorted byte offsets the caller needs scopes for, or empty to walk
+    /// the whole file.
+    targets: &'a [u32],
 }
 
 impl<'a> DiagnosticWalkCtx<'a> {
+    /// Whether a body spanning `span` holds one of the offsets this walk
+    /// was asked about.  Always true for a whole-file walk.
+    fn wants(&self, span: mago_span::Span) -> bool {
+        if self.targets.is_empty() {
+            return true;
+        }
+        let start = self.targets.partition_point(|&o| o < span.start.offset);
+        let end = self.targets.partition_point(|&o| o <= span.end.offset);
+        start < end
+    }
+
+    /// The last offset this walk was asked about, or `u32::MAX` for a
+    /// whole-file walk.  Statements that begin past it cannot affect any
+    /// answer, so a targeted walk stops carrying the file-level scope
+    /// through them.
+    fn last_target(&self) -> u32 {
+        self.targets.last().copied().unwrap_or(u32::MAX)
+    }
+
+    /// Record that this walk produced snapshots for every offset in
+    /// `span`, so lookups inside it may be answered from them.
+    fn mark_walked(&self, span: mago_span::Span) {
+        if !self.targets.is_empty() {
+            record_covered_region(span.start.offset, span.end.offset);
+        }
+    }
+
     /// Build the forward-walk context for a body belonging to
     /// `current_class`.  The diagnostic pass walks the whole file, so the
     /// cursor is past the end of every body it visits.
@@ -1166,6 +1456,8 @@ impl<'a> DiagnosticWalkCtx<'a> {
             resolved_class_cache: self.resolved_class_cache,
             enclosing_return_type: None,
             top_level_scope: None,
+            in_loop: false,
+            template_markers: None,
         }
     }
 }
@@ -1214,6 +1506,10 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     is_static: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) {
+    #[cfg(test)]
+    TEST_BODY_WALKS.with(|count| count.set(count.get() + 1));
+
+    let ctx = &ctx.for_declaration(fn_span_start);
     let mut scope = ScopeState::new();
 
     // Seed `$this` for non-static class methods so that expressions
@@ -1222,6 +1518,11 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     // scanner.
     if !is_static {
         seed_this(&mut scope, ctx);
+        super::readonly_properties::seed_constructor_readonly_properties(
+            &mut scope,
+            method_name,
+            ctx,
+        );
     }
 
     // Seed scope with parameter types.
@@ -1292,6 +1593,8 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         resolved_class_cache: ctx.resolved_class_cache,
         enclosing_return_type: None,
         top_level_scope: None,
+        in_loop: false,
+        template_markers: None,
     };
 
     for member in anon.members.iter() {

@@ -601,7 +601,7 @@ fn test_preprocess_lang_directive_optional_argument() {
 
     let (php, _) = preprocess("@lang($key)\n<p>after</p>");
     assert!(
-        php.contains("blade_directive ($key);"),
+        php.contains("__ ($key);"),
         "@lang(...) should type-check its argument: {}",
         php
     );
@@ -654,7 +654,7 @@ fn test_preprocess_unset_directive() {
 fn test_preprocess_choice_js_dd_directives_consume_arguments() {
     let (php, _) = preprocess("@choice('apples', $count)\n<p>after</p>");
     assert!(
-        php.contains("blade_directive ('apples', $count);"),
+        php.contains("trans_choice ('apples', $count);"),
         "@choice should type-check its arguments: {}",
         php
     );
@@ -1508,6 +1508,42 @@ fn test_preprocess_verbatim_with_comment_syntax() {
     assert!(
         php.contains("$after"),
         "content after endverbatim should work: {}",
+        php
+    );
+}
+
+#[test]
+fn test_preprocess_verbatim_with_quotes() {
+    // Alpine/Vue markup inside @verbatim is full of quoted attributes; a
+    // quote must not start a tracked PHP string that leaks into the buffer.
+    let content = "@verbatim\n<div class=\"x\" v-if=\"show\">\n@endverbatim\n{{ $a }}\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        !php.contains("\"x\"") && !php.contains("\"show\""),
+        "quoted verbatim content should be skipped, not lowered into PHP: {}",
+        php
+    );
+    assert!(
+        php.contains("$a"),
+        "content after endverbatim should work: {}",
+        php
+    );
+}
+
+#[test]
+fn test_preprocess_verbatim_with_unbalanced_quote() {
+    // An unbalanced apostrophe (e.g. "Don't") must not be treated as opening
+    // a PHP string, or @endverbatim on a later line gets swallowed.
+    let content = "@verbatim\nDon't touch this\n@endverbatim\n{{ $a }}\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        !php.contains("Don't touch this"),
+        "verbatim content should be skipped: {}",
+        php
+    );
+    assert!(
+        php.contains("$a"),
+        "content after endverbatim should still be lowered: {}",
         php
     );
 }

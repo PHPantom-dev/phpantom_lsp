@@ -22,23 +22,6 @@ use mago_syntax::walker::Walker;
 use crate::atom::bytes_to_str;
 use crate::scope_collector::ScopeBody;
 
-/// Emit [`Walker`] overrides that stop traversal at nested variable
-/// scopes (closures, arrow functions, named function declarations) while
-/// still walking an anonymous class's constructor arguments, which belong
-/// to the enclosing scope.
-macro_rules! stop_at_inner_scopes {
-    ($ctx:ty) => {
-        fn walk_closure(&self, _node: &'ast Closure<'arena>, _context: &mut $ctx) {}
-        fn walk_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, _context: &mut $ctx) {}
-        fn walk_function(&self, _node: &'ast Function<'arena>, _context: &mut $ctx) {}
-        fn walk_anonymous_class(&self, node: &'ast AnonymousClass<'arena>, context: &mut $ctx) {
-            if let Some(argument_list) = &node.argument_list {
-                self.walk_partial_argument_list(argument_list, context);
-            }
-        }
-    };
-}
-
 // ─── @var annotation collection ─────────────────────────────────────────────
 
 /// Scan the source text for `/** @var Type $varName */` inline
@@ -60,12 +43,9 @@ pub(super) fn collect_var_annotations(content: &str) -> Vec<(String, u32)> {
         let this_line_start = line_start;
         line_start += line.len() + 1; // +1 for the stripped '\n'
 
-        if !line.contains("@var") {
-            continue;
-        }
-        // Find `@var` and extract the variable name after the type.
-        if let Some(var_pos) = line.find("@var") {
-            let after_var_off = var_pos + 4;
+        // Find the `@var` tag and extract the variable name after the type.
+        if let Some((var_pos, tag_len)) = crate::docblock::find_var_tag(line) {
+            let after_var_off = var_pos + tag_len;
             let after_var = &line[after_var_off..];
             let ws = after_var.len() - after_var.trim_start().len();
             let after_var = after_var.trim_start();
@@ -285,19 +265,6 @@ fn collect_chain_operands<'e>(
     out.push(expr);
 }
 
-/// Unwrap parentheses and a single `!` prefix from a condition,
-/// returning `(inner_expr, negated)`.
-fn unwrap_negation<'e>(expr: &'e Expression<'e>) -> (&'e Expression<'e>, bool) {
-    match expr {
-        Expression::Parenthesized(inner) => unwrap_negation(inner.expression),
-        Expression::UnaryPrefix(prefix) if prefix.operator.is_not() => {
-            let (inner, already_negated) = unwrap_negation(prefix.operand);
-            (inner, !already_negated)
-        }
-        _ => (expr, false),
-    }
-}
-
 // ─── isset()-guarded branch regions ────────────────────────────────────────
 
 /// A source region in which a positive `isset()` check has proven a set
@@ -405,7 +372,7 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<IssetGuardedRegion>> for IssetRegion
 /// negation matches `want_negated`, return the base variable names of
 /// its guard targets.
 fn isset_guard_names(expr: &Expression<'_>, want_negated: bool) -> Vec<String> {
-    let (inner, negated) = unwrap_negation(expr);
+    let (inner, negated) = crate::parser::unwrap_negation(expr);
     if negated != want_negated {
         return Vec::new();
     }

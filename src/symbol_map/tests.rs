@@ -1,6 +1,13 @@
 use super::docblock::is_navigable_type;
-use super::extraction::extract_symbol_map;
+use super::extraction::{extract_symbol_map, extract_symbol_map_with_resolved_names};
 use super::*;
+
+/// Pair a map with the source it was extracted from, for the subject-text
+/// assertions below.
+fn mapped<'a>(map: &SymbolMap, php: &'a str) -> MappedSource<'a> {
+    map.source(php)
+        .expect("the map under test was extracted from this text")
+}
 
 // ── SymbolMap::lookup tests ─────────────────────────────────────────
 
@@ -137,6 +144,33 @@ fn parse_and_extract(php: &str) -> SymbolMap {
     extract_symbol_map(program, php)
 }
 
+fn parse_and_extract_semantic(php: &str) -> SymbolMap {
+    let arena = mago_allocator::LocalArena::new();
+    let file_id = mago_database::file::FileId::new(b"test.php");
+    let program = mago_syntax::parser::parse_file_content(&arena, file_id, php.as_bytes());
+    let resolver = mago_names::resolver::NameResolver::new(&arena);
+    let resolved = resolver.resolve(program);
+    let owned = crate::names::OwnedResolvedNames::from_resolved(&resolved);
+    extract_symbol_map_with_resolved_names(program, php, &owned)
+}
+
+#[test]
+fn a_map_refuses_to_pair_with_a_different_revision() {
+    let php = "<?php\n$service->handle();\n";
+    let map = parse_and_extract(php);
+    assert!(map.source(php).is_some());
+
+    // Every shape of "different text" the same URI can be handed: an
+    // edited buffer, and a Blade template whose map describes the far
+    // longer virtual PHP it lowers to.
+    assert!(map.source("<?php\n$svc->handle();\n").is_none());
+    assert!(map.source("<?php\n").is_none());
+    assert!(
+        map.source(&format!("{php}// appended\n")).is_none(),
+        "a longer revision is a different revision too"
+    );
+}
+
 #[test]
 fn class_declaration_produces_class_declaration() {
     let php = "<?php\nclass Foo {}\n";
@@ -254,7 +288,7 @@ fn method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "bar");
-        assert_eq!(subject_text.as_str(php), "$this");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
         assert!(!is_static);
         assert!(is_method_call);
     } else {
@@ -278,7 +312,7 @@ fn static_method_call_produces_member_access() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "create");
-        assert_eq!(subject_text.as_str(php), "self");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
         assert!(is_static);
         assert!(is_method_call);
     } else {
@@ -421,7 +455,10 @@ fn chained_method_call_subject_text() {
     } = hit.unwrap().kind
     {
         assert_eq!(member_name, "find");
-        assert_eq!(subject_text.as_str(php), "$this->getService()");
+        assert_eq!(
+            subject_text.as_str(mapped(&map, php)),
+            "$this->getService()"
+        );
     } else {
         panic!("Expected MemberAccess");
     }
@@ -3693,7 +3730,7 @@ fn see_tag_member_method() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(is_static, "@see members are treated as static access");
     } else {
@@ -3736,7 +3773,7 @@ fn see_tag_member_hash_fragment() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "getTotal");
         assert!(!is_static, "@see `#` fragments are instance members");
     } else {
@@ -3776,7 +3813,7 @@ fn see_tag_member_property() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "channel_type");
         assert!(is_static);
     } else {
@@ -3808,7 +3845,7 @@ fn see_tag_member_constant() {
         ..
     } = hit.unwrap().kind
     {
-        assert_eq!(subject_text.as_str(php), "Order");
+        assert_eq!(subject_text.as_str(mapped(&map, php)), "Order");
         assert_eq!(member_name, "STATUS_PENDING");
         assert!(is_static);
     } else {
@@ -4149,7 +4186,7 @@ fn see_tag_self_member_spans_emitted() {
             docblock_ref,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "self");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "self");
             assert_eq!(member_name, "bar");
             assert!(*is_static);
             assert_eq!(*docblock_ref, DocblockMemberRef::See);
@@ -4508,7 +4545,10 @@ fn array_callable_class_const_emits_member_access() {
             is_method_call,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "IndexPageController");
+            assert_eq!(
+                subject_text.as_str(mapped(&map, php)),
+                "IndexPageController"
+            );
             assert_eq!(member_name, "indexPage");
             assert!(*is_static);
             assert!(*is_method_call);
@@ -4531,7 +4571,7 @@ fn array_callable_variable_emits_instance_member_access() {
             is_static,
             ..
         } => {
-            assert_eq!(subject_text.as_str(php), "$this");
+            assert_eq!(subject_text.as_str(mapped(&map, php)), "$this");
             assert_eq!(member_name, "handle");
             assert!(!*is_static);
         }
@@ -4610,13 +4650,18 @@ fn storage_disk_keys(map: &SymbolMap) -> Vec<(String, bool, bool)> {
         .iter()
         .filter_map(|span| match &span.kind {
             SymbolKind::LaravelStringKey {
-                kind: LaravelStringKind::Config,
+                kind: LaravelStringKind::ConfigResource(LaravelConfigResource::StorageDisk),
                 key,
                 is_write,
                 is_optional,
-            } if key.starts_with("filesystems.disks.") => {
-                Some((key.clone(), *is_write, *is_optional))
-            }
+            } => Some((
+                crate::symbol_map::laravel_resources::config_key(
+                    LaravelConfigResource::StorageDisk,
+                    key,
+                ),
+                *is_write,
+                *is_optional,
+            )),
             _ => None,
         })
         .collect()
@@ -4710,7 +4755,7 @@ use Illuminate\Support\Facades\Storage;
 Storage::disk('archive');
 "#;
     assert_eq!(
-        storage_disk_keys(&parse_and_extract(imported)),
+        storage_disk_keys(&parse_and_extract_semantic(imported)),
         vec![("filesystems.disks.archive".to_string(), false, false,)]
     );
 
@@ -4720,7 +4765,7 @@ use Illuminate\Support\Facades\Storage as LaravelStorage;
 LaravelStorage::fake('testing');
 "#;
     assert_eq!(
-        storage_disk_keys(&parse_and_extract(aliased)),
+        storage_disk_keys(&parse_and_extract_semantic(aliased)),
         vec![("filesystems.disks.testing".to_string(), true, false,)]
     );
 
@@ -4729,14 +4774,14 @@ namespace App;
 class Storage {}
 Storage::disk('local');
 "#;
-    assert!(storage_disk_keys(&parse_and_extract(homonym)).is_empty());
+    assert!(storage_disk_keys(&parse_and_extract_semantic(homonym)).is_empty());
 
     let root_qualified = r#"<?php
 namespace App;
 \Storage::disk('root-alias');
 "#;
     assert_eq!(
-        storage_disk_keys(&parse_and_extract(root_qualified)),
+        storage_disk_keys(&parse_and_extract_semantic(root_qualified)),
         vec![("filesystems.disks.root-alias".to_string(), false, false,)]
     );
 }
@@ -4752,7 +4797,7 @@ use Illuminate\Support\Facades\{Cache, Storage as Disks};
 Disks::disk('archive');
 "#;
     assert_eq!(
-        storage_disk_keys(&parse_and_extract(facade)),
+        storage_disk_keys(&parse_and_extract_semantic(facade)),
         vec![("filesystems.disks.archive".to_string(), false, false)]
     );
 
@@ -4763,7 +4808,7 @@ use Illuminate\Container\Attributes\{Config, Storage};
 class GroupImported {}
 "#;
     assert_eq!(
-        storage_disk_keys(&parse_and_extract(attribute)),
+        storage_disk_keys(&parse_and_extract_semantic(attribute)),
         vec![("filesystems.disks.backup".to_string(), false, false)]
     );
 }
@@ -4793,7 +4838,9 @@ fn unreadable_storage_disk_arguments_name_no_disk() {
         "Storage::disk($disk)",
         "Storage::disk('arch' . 'ive')",
         "Storage::disk(\"disk-{$id}\")",
+        "Storage::disk(NAME: 'archive')",
         "Storage::fake(config: [], disk: $disk)",
+        "Storage::fake(config: [], DISK: 'archive')",
         "Storage::forgetDisk([$disk, ...$more])",
     ] {
         let map = parse_and_extract(&format!("<?php\n{call};\n"));
@@ -4831,7 +4878,7 @@ class LocalHomonym {}
 #[\Acme\Storage(disk: 'acme')]
 class OtherNamespace {}
 "#;
-    assert!(storage_disk_keys(&parse_and_extract(php)).is_empty());
+    assert!(storage_disk_keys(&parse_and_extract_semantic(php)).is_empty());
 }
 
 #[test]
@@ -4851,6 +4898,368 @@ class Service {}
             is_optional: false,
         } if key == "app.name"
     )));
+}
+
+// ── Direct config-backed resource spans ───────────────────────────
+
+fn resource_keys(map: &SymbolMap, resource: LaravelConfigResource) -> Vec<(String, bool, bool)> {
+    map.spans
+        .iter()
+        .filter_map(|span| match &span.kind {
+            SymbolKind::LaravelStringKey {
+                kind: LaravelStringKind::ConfigResource(span_resource),
+                key,
+                is_write,
+                is_optional,
+            } if *span_resource == resource => Some((key.clone(), *is_write, *is_optional)),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn every_direct_resource_trigger_emits_its_short_name() {
+    for (php, resource, expected) in [
+        (
+            "<?php auth('web');",
+            LaravelConfigResource::AuthGuard,
+            "web",
+        ),
+        (
+            "<?php Auth::guard('admin');",
+            LaravelConfigResource::AuthGuard,
+            "admin",
+        ),
+        (
+            "<?php Cache::store('redis');",
+            LaravelConfigResource::CacheStore,
+            "redis",
+        ),
+        (
+            "<?php Log::channel('daily');",
+            LaravelConfigResource::LogChannel,
+            "daily",
+        ),
+        (
+            "<?php DB::connection('mysql');",
+            LaravelConfigResource::DatabaseConnection,
+            "mysql",
+        ),
+        (
+            "<?php Queue::connection('sqs');",
+            LaravelConfigResource::QueueConnection,
+            "sqs",
+        ),
+        (
+            "<?php Mail::mailer('postmark');",
+            LaravelConfigResource::Mailer,
+            "postmark",
+        ),
+        (
+            "<?php Broadcast::connection('pusher');",
+            LaravelConfigResource::BroadcastConnection,
+            "pusher",
+        ),
+    ] {
+        assert_eq!(
+            resource_keys(&parse_and_extract(php), resource),
+            vec![(expected.to_string(), false, false)],
+            "{php}"
+        );
+    }
+}
+
+#[test]
+fn log_stack_emits_only_literal_values_from_both_array_spellings() {
+    for php in [
+        "<?php Log::stack(['daily', 'fallback' => 'stderr', $dynamic, ...$more]);",
+        "<?php Log::stack(array('daily', 'fallback' => 'stderr', $dynamic));",
+    ] {
+        assert_eq!(
+            resource_keys(&parse_and_extract(php), LaravelConfigResource::LogChannel),
+            vec![
+                ("daily".to_string(), false, false),
+                ("stderr".to_string(), false, false),
+            ]
+        );
+    }
+    assert!(
+        resource_keys(
+            &parse_and_extract("<?php Log::stack('daily');"),
+            LaravelConfigResource::LogChannel,
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn every_resource_container_attribute_selects_its_declared_parameter() {
+    for (attribute, argument, resource) in [
+        ("Auth", "guard", LaravelConfigResource::AuthGuard),
+        ("Authenticated", "guard", LaravelConfigResource::AuthGuard),
+        ("Cache", "store", LaravelConfigResource::CacheStore),
+        ("Log", "channel", LaravelConfigResource::LogChannel),
+        ("Storage", "disk", LaravelConfigResource::StorageDisk),
+        (
+            "Database",
+            "connection",
+            LaravelConfigResource::DatabaseConnection,
+        ),
+        (
+            "DB",
+            "connection",
+            LaravelConfigResource::DatabaseConnection,
+        ),
+    ] {
+        let php = format!(
+            "<?php #[\\Illuminate\\Container\\Attributes\\{attribute}(ignored: 'bad', {argument}: 'named')] class Service {{}}"
+        );
+        assert_eq!(
+            resource_keys(&parse_and_extract(&php), resource),
+            vec![("named".to_string(), false, false)],
+            "{attribute}"
+        );
+    }
+}
+
+#[test]
+fn resource_named_parameters_are_case_sensitive() {
+    let php = r#"<?php
+Auth::guard(NAME: 'bad');
+Log::stack(CHANNELS: ['bad']);
+Route::middleware(MIDDLEWARE: 'auth:bad');
+#[\Illuminate\Container\Attributes\Cache(STORE: 'bad')]
+class Service {}
+"#;
+    let map = parse_and_extract(php);
+    assert!(map.spans.iter().all(|span| !matches!(
+        &span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::ConfigResource(_),
+            ..
+        }
+    )));
+}
+
+#[test]
+fn a_bare_contextual_attribute_without_a_laravel_import_is_not_a_resource() {
+    let map = parse_and_extract("<?php #[Cache(store: 'memory')] class Service {}");
+    assert!(resource_keys(&map, LaravelConfigResource::CacheStore).is_empty());
+}
+
+#[test]
+fn auth_middleware_emits_each_guard_and_preserves_can_abilities() {
+    let php = r#"<?php
+Route::middleware(
+    options: ['ignored'],
+    middleware: [
+        'auth:web,admin',
+        'label' => 'auth:api',
+        'can:update,post',
+        'AUTH:invalid',
+        'CAN:invalid',
+    ],
+);
+"#;
+    let map = parse_and_extract(php);
+    assert_eq!(
+        resource_keys(&map, LaravelConfigResource::AuthGuard),
+        vec![
+            ("web".to_string(), false, false),
+            ("admin".to_string(), false, false),
+            ("api".to_string(), false, false),
+        ]
+    );
+    assert!(map.spans.iter().any(|span| matches!(
+        &span.kind,
+        SymbolKind::LaravelStringKey {
+            kind: LaravelStringKind::GateAbility,
+            key,
+            ..
+        } if key == "update"
+    )));
+    for guard in ["web", "admin", "api"] {
+        let offset = php.find(guard).unwrap() as u32;
+        let span = map.lookup(offset).expect("guard should have a span");
+        assert_eq!(&php[span.start as usize..span.end as usize], guard);
+    }
+}
+
+#[test]
+fn auth_middleware_skips_variadic_values_in_both_array_spellings() {
+    let php = r#"<?php
+Route::middleware(['auth:web', ...$modern]);
+Route::middleware(array('label' => 'auth:api', ...$legacy));
+"#;
+    assert_eq!(
+        resource_keys(&parse_and_extract(php), LaravelConfigResource::AuthGuard,),
+        vec![
+            ("web".to_string(), false, false),
+            ("api".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn a_route_middleware_chain_is_followed_only_within_the_depth_bound() {
+    for (chain, expected) in [
+        ("Route::get('/')", true),
+        ("Route::get('/')->a()", true),
+        ("Route::get('/')->a()->b()->c()", true),
+        ("Route::get('/')->a()->b()->c()->d()", false),
+        ("$router->get('/')", false),
+    ] {
+        let php = format!("<?php\n{chain}->middleware('auth:web');\n");
+        assert_eq!(
+            !resource_keys(&parse_and_extract(&php), LaravelConfigResource::AuthGuard,).is_empty(),
+            expected,
+            "{chain}"
+        );
+    }
+}
+
+#[test]
+fn semantic_facade_aliases_cover_every_resource_and_reject_local_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Auth as LaravelAuth;
+use Illuminate\Support\Facades\Cache as LaravelCache;
+use Illuminate\Support\Facades\Log as LaravelLog;
+use Illuminate\Support\Facades\Storage as LaravelStorage;
+use Illuminate\Support\Facades\DB as LaravelDB;
+use Illuminate\Support\Facades\Queue as LaravelQueue;
+use Illuminate\Support\Facades\Mail as LaravelMail;
+use Illuminate\Support\Facades\Broadcast as LaravelBroadcast;
+class Auth {} class Cache {} class Log {} class Storage {}
+class DB {} class Queue {} class Mail {} class Broadcast {}
+LaravelAuth::guard(name: 'admin');
+LaravelCache::store(name: 'redis');
+LaravelLog::stack(channel: 'ignored', channels: ['daily', 'stderr']);
+LaravelStorage::fake(config: [], disk: 'testing');
+LaravelDB::connection(name: 'mysql');
+LaravelQueue::connection(name: 'sqs');
+LaravelMail::mailer(name: 'postmark');
+LaravelBroadcast::connection(name: 'pusher');
+Auth::guard('bad'); Cache::store('bad'); Log::channel('bad'); Storage::disk('bad');
+DB::connection('bad'); Queue::connection('bad'); Mail::mailer('bad'); Broadcast::connection('bad');
+"#;
+    let map = parse_and_extract_semantic(php);
+    for (resource, expected) in [
+        (LaravelConfigResource::AuthGuard, vec!["admin"]),
+        (LaravelConfigResource::CacheStore, vec!["redis"]),
+        (LaravelConfigResource::LogChannel, vec!["daily", "stderr"]),
+        (LaravelConfigResource::StorageDisk, vec!["testing"]),
+        (LaravelConfigResource::DatabaseConnection, vec!["mysql"]),
+        (LaravelConfigResource::QueueConnection, vec!["sqs"]),
+        (LaravelConfigResource::Mailer, vec!["postmark"]),
+        (LaravelConfigResource::BroadcastConnection, vec!["pusher"]),
+    ] {
+        assert_eq!(
+            resource_keys(&map, resource)
+                .iter()
+                .map(|(key, _, _)| key.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "{resource:?}"
+        );
+    }
+}
+
+#[test]
+fn semantic_attribute_aliases_select_named_arguments_and_reject_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Container\Attributes\Auth as LaravelAuth;
+use Illuminate\Container\Attributes\Cache as LaravelCache;
+use Illuminate\Container\Attributes\Log as LaravelLog;
+use Illuminate\Container\Attributes\Storage as LaravelStorage;
+use Illuminate\Container\Attributes\Database as LaravelDatabase;
+class Storage {}
+#[LaravelAuth(guard: 'admin')]
+#[LaravelCache(memo: true, store: 'redis')]
+#[LaravelLog(name: 'prefixed', channel: 'daily')]
+#[LaravelStorage(disk: 's3')]
+#[LaravelDatabase(connection: 'mysql')]
+class Service {}
+#[Storage(disk: 'bad')] class OtherService {}
+"#;
+    let map = parse_and_extract_semantic(php);
+    for (resource, expected) in [
+        (LaravelConfigResource::AuthGuard, "admin"),
+        (LaravelConfigResource::CacheStore, "redis"),
+        (LaravelConfigResource::LogChannel, "daily"),
+        (LaravelConfigResource::StorageDisk, "s3"),
+        (LaravelConfigResource::DatabaseConnection, "mysql"),
+    ] {
+        assert_eq!(
+            resource_keys(&map, resource),
+            vec![(expected.to_string(), false, false)],
+            "{resource:?}"
+        );
+    }
+}
+
+#[test]
+fn semantic_route_middleware_accepts_aliases_and_fqns_but_rejects_homonyms() {
+    let php = r#"<?php
+namespace App;
+use Illuminate\Support\Facades\Route as LaravelRoute;
+class Route {}
+LaravelRoute::middleware(options: [], middleware: 'auth:web');
+\Illuminate\Support\Facades\Route::middleware('auth:admin');
+LaravelRoute::get('/')->middleware(['auth:api']);
+Route::middleware('auth:bad-static');
+Route::get('/local')->middleware('auth:bad-chain');
+"#;
+    assert_eq!(
+        resource_keys(
+            &parse_and_extract_semantic(php),
+            LaravelConfigResource::AuthGuard,
+        ),
+        vec![
+            ("web".to_string(), false, false),
+            ("admin".to_string(), false, false),
+            ("api".to_string(), false, false),
+        ]
+    );
+}
+
+#[test]
+fn semantic_auth_helper_preserves_global_fallback_and_rejects_shadows() {
+    let global_fallback = r#"<?php
+namespace App;
+use function auth as laravel_auth;
+auth('web');
+\auth('admin');
+laravel_auth('api');
+"#;
+    assert_eq!(
+        resource_keys(
+            &parse_and_extract_semantic(global_fallback),
+            LaravelConfigResource::AuthGuard,
+        ),
+        vec![
+            ("web".to_string(), false, false),
+            ("admin".to_string(), false, false),
+            ("api".to_string(), false, false),
+        ]
+    );
+
+    for shadowed in [
+        "<?php namespace App; function auth() {} auth('bad');",
+        "<?php namespace App; function & auth() {} auth('bad');",
+        "<?php namespace App; use function Vendor\\auth; auth('bad');",
+        "<?php namespace App; use function Vendor\\helper as auth; auth('bad');",
+    ] {
+        assert!(
+            resource_keys(
+                &parse_and_extract_semantic(shadowed),
+                LaravelConfigResource::AuthGuard,
+            )
+            .is_empty(),
+            "{shadowed}"
+        );
+    }
 }
 
 // ── Container binding key spans ────────────────────────────────────
@@ -5113,7 +5522,11 @@ fn the_checked_model_is_recorded_in_each_spelling() {
             .first()
             .unwrap_or_else(|| panic!("`{subject}` should be recorded as the checked model"));
         assert_eq!(recorded.is_static, is_static, "for `{subject}`");
-        assert_eq!(recorded.subject_text.as_str(&php), text, "for `{subject}`");
+        assert_eq!(
+            recorded.subject_text.as_str(mapped(&map, &php)),
+            text,
+            "for `{subject}`"
+        );
     }
 }
 
@@ -5165,7 +5578,7 @@ fn authorize_for_user_reads_its_shifted_arguments() {
     assert_eq!(
         map.gate_subjects
             .first()
-            .map(|s| s.subject_text.as_str(php)),
+            .map(|s| s.subject_text.as_str(mapped(&map, php))),
         Some("$post")
     );
 
@@ -5444,6 +5857,21 @@ fn the_single_key_form_of_config_still_reads_and_writes() {
         )),
         vec![("app.name".to_string(), true)]
     );
+}
+
+#[test]
+fn runtime_config_writes_can_establish_an_entire_root() {
+    for call in [
+        "Config::set('filesystems', $settings)",
+        "config(['filesystems' => $settings])",
+    ] {
+        assert_eq!(
+            config_keys_written(&parse_and_extract(&format!("<?php\n{call};\n"))),
+            vec![("filesystems".to_string(), true)],
+            "source: {call}"
+        );
+    }
+    assert!(config_keys_written(&parse_and_extract("<?php config('filesystems');")).is_empty());
 }
 
 /// `hasForLocale()` asks the same question of the same keys `has()` does.

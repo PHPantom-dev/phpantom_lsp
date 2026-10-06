@@ -1,4 +1,4 @@
-use crate::common::create_test_backend;
+use crate::common::{class_items, complete_at, create_test_backend, labels, open_php_str};
 use phpantom_lsp::Backend;
 use std::collections::HashMap;
 use tower_lsp::LanguageServer;
@@ -32,96 +32,41 @@ fn create_builtin_attribute_backend() -> Backend {
     Backend::new_test_with_all_stubs(class_stubs, HashMap::new(), HashMap::new())
 }
 
-async fn complete_at(
-    backend: &Backend,
-    uri: &Url,
-    text: &str,
-    line: u32,
-    character: u32,
-) -> Vec<CompletionItem> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        None => vec![],
-    }
-}
-
-fn class_items(items: &[CompletionItem]) -> Vec<&CompletionItem> {
-    items
-        .iter()
-        .filter(|i| i.kind == Some(CompletionItemKind::CLASS))
-        .collect()
-}
-
-fn labels(items: &[CompletionItem]) -> Vec<&str> {
-    items.iter().map(|i| i.label.as_str()).collect()
-}
-
 /// Load scaffolding classes into the backend's ast_map.
 ///
 /// All attribute classes share a common prefix ("My") so that prefix-based
 /// tests can use "My" to match all of them at once, while non-attribute
 /// classes use a different prefix ("Plain").
 async fn load_scaffolding(backend: &Backend) {
-    let scaffolding_uri = Url::parse("file:///scaffolding_attr.php").unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: scaffolding_uri,
-                language_id: "php".to_string(),
-                version: 1,
-                text: concat!(
-                    "<?php\n",
-                    "namespace Scaffold;\n",
-                    "#[\\Attribute(\\Attribute::TARGET_CLASS)]\n",
-                    "class MyClassAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_METHOD)]\n",
-                    "class MyMethodAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_PROPERTY)]\n",
-                    "class MyPropertyAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_PARAMETER)]\n",
-                    "class MyParameterAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_CLASS_CONSTANT)]\n",
-                    "class MyConstantAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_FUNCTION)]\n",
-                    "class MyFunctionAttr {}\n",
-                    "#[\\Attribute]\n",
-                    "class MyAnyAttr {}\n",
-                    "#[\\Attribute(\\Attribute::TARGET_CLASS | \\Attribute::TARGET_METHOD)]\n",
-                    "class MyClassMethodAttr {}\n",
-                    "class PlainClass {}\n",
-                    "interface PlainInterface {}\n",
-                    "trait PlainTrait {}\n",
-                    "enum PlainEnum {}\n",
-                )
-                .to_string(),
-            },
-        })
-        .await;
+    open_php_str(
+        backend,
+        "file:///scaffolding_attr.php",
+        concat!(
+            "<?php\n",
+            "namespace Scaffold;\n",
+            "#[\\Attribute(\\Attribute::TARGET_CLASS)]\n",
+            "class MyClassAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_METHOD)]\n",
+            "class MyMethodAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_PROPERTY)]\n",
+            "class MyPropertyAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_PARAMETER)]\n",
+            "class MyParameterAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_CLASS_CONSTANT)]\n",
+            "class MyConstantAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_FUNCTION)]\n",
+            "class MyFunctionAttr {}\n",
+            "#[\\Attribute]\n",
+            "class MyAnyAttr {}\n",
+            "#[\\Attribute(\\Attribute::TARGET_CLASS | \\Attribute::TARGET_METHOD)]\n",
+            "class MyClassMethodAttr {}\n",
+            "class PlainClass {}\n",
+            "interface PlainInterface {}\n",
+            "trait PlainTrait {}\n",
+            "enum PlainEnum {}\n",
+        ),
+    )
+    .await;
 }
 
 fn insert_text(item: &CompletionItem) -> &str {

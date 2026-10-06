@@ -1571,6 +1571,39 @@ fn blade_foreach_directive_token() {
 }
 
 #[test]
+fn blade_interpolation_token_aligns_with_source_column() {
+    // src="{{ \App\Library\MyImage::get('foo.png') }}"
+    // Index: 012345678
+    // \ is at col 8.
+    let blade = r#"src="{{ \App\Library\MyImage::get('foo.png') }}""#;
+    let tokens = get_blade_tokens(blade);
+
+    // App\Library\MyImage
+    let app_lib = tokens
+        .iter()
+        .find(|t| t.length == 20)
+        .expect("Should find App-Library token");
+    assert_eq!(app_lib.line, 0);
+    assert_eq!(app_lib.character, 8);
+}
+
+#[test]
+fn blade_foreach_variable_token_aligns_with_source_column() {
+    // @foreach ($items as $item)
+    // Col:    01234567890
+    // $items starts at 10.
+    let tokens = get_blade_tokens("@foreach ($items as $item)\n@endforeach");
+
+    // Find $items (length 6)
+    let items_tok = tokens
+        .iter()
+        .find(|t| t.length == 6)
+        .expect("Should find $items token");
+    assert_eq!(items_tok.line, 0);
+    assert_eq!(items_tok.character, 10); // "@foreach (" is 10 chars
+}
+
+#[test]
 fn phpstan_type_alias_definition_highlights_its_class_names() {
     // The alias definition is an ordinary type, so a class named inside
     // it is classified like any other docblock type reference.

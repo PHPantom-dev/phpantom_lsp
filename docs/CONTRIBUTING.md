@@ -32,17 +32,33 @@ Note that clippy runs twice, once for library code and once including test code.
 
 ## Testing
 
-- Integration tests go in `tests/completion_*.rs` or `tests/definition_*.rs`, one file per feature area
-- Use `create_test_backend()` from `tests/common/mod.rs` for same-file tests
+- Integration tests go in `tests/integration/`, one file per feature area (`completion_*.rs`, `definition_*.rs`, `code_action_*.rs`, ...)
+- Use `create_test_backend()` from `tests/integration/common/mod.rs` for same-file tests
 - Use `create_psr4_workspace()` for cross-file / PSR-4 tests
+- A helper (a request wrapper, a label extractor, a position finder) that three or more test files would define belongs in `tests/integration/common/mod.rs`, not copied into each file; check there before writing one
+- Inline `#[cfg(test)]` modules in `src/` are for unit tests of private helpers; a test that drives a `Backend` through a public handler goes in `tests/integration/`
 - Test the happy path, edge cases, and interactions with existing features
-- When adding a feature, update `examples/php/demo.php` with working examples (and verify with `php -l examples/php/demo.php`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`).
+- When adding a feature, update the matching demo file under `examples/php/` with working examples (and verify with `find examples/php -name '*.php' -print0 | xargs -0 -n1 php -l`). For Laravel-specific features, also update `examples/laravel/app/Demo.php` (and verify with `php -l examples/laravel/app/Demo.php`).
 
 See [BUILDING.md](BUILDING.md) for more on running tests and manual LSP testing.
 
 ## Changelog
 
-Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. See the existing entries for the style and level of detail expected.
+Update [CHANGELOG.md](CHANGELOG.md) when your PR adds, changes, or fixes something a user would notice. Add entries under `## [Unreleased]` in the appropriate subsection (`### Added`, `### Fixed`, `### Changed`, or `### Removed`). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched.
+
+Keep entries short and easy to scan:
+
+- Start with a bolded one-line summary, then one or two plain sentences (three at most for a large feature). For a feature, say what the user gets and how to use it. For a fix, say what went wrong from the user's point of view and what happens now.
+- Leave out how the code worked before or why the bug happened. That belongs in the commit message.
+- Keep the details a user acts on: config keys, CLI flags, and a short code example when it makes the change concrete. One headline number is enough for a performance entry.
+- If a section groups its entries under `####` headings (Laravel, Blade templates, Type inference, Diagnostics, Performance and memory, and so on), put your entry under the matching one. Related fixes can share one entry.
+- End with `Contributed by @username` if you are not the maintainer, and `Closes #N` when the change fixes an issue.
+
+Example:
+
+```markdown
+- **`analyze` takes more than one path.** `phpantom_lsp analyze app/ lib/Helper.php tests/` checks everything named, so a pre-commit hook or CI step can pass only the changed files.
+```
 
 ## Documentation
 

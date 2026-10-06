@@ -4,6 +4,8 @@ use crate::Backend;
 use crate::composer;
 use crate::parser::with_parsed_program;
 
+use super::helpers::make_diagnostic;
+
 use mago_syntax::cst::*;
 
 impl Backend {
@@ -25,6 +27,37 @@ pub(crate) fn namespace_mismatch_diagnostic(
     uri: &str,
     content: &str,
 ) -> Option<Diagnostic> {
+    let (expected_ns, _) = psr4_expectation(backend, uri, content)?;
+
+    let (actual_ns, range) = namespace_decl_from_content(content)?;
+
+    if expected_ns.as_deref() == actual_ns.as_deref() {
+        return None;
+    }
+
+    let expected_display = expected_ns.as_deref().unwrap_or("<global>");
+    let actual_display = actual_ns.as_deref().unwrap_or("<global>");
+
+    Some(make_diagnostic(
+        range,
+        DiagnosticSeverity::WARNING,
+        "namespace_mismatch",
+        format!("Namespace `{actual_display}` does not match PSR-4 expected `{expected_display}`"),
+    ))
+}
+
+/// What PSR-4 expects of `uri`: the namespace its directory maps to and
+/// the class name its filename maps to.
+///
+/// `None` when the file is exempt from both checks: it declares more
+/// than the one class-like they are about, it is not a file on disk, the
+/// project has no PSR-4 mappings (a standalone script, or no
+/// `composer.json` at all), or no mapping covers its path.
+pub(crate) fn psr4_expectation(
+    backend: &Backend,
+    uri: &str,
+    content: &str,
+) -> Option<(Option<String>, String)> {
     if !is_structural_single_classlike_file(content) {
         return None;
     }
@@ -37,29 +70,7 @@ pub(crate) fn namespace_mismatch_diagnostic(
         return None;
     }
 
-    let (expected_ns, _) =
-        composer::resolve_namespace_from_path(&mappings, &workspace_root, &file_path)?;
-
-    let (actual_ns, range) = namespace_decl_from_content(content)?;
-
-    if expected_ns.as_deref() == actual_ns.as_deref() {
-        return None;
-    }
-
-    let expected_display = expected_ns.as_deref().unwrap_or("<global>");
-    let actual_display = actual_ns.as_deref().unwrap_or("<global>");
-
-    Some(Diagnostic {
-        range,
-        severity: Some(DiagnosticSeverity::WARNING),
-        code: Some(NumberOrString::String("namespace_mismatch".to_string())),
-        source: Some("phpantom".to_string()),
-        message: format!(
-            "Namespace `{}` does not match PSR-4 expected `{}`",
-            actual_display, expected_display,
-        ),
-        ..Default::default()
-    })
+    composer::resolve_namespace_from_path(&mappings, &workspace_root, &file_path)
 }
 
 pub(crate) fn namespace_decl_from_content(content: &str) -> Option<(Option<String>, Range)> {

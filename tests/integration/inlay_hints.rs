@@ -1358,7 +1358,7 @@ each([1, 2, 3], function ($x) {});
         .filter(|h| h.kind == Some(InlayHintKind::TYPE) && !hint_label(h).starts_with(':'))
         .collect();
 
-    // Template substitution infers T = int from [1, 2, 3].
+    // Template substitution infers T = 1|2|3 from [1, 2, 3].
     assert_eq!(
         param_type_hints.len(),
         1,
@@ -1367,8 +1367,8 @@ each([1, 2, 3], function ($x) {});
     );
     assert_eq!(
         hint_label(param_type_hints[0]),
-        "int ",
-        "template T should be substituted to int; all hints: {:?}",
+        "1|2|3 ",
+        "template T should be substituted to 1|2|3; all hints: {:?}",
         all
     );
     // Verify the callable resolves — we should get ": void" return hint.
@@ -1398,7 +1398,7 @@ async fn closure_return_type_hint_template_substitution() {
  */
 function transform(array $items, callable $fn): void {}
 
-transform([1, 2, 3], function ($x) { return $x * 2; });
+transform([1, 2, 3], function ($x) { return $x; });
 "#;
     let hints = inlay_hints_for(&backend, &uri, text).await;
     let all: Vec<_> = hints.iter().map(|h| (hint_label(h), h.kind)).collect();
@@ -1406,8 +1406,8 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
         .iter()
         .filter(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'))
         .collect();
-    // Template substitution infers T = int from [1, 2, 3], so the
-    // return type of callable(T): T becomes ": int".
+    // Template substitution infers T = 1|2|3 from [1, 2, 3], so the
+    // return type of callable(T): T becomes ": 1|2|3".
     assert!(
         !return_hints.is_empty(),
         "expected a closure return-type hint; all hints: {:?}",
@@ -1415,8 +1415,37 @@ transform([1, 2, 3], function ($x) { return $x * 2; });
     );
     assert_eq!(
         hint_label(return_hints[0]),
-        ": int",
-        "return type hint should be ': int' (T substituted from array elements); all: {:?}",
+        ": 1|2|3",
+        "return type hint should be ': 1|2|3' (T substituted from array elements); all: {:?}",
+        all
+    );
+}
+
+#[tokio::test]
+async fn closure_return_type_hint_integer_arithmetic_is_int() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    let text = r#"<?php
+/**
+ * @template T
+ * @param array<T> $items
+ * @param callable(T): T $fn
+ */
+function transform(array $items, callable $fn): void {}
+
+transform([1, 2, 3], function ($x) { return $x * 2; });
+"#;
+    let hints = inlay_hints_for(&backend, &uri, text).await;
+    let all: Vec<_> = hints.iter().map(|h| (hint_label(h), h.kind)).collect();
+    // `$x * 2` over `1|2|3` returns 2, 4 or 6, so the body's own type wins
+    // over the substituted `T`.
+    let return_hint = hints
+        .iter()
+        .find(|h| h.kind == Some(InlayHintKind::TYPE) && hint_label(h).starts_with(':'));
+    assert_eq!(
+        return_hint.map(hint_label).as_deref(),
+        Some(": int"),
+        "all: {:?}",
         all
     );
 }

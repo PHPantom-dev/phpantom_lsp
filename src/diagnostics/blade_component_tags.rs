@@ -11,10 +11,12 @@
 //! the directive stream; this turns what it finds into reports anchored
 //! on the offending tag in the Blade source.
 
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity};
+use tower_lsp::lsp_types::Diagnostic;
 
 use crate::Backend;
 use crate::blade::component_tags::{TagImbalance, TagKind, tag_imbalances};
+
+use super::blade_imbalance::{BlockImbalance, report_block_imbalances};
 
 /// A closing tag that closes something other than the tag it sits in.
 const MISMATCHED_CODE: &str = "mismatched_blade_component_tag";
@@ -31,6 +33,61 @@ fn tag_text(kind: TagKind, name: &str, closing: bool) -> String {
         slash = if closing { "/" } else { "" },
         prefix = kind.prefix(),
     )
+}
+
+impl BlockImbalance for TagImbalance {
+    fn span(&self) -> &std::ops::Range<usize> {
+        TagImbalance::span(self)
+    }
+
+    fn code_and_message<F: Fn(&std::ops::Range<usize>) -> u32>(
+        &self,
+        line_of: F,
+    ) -> (&'static str, String) {
+        match self {
+            TagImbalance::Mismatched {
+                found_kind,
+                found,
+                opener_kind,
+                opener,
+                opener_span,
+                ..
+            } => {
+                let line = line_of(opener_span);
+                let opener_open = tag_text(*opener_kind, opener, false);
+                let opener_close = tag_text(*opener_kind, opener, true);
+                let found_close = tag_text(*found_kind, found, true);
+                (
+                    MISMATCHED_CODE,
+                    format!(
+                        "Expected {opener_close} to close the {opener_open} on line {line}, found {found_close}"
+                    ),
+                )
+            }
+            TagImbalance::Unexpected {
+                found_kind, found, ..
+            } => {
+                let found_close = tag_text(*found_kind, found, true);
+                let found_open = tag_text(*found_kind, found, false);
+                (
+                    UNEXPECTED_CODE,
+                    format!("{found_close} closes nothing: no {found_open} is open here"),
+                )
+            }
+            TagImbalance::Unclosed {
+                opener_kind,
+                opener,
+                ..
+            } => {
+                let opener_open = tag_text(*opener_kind, opener, false);
+                let opener_close = tag_text(*opener_kind, opener, true);
+                (
+                    UNCLOSED_CODE,
+                    format!("{opener_open} is never closed: this needs a matching {opener_close}"),
+                )
+            }
+        }
+    }
 }
 
 impl Backend {
@@ -51,62 +108,7 @@ impl Backend {
         let Some(source) = self.get_file_content_arc(uri) else {
             return;
         };
-        let range_of = |span: &std::ops::Range<usize>| {
-            crate::text_position::byte_range_to_lsp_range(&source, span.start, span.end)
-        };
 
-        for imbalance in tag_imbalances(&source) {
-            let (code, message) = match &imbalance {
-                TagImbalance::Mismatched {
-                    found_kind,
-                    found,
-                    opener_kind,
-                    opener,
-                    opener_span,
-                    ..
-                } => {
-                    let line = range_of(opener_span).start.line + 1;
-                    let opener_open = tag_text(*opener_kind, opener, false);
-                    let opener_close = tag_text(*opener_kind, opener, true);
-                    let found_close = tag_text(*found_kind, found, true);
-                    (
-                        MISMATCHED_CODE,
-                        format!(
-                            "Expected {opener_close} to close the {opener_open} on line {line}, found {found_close}"
-                        ),
-                    )
-                }
-                TagImbalance::Unexpected {
-                    found_kind, found, ..
-                } => {
-                    let found_close = tag_text(*found_kind, found, true);
-                    let found_open = tag_text(*found_kind, found, false);
-                    (
-                        UNEXPECTED_CODE,
-                        format!("{found_close} closes nothing: no {found_open} is open here"),
-                    )
-                }
-                TagImbalance::Unclosed {
-                    opener_kind,
-                    opener,
-                    ..
-                } => {
-                    let opener_open = tag_text(*opener_kind, opener, false);
-                    let opener_close = tag_text(*opener_kind, opener, true);
-                    (
-                        UNCLOSED_CODE,
-                        format!(
-                            "{opener_open} is never closed: this needs a matching {opener_close}"
-                        ),
-                    )
-                }
-            };
-            out.push(super::helpers::make_diagnostic(
-                range_of(imbalance.span()),
-                DiagnosticSeverity::ERROR,
-                code,
-                message,
-            ));
-        }
+        report_block_imbalances(&source, tag_imbalances(&source), out);
     }
 }

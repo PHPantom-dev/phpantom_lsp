@@ -239,6 +239,68 @@ async fn model_and_typed_builder_where_values_complete_and_hover() {
 }
 
 #[tokio::test]
+async fn morph_column_aliases_use_each_namespace_blocks_model_imports() {
+    let source = r#"<?php
+namespace App\First {
+    use App\Models\Comment as Record;
+    Record::where('commentable_type', 'post');
+}
+namespace App\Second {
+    use App\Models\Other as Record;
+    Record::whereIn('commentable_type', ['post']);
+    if ((new Record())->commentable_type === 'post') {}
+}
+namespace App\Third {
+    use App\Models\Attachment as Record;
+    Record::where('owner_kind', 'post');
+    if ((new Record())->owner_kind === 'post') {}
+}
+"#;
+    let (backend, _dir, uri) = workspace(source, true).await;
+    for (prefix, is_alias) in [
+        ("Record::where('commentable_type', 'po", true),
+        ("Record::whereIn('commentable_type', ['po", false),
+        ("(new Record())->commentable_type === 'po", false),
+        ("Record::where('owner_kind', 'po", true),
+        ("(new Record())->owner_kind === 'po", true),
+    ] {
+        let position = position_after(source, prefix);
+        let completions = labels(&backend, &uri, position).await;
+        assert_eq!(
+            completions.iter().any(|label| label == "post"),
+            is_alias,
+            "{prefix}: {completions:?}"
+        );
+        let description = hover(&backend, &uri, position).await;
+        assert_eq!(
+            description
+                .as_ref()
+                .is_some_and(|text| text.contains("App\\Models\\Post")),
+            is_alias,
+            "{prefix}: {description:?}"
+        );
+    }
+
+    let unknowns = source.replace("'post'", "'missing'");
+    open_php(&backend, &uri, &unknowns).await;
+    let diagnostics = morph_diagnostics(&backend, &uri, &unknowns);
+    let mut actual_lines: Vec<u32> = diagnostics
+        .iter()
+        .map(|diagnostic| diagnostic.range.start.line)
+        .collect();
+    actual_lines.sort_unstable();
+    let expected_lines: Vec<u32> = [
+        "Record::where('commentable_type', 'missing",
+        "Record::where('owner_kind', 'missing",
+        "(new Record())->owner_kind === 'missing",
+    ]
+    .into_iter()
+    .map(|prefix| position_after(&unknowns, prefix).line)
+    .collect();
+    assert_eq!(actual_lines, expected_lines, "{diagnostics:?}");
+}
+
+#[tokio::test]
 async fn property_equality_aliases_work_in_both_directions_and_with_nullsafe_access() {
     let statements = [
         "if ($comment->commentable_type === 'post') {}",

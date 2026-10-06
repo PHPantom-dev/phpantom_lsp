@@ -39,26 +39,34 @@
 //! phpantom_lsp analyze src/Foo.php         # scan a single file
 //! ```
 //!
-//! The driver and file discovery live in [`run`]; output formatting
-//! (table, GitHub annotations, JSON) lives in [`output`]; opening the
-//! project on a headless `Backend`, which `fix`, `move`, and `format`
-//! share, lives in [`project`].
+//! The driver and file discovery live in [`run`], the stages it runs
+//! through in [`stages`] and the parallel diagnostic pass in
+//! [`diagnose`]; output formatting (table, GitHub annotations, JSON)
+//! lives in [`output`]; opening the project on a headless `Backend`,
+//! which `fix`, `move`, and `format` share, lives in [`project`].
 
 use std::path::PathBuf;
 
 use tower_lsp::lsp_types::DiagnosticSeverity;
 
+mod diagnose;
 mod output;
 mod project;
 mod run;
+mod stages;
 
-pub(crate) use output::{format_github_message, json_escape, print_success_box, progress_bar};
+pub(crate) use output::{
+    Colour, JsonFileEntry, JsonMessage, JsonTotals, TableRow, dispatch_report,
+    format_github_message, github_annotation, print_box, print_success_box, print_table,
+    progress_bar,
+};
 pub(crate) use project::{
     discover_laravel_resources, load_config_or_default, open_headless_project,
     open_headless_project_unindexed, parse_user_files,
 };
 pub(crate) use run::discover_user_files;
 pub use run::run;
+pub(crate) use stages::{OpenedProject, note_plain_php_project, open_project};
 
 /// Severity filter for the analyse output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

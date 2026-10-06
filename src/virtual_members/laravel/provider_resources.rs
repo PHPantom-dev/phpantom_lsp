@@ -16,6 +16,31 @@ use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_d
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
+use crate::symbol_map::extraction::laravel::{chain_roots_at_facade, is_laravel_container_expr};
+
+/// How many `->` links a `Route::…->group(path)` registration may put
+/// between the facade and the `group()` call. `Route::middleware(…)
+/// ->prefix(…)->name(…)->group(…)` is already longer than a provider
+/// realistically writes, and the bound keeps the walk linear.
+const ROUTE_GROUP_CHAIN_DEPTH: usize = 8;
+
+/// How many `->` links a `$package->name(…)->hasTranslations()->hasViews()
+/// ->…` registration may put between the `Package` variable and the call
+/// being resolved. Every `has*()` a provider chains onto one `name()` call
+/// adds one link, and real providers chain at most a handful.
+const PACKAGE_TOOLS_CHAIN_DEPTH: usize = 8;
+
+/// The `Package` variable name `configurePackage(Package $package)`
+/// conventionally declares, matched by name the way [`is_blade_compiler_expr`]
+/// matches the compiler variable: every `spatie/laravel-package-tools`
+/// provider, including every one spatie itself ships, follows this
+/// convention.
+const PACKAGE_TOOLS_VARIABLE: &[u8] = b"$package";
+
+/// `Package` methods that register a resource under the package's short
+/// name, unless given an explicit name/namespace of their own.
+const PACKAGE_TOOLS_RESOURCE_METHODS: [&[u8]; 3] =
+    [b"hastranslations", b"hasviews", b"hasconfigfile"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ProviderResource {
@@ -333,6 +358,15 @@ impl ProviderScans {
         true
     }
 
+    /// Drop one provider's scan, for a file deleted from disk.  Its FQN stays
+    /// registered, so a file that declares the provider again rejoins the
+    /// table the moment it parses.  Returns whether anything was dropped.
+    pub fn remove(&mut self, uri: &str) -> bool {
+        let before = self.scans.len();
+        self.scans.retain(|scan| scan.uri != uri);
+        self.scans.len() != before
+    }
+
     /// The merged table every consumer reads, with aliases resolved against
     /// the complete set of bindings.
     pub fn merged(&self) -> ProviderResources {
@@ -482,7 +516,9 @@ pub(crate) fn extract_provider_resources(
         // argument is either a closure (inline routes, ignored here) or a path
         // to a file whose routes we must scan.
         if method_lower == b"group"
-            && chain_roots_at_route(mc.object)
+            && chain_roots_at_facade(mc.object, ROUTE_GROUP_CHAIN_DEPTH, &|name| {
+                name.eq_ignore_ascii_case("Route")
+            })
             && let Some(first_arg) = mc.argument_list.arguments.iter().next()
             && let Some(path) = resolve_path_arg(
                 first_arg.value(),
@@ -501,7 +537,7 @@ pub(crate) fn extract_provider_resources(
         // `bind()`: the key is the second one, and the first names what it
         // stands for.
         if method_lower == b"alias"
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(target) = mc.argument_list.arguments.iter().next()
             && let Some(key_arg) = mc.argument_list.arguments.iter().nth(1)
             && let Some(key) = alias_key(key_arg.value(), content, &scope, &resolved)
@@ -544,7 +580,7 @@ pub(crate) fn extract_provider_resources(
         // through `$this->app`, not `$this`, so this is checked ahead of the
         // `$this->…` resource loaders below.
         if BINDING_METHODS.contains(&method_lower.as_slice())
-            && is_app_container_expr(mc.object)
+            && is_laravel_container_expr(mc.object)
             && let Some(key_arg) = mc.argument_list.arguments.iter().next()
             && let Some(key) = const_string(key_arg.value(), content, &scope)
         {
@@ -617,44 +653,66 @@ pub(crate) fn extract_provider_resources(
             return ControlFlow::Continue(());
         }
 
+        // `$package->name('laravel-billing')->hasTranslations()` and its
+        // `hasViews`/`hasConfigFile` siblings, written from
+        // `configurePackage(Package $package)`
+        // (`spatie/laravel-package-tools`). Checked ahead of the `$this->…`
+        // resource loaders below, which this chain's receiver is not.
+        if PACKAGE_TOOLS_RESOURCE_METHODS.contains(&method_lower.as_slice())
+            && chain_roots_at_package_var(mc.object, PACKAGE_TOOLS_CHAIN_DEPTH)
+            && let Some(name) =
+                package_tools_name(mc.object, PACKAGE_TOOLS_CHAIN_DEPTH, content, &scope)
+        {
+            record_package_tools_registration(
+                &method_lower,
+                &mc.argument_list,
+                content,
+                &scope,
+                &PackageToolsContext {
+                    short_name: package_tools_short_name(&name),
+                    package_base_dir: &package_tools_base_dir(file_path),
+                    workspace_root,
+                },
+                &mut resources,
+            );
+            return ControlFlow::Continue(());
+        }
+
         if !is_this_expr(mc.object) {
             return ControlFlow::Continue(());
         }
 
         let args: Vec<_> = mc.argument_list.arguments.iter().collect();
 
-        if method_lower == b"mergeconfigfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+        // The namespaced `load*From(path, namespace)` registrations differ
+        // only in which list they land in. `loadViewsFrom` is handled
+        // separately below: unlike the other two, it has a published-package
+        // override to check for first.
+        let namespaced: Option<&mut Vec<ProviderResource>> = match method_lower.as_slice() {
+            b"mergeconfigfrom" => Some(&mut resources.config_files),
+            b"loadtranslationsfrom" => Some(&mut resources.trans_dirs),
+            _ => None,
+        };
+        if let Some(target) = namespaced {
+            if args.len() >= 2
+                && let Some(path) =
+                    resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
                 && let Some((ns, _, _)) =
                     super::helpers::extract_string_literal(args[1].value(), content)
             {
-                resources.config_files.push(ProviderResource {
+                target.push(ProviderResource {
                     path,
                     namespace: ns.to_string(),
                 });
             }
-        } else if method_lower == b"loadviewsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
+        } else if method_lower == b"loadviewsfrom" {
+            if args.len() >= 2
+                && let Some(path) =
+                    resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
                 && let Some((ns, _, _)) =
                     super::helpers::extract_string_literal(args[1].value(), content)
             {
-                resources.view_dirs.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
-            }
-        } else if method_lower == b"loadtranslationsfrom" && args.len() >= 2 {
-            if let Some(path) =
-                resolve_path_arg(args[0].value(), content, file_dir, workspace_root, program)
-                && let Some((ns, _, _)) =
-                    super::helpers::extract_string_literal(args[1].value(), content)
-            {
-                resources.trans_dirs.push(ProviderResource {
-                    path,
-                    namespace: ns.to_string(),
-                });
+                push_view_dir_registration(&mut resources, path, ns.to_string(), workspace_root);
             }
         } else if method_lower == b"loadjsontranslationsfrom" && !args.is_empty() {
             if let Some(path) =
@@ -1006,28 +1064,166 @@ fn is_this_expr(expr: &Expression<'_>) -> bool {
     )
 }
 
-/// Whether `expr` names the service container: `$this->app` in a provider
-/// method, the `$app` a deferred callback receives, or the `app()` helper.
-pub(in crate::virtual_members::laravel) fn is_app_container_expr(expr: &Expression<'_>) -> bool {
+/// Walk at most `depth` links down a method chain to check whether it
+/// bottoms out at the `$package` variable [`PACKAGE_TOOLS_VARIABLE`] names.
+fn chain_roots_at_package_var(expr: &Expression<'_>, depth: usize) -> bool {
+    if depth == 0 {
+        return false;
+    }
     match expr {
-        Expression::Variable(Variable::Direct(dv)) => dv.name == b"$app",
-        Expression::Access(Access::Property(pa)) => {
-            is_this_expr(pa.object)
-                && matches!(
-                    &pa.property,
-                    ClassLikeMemberSelector::Identifier(ident)
-                        if ident.value.eq_ignore_ascii_case(b"app")
-                )
+        Expression::Variable(Variable::Direct(dv)) => {
+            dv.name.eq_ignore_ascii_case(PACKAGE_TOOLS_VARIABLE)
         }
-        Expression::Call(Call::Function(fc)) => {
-            matches!(fc.function, Expression::Identifier(id)
-                if id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"app")))
-                && fc.argument_list.arguments.is_empty()
-        }
+        Expression::Call(Call::Method(mc)) => chain_roots_at_package_var(mc.object, depth - 1),
         _ => false,
+    }
+}
+
+/// Walk down a `$package->name('laravel-billing')->hasConfigFile()->…`
+/// chain looking for the literal name `Package::name()` was given.
+fn package_tools_name(
+    expr: &Expression<'_>,
+    depth: usize,
+    content: &str,
+    scope: &Scope,
+) -> Option<String> {
+    if depth == 0 {
+        return None;
+    }
+    let Expression::Call(Call::Method(mc)) = expr else {
+        return None;
+    };
+    let ClassLikeMemberSelector::Identifier(method) = &mc.method else {
+        return None;
+    };
+    if method.value.eq_ignore_ascii_case(b"name")
+        && let Some(first) = mc.argument_list.arguments.iter().next()
+    {
+        return const_string(first.value(), content, scope);
+    }
+    package_tools_name(mc.object, depth - 1, content, scope)
+}
+
+/// `Illuminate\Support\Str::after($name, 'laravel-')`: `Package::shortName()`
+/// applied to whatever `name()` was given, dropping everything up to and
+/// including the first `laravel-`. A name without that substring is left
+/// unchanged, the way `Str::after` leaves any string it cannot find alone.
+fn package_tools_short_name(name: &str) -> &str {
+    match name.find("laravel-") {
+        Some(idx) => &name[idx + "laravel-".len()..],
+        None => name,
+    }
+}
+
+/// `PackageServiceProvider::getPackageBaseDir()`: the provider file's own
+/// directory, moved up one level when the file sits directly in a
+/// `Providers` folder (packages that mirror Laravel's own app structure put
+/// their provider there, one level below the package root).
+fn package_tools_base_dir(file_path: &Path) -> PathBuf {
+    let dir = file_path.parent().unwrap_or(file_path);
+    match dir.file_name().and_then(|name| name.to_str()) {
+        Some("Providers") => dir.parent().unwrap_or(dir).to_path_buf(),
+        _ => dir.to_path_buf(),
+    }
+}
+
+/// Registers a `loadViewsFrom($path, $namespace)` resource the way
+/// `Illuminate\Support\ServiceProvider::loadViewsFrom()` actually resolves
+/// it: before adding `$path` itself, it checks each configured view root for
+/// a `vendor/$namespace` directory and, if one exists, adds that first.
+/// `FileViewFinder` renders the first hint registered for a namespace, so a
+/// published copy (created by `artisan vendor:publish`) wins over the
+/// package's own directory, and a view only the published directory holds
+/// still resolves.
+fn push_view_dir_registration(
+    resources: &mut ProviderResources,
+    path: PathBuf,
+    namespace: String,
+    workspace_root: &Path,
+) {
+    for root in crate::blade::discover_view_paths(workspace_root) {
+        let published = root.join("vendor").join(&namespace);
+        if published.is_dir() {
+            resources.view_dirs.push(ProviderResource {
+                path: published,
+                namespace: namespace.clone(),
+            });
+        }
+    }
+    resources
+        .view_dirs
+        .push(ProviderResource { path, namespace });
+}
+
+/// The context a `$package->has*()` registration (see
+/// [`record_package_tools_registration`]) reads its default namespace and
+/// resource directory from.
+struct PackageToolsContext<'a> {
+    short_name: &'a str,
+    package_base_dir: &'a Path,
+    workspace_root: &'a Path,
+}
+
+/// `$package->hasTranslations()`, `->hasViews($namespace = null)`, and
+/// `->hasConfigFile($name = null)`: the resource registrations
+/// `spatie/laravel-package-tools` exposes on `Package`. Each defaults its
+/// namespace/config key to `short_name` and reads its directory from
+/// `<package_base_dir>/../resources/<kind>` (`../config/<name>.php` for a
+/// config file), exactly as `PackageServiceProvider`'s own `boot*()`/
+/// `register()` methods do.
+fn record_package_tools_registration(
+    method: &[u8],
+    argument_list: &ArgumentList<'_>,
+    content: &str,
+    scope: &Scope,
+    ctx: &PackageToolsContext<'_>,
+    resources: &mut ProviderResources,
+) {
+    let first_arg_name = argument_list
+        .arguments
+        .iter()
+        .next()
+        .and_then(|arg| const_string(arg.value(), content, scope));
+
+    match method {
+        b"hastranslations" => {
+            let resolved = ctx
+                .package_base_dir
+                .join("..")
+                .join("resources")
+                .join("lang");
+            resources.trans_dirs.push(ProviderResource {
+                path: resolved.canonicalize().unwrap_or(resolved),
+                namespace: ctx.short_name.to_string(),
+            });
+        }
+        b"hasviews" => {
+            let resolved = ctx
+                .package_base_dir
+                .join("..")
+                .join("resources")
+                .join("views");
+            let namespace = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
+            push_view_dir_registration(
+                resources,
+                resolved.canonicalize().unwrap_or(resolved),
+                namespace,
+                ctx.workspace_root,
+            );
+        }
+        b"hasconfigfile" => {
+            let config_name = first_arg_name.unwrap_or_else(|| ctx.short_name.to_string());
+            let resolved = ctx
+                .package_base_dir
+                .join("..")
+                .join("config")
+                .join(format!("{config_name}.php"));
+            resources.config_files.push(ProviderResource {
+                path: resolved.canonicalize().unwrap_or(resolved),
+                namespace: config_name.replace(['/', '\\'], "."),
+            });
+        }
+        _ => {}
     }
 }
 
@@ -1226,12 +1422,13 @@ fn instantiated_or_class_string<'arena>(expr: &Expression<'arena>) -> Option<&'a
 /// Resolve an expression that names a file to the path it points at.
 ///
 /// Covers the forms Laravel projects use to locate route, config, view, and
-/// translation files: `__DIR__ . '/…'`, `base_path('…')`, a bare literal
-/// (absolute, or relative to the referring file), and a local variable
-/// assigned one of those forms earlier in the same scope (Livewire's
-/// service provider writes `$config = __DIR__.'/../config/x.php';` before
-/// passing `$config` to `mergeConfigFrom`).  `program` is the parse of
-/// `content`, which that last form is resolved against.
+/// translation files: `__DIR__ . '/…'` and `dirname(__DIR__) . '/…'`,
+/// `base_path('…')`, a bare literal (absolute, or relative to the referring
+/// file), and a local variable assigned one of those forms earlier in the
+/// same scope (Livewire's service provider writes
+/// `$config = __DIR__.'/../config/x.php';` before passing `$config` to
+/// `mergeConfigFrom`).  `program` is the parse of `content`, which that last
+/// form is resolved against.
 pub(crate) fn resolve_path_arg(
     expr: &Expression<'_>,
     content: &str,
@@ -1239,11 +1436,6 @@ pub(crate) fn resolve_path_arg(
     workspace_root: &Path,
     program: &Program<'_>,
 ) -> Option<PathBuf> {
-    if let Some(rel) = super::helpers::extract_dir_concat_path(expr, content) {
-        let resolved = file_dir.join(rel.trim_start_matches('/'));
-        return resolved.canonicalize().ok().or(Some(resolved));
-    }
-
     // `base_path('app/.../web.php')` resolves relative to the workspace
     // root, `resource_path('views/components')` relative to `resources/`
     // inside it.  Both take an optional argument, and naming the base
@@ -1266,27 +1458,25 @@ pub(crate) fn resolve_path_arg(
         return resolved.canonicalize().ok().or(Some(resolved));
     }
 
-    if let Some((val, _, _)) = super::helpers::extract_string_literal(expr, content) {
-        if val.starts_with('/') {
-            let p = PathBuf::from(val);
-            return p.canonicalize().ok().or(Some(p));
-        }
-        let resolved = file_dir.join(val);
-        return resolved.canonicalize().ok().or(Some(resolved));
-    }
-
     if let Expression::Variable(Variable::Direct(dv)) = expr {
         let assigned = last_assignment_before(program, dv.start_offset(), dv.name)?;
         return resolve_path_arg(assigned, content, file_dir, workspace_root, program);
     }
 
-    None
+    let resolved = PathBuf::from(crate::document_links::try_evaluate_path_expr(
+        expr, file_dir,
+    )?);
+    resolved.canonicalize().ok().or(Some(resolved))
 }
 
 /// The workspace-relative directory a Laravel path helper resolves against,
 /// or `None` for a function that is not one.
 fn path_helper_base(name: &[u8]) -> Option<&'static str> {
-    const HELPERS: [(&[u8], &str); 2] = [(b"base_path", ""), (b"resource_path", "resources")];
+    const HELPERS: [(&[u8], &str); 3] = [
+        (b"base_path", ""),
+        (b"resource_path", "resources"),
+        (b"lang_path", "lang"),
+    ];
     let short = name.rsplit(|&b| b == b'\\').next()?;
     HELPERS
         .iter()
@@ -1334,26 +1524,6 @@ fn last_assignment_before<'ast, 'arena>(
         ),
     }
     best.map(|(_, rhs)| rhs)
-}
-
-/// Check whether an instance-method call chain roots at the `Route` facade,
-/// i.e. `Route::middleware(...)->namespace(...)->…`.  Walks down the `->object`
-/// chain until it reaches the static entry point and matches its class name.
-fn chain_roots_at_route(expr: &Expression<'_>) -> bool {
-    match expr {
-        Expression::Call(Call::Method(mc)) => chain_roots_at_route(mc.object),
-        Expression::Call(Call::StaticMethod(sc)) => {
-            if let Expression::Identifier(id) = sc.class {
-                id.value()
-                    .rsplit(|&b| b == b'\\')
-                    .next()
-                    .is_some_and(|seg| seg.eq_ignore_ascii_case(b"Route"))
-            } else {
-                false
-            }
-        }
-        _ => false,
-    }
 }
 
 #[cfg(test)]

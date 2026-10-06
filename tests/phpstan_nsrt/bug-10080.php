@@ -1,0 +1,76 @@
+<?php
+
+namespace Bug10080;
+
+/**
+ * @param array{
+ *    a1?: string,
+ *    a2?: string,
+ *    a3?: string,
+ *    a4?: string,
+ *    a5?: string,
+ *    a6?: string,
+ *    a7?: string,
+ *    a8?: string,
+ *    a9?: string,
+ *    a10?: string,
+ *    a11?: string,
+ *    a12?: string,
+ *    a13?: string,
+ *    a14?: string,
+ *    a15?: string,
+ *    a16?: string,
+ *    a17?: string,
+ *    a18?: string,
+ *    a19?: string,
+ *    a20?: string,
+ *    a21?: string,
+ *    a22?: string,
+ *    a23?: string,
+ *    a24?: string,
+ *    a25?: string,
+ *    a26?: string,
+ *    a27?: string,
+ *    a28?: string,
+ *    a29?: string,
+ *    a30?: string,
+ *    a31?: string,
+ *    a32?: string,
+ *    a33?: string,
+ *    a34?: string,
+ *    a35?: string,
+ *    a36?: string,
+ *    a37?: string,
+ *    a38?: string,
+ *    a39?: string,
+ *    a40?: string,
+ *    a41?: string,
+ *    a42?: string,
+ *    a43?: string,
+ *    a44?: string,
+ *    a45?: string,
+ *    a46?: string,
+ *    a47?: string,
+ *    a48?: string,
+ *    a49?: string,
+ *    a50?: string,
+ *    a51?: string,
+ *    a52?: string,
+ *    a53?: string,
+ *    a54?: string,
+ *    a55?: string,
+ *    a56?: string,
+ *    a57?: string,
+ *    a58?: string,
+ *    a59?: string,
+ *    a60?: string,
+ *    a61?: string,
+ *    a62?: string|string[]|int|float,
+ *    a63?: string
+ * } $row
+ */
+function doStuff(array $row): void
+{
+	\PHPStan\Testing\assertType('string', $row['a51'] ?? '');
+	\PHPStan\Testing\assertType('string', $row['a51'] ?? '');
+}

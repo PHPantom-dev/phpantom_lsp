@@ -11,11 +11,20 @@ generate a starter config file:
 phpantom_lsp init
 ```
 
-This creates a minimal `.phpantom.toml` with a JSON schema directive.
+On an interactive terminal, this walks through the settings projects
+customize most often (PHP version, indexing strategy, a few diagnostic
+toggles, semantic token mode) and writes only the answers that differ
+from PHPantom's defaults. Press Enter to accept a default and skip a
+question. Run `phpantom_lsp init --yes` (or pipe stdin, e.g. in a
+script) to skip the prompts and write a minimal `.phpantom.toml` with
+just a JSON schema directive instead.
+
 Editors with TOML schema support (Zed, VS Code + Even Better TOML,
 Neovim) provide autocomplete and hover documentation for every option
 via the schema. Only add settings you want to override -- when absent,
-all settings use their defaults.
+all settings use their defaults. Settings that need a list or a table
+(`indexing.exclude`, `[[diagnostics.ignore]]`, per-tool command
+overrides) aren't part of the wizard; add those by hand.
 
 ### Global config
 
@@ -61,7 +70,7 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
 | `downgrade-nullable-argument-mismatch` | bool | `false` | Downgrade `type_mismatch_argument` to a warning when the only reason an argument fails to satisfy the parameter is a stray `null` (every non-null member of the argument's type is already compatible). |
 | `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
-| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
+| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
 
 #### `[[diagnostics.ignore]]`
 
@@ -85,7 +94,7 @@ message = "^Call to deprecated function some_legacy_helper\\(\\)"
 | Key          | Type     | Default  | Description |
 | ------------ | -------- | -------- | ----------- |
 | `strategy`   | string   | `"full"` | Class discovery strategy: `"full"`, `"composer"`, `"self"`, or `"none"`. See [Indexing Strategy](#indexing-strategy) below. |
-| `exclude`    | string[] | `[]`     | Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing `/` anchors to the root, a trailing `/` restricts to directories, and a leading `!` re-includes. Applies to background discovery and to the directories `analyze` walks. A file you open in the editor, or name outright on the `analyze` command line, is always served. |
+| `exclude`    | string[] | `[]`     | Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing `/` anchors to the root, a trailing `/` restricts to directories, and a leading `!` re-includes. Applies to background discovery and to the directories `analyze` walks. A file you open in the editor, or name outright on the `analyze` command line, is always served. The `_ide_helper.php` and `_ide_helper_models.php` files laravel-ide-helper generates are always skipped; list them with a leading `!` to index them anyway. |
 | `extensions` | string[] | `[]`     | Extra file extensions (without the dot) treated as PHP source during workspace discovery, e.g. `["module", "inc", "theme"]` for Drupal. `.php` is always included. |
 
 ```toml
@@ -115,6 +124,7 @@ highlighting remains in charge of ordinary PHP syntax.
 | -------------- | ------- | ------- | ----------- |
 | `pint`         | string  | unset   | Command or path for Laravel Pint. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `pint-blade`   | boolean | unset   | Whether `.blade.php` files are formatted by Pint's `Pint/laravel_blade` rule. Unset: follow the workspace `pint.json`. `true`: send them to Pint with `--blade`. `false`: never; use the built-in Blade formatter. |
+| `blade-php`    | boolean | unset   | Whether the built-in Blade formatter also formats the PHP a template carries. Unset: leave every fragment as written. `true`: format it. No effect on a project whose Blade files go to Pint. |
 | `php-cs-fixer` | string  | unset   | Command or path for php-cs-fixer. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `phpcbf`       | string  | unset   | Command or path for phpcbf. Unset: auto-detect from `require-dev`. `""`: disable. |
 | `timeout`      | integer | `10000` | Max runtime in milliseconds per external formatting tool. |
@@ -134,6 +144,16 @@ highlighting remains in charge of ordinary PHP syntax.
 | `command`  | string  | unset   | Command or path for PHPCS. Unset: auto-detect via `vendor/bin/phpcs` then `$PATH`. `""`: disable. |
 | `standard` | string  | unset   | Coding standard to enforce (e.g. `"PSR12"`). Unset: PHPCS uses its own default detection. |
 | `timeout`  | integer | `30000` | Max runtime in milliseconds before PHPCS is killed. |
+
+### `[phpmd]`
+
+PHPMD 3 is required. Earlier versions have a different command line.
+
+| Key       | Type    | Default | Description |
+| --------- | ------- | ------- | ----------- |
+| `command` | string  | unset   | Command or path for PHPMD. Unset: auto-detect via `vendor/bin/phpmd` then `$PATH`, only when the project has a PHPMD config file (`phpmd.yml`, `phpmd.xml`, `.phpmd.yml`, `phpmd.xml.dist`, and the other names PHPMD looks for) or `ruleset` is set. `""`: disable. |
+| `ruleset` | string  | unset   | Ruleset name or file passed via `--ruleset` (e.g. `"cleancode"`). Unset: PHPMD uses the config file it finds in the project root. |
+| `timeout` | integer | `30000` | Max runtime in milliseconds before PHPMD is killed. |
 
 ### `[mago]`
 
@@ -204,6 +224,8 @@ PHPantom ships a built-in PHP formatter (mago-formatter) that works out of the b
 3. **Otherwise, the built-in formatter is used.**
 
 **Blade templates** are resolved on their own, since only Pint knows how to format one. A `.blade.php` file goes to Pint when the project's `pint.json` turns the `Pint/laravel_blade` rule on (or `pint-blade = true` asks for it, which also passes `--blade`), and otherwise to PHPantom's built-in Blade formatter. The built-in formatter reindents the template without changing the content of any line: indentation follows the nesting of directives, HTML and component tags, multi-line attribute lists and values, and brackets left open at the end of a line, using the editor's tab size and spaces-or-tabs setting. The bodies of `<script>`, `<style>`, and `@php` blocks are moved as a unit and keep their own layout; `<pre>`, `<textarea>`, and `@verbatim` contents are left exactly as written, as is anything between `{{-- blade-formatter-disable --}}` and `{{-- blade-formatter-enable --}}`. Templates whose indentation is output are never touched: Envoy task files, Markdown mail templates (under `resources/views/mail`, `resources/views/emails`, or `vendor/mail`, or using `<x-mail::` components), and Laravel Boost guidelines.
+
+Setting `blade-php = true` adds a pass that formats the PHP a template carries through the same built-in PHP formatter (and the same `mago.toml` settings) a `.php` file gets: `@php` bodies and `<?php` islands as statement lists, echoes, `<?=` islands, and directive arguments as expressions, along with the spacing that is Blade's own rather than PHP's, so `@if($a&&$b)` becomes `@if ($a && $b)` and `{{$x}}` becomes `{{ $x }}`. It is opt-in because it changes the content of a line, which the reindenter on its own never does. A fragment written across several lines is formatted where it stands, wrapped for the width the column it sits at actually leaves it. How many lines a fragment takes stays the author's, though: an array broken over several lines is respaced without being joined onto one, and a long line is respaced without being broken up. A fragment the formatter cannot parse is left exactly as written and the rest of the template still formats, and the pass stays out of everything the reindenter leaves alone, plus Alpine and Livewire attribute values, which are JavaScript.
 
 The built-in formatter defaults to the PER-CS 2.0 style. If a `mago.toml` is present at the workspace root, its `[formatter]` table is honoured instead, so PHPantom formats with the same preset and settings your project already uses with the Mago CLI:
 

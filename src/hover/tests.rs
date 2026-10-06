@@ -65,6 +65,7 @@ fn format_params_with_types() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         },
         ParameterInfo {
             name: crate::atom::atom("$age"),
@@ -76,6 +77,7 @@ fn format_params_with_types() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         },
     ];
     assert_eq!(
@@ -96,6 +98,7 @@ fn format_params_variadic() {
         is_variadic: true,
         is_reference: false,
         closure_this_type: None,
+        param_out_type: None,
     }];
     assert_eq!(format_native_params(&params), "string ...$items");
 }
@@ -112,6 +115,7 @@ fn format_params_reference() {
         is_variadic: false,
         is_reference: true,
         closure_this_type: None,
+        param_out_type: None,
     }];
     assert_eq!(format_native_params(&params), "array &$arr");
 }
@@ -525,7 +529,7 @@ fn a_definition_outside_the_workspace_hovers_without_a_path() {
     backend.update_ast(uri, provider);
     {
         let mut index = backend.laravel_gates.write();
-        index.set_file(
+        index.files.set_file(
             uri.to_string(),
             crate::virtual_members::laravel::scan_gate_registrations(provider),
         );

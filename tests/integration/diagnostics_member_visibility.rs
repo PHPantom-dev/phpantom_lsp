@@ -1,15 +1,15 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{collect_diagnostics_with, create_psr4_workspace, create_test_backend};
+use phpantom_lsp::Backend;
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn collect(php: &str) -> Vec<Diagnostic> {
-    let backend = create_test_backend();
-    let uri = "file:///test.php";
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    retain_visibility(out)
+    retain_visibility(collect_diagnostics_with(
+        &create_test_backend(),
+        php,
+        Backend::collect_slow_diagnostics,
+    ))
 }
 
 fn retain_visibility(mut diagnostics: Vec<Diagnostic>) -> Vec<Diagnostic> {

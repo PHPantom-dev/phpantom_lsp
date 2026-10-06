@@ -9,10 +9,10 @@ use mago_syntax::cst::*;
 use crate::Backend;
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::docblock;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{ResolutionCtx, VarResolutionCtx};
 
 use super::{resolve_rhs_expression, resolve_var_types};
 
@@ -27,15 +27,15 @@ pub(super) fn resolve_rhs_array_access<'b>(
     // walking through nested ArrayAccess nodes.  This handles both
     // single access (`$result['data']`) and chained access
     // (`$result['items'][0]`).
-    let mut segments: Vec<ArrayBracketSegment> = Vec::new();
+    let mut segments: Vec<(ArrayBracketSegment, &Expression<'_>)> = Vec::new();
     let mut current_expr: &Expression<'_> = array_access.array;
 
     // Classify the outermost (current) index first.
-    segments.push(classify_array_index(array_access.index));
+    segments.push((classify_array_index(array_access.index), array_access.index));
 
     // Walk inward through nested ArrayAccess nodes.
     while let Expression::ArrayAccess(inner) = current_expr {
-        segments.push(classify_array_index(inner.index));
+        segments.push((classify_array_index(inner.index), inner.index));
         current_expr = inner.array;
     }
 
@@ -124,8 +124,15 @@ pub(super) fn resolve_rhs_array_access<'b>(
     }
 
     // Walk each bracket segment, narrowing the type at each step.
-    for seg in &segments {
-        let Some(element) = index_segment(&current, seg, ctx) else {
+    for (seg, index) in &segments {
+        let literal_seg =
+            if matches!(seg, ArrayBracketSegment::ElementAccess) && has_shape_member(&current) {
+                literal_variable_index(index, ctx)
+            } else {
+                None
+            };
+        let seg = literal_seg.as_ref().unwrap_or(seg);
+        let Some(element) = index_segment(&current, seg, &ctx.as_resolution_ctx()) else {
             return vec![];
         };
         current = element;
@@ -159,6 +166,49 @@ pub(super) fn resolve_rhs_array_access<'b>(
     }
 }
 
+/// Whether `ty` is, or has a union member that is, an array shape: the
+/// only kind of array whose offset reads depend on which key is read.
+fn has_shape_member(ty: &PhpType) -> bool {
+    if ty.as_unsealed_shape().is_some() {
+        return true;
+    }
+    match ty.kind() {
+        TypeKind::ArrayShape(_) => true,
+        TypeKind::Nullable(inner) => has_shape_member(inner),
+        TypeKind::Union(members) => members.iter().any(has_shape_member),
+        _ => false,
+    }
+}
+
+/// The literal key a variable index holds, as the segment a literal
+/// written in its place would classify to.
+///
+/// `$k = 'classmap'; $data[$k]` reads the same entry `$data['classmap']`
+/// does, so a variable whose type is a single string or int literal
+/// addresses that one shape entry rather than any of them.
+fn literal_variable_index(
+    index: &Expression<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Option<ArrayBracketSegment> {
+    let Expression::Variable(Variable::Direct(_)) = index else {
+        return None;
+    };
+    let resolved = resolve_rhs_expression(index, ctx);
+    let [only] = resolved.as_slice() else {
+        return None;
+    };
+    let literal = only.type_string.as_literal()?;
+    match literal {
+        LiteralValue::String(_) => Some(ArrayBracketSegment::StringKey(
+            literal.string_content()?.into_owned(),
+        )),
+        LiteralValue::Int(_) => Some(ArrayBracketSegment::IntKey(
+            literal.parse_i64()?.to_string(),
+        )),
+        LiteralValue::Float(_) => None,
+    }
+}
+
 /// Read one bracket segment off `base` and return the value type it
 /// yields, or `None` when the offset read cannot be typed at all.
 ///
@@ -183,7 +233,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
 fn index_segment(
     base: &PhpType,
     seg: &ArrayBracketSegment,
-    ctx: &VarResolutionCtx<'_>,
+    ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     match base.kind() {
         TypeKind::Union(members) => {
@@ -258,7 +308,7 @@ fn index_segment(
     // `OpeningHours extends DataCollection<string, Day>`.
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
-        &ctx.current_class.name,
+        ctx.current_class.map_or("", |cls| &cls.name),
         ctx.all_classes,
         ctx.class_loader,
     )
@@ -283,8 +333,15 @@ fn index_segment(
         // any key yields `mixed`.
         return Some(PhpType::mixed());
     }
-    // A string offset is itself a one-character string.
+    // A string offset is itself a one-character string, and a key that
+    // names no offset reads nothing: the read throws, so a string member
+    // of a union adds nothing to what the others hold.
     if base.is_string_subtype() {
+        if let ArrayBracketSegment::StringKey(key) = seg
+            && !crate::php_type::may_read_string_offset(key)
+        {
+            return Some(PhpType::never());
+        }
         return Some(PhpType::string());
     }
     // Reading an offset off anything else that is not an object yields
@@ -293,6 +350,21 @@ fn index_segment(
         return Some(PhpType::null());
     }
     None
+}
+
+/// The value type an offset read of `base` yields, the same answer
+/// `$base[…]` resolves to: `key` is the literal key read, or `None` for a
+/// key that is not written as one.
+pub(crate) fn offset_read_type(
+    base: &PhpType,
+    key: Option<&str>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let seg = match key {
+        Some(key) => ArrayBracketSegment::StringKey(key.to_string()),
+        None => ArrayBracketSegment::ElementAccess,
+    };
+    index_segment(base, &seg, ctx)
 }
 
 /// Classification of an array access index expression.
@@ -382,11 +454,10 @@ pub(crate) fn insert_or_union(subs: &mut HashMap<String, PhpType>, key: String, 
                     }
                 }
             }
-            e.insert(if parts.len() == 1 {
-                parts.into_iter().next().unwrap()
-            } else {
-                PhpType::union(parts)
-            });
+            // A literal from one site and its base type from another bind
+            // the base type: `array_reduce(..., 0)` with an `int` callback
+            // carries an `int`, not a `0|int`.
+            e.insert(PhpType::join_runtime_value_types(parts));
         }
     }
 }

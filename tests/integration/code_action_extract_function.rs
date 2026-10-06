@@ -5,7 +5,10 @@
 //! `ScopeCollector`, and generating a `WorkspaceEdit` that replaces the
 //! selection with a call and inserts a new function or method definition.
 
-use crate::common::{create_test_backend, lsp_pos_to_offset};
+use crate::common::{
+    apply_workspace_edit, create_test_backend, find_action, get_code_actions_in_range,
+    resolve_action,
+};
 use std::sync::Arc;
 use tower_lsp::lsp_types::*;
 
@@ -20,28 +23,15 @@ fn get_code_actions(
     end_line: u32,
     end_char: u32,
 ) -> Vec<CodeActionOrCommand> {
-    let params = CodeActionParams {
-        text_document: TextDocumentIdentifier {
-            uri: uri.parse().unwrap(),
-        },
-        range: Range {
-            start: Position::new(start_line, start_char),
-            end: Position::new(end_line, end_char),
-        },
-        context: CodeActionContext {
-            diagnostics: vec![],
-            only: None,
-            trigger_kind: None,
-        },
-        work_done_progress_params: WorkDoneProgressParams {
-            work_done_token: None,
-        },
-        partial_result_params: PartialResultParams {
-            partial_result_token: None,
-        },
-    };
-
-    backend.handle_code_action(uri, content, &params)
+    get_code_actions_in_range(
+        backend,
+        uri,
+        content,
+        Range::new(
+            Position::new(start_line, start_char),
+            Position::new(end_line, end_char),
+        ),
+    )
 }
 
 /// Find an "Extract function" or "Extract method" code action from a list.
@@ -58,55 +48,50 @@ fn find_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
     })
 }
 
-/// Resolve a deferred code action through `codeAction/resolve` and return
-/// the resolved action with its workspace edit populated.
-///
-/// The file content is stored in `open_files` so that
-/// `resolve_code_action` → `get_file_content` can find it.
-fn resolve_action(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    content: &str,
-    action: &CodeAction,
-) -> CodeAction {
-    backend
-        .open_files()
-        .write()
-        .insert(uri.to_string(), Arc::new(content.to_string()));
-    let (resolved, _) = backend.resolve_code_action(action.clone());
-    assert!(
-        resolved.edit.is_some(),
-        "resolved action should have an edit, title: {}",
-        resolved.title
-    );
-    resolved
+/// [`find_extract_action`] but without the "not disabled" requirement, for
+/// the tests that assert on what the handler offers at all.
+fn find_any_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    find_action(actions, "Extract function").or_else(|| find_action(actions, "Extract method"))
 }
 
-/// Apply a workspace edit to the content and return the result.
-fn apply_edit(content: &str, edit: &WorkspaceEdit) -> String {
-    let changes = edit.changes.as_ref().expect("edit should have changes");
-    let edits = changes
-        .values()
-        .next()
-        .expect("should have edits for one URI");
+/// Find a `refactor.extract` action whose title mentions "Extract",
+/// matching on the kind rather than on a title prefix.
+fn find_refactor_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca)
+            if ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
+                && ca.title.contains("Extract") =>
+        {
+            Some(ca)
+        }
+        _ => None,
+    })
+}
 
-    // Sort edits by start position descending so we can apply back-to-front.
-    let mut sorted: Vec<&TextEdit> = edits.iter().collect();
-    sorted.sort_by(|a, b| {
-        b.range
-            .start
-            .line
-            .cmp(&a.range.start.line)
-            .then(b.range.start.character.cmp(&a.range.start.character))
-    });
+/// Find a *disabled* `refactor.extract` action whose title mentions
+/// "Extract".
+fn find_disabled_extract_action(actions: &[CodeActionOrCommand]) -> Option<&CodeAction> {
+    actions.iter().find_map(|a| match a {
+        CodeActionOrCommand::CodeAction(ca)
+            if ca.disabled.is_some()
+                && ca.kind == Some(CodeActionKind::REFACTOR_EXTRACT)
+                && ca.title.contains("Extract") =>
+        {
+            Some(ca)
+        }
+        _ => None,
+    })
+}
 
-    let mut result = content.to_string();
-    for edit in sorted {
-        let start = lsp_pos_to_offset(&result, edit.range.start);
-        let end = lsp_pos_to_offset(&result, edit.range.end);
-        result.replace_range(start..end, &edit.new_text);
-    }
-    result
+/// The titles of every offered action, for assertion messages.
+fn action_titles(actions: &[CodeActionOrCommand]) -> Vec<String> {
+    actions
+        .iter()
+        .map(|a| match a {
+            CodeActionOrCommand::CodeAction(ca) => ca.title.clone(),
+            CodeActionOrCommand::Command(cmd) => cmd.title.clone(),
+        })
+        .collect()
 }
 
 // ── Offering / not offering the action ──────────────────────────────────────
@@ -238,7 +223,7 @@ class Validator {
     let actions = get_code_actions(&backend, uri, content, 4, 8, 5, 40);
     let action = find_extract_action(&actions).expect("should offer extract for void guards");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should be: if (!$this->handleGuard($request)) return;
     assert!(
@@ -282,7 +267,7 @@ class Validator {
     let action =
         find_extract_action(&actions).expect("should offer extract for uniform false guards");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should use the bool-flag pattern with false.
     // Parameter order depends on the scope classifier (first-use order).
@@ -328,7 +313,7 @@ class Lookup {
     let action =
         find_extract_action(&actions).expect("should offer extract for uniform null guards");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should be: if (!$this->findGuard($id)) return null;
     assert!(
@@ -377,7 +362,7 @@ function classify(int $code): string
     let action = find_extract_action(&actions)
         .expect("should offer extract for different non-null return values");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should use the sentinel-null pattern:
     //   $result = extracted($code);
@@ -426,7 +411,7 @@ class Animal {
     let action = find_extract_action(&actions)
         .expect("should offer extract for null guard with computed value");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should assign and check for null:
     //   $sound = $this->getSoundGuard();
@@ -475,7 +460,7 @@ class Animal {
     let action = find_extract_action(&actions)
         .expect("should offer extract for void guard with computed value");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should assign and check for null, but return bare
     // (matching the original void return):
@@ -540,7 +525,7 @@ class Foo {
     let action = find_extract_action(&actions)
         .expect("should offer extract when guard returns + trailing return");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should be `return $this->extracted(…);` since the
     // selection ends with return.
@@ -570,7 +555,7 @@ function foo(): int {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 14);
     let action = find_extract_action(&actions).expect("should offer extract for trailing return");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Call site should wrap with `return`.
     assert!(
@@ -613,7 +598,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 11);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     assert!(
         action.title.starts_with("Extract function"),
@@ -649,7 +634,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 11);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // The extracted function should exist.
     assert!(
@@ -673,7 +658,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 12);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $x should be assigned from the extracted function's return value.
     assert!(
@@ -702,7 +687,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 3, 4, 3, 16);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $x should be a parameter of the extracted function.
     assert!(
@@ -732,7 +717,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 22);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $temp should NOT be a parameter or return value — it's local.
     // The call should have no arguments.
@@ -769,7 +754,7 @@ class Calculator {
         action.title
     );
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // The call site should use $this->
     assert!(
@@ -801,7 +786,7 @@ class Util {
     let actions = get_code_actions(&backend, uri, content, 3, 8, 4, 15);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // The method should be private static.
     assert!(
@@ -828,7 +813,7 @@ class Foo {
     let actions = get_code_actions(&backend, uri, content, 4, 8, 4, 20);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $a should be passed as argument.
     assert!(
@@ -874,7 +859,7 @@ function foo() {
 
     // Verify resolve produces an edit with a deduplicated name.
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
     // The existing `extracted()` function should cause the generated
     // name to be deduplicated (e.g. `extracted1` or a contextual name
     // like `computeX`).
@@ -904,7 +889,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 11);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     assert!(
         result.contains("): void"),
@@ -1048,7 +1033,7 @@ class Foo {
     let actions = get_code_actions(&backend, uri, content, 3, 8, 4, 16);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // The extracted method must be indented at the same level as sibling
     // methods (4 spaces), NOT at the body level (8 spaces).
@@ -1086,7 +1071,7 @@ class Foo {
     let actions = get_code_actions(&backend, uri, content, 5, 8, 6, 24);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // Every line inside the extracted method body must be indented at
     // exactly 8 spaces (body_indent for a 4-space class member).
@@ -1169,7 +1154,7 @@ function foo() {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 11);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // For a top-level function, the definition should have no leading indent.
     assert!(
@@ -1205,7 +1190,7 @@ class Foo {
     let actions = get_code_actions(&backend, uri, content, 4, 8, 7, 9);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $count is first written inside the selection ($count = 0), so it
     // must NOT appear as a parameter at the call site.  It should only
@@ -1250,7 +1235,7 @@ class S {
     let actions = get_code_actions(&backend, uri, content, 4, 8, 7, 9);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // $subcategories must be passed in (it is read before being written
     // inside the selection) AND assigned from the return value.
@@ -1303,7 +1288,7 @@ class C {
     let actions = get_code_actions(&backend, uri, content, 4, 8, 9, 9);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     // The call site must NOT reproduce the local-referencing expression.
     let call_area = &result[..result.find("private function").unwrap()];
@@ -1397,10 +1382,227 @@ function foo(array &$out) {
     let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 25);
     let action = find_extract_action(&actions).expect("should offer extract action");
     let resolved = resolve_action(&backend, uri, content, action);
-    let result = apply_edit(content, resolved.edit.as_ref().unwrap());
+    let result = apply_workspace_edit(content, resolved.edit.as_ref().unwrap());
 
     assert!(
         result.contains("$count = "),
         "call site should keep assigning $count:\n{result}"
+    );
+}
+
+// ── Code action on Backend ──────────────────────────────────────────────────
+
+#[test]
+fn extract_function_action_offered_for_complete_statements() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+    $y = $x + 2;
+    echo $y;
+}
+";
+    // Select `$x = 1;\n    $y = $x + 2;`
+    let start_line = 2; // `    $x = 1;`
+    let end_line = 3; // `    $y = $x + 2;`
+
+    let actions = get_code_actions(&backend, uri, content, start_line, 4, end_line, 16);
+    let extract_action = find_action(&actions, "Extract function");
+    assert!(
+        extract_action.is_some(),
+        "should offer extract function action, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+#[test]
+fn extract_function_not_offered_for_empty_selection() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+}
+";
+    // Empty selection.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 4);
+    assert!(
+        find_any_extract_action(&actions).is_none(),
+        "should not offer extract for empty selection"
+    );
+}
+
+#[test]
+fn extract_function_not_offered_for_partial_statement() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1 + 2;
+}
+";
+    // Select just `1 + 2` — not a complete statement.
+    let actions = get_code_actions(&backend, uri, content, 2, 9, 2, 14);
+    assert!(
+        find_any_extract_action(&actions).is_none(),
+        "should not offer extract for partial statement"
+    );
+}
+
+#[test]
+fn extract_method_offered_when_using_this() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+class Foo {
+    private int $value = 0;
+
+    public function bar() {
+        $x = $this->value;
+        echo $x;
+    }
+}
+";
+    // Select `$x = $this->value;\n        echo $x;`
+    let actions = get_code_actions(&backend, uri, content, 5, 8, 6, 16);
+    let extract_method = find_action(&actions, "Extract method");
+    assert!(
+        extract_method.is_some(),
+        "should offer extract method when $this is used, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+#[test]
+fn extract_function_offered_for_trailing_return() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+    return $x;
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 3, 14);
+    let extract_action = find_any_extract_action(&actions);
+    assert!(
+        extract_action.is_some(),
+        "should offer extract when return is the last selected statement"
+    );
+}
+
+#[test]
+fn extract_function_offered_for_guard_clause_return() {
+    // Non-trailing returns that form guard clauses should now be
+    // offered with the appropriate guard strategy.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo($x) {
+    if ($x) {
+        return 1;
+    }
+    echo 'done';
+}
+";
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 5, 17);
+    let extract_action = find_any_extract_action(&actions);
+    assert!(
+        extract_action.is_some(),
+        "should offer extract for guard clause return pattern, got: {:?}",
+        action_titles(&actions)
+    );
+}
+
+// ── Disabled code action with rejection reason ──────────────────────────────
+
+#[test]
+fn unsafe_returns_resolve_produces_no_edit() {
+    // Phase 1 no longer emits disabled actions (validation is
+    // deferred to resolve).  Instead it offers a normal action
+    // and resolve returns None when the return strategy is unsafe.
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    if ($a) return 1;
+    if ($b) return null;
+    echo 'done';
+}
+";
+    backend
+        .open_files()
+        .write()
+        .insert(uri.to_string(), Arc::new(content.to_string()));
+
+    // Select the three statements (mixed return values including
+    // null → Unsafe strategy).
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 4, 17);
+    let extract = find_refactor_extract_action(&actions);
+    assert!(
+        extract.is_some(),
+        "Phase 1 should still offer the action (validation deferred to resolve)"
+    );
+
+    let action = extract.unwrap();
+    assert!(action.edit.is_none(), "Phase 1 should not have an edit");
+    assert!(
+        action.data.is_some(),
+        "Phase 1 should have data for resolve"
+    );
+
+    // Phase 2: resolve should produce no edit because the return
+    // strategy is unsafe.  Call resolve directly (not via
+    // `resolve_action`, which asserts the edit is present).
+    let (resolved, _) = backend.resolve_code_action(action.clone());
+    assert!(
+        resolved.edit.is_none(),
+        "resolve should produce no edit for unsafe returns"
+    );
+}
+
+#[test]
+fn no_disabled_action_for_empty_selection() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = 1;
+}
+";
+    // Empty selection.
+    let actions = get_code_actions(&backend, uri, content, 2, 4, 2, 4);
+    let disabled_extract = find_disabled_extract_action(&actions);
+    assert!(
+        disabled_extract.is_none(),
+        "should NOT emit a disabled extract action for empty selection"
+    );
+}
+
+#[test]
+fn no_disabled_action_for_partial_statement() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = "\
+<?php
+function foo() {
+    $x = some_function($a, $b);
+}
+";
+    // Select partial statement (just the function call, not the assignment).
+    let actions = get_code_actions(&backend, uri, content, 2, 9, 2, 30);
+    let disabled_extract = find_disabled_extract_action(&actions);
+    assert!(
+        disabled_extract.is_none(),
+        "should NOT emit a disabled extract action for partial statement"
     );
 }

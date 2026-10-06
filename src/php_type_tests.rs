@@ -265,6 +265,18 @@ fn round_trip_callables() {
 }
 
 #[test]
+fn callable_variadic_parameter_spellings() {
+    assert_round_trip("callable(mixed...): T");
+    // Psalm writes the ellipsis ahead of the type.
+    assert_round_trip_expected("callable(...mixed): T", "callable(mixed...): T");
+    assert_round_trip_expected("callable(int, ...string): T", "callable(int, string...): T");
+    assert_round_trip_expected(
+        "Closure(... array<int, string> $rest): void",
+        "Closure(array<int, string>...): void",
+    );
+}
+
+#[test]
 fn round_trip_class_string() {
     // mago Display bug: class-string<Foo> → class-string<<Foo>>
     assert_round_trip_expected("class-string<Foo>", "class-string<Foo>");
@@ -707,16 +719,18 @@ fn shape_keys_round_trip_through_their_display_form() {
 
 #[test]
 fn iterable_key_type_makes_implicit_int_keys_explicit() {
-    for spelling in [
-        "list<User>",
-        "non-empty-list<User>",
-        "array<User>",
-        "non-empty-array<User>",
-        "User[]",
-    ] {
+    for spelling in ["array<User>", "non-empty-array<User>", "User[]"] {
         assert_eq!(
             PhpType::parse(spelling).iterable_key_type().unwrap(),
             PhpType::int(),
+            "{spelling}"
+        );
+    }
+    // A list's keys count up from zero.
+    for spelling in ["list<User>", "non-empty-list<User>"] {
+        assert_eq!(
+            PhpType::parse(spelling).iterable_key_type().unwrap(),
+            PhpType::int_range("0", "max"),
             "{spelling}"
         );
     }
@@ -744,6 +758,35 @@ fn iterable_key_type_preserves_unknown_class_constant_key_domain() {
             .to_string(),
         "int|string"
     );
+}
+
+#[test]
+fn class_name_shape_key_round_trips_as_a_class_string_key() {
+    let ty = PhpType::parse("array{Foo\\Bar::class: int}");
+    assert_eq!(ty.to_string(), "array{Foo\\Bar::class: int}");
+    assert_eq!(
+        ty.iterable_key_type().unwrap().to_string(),
+        "class-string<Foo\\Bar>"
+    );
+    let resolved = PhpType::parse("array{Bar::class: int, Bar::BAZ: int, self::QUX: int}")
+        .resolve_names(&|name| format!("App\\{name}"));
+    assert_eq!(
+        resolved.to_string(),
+        "array{App\\Bar::class: int, App\\Bar::BAZ: int, self::QUX: int}"
+    );
+}
+
+#[test]
+fn class_name_literal_reads_as_its_class_string() {
+    let exact = PhpType::class_name_literal(atom("Foo"));
+    let class_string = PhpType::class_string(Some(PhpType::named(atom("Foo"))));
+    assert_eq!(exact.as_class_name_literal(), Some("Foo"));
+    assert_eq!(exact.to_string(), "class-string<Foo>");
+    assert!(matches!(exact.kind(), TypeKind::ClassString(_)));
+    // Beside the wider class-string it is one of, it adds nothing.
+    let union = PhpType::union(vec![exact.clone(), class_string.clone()]);
+    assert_eq!(union, class_string);
+    assert!(!exact.equivalent(&class_string));
 }
 
 #[test]
@@ -792,6 +835,47 @@ fn shape_entries_object() {
     let entries = ty.shape_entries().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].key, Some("foo".to_owned()));
+}
+
+#[test]
+fn unsealed_shape_round_trips() {
+    for spelling in [
+        "array{name: string, ...<string, int>}",
+        "list{string, ...<int>}",
+    ] {
+        assert_eq!(PhpType::parse(spelling).to_string(), spelling);
+    }
+    assert_eq!(
+        PhpType::parse("array{name: string, ...}").to_string(),
+        "array{name: string, ...<array-key, mixed>}"
+    );
+    assert_eq!(
+        PhpType::parse("array{name: string, ...<int>}").to_string(),
+        "array{name: string, ...<array-key, int>}"
+    );
+}
+
+#[test]
+fn unsealed_shape_reads_as_the_array_it_widens_to() {
+    let ty = PhpType::parse("array{name: string, ...<int, User>}");
+    // Code that does not ask about the tail sees an array of both.
+    assert_eq!(
+        ty.iterable_element_type().unwrap().to_string(),
+        "string|User"
+    );
+    assert_eq!(ty.iterable_key_type().unwrap().to_string(), "string|int");
+    assert!(ty.shape_entries().is_none());
+    // An offset read of a listed key, and key completion, see the entry.
+    assert_eq!(ty.shape_value_type("name").unwrap().to_string(), "string");
+    assert_eq!(ty.known_shape_entries().unwrap().len(), 1);
+    assert!(!ty.equivalent(&PhpType::parse("non-empty-array<string|int, string|User>")));
+}
+
+#[test]
+fn unsealed_shape_without_entries_is_the_plain_array() {
+    let ty = PhpType::parse("array{...<string, int>}");
+    assert!(ty.as_unsealed_shape().is_none());
+    assert_eq!(ty.to_string(), "array<string, int>");
 }
 
 #[test]
@@ -928,6 +1012,44 @@ fn join_shapes_pairs_an_appended_slot_by_index() {
 }
 
 #[test]
+fn join_shapes_positional_entry_anchors_to_an_agreeing_explicit_key() {
+    // A positional shape's slot 0 is exactly the same runtime slot an
+    // explicit `0:` key names, so when the two sides agree on the value
+    // there, the explicit key is just a longer spelling of the same
+    // position and pairing them is safe.
+    let positional = PhpType::parse("array{'a'}");
+    let keyed = PhpType::parse("array{0: 'a', 1: 'b'}");
+    assert_eq!(
+        positional.join_shapes(&keyed),
+        Some(PhpType::parse("array{'a', 1?: 'b'}"))
+    );
+    assert_eq!(
+        keyed.join_shapes(&positional),
+        Some(PhpType::parse("array{0: 'a', 1?: 'b'}"))
+    );
+
+    // `mixed` on either side is a wildcard: it never contradicts whatever
+    // the other side holds there.
+    assert_eq!(
+        PhpType::parse("array{mixed}").join_shapes(&PhpType::parse("array{0: mixed, 1?: int}")),
+        Some(PhpType::parse("array{mixed, 1?: int}"))
+    );
+
+    // A value the two sides disagree on means these are two
+    // differently-tagged alternatives that merely share a length, not one
+    // shape spelled two ways, so the whole pairing is refused.
+    assert_eq!(
+        positional.join_shapes(&PhpType::parse("array{0: 1, 1: 'b'}")),
+        None
+    );
+
+    // An empty shape shares no key with anything, so it must not be free
+    // to absorb an unrelated positional shape just because nothing
+    // contradicts it.
+    assert_eq!(positional.join_shapes(&PhpType::parse("array{}")), None);
+}
+
+#[test]
 fn join_shapes_key_order_is_first_side_then_new_keys() {
     let a = PhpType::parse("array{b: int, a: int}");
     let b = PhpType::parse("array{c: int, a: int}");
@@ -935,6 +1057,31 @@ fn join_shapes_key_order_is_first_side_then_new_keys() {
         a.join_shapes(&b),
         Some(PhpType::parse("array{b?: int, a: int, c?: int}"))
     );
+}
+
+#[test]
+fn union_folds_a_shape_wholly_covered_by_another_member() {
+    // `array{mixed}` names the same one-entry array `array{0: mixed, 1?:
+    // string|null}` already allows when key `1` is absent, so the union
+    // is just the wider shape.
+    assert_eq!(
+        PhpType::parse("array{mixed}|array{0: mixed, 1?: string|null}"),
+        PhpType::parse("array{0: mixed, 1?: string|null}")
+    );
+    // Order does not matter.
+    assert_eq!(
+        PhpType::parse("array{0: mixed, 1?: string|null}|array{mixed}"),
+        PhpType::parse("array{0: mixed, 1?: string|null}")
+    );
+}
+
+#[test]
+fn union_keeps_shapes_that_only_subtype_rather_than_match_exactly() {
+    // A literal value is a subtype of its base type, but the two shapes
+    // are not the same array: folding on subtype containment alone would
+    // drop the more precise literal-tuple alternative.
+    let union = PhpType::parse("list{'a', bool}|array{string, bool}");
+    assert_eq!(union.union_members().len(), 2);
 }
 
 #[test]
@@ -1152,6 +1299,90 @@ fn parse_model_property_nested_in_array() {
             vec![
                 PhpType::generic("model-property", vec![PhpType::named(atom("Process"))]),
                 PhpType::mixed(),
+            ]
+        )
+    );
+}
+
+/// `view-string` is a string, not a class and not an unknown pseudo-type
+/// degraded to `mixed`, so a parameter declaring it still reads as the
+/// string it is everywhere a string is expected.
+#[test]
+fn view_string_is_a_string_subtype() {
+    let view_string = PhpType::parse("view-string");
+    assert_eq!(view_string, PhpType::named(atom("view-string")));
+    assert!(view_string.is_string_subtype());
+    assert!(view_string.is_subtype_of(&PhpType::string()));
+    assert!(PhpType::literal_string_raw("'users.profile'").is_subtype_of(&view_string));
+    // A plain `string` is not known to name a template.
+    assert!(!PhpType::string().is_subtype_of(&view_string));
+}
+
+/// Which spellings demand a template name. A union that also admits a
+/// plain `string` says nothing a bare `string` does not, so demanding a
+/// template of it would report code the declaration permits.
+#[test]
+fn view_string_demanding_types() {
+    for demanding in [
+        "view-string",
+        "?view-string",
+        "view-string|null",
+        "view-string|\\Illuminate\\View\\View",
+    ] {
+        assert!(
+            PhpType::parse(demanding).is_view_string(),
+            "{demanding} should demand a template name"
+        );
+    }
+    for permissive in [
+        "string",
+        "view-string|string",
+        "non-empty-string",
+        "array<view-string>",
+        "int",
+    ] {
+        assert!(
+            !PhpType::parse(permissive).is_view_string(),
+            "{permissive} should not demand a template name"
+        );
+    }
+}
+
+#[test]
+fn parse_laravel_model_type_operators() {
+    for name in ["builder-of", "collection-of", "factory-of", "relation-of"] {
+        let ty = PhpType::parse(&format!("array<{name}<User|Post>>"));
+        assert_eq!(
+            ty,
+            PhpType::generic(
+                "array",
+                vec![PhpType::generic(
+                    name,
+                    vec![PhpType::union(vec![
+                        PhpType::named(atom("User")),
+                        PhpType::named(atom("Post")),
+                    ])],
+                )],
+            ),
+        );
+    }
+    assert_eq!(
+        PhpType::parse("builder-of<User, 'posts.comments'>"),
+        PhpType::generic(
+            "builder-of",
+            vec![
+                PhpType::named(atom("User")),
+                PhpType::literal_string_raw("'posts.comments'")
+            ]
+        ),
+    );
+    assert_eq!(
+        PhpType::parse("relation-of<User, 'posts.comments'>"),
+        PhpType::generic(
+            "relation-of",
+            vec![
+                PhpType::named(atom("User")),
+                PhpType::literal_string_raw("'posts.comments'"),
             ]
         )
     );
@@ -1920,6 +2151,18 @@ fn replace_self_intersection() {
     assert_eq!(replaced.to_string(), "App\\User&JsonSerializable");
 }
 
+// ── replace_bare_self ───────────────────────────────────────
+
+#[test]
+fn replace_bare_self_in_shapes_and_callables() {
+    let ty = PhpType::parse("object{foo: self, bar: static}|array{list<self>}|Closure(self): self");
+    assert!(ty.contains_bare_self());
+    assert_eq!(
+        ty.replace_bare_self("App\\User").to_string(),
+        "object{foo: App\\User, bar: static}|array{list<App\\User>}|(Closure(App\\User): App\\User)"
+    );
+}
+
 // ── replace_self_bound ──────────────────────────────────────
 
 #[test]
@@ -2149,7 +2392,14 @@ fn top_level_class_names_union_with_null() {
 
 #[test]
 fn top_level_class_names_scalar_excluded() {
+    assert!(PhpType::parse("string").top_level_class_names().is_empty());
     let names = PhpType::parse("string|int").top_level_class_names();
+    assert!(names.is_empty());
+}
+
+#[test]
+fn top_level_class_names_void_excluded() {
+    let names = PhpType::parse("void").top_level_class_names();
     assert!(names.is_empty());
 }
 
@@ -2680,6 +2930,22 @@ mod subtype_tests {
         // A hole in the sequence is not a list.
         assert!(!is_subtype("array{0: string, 2: int}", "list<string|int>"));
         assert!(!is_subtype("array{0?: string, 1: int}", "list<string|int>"));
+    }
+
+    /// A generic array keeps the `list` and `non-empty-…` promises of its
+    /// family: a plain `array<int>` may be empty and may have any keys.
+    #[test]
+    fn generic_array_satisfies_only_the_promises_its_family_makes() {
+        let is_subtype =
+            |sub: &str, sup: &str| PhpType::parse(sub).is_subtype_of(&PhpType::parse(sup));
+
+        assert!(is_subtype("non-empty-array<int>", "array<int>"));
+        assert!(is_subtype("non-empty-list<int>", "non-empty-array<int>"));
+        assert!(is_subtype("list<int>", "array<int, int>"));
+        assert!(!is_subtype("array<int>", "non-empty-array<int>"));
+        assert!(!is_subtype("list<int>", "non-empty-list<int>"));
+        assert!(!is_subtype("array<int>", "list<int>"));
+        assert!(!is_subtype("array<int, int>", "list<int>"));
     }
 
     #[test]
@@ -4706,6 +4972,11 @@ fn key_of_concrete_shape_is_evaluated_at_parse_time() {
         "int|string"
     );
     assert_eq!(PhpType::parse("key-of<list<string>>").to_string(), "int");
+    assert_eq!(
+        PhpType::parse("key-of<array<string>>").to_string(),
+        "array-key"
+    );
+    assert_eq!(PhpType::parse("key-of<string[]>").to_string(), "array-key");
 }
 
 #[test]
@@ -4917,14 +5188,14 @@ fn truthy_type_strips_null_from_every_nullable_union_member() {
 
 #[test]
 fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
-    // The mirror of the truthy side: a `bool` keeps its `false` half and
-    // every nullable member keeps its `null`.
+    // Each member keeps only its falsy values, and every nullable member
+    // keeps its `null`.
     assert_eq!(
         PhpType::parse("?int|?bool|?string|?DateTime")
             .falsy_type()
             .unwrap()
             .to_string(),
-        "int|false|string|null"
+        "0|false|''|'0'|null"
     );
     // An object is truthy whatever it holds, so it is dropped outright.
     assert_eq!(
@@ -4932,16 +5203,17 @@ fn falsy_type_keeps_only_what_the_skipped_branch_could_hold() {
             .falsy_type()
             .unwrap()
             .to_string(),
-        "string"
+        "''|'0'"
     );
     // A union that is entirely truthy has no falsy half at all.
     assert_eq!(PhpType::parse("true|DateTime").falsy_type(), None);
-    // Refinements PHP has no plain spelling for are left alone, exactly
-    // as the truthy side leaves `int` rather than excluding `0`.
-    assert_eq!(
-        PhpType::parse("int").falsy_type().unwrap().to_string(),
-        "int"
-    );
+    assert_eq!(PhpType::parse("int<1, 5>").falsy_type(), None);
+    assert_eq!(PhpType::parse("non-zero-int").falsy_type(), None);
+    let falsy = |ty: &str| PhpType::parse(ty).falsy_type().unwrap().to_string();
+    assert_eq!(falsy("int<0, max>"), "0");
+    assert_eq!(falsy("non-empty-string"), "'0'");
+    assert_eq!(falsy("list<int>|null"), "array{}|null");
+    assert_eq!(falsy("mixed"), "0|0.0|''|'0'|array{}|false|null");
 }
 
 #[test]

@@ -17,11 +17,9 @@
 
 use std::ops::Range;
 
-use super::directives::match_directive;
+use super::directives::{DirectiveHead, directive_head, match_directive};
 use super::pairing::{self, Pair, Stray, Token};
-use super::signature::{
-    InertOpener, inert_regions, mask_regions, matching_paren, split_top_level_args,
-};
+use super::signature::{InertOpener, inert_regions, mask_regions, split_top_level_args};
 
 /// A byte range of the original Blade source.
 pub(crate) type Span = Range<usize>;
@@ -488,42 +486,18 @@ pub(crate) fn directives(masked: &str) -> impl Iterator<Item = Directive> + '_ {
     })
 }
 
-/// The directive at `at` (which is on an `@`), and the byte range of its
-/// argument list, parentheses included, when it has one.
+/// The known directive at `at` (which is on an `@`), and the byte range of
+/// its argument list, parentheses included, when it has one.
 ///
-/// Blade's own `compileStatements` pattern is anchored with `\B`, so a name
-/// glued to a preceding word is not a directive: an `@production` in
-/// `admin@production.example` compiles to nothing, and `@@if` is the escape
-/// for a literal `@if`.
+/// A `@name` Blade does not compile (a custom directive, an email address's
+/// domain, a `@click="…"` binding) opens and closes nothing here.
 fn directive_at(content: &str, at: usize) -> Option<(&'static str, Option<Span>)> {
     let bytes = content.as_bytes();
-    if at > 0 && (bytes[at - 1] == b'@' || is_word_byte(bytes[at - 1])) {
+    let DirectiveHead::Named { name, args, .. } = directive_head(content, bytes, at, bytes.len())
+    else {
         return None;
-    }
-    let name = match_directive(content.get(at + 1..)?)?;
-    let after = at + 1 + name.len();
-    // `@error="…"` and `@class="…"` are a JavaScript framework's bindings
-    // written in markup. Blade has no directive form that runs a name into
-    // an `=`, so neither opens nor closes anything.
-    if bytes.get(after) == Some(&b'=') {
-        return None;
-    }
-    // Blade allows spaces and tabs, but no newline, between a directive
-    // name and its opening parenthesis.
-    let mut open = after;
-    while matches!(bytes.get(open), Some(b' ' | b'\t')) {
-        open += 1;
-    }
-    if bytes.get(open) != Some(&b'(') {
-        return Some((name, None));
-    }
-    // An unterminated argument list is a template mid-edit; the directive
-    // is read without one rather than swallowing the rest of the file.
-    Some((name, matching_paren(bytes, open).map(|end| open..end + 1)))
-}
-
-fn is_word_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'_'
+    };
+    Some((match_directive(name)?, args))
 }
 
 #[cfg(test)]

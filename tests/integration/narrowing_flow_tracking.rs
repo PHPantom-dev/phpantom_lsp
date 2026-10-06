@@ -2375,3 +2375,129 @@ function process(Expr $expr): void
 "#,
     );
 }
+
+// ─── A loop inside a branch a repeated-call guard rules out ─────────────────
+
+/// Run the slow diagnostic pipeline and keep only `scalar_member_access`
+/// messages, the ones a lost loop assignment surfaces as (the variable
+/// reads as `never` once a bogus `null` is all that is left of it).
+fn member_access_diagnostics(php: &str) -> Vec<String> {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    backend.update_ast(uri, php);
+    let mut out = Vec::new();
+    backend.collect_slow_diagnostics(uri, php, &mut out);
+    out.iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "scalar_member_access"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect()
+}
+
+fn assert_no_member_access_errors(php: &str) {
+    let messages = member_access_diagnostics(php);
+    assert!(
+        messages.is_empty(),
+        "expected the loop's assignment to reach the read: {messages:?}"
+    );
+}
+
+/// `if ($id->isConstant()) { return; }` proves `$id->isConstant()` false
+/// for everything after it, the same repeated-call idiom the section
+/// above exercises. A later `if ($id->isConstant())` is provably dead, but
+/// a `foreach` inside it still has to keep what its own body assigned:
+/// discarding it left the guarded variable reading as `null` alone, and a
+/// `=== null` guard past that turned it into `never`.
+#[test]
+fn a_foreach_inside_a_branch_a_repeated_call_guard_rules_out_keeps_its_assignment() {
+    assert_no_member_access_errors(
+        r#"<?php
+namespace Repro;
+
+class Node
+{
+    public function touch(): void {}
+}
+
+class Identifier
+{
+    public function isConstant(): bool { return true; }
+}
+
+class Test
+{
+    /** @param list<string> $files */
+    public function run(array $files, Identifier $identifier): void
+    {
+        if ($identifier->isConstant()) {
+            return;
+        }
+
+        if ($identifier->isConstant()) {
+            $found = null;
+            foreach ($files as $file) {
+                /** @var Node $found */
+                $found = current([$file]);
+            }
+            if ($found === null) {
+                return;
+            }
+            $found->touch();
+        }
+    }
+}
+"#,
+    );
+}
+
+/// The `while` equivalent of the `foreach` case above: the loop is inside
+/// a branch the same repeated-call guard rules out, and its assignment
+/// must not be dropped either.
+#[test]
+fn a_while_loop_inside_a_branch_a_repeated_call_guard_rules_out_keeps_its_assignment() {
+    assert_no_member_access_errors(
+        r#"<?php
+namespace Repro;
+
+class Node
+{
+    public function touch(): void {}
+}
+
+class Identifier
+{
+    public function isConstant(): bool { return true; }
+}
+
+/** @return list<string> */
+function nextBatch(): array { return []; }
+
+class Test
+{
+    public function run(Identifier $identifier): void
+    {
+        if ($identifier->isConstant()) {
+            return;
+        }
+
+        if ($identifier->isConstant()) {
+            $found = null;
+            $files = nextBatch();
+            while (count($files) > 0) {
+                /** @var Node $found */
+                $found = current($files);
+                $files = nextBatch();
+            }
+            if ($found === null) {
+                return;
+            }
+            $found->touch();
+        }
+    }
+}
+"#,
+    );
+}

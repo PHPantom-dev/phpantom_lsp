@@ -304,30 +304,36 @@ pub(super) fn extract_from_attribute_lists<'a>(
 
                 // Laravel container attributes: #[Config('key')],
                 // #[Database('conn')], #[Cache('store')], etc. →
-                // emit a LaravelStringKey::Config span so hover,
-                // go-to-definition, and diagnostics work on the key.
+                // emit a config-key or named-resource span so hover,
+                // go-to-definition, and diagnostics work on the name.
                 //
-                // FQN attributes match directly. Short names require
-                // the file to import from the Illuminate namespace;
-                // that check is cached once per file to avoid repeated
-                // linear scans.
+                // Semantic names resolve imports and aliases exactly. The
+                // syntax-only fallback caches its import check per file.
+                let semantic_class_name = ctx
+                    .resolved_name_at(attr.name.span().start.offset)
+                    .unwrap_or(class_name);
                 if let Some(attribute) = resolve_laravel_container_attr(
-                    class_name,
+                    semantic_class_name,
+                    ctx.resolved_names.is_none(),
                     &mut ctx.has_laravel_container_attrs,
                     ctx.content,
                 ) {
                     match attribute {
-                        LaravelContainerAttribute::Config => {
-                            try_emit_laravel_string_span_partial(
-                                crate::symbol_map::LaravelStringKind::Config,
+                        LaravelContainerAttribute::Resource(trigger) => {
+                            try_emit_laravel_config_resource_span_partial_for_parameter(
+                                trigger.kind,
+                                trigger.access,
                                 arg_list,
+                                trigger.argument,
                                 ctx.content,
                                 &mut ctx.spans,
                             );
                         }
-                        LaravelContainerAttribute::StorageDisk => {
-                            try_emit_laravel_storage_disk_span_partial(
+                        LaravelContainerAttribute::Config => {
+                            try_emit_laravel_string_span_partial_for_parameter(
+                                crate::symbol_map::LaravelStringKind::Config,
                                 arg_list,
+                                "key",
                                 ctx.content,
                                 &mut ctx.spans,
                             );
@@ -342,18 +348,20 @@ pub(super) fn extract_from_attribute_lists<'a>(
                     &mut ctx.has_laravel_http_attrs,
                     ctx.content,
                 ) {
-                    try_emit_laravel_string_span_partial(
+                    try_emit_laravel_string_span_partial_for_parameter(
                         crate::symbol_map::LaravelStringKind::Route,
                         arg_list,
+                        "route",
                         ctx.content,
                         &mut ctx.spans,
                     );
                 }
 
-                // PHPUnit coverage attributes: #[CoversMethod(Foo::class,
-                // 'bar')], #[CoversFunction('baz')] — the target is a
-                // string literal, so nothing else makes it navigable.
-                try_emit_coverage_attribute_spans(
+                // PHPUnit metadata attributes: #[CoversMethod(Foo::class,
+                // 'bar')], #[CoversFunction('baz')], #[DataProvider('qux')]
+                // — the target is a string literal, so nothing else makes
+                // it navigable.
+                try_emit_phpunit_attribute_spans(
                     class_name,
                     arg_list,
                     &mut ctx.has_phpunit_attrs,

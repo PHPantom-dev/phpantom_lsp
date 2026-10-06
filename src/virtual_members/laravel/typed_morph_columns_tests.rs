@@ -51,7 +51,7 @@ fn morph_column_cache_rejects_missing_changed_and_outdated_sources() {
     backend
         .blade_virtual_content
         .write()
-        .insert(uri.to_string(), source.to_string());
+        .insert(uri.to_string(), Arc::new(source.to_string()));
     assert_eq!(backend.morph_column_spans_for(uri, &map).len(), 1);
     assert!(
         backend

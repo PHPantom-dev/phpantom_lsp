@@ -82,11 +82,55 @@ impl PhpType {
     /// The two markers never wrap each other — one only ever tags a union or
     /// nullable, the other only ever tags an array shape — so one hop is
     /// always enough to reach the node itself.
+    ///
+    /// A [`TemplateParam`](TypeKind::TemplateParam) is seen through to its
+    /// bound the same way, which may take one more hop, and an
+    /// [`UnsealedShape`](TypeKind::UnsealedShape) to the generic array it
+    /// widens to.
     #[inline]
     pub fn kind(&self) -> &TypeKind {
         match &*self.0 {
             TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => &inner.0,
+            TypeKind::TemplateParam(_, bound) => bound.kind(),
+            TypeKind::UnsealedShape(unsealed) => &unsealed.widened.0,
+            TypeKind::ClassNameLiteral(class_string) => &class_string.0,
             kind => kind,
+        }
+    }
+
+    /// The class this type is exactly the name of, when it is a
+    /// [`ClassNameLiteral`](TypeKind::ClassNameLiteral).
+    #[inline]
+    pub fn as_class_name_literal(&self) -> Option<&str> {
+        let TypeKind::ClassNameLiteral(class_string) = &*self.0 else {
+            return None;
+        };
+        match class_string.kind() {
+            TypeKind::ClassString(Some(class)) => match class.kind() {
+                TypeKind::Named(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The unsealed shape this type is, when it is a
+    /// [`UnsealedShape`](TypeKind::UnsealedShape).
+    #[inline]
+    pub fn as_unsealed_shape(&self) -> Option<&UnsealedShape> {
+        match &*self.0 {
+            TypeKind::UnsealedShape(unsealed) => Some(unsealed),
+            _ => None,
+        }
+    }
+
+    /// The template parameter this type is, and the bound it stands for,
+    /// when it is a [`TemplateParam`](TypeKind::TemplateParam).
+    #[inline]
+    pub fn as_template_param(&self) -> Option<(Atom, &PhpType)> {
+        match &*self.0 {
+            TypeKind::TemplateParam(name, bound) => Some((*name, bound)),
+            _ => None,
         }
     }
 
@@ -328,6 +372,61 @@ pub enum TypeKind {
     ///
     /// [`ArrayShape`]: TypeKind::ArrayShape
     ListShape(PhpType),
+
+    /// A function or method `@template T of Bound` parameter, seen from
+    /// inside the declaration that introduces it: the value is still `T`,
+    /// but all that is known about it is that it is a `Bound`.
+    ///
+    /// Invisible to [`PhpType::kind`] the same way
+    /// [`Benevolent`](TypeKind::Benevolent) is: every `match ty.kind()`
+    /// sees the bound, so class lookup, member access, subtyping and
+    /// narrowing all treat the value as its bound, and the bound travels
+    /// with the value into anything derived from it (`array<T>`'s element,
+    /// a foreach variable) however late that is looked at.  Only the
+    /// display (which spells the template's name) and template
+    /// substitution (which replaces it by name, like a `Named`) look at
+    /// the marker itself.  A transform that rebuilds the type through
+    /// `kind()` drops the name and keeps the bound, which is what it was
+    /// before the marker existed.
+    TemplateParam(Atom, PhpType),
+
+    /// An unsealed shape: `array{a: A, ...<K, V>}` or `list{A, ...<V>}`.
+    /// The entries it lists are known to be there, and any number of
+    /// others, keyed `K` and holding `V`, may sit beside them.
+    ///
+    /// Invisible to [`PhpType::kind`], which sees the generic array the
+    /// shape widens to (`non-empty-array<'a'|K, A|V>`, spelled with the
+    /// key types rather than the literals). Code that knows nothing about
+    /// the tail therefore treats it as the `array<K, V>` it also is, which
+    /// is what it was before the type existed and is never wrong. Only the
+    /// code that asks, through [`PhpType::as_unsealed_shape`], gets to read
+    /// the listed entries one by one: offset reads, key completion and the
+    /// display.
+    UnsealedShape(Box<UnsealedShape>),
+
+    /// `Foo::class`: the name of the class `Foo` itself, which the inner
+    /// `class-string<Foo>` also admits the name of any subclass beside.
+    ///
+    /// Invisible to [`PhpType::kind`] and the display, which both see the
+    /// `class-string<Foo>`, so the value goes wherever a class-string does.
+    /// Only a write through it asks, via
+    /// [`PhpType::as_class_name_literal`], since knowing the one name it
+    /// holds is what lets the write name the entry it lands on.
+    ClassNameLiteral(PhpType),
+}
+
+/// Payload of [`TypeKind::UnsealedShape`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsealedShape {
+    /// The entries known to be there, as an `array{…}`, or a `list{…}`
+    /// when the whole array is a list.
+    pub shape: PhpType,
+    /// The key type of the entries beyond the listed ones.
+    pub key: PhpType,
+    /// The value type of the entries beyond the listed ones.
+    pub value: PhpType,
+    /// What [`PhpType::kind`] answers for the whole shape.
+    widened: PhpType,
 }
 
 /// Payload of [`TypeKind::Generic`].
@@ -453,6 +552,76 @@ impl LiteralValue {
         self.string_content()
             .is_some_and(|content| is_php_numeric_string(&content))
     }
+
+    /// The number a numeric-string literal holds, as PHP reads it in an
+    /// arithmetic context: `'1'` is `1`, `' 1.5 '` is `1.5`, and an integer
+    /// spelling too large for `int` is a float. `None` for anything that is
+    /// not a numeric string.
+    pub fn numeric_string_value(&self) -> Option<LiteralValue> {
+        let content = self.string_content()?;
+        if !is_php_numeric_string(&content) {
+            return None;
+        }
+        let trimmed = content.trim_matches(|c: char| c.is_ascii_whitespace());
+        if !trimmed.contains(['.', 'e', 'E'])
+            && let Ok(value) = trimmed.parse::<i64>()
+        {
+            return Some(LiteralValue::int(value.to_string()));
+        }
+        let value = trimmed.parse::<f64>().ok().filter(|v| v.is_finite())?;
+        Some(LiteralValue::float(format!("{value:?}")))
+    }
+
+    /// Whether PHP 8's `==` holds between the two values, or `None` when a
+    /// literal's value cannot be read.
+    ///
+    /// Two numeric strings, or a number and a numeric string, compare as
+    /// numbers (`'1e3' == '1000'`); any other pair of strings compares
+    /// byte for byte.  A number never equals a non-numeric string, since
+    /// PHP 8 compares the two as strings and a number's string form is
+    /// numeric.
+    pub fn loosely_equals(&self, other: &LiteralValue) -> Option<bool> {
+        let numeric = |value: &LiteralValue| -> Option<f64> {
+            match value {
+                LiteralValue::Int(_) => value.parse_i64().map(|n| n as f64),
+                LiteralValue::Float(_) => value.parse_f64(),
+                LiteralValue::String(_) => {
+                    let content = value.string_content()?;
+                    is_php_numeric_string(&content)
+                        .then(|| content.trim().parse().ok())
+                        .flatten()
+                }
+            }
+        };
+        match (self, other) {
+            (LiteralValue::Int(_), LiteralValue::Int(_)) => {
+                Some(self.parse_i64()? == other.parse_i64()?)
+            }
+            (LiteralValue::String(_), LiteralValue::String(_))
+                if !self.is_numeric_string() || !other.is_numeric_string() =>
+            {
+                Some(self.string_content()? == other.string_content()?)
+            }
+            (LiteralValue::String(_), _) if !self.is_numeric_string() => Some(false),
+            (_, LiteralValue::String(_)) if !other.is_numeric_string() => Some(false),
+            _ => Some(numeric(self)? == numeric(other)?),
+        }
+    }
+}
+
+/// The truthiness of a named type, bare or with type arguments.
+///
+/// A class instance is always truthy, and so is a class name: no class is
+/// called `''` or `'0'`.  A `non-empty-string` is not: `'0'` is non-empty
+/// and falsy.
+fn named_truthiness(name: &str) -> Option<bool> {
+    match name.to_ascii_lowercase().as_str() {
+        "object" | "non-falsy-string" | "truthy-string" | "non-empty-array" | "non-empty-list"
+        | "positive-int" | "negative-int" | "non-zero-int" | "callable" | "closure"
+        | "class-string" | "interface-string" | "trait-string" | "enum-string" => Some(true),
+        other if is_keyword_type(other) => None,
+        _ => Some(true),
+    }
 }
 
 /// Match PHP 8's `NUM_STRING` grammar without accepting Rust-only float
@@ -533,6 +702,59 @@ pub(crate) fn is_decimal_int_array_key(content: &str) -> bool {
             .is_ok_and(|parsed| parsed.to_string() == content)
 }
 
+/// Whether `isset($string[$key])` can hold for this string key: PHP only
+/// sets a string's integer offsets, and accepts any integer-numeric
+/// spelling of one (`"1"`, `"01"`, `" 1"`, `"+1"`), but not a fraction
+/// (`"1.0"`), a trailing non-digit (`"1x"`), or a word.
+pub(crate) fn may_be_set_string_offset(key: &str) -> bool {
+    let trimmed = key.trim_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether reading `$string[$key]` can yield a character.  A key that does
+/// not begin with an integer names no offset at all: the read throws, and
+/// under `??` it falls back to the default.  A leading-numeric one (`"1x"`)
+/// still reads the character at that integer, with a warning.
+pub(crate) fn may_read_string_offset(key: &str) -> bool {
+    let trimmed = key.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    digits.bytes().next().is_some_and(|b| b.is_ascii_digit())
+}
+
+/// The shape key an entry written under `Foo::class` is recorded with: the
+/// constant's spelling, which is how a docblock writes the same key and
+/// which keeps it a `class-string<Foo>` when the keys are read back.
+pub(crate) fn class_name_shape_key(class: &str) -> String {
+    format!("{class}::class")
+}
+
+/// The class a shape key spelled `Foo::class` is the name of.
+pub(crate) fn class_name_key(key: &str) -> Option<&str> {
+    let (class, constant) = key.rsplit_once("::")?;
+    (constant.eq_ignore_ascii_case("class") && is_class_name_spelling(class)).then_some(class)
+}
+
+/// Whether `text` is spelled like a class name, qualified or not.
+fn is_class_name_spelling(text: &str) -> bool {
+    let text = text.strip_prefix('\\').unwrap_or(text);
+    !text.is_empty()
+        && text.split('\\').all(|part| {
+            part.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || !c.is_ascii())
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii())
+        })
+}
+
+/// The class a shape key spelled `Foo::CONSTANT` reads its constant from,
+/// and the constant's name.
+pub(crate) fn class_constant_key(key: &str) -> Option<(&str, &str)> {
+    let (class, constant) = key.rsplit_once("::")?;
+    (is_class_name_spelling(class) && is_class_name_spelling(constant) && !constant.contains('\\'))
+        .then_some((class, constant))
+}
+
 /// The runtime array key each shape entry occupies, in order.
 ///
 /// A positional entry takes the next free integer index, mirroring the
@@ -555,7 +777,7 @@ pub(crate) fn runtime_shape_keys(entries: &[ShapeEntry]) -> Option<Vec<String>> 
                 shifted |= entry.optional;
             }
             Some(key) => {
-                if let Ok(index) = key.parse::<i64>() {
+                if let Some(index) = canonical_int_key(key) {
                     next = next.max(index.checked_add(1)?);
                     shifted |= entry.optional;
                 }
@@ -682,6 +904,19 @@ impl PhpType {
         TypeKind::StaticType(bound).into()
     }
 
+    /// The template parameter `name`, known to be a `bound`.
+    ///
+    /// A bound that is itself a bounded template (`@template U of T`)
+    /// contributes its own bound, so the marker never wraps another one and
+    /// [`kind`](PhpType::kind) stays a bounded number of hops.
+    pub fn template_param(name: Atom, bound: PhpType) -> PhpType {
+        let bound = match bound.as_template_param() {
+            Some((_, inner)) => inner.clone(),
+            None => bound,
+        };
+        TypeKind::TemplateParam(name, bound).into()
+    }
+
     /// `$this` resolved against a class context.
     pub fn this_type(bound: Atom) -> PhpType {
         TypeKind::ThisType(bound).into()
@@ -710,6 +945,11 @@ impl PhpType {
     /// `class-string<T>`, or bare `class-string` when `inner` is `None`.
     pub fn class_string(inner: Option<PhpType>) -> PhpType {
         TypeKind::ClassString(inner).into()
+    }
+
+    /// `Foo::class`: exactly the name of `class`.
+    pub fn class_name_literal(class: Atom) -> PhpType {
+        TypeKind::ClassNameLiteral(PhpType::class_string(Some(PhpType::named(class)))).into()
     }
 
     /// `interface-string<T>`, or bare `interface-string` when `inner` is
@@ -760,16 +1000,24 @@ impl PhpType {
         TypeKind::Raw(text.into()).into()
     }
 
-    /// Union of two or more members.
+    /// Union of the members.
     ///
-    /// Repeated alternatives are dropped (and a union left with a single
-    /// alternative is unwrapped), because a union that names the same type
-    /// twice is never anything but noise in a hover or a diagnostic. No
-    /// other normalisation happens here — for `true|false` → `bool`,
-    /// subtype absorption, and nested-union flattening see
-    /// [`simplified`](PhpType::simplified).
+    /// A single member is returned as itself, and repeated alternatives
+    /// are dropped (unwrapping the union if one alternative is left),
+    /// because a union that names the same type twice is never anything
+    /// but noise in a hover or a diagnostic. No other normalisation
+    /// happens here — for `true|false` → `bool`, subtype absorption, and
+    /// nested-union flattening see [`simplified`](PhpType::simplified).
     pub fn union(mut members: Vec<PhpType>) -> PhpType {
+        if members.len() == 1 {
+            return members.pop().unwrap();
+        }
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
+            return members.into_iter().next().unwrap();
+        }
+        normalize::absorb_subsumed_shapes(&mut members);
+        normalize::absorb_exact_class_names(&mut members);
+        if members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
         if normalize::has_duplicate_members(&members) {
@@ -808,6 +1056,52 @@ impl PhpType {
             return inner;
         }
         TypeKind::ListShape(inner).into()
+    }
+
+    /// Unsealed shape (`array{…, ...<K, V>}`): the entries of `shape`, plus
+    /// any number of others keyed `key` and holding `value`.
+    ///
+    /// A `list{…}` shape makes an unsealed list, whose further entries
+    /// continue the count, so `key` is taken to be `int` there. A shape
+    /// with no entries says nothing the tail does not, and is returned as
+    /// the plain `array<K, V>` / `list<V>`; so is anything that is not a
+    /// shape at all, which a transform rebuilding the parts may produce.
+    pub fn unsealed_shape(shape: PhpType, key: PhpType, value: PhpType) -> PhpType {
+        let is_list = shape.is_list_shape();
+        let entries: &[ShapeEntry] = match shape.kind() {
+            TypeKind::ArrayShape(entries) => entries,
+            _ => &[],
+        };
+        let non_empty = entries.iter().any(|entry| !entry.optional);
+        let widened_value = match shape.iterable_element_type() {
+            Some(known) => PhpType::join_runtime_value_types(vec![known, value.clone()]),
+            None => value.clone(),
+        };
+        let widened = if is_list {
+            let name = if non_empty { "non-empty-list" } else { "list" };
+            PhpType::generic(name, vec![widened_value])
+        } else {
+            let widened_key = match shape.iterable_key_type() {
+                Some(known) => PhpType::join_runtime_value_types(vec![known, key.clone()]),
+                None => key.clone(),
+            };
+            let name = if non_empty {
+                "non-empty-array"
+            } else {
+                "array"
+            };
+            PhpType::generic(name, vec![widened_key, widened_value])
+        };
+        if entries.is_empty() {
+            return widened;
+        }
+        TypeKind::UnsealedShape(Box::new(UnsealedShape {
+            shape,
+            key: if is_list { PhpType::int() } else { key },
+            value,
+            widened,
+        }))
+        .into()
     }
 
     /// Object shape (`object{…}`).
@@ -1262,6 +1556,7 @@ impl PhpType {
                     | "interface-string"
                     | "trait-string"
                     | "enum-string"
+                    | "view-string"
                     | "lowercase-string"
                     | "non-empty-lowercase-string"
                     | "uppercase-string"
@@ -1277,6 +1572,31 @@ impl PhpType {
             ),
             TypeKind::Union(members) => {
                 !members.is_empty() && members.iter().all(|m| m.is_string_subtype())
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether this type demands a string that names a Blade template:
+    /// the Laravel PHPStan extensions' `view-string`, on its own or as
+    /// the only string-like member of a union.
+    ///
+    /// `?view-string` and `view-string|null` both count — `null` is not a
+    /// string the check could be wrong about — and so does a union with a
+    /// non-string alternative such as `view-string|\Illuminate\View\View`,
+    /// where a string argument still has to name a template. A union that
+    /// also admits a plain `string` does not: the annotation then says
+    /// nothing a bare `string` does not already say, so demanding a
+    /// template of it would report code the declaration permits.
+    pub fn is_view_string(&self) -> bool {
+        match self.kind() {
+            TypeKind::Named(name) => name.eq_ignore_ascii_case("view-string"),
+            TypeKind::Nullable(inner) => inner.is_view_string(),
+            TypeKind::Union(members) => {
+                members.iter().any(PhpType::is_view_string)
+                    && !members
+                        .iter()
+                        .any(|m| !m.is_view_string() && m.is_string_subtype())
             }
             _ => false,
         }
@@ -1371,6 +1691,73 @@ impl PhpType {
             TypeKind::Named(s) => s.eq_ignore_ascii_case("iterable"),
             TypeKind::Nullable(inner) => inner.is_iterable(),
             _ => false,
+        }
+    }
+
+    /// This type with every `iterable` alternative spelled out as the
+    /// `array|Traversable` union it stands for, type arguments carried
+    /// onto both halves (`iterable<K, V>` → `array<K, V>|Traversable<K, V>`).
+    ///
+    /// A check that tells arrays from objects (`is_array()`,
+    /// `instanceof Traversable`) keeps one half and drops the other, which
+    /// it cannot do while the two share one name.  Returns `None` when no
+    /// top-level alternative is an `iterable`.
+    pub fn split_iterable(&self) -> Option<PhpType> {
+        let alternatives = match self.kind() {
+            TypeKind::Union(members) => &members[..],
+            _ => std::slice::from_ref(self),
+        };
+        fn without_null(member: &PhpType) -> (&PhpType, bool) {
+            match member.kind() {
+                TypeKind::Nullable(inner) => (inner, true),
+                _ => (member, false),
+            }
+        }
+        if !alternatives.iter().any(|m| match without_null(m).0.kind() {
+            TypeKind::Named(n) => n.eq_ignore_ascii_case("iterable"),
+            TypeKind::Generic(g) => {
+                g.name.eq_ignore_ascii_case("iterable") && matches!(g.args.len(), 1 | 2)
+            }
+            _ => false,
+        }) {
+            return None;
+        }
+        let mut members = Vec::with_capacity(alternatives.len() + 1);
+        for member in alternatives {
+            let (inner, nullable) = without_null(member);
+            match inner.split_iterable_member() {
+                Some((array, traversable)) => {
+                    members.push(array);
+                    members.push(traversable);
+                }
+                None => members.push(inner.clone()),
+            }
+            if nullable {
+                members.push(PhpType::null());
+            }
+        }
+        Some(PhpType::union(members))
+    }
+
+    /// The array and `Traversable` halves of a single `iterable` member.
+    fn split_iterable_member(&self) -> Option<(PhpType, PhpType)> {
+        let traversable = || atom("Traversable");
+        match self.kind() {
+            TypeKind::Named(n) if n.eq_ignore_ascii_case("iterable") => {
+                Some((PhpType::array(), PhpType::named(traversable())))
+            }
+            TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("iterable") => match &g.args[..] {
+                [value] => Some((
+                    PhpType::generic_array_val(value.clone()),
+                    PhpType::generic_atom(traversable(), vec![PhpType::mixed(), value.clone()]),
+                )),
+                [key, value] => Some((
+                    PhpType::generic_array(key.clone(), value.clone()),
+                    PhpType::generic_atom(traversable(), vec![key.clone(), value.clone()]),
+                )),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
@@ -1690,69 +2077,17 @@ impl PhpType {
     /// - Unions/intersections of native types are preserved
     /// - `?T` → `?NativeT`
     pub fn to_native_hint(&self) -> Option<String> {
-        match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.to_native_hint(),
-            TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
-                native_scalar_name(s).map(|n| n.to_string())
-            }
-            TypeKind::Generic(g) => {
-                // Generic classes: strip the generic params.
-                // `array<K,V>` → `array`, `Collection<T>` → `Collection`
-                native_scalar_name(&g.name)
-                    .map(|n| n.to_string())
-                    .or_else(|| Some(g.name.to_string()))
-            }
-            TypeKind::Nullable(inner) => inner.to_native_hint().map(|n| format!("?{}", n)),
-            TypeKind::Union(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None; // some members have no native form
-                }
-                // Deduplicate (e.g. `list<string>|array<int>` both → `array`)
-                let mut deduped = native;
-                deduped.sort();
-                deduped.dedup();
-                Some(deduped.join("|"))
-            }
-            TypeKind::Intersection(members) => {
-                let native: Vec<String> =
-                    members.iter().filter_map(|m| m.to_native_hint()).collect();
-                if native.len() != members.len() {
-                    return None;
-                }
-                Some(native.join("&"))
-            }
-            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some("array".to_string()),
-            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some("string".to_string()),
-            TypeKind::IntRange(_, _) => Some("int".to_string()),
-            TypeKind::Literal(l) => Some(
-                match **l {
-                    LiteralValue::String(_) => "string",
-                    LiteralValue::Int(_) => "int",
-                    LiteralValue::Float(_) => "float",
-                }
-                .to_string(),
-            ),
-            TypeKind::ObjectShape(_) => Some("object".to_string()),
-            TypeKind::Callable(c) => Some(c.kind.to_string()),
-            // Conditionals, key-of, value-of, index-access, and raw
-            // types have no native form.
-            TypeKind::Conditional(_)
-            | TypeKind::KeyOf(_)
-            | TypeKind::ValueOf(_)
-            | TypeKind::IndexAccess(_, _)
-            | TypeKind::Raw(_) => None,
-        }
+        self.to_native_hint_typed().map(|ty| ty.to_string())
     }
 
     /// Like [`to_native_hint`] but returns a structured [`PhpType`] instead of a string,
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.to_native_hint_typed()
-            }
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -1811,7 +2146,9 @@ impl PhpType {
                     Some(PhpType::intersection(deduped))
                 }
             }
-            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(PhpType::array()),
+            TypeKind::Array(_) | TypeKind::ArrayShape(_) | TypeKind::UnsealedShape(_) => {
+                Some(PhpType::array())
+            }
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(PhpType::string()),
             TypeKind::IntRange(_, _) => Some(PhpType::int()),
             TypeKind::Literal(l) => Some(match **l {
@@ -1940,10 +2277,13 @@ impl PhpType {
                     .iter()
                     .map(|entry| match entry.key.as_deref() {
                         None => PhpType::int(),
-                        // The parser currently stores a class-constant shape
-                        // key only as its display spelling. Without resolving
-                        // the constant, its runtime array key may be int or
-                        // string (`Foo::class` is safely covered as a subset).
+                        // A class-constant key is stored as its spelling.
+                        // `Foo::class` is the class's name; any other
+                        // constant, not being read here, may be an int or a
+                        // string.
+                        Some(key) if let Some(class) = class_name_key(key) => {
+                            PhpType::class_string(Some(PhpType::named(atom(class))))
+                        }
                         Some(key) if key.contains("::") => {
                             PhpType::union(vec![PhpType::int(), PhpType::string()])
                         }
@@ -1963,13 +2303,23 @@ impl PhpType {
                 (!entries.is_empty()).then(PhpType::string)
             }
             TypeKind::Generic(g) if g.args.len() >= 2 => Some(g.args[0].clone()),
+            // A list's keys count up from zero.
             TypeKind::Generic(g)
                 if g.args.len() == 1
                     && matches!(
                         g.name.to_ascii_lowercase().as_str(),
-                        // A single-argument `array<T>` names its value type,
-                        // leaving the same implicit integer keys as `T[]`.
-                        "list" | "non-empty-list" | "array" | "non-empty-array"
+                        "list" | "non-empty-list"
+                    ) =>
+            {
+                Some(PhpType::int_range("0", "max"))
+            }
+            // A single-argument `array<T>` names its value type, leaving
+            // the same implicit integer keys as `T[]`.
+            TypeKind::Generic(g)
+                if g.args.len() == 1
+                    && matches!(
+                        g.name.to_ascii_lowercase().as_str(),
+                        "array" | "non-empty-array"
                     ) =>
             {
                 Some(PhpType::int())
@@ -2127,6 +2477,9 @@ impl PhpType {
     ///
     /// [`shape_value_type`]: PhpType::shape_value_type
     pub fn shape_entry(&self, key: &str) -> Option<&ShapeEntry> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.shape_entry(key);
+        }
         match self.kind() {
             TypeKind::ArrayShape(entries) => {
                 // First try an exact key match (handles named and explicit
@@ -2169,32 +2522,17 @@ impl PhpType {
     /// Returns `None` if this is not an array shape or the key is not
     /// found.
     pub fn extract_shape_key_type(&self, key: &str) -> Option<PhpType> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.extract_shape_key_type(key);
+        }
         match self.kind() {
-            TypeKind::ArrayShape(entries) => {
-                if let Some(entry) = entries.iter().find(|e| e.key.as_deref() == Some(key)) {
-                    return if entry.optional {
-                        Some(PhpType::nullable(entry.value_type.clone()))
-                    } else {
-                        Some(entry.value_type.clone())
-                    };
+            TypeKind::ArrayShape(_) => self.shape_entry(key).map(|entry| {
+                if entry.optional {
+                    PhpType::nullable(entry.value_type.clone())
+                } else {
+                    entry.value_type.clone()
                 }
-                if let Ok(idx) = key.parse::<usize>() {
-                    let mut positional_idx = 0usize;
-                    for entry in entries {
-                        if entry.key.is_none() {
-                            if positional_idx == idx {
-                                return if entry.optional {
-                                    Some(PhpType::nullable(entry.value_type.clone()))
-                                } else {
-                                    Some(entry.value_type.clone())
-                                };
-                            }
-                            positional_idx += 1;
-                        }
-                    }
-                }
-                None
-            }
+            }),
             TypeKind::Nullable(inner) => inner.extract_shape_key_type(key),
             TypeKind::Union(members) => {
                 // Every alternative contributes its own entry: reading
@@ -2222,6 +2560,25 @@ impl PhpType {
                 // Find the first array/object shape member in the union.
                 members.iter().find_map(|m| m.shape_entries())
             }
+            _ => None,
+        }
+    }
+
+    /// The entries a shape is known to hold, whether it is sealed or not:
+    /// what [`shape_entries`](Self::shape_entries) answers, and also the
+    /// listed entries of an unsealed `array{…, ...<K, V>}`.
+    ///
+    /// The entries of an unsealed shape are not the whole array, so this
+    /// is for a caller that only reads them (offering a key, say), never
+    /// for one that builds a shape back out of them.
+    pub fn known_shape_entries(&self) -> Option<&[ShapeEntry]> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.shape_entries();
+        }
+        match self.kind() {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => Some(entries),
+            TypeKind::Nullable(inner) => inner.known_shape_entries(),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.known_shape_entries()),
             _ => None,
         }
     }
@@ -2333,9 +2690,18 @@ impl PhpType {
     /// positional entry an append added beside named keys lines up with
     /// the index it sits at. Keys from `a` keep their order; keys only in
     /// `b` follow in `b`'s order. Returns `None` when either side's keys
-    /// are not decidable, and when either side is a bare list of values:
+    /// are not decidable, and when both sides are a bare list of values:
     /// two literals written slot by slot describe unrelated arrays, and
     /// pairing their slots up would invent a row neither one holds.
+    ///
+    /// When only one side is a bare list, the other side's explicit key at
+    /// each shared position is the anchor that makes pairing safe, *if* the
+    /// two sides agree on the value that position holds. A position they
+    /// disagree on (`array{string}` against `array{0: int}`) is not a
+    /// narrower and a wider spelling of the same shape, it is two
+    /// differently-tagged alternatives that merely happen to share a
+    /// length, so the whole pairing is refused rather than inventing an
+    /// `int|string` at a slot neither alternative holds both of.
     ///
     /// [`join_shapes`]: Self::join_shapes
     fn join_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
@@ -2345,11 +2711,39 @@ impl PhpType {
                     entry
                         .key
                         .as_deref()
-                        .is_some_and(|k| k.parse::<i64>().is_err())
+                        .is_some_and(|k| !is_canonical_int_key(k))
                 })
         }
-        if is_value_list(a) || is_value_list(b) {
+        let a_is_list = is_value_list(a);
+        let b_is_list = is_value_list(b);
+        if a_is_list && b_is_list {
             return None;
+        }
+        if a_is_list || b_is_list {
+            let (list_side, keyed_side) = if a_is_list { (a, b) } else { (b, a) };
+            let list_keys = runtime_shape_keys(list_side)?;
+            let keyed_keys = runtime_shape_keys(keyed_side)?;
+            // At least one position has to actually land on an explicit key
+            // in `keyed_side`, or there is no anchor at all: an empty shape
+            // (`array{}`) shares no key with anything, so it must not be
+            // free to absorb an unrelated positional shape just because
+            // nothing contradicts it.
+            let mut overlapped = false;
+            let anchored = list_side.iter().zip(&list_keys).all(|(entry, key)| {
+                match keyed_keys.iter().position(|other| other == key) {
+                    Some(index) => {
+                        overlapped = true;
+                        let other_value = &keyed_side[index].value_type;
+                        entry.value_type.is_mixed()
+                            || other_value.is_mixed()
+                            || entry.value_type.equivalent(other_value)
+                    }
+                    None => true,
+                }
+            });
+            if !overlapped || !anchored {
+                return None;
+            }
         }
         let keys_a = runtime_shape_keys(a)?;
         let keys_b = runtime_shape_keys(b)?;
@@ -2401,7 +2795,8 @@ impl PhpType {
         }
         let mut members: Vec<PhpType> = a.union_members().into_iter().cloned().collect();
         'incoming: for m in b.union_members() {
-            for existing in members.iter_mut() {
+            let mut replaced = None;
+            for (index, existing) in members.iter_mut().enumerate() {
                 if existing.equivalent(m) {
                     continue 'incoming;
                 }
@@ -2410,14 +2805,27 @@ impl PhpType {
                 }
                 if is_runtime_value_subtype(existing, m) {
                     *existing = m.clone();
-                    continue 'incoming;
+                    replaced = Some(index);
+                    break;
                 }
                 if let Some(joined) = existing.join_shapes(m) {
                     *existing = joined;
                     continue 'incoming;
                 }
             }
-            members.push(m.clone());
+            match replaced {
+                // The incoming member may cover more than the one it took
+                // the place of: `'b'|'c'` joined with `string` is `string`.
+                Some(index) => {
+                    let mut position = 0;
+                    members.retain(|existing| {
+                        let keep = position <= index || !is_runtime_value_subtype(existing, m);
+                        position += 1;
+                        keep
+                    });
+                }
+                None => members.push(m.clone()),
+            }
         }
         if members.len() == 1 {
             members.into_iter().next().unwrap()
@@ -2575,13 +2983,11 @@ impl PhpType {
                 LiteralValue::Int(_) => value.parse_i64().is_none_or(|value| value != 0),
                 LiteralValue::Float(_) => value.parse_f64().is_none_or(|value| value != 0.0),
             }),
-            TypeKind::Named(name) => match name.to_ascii_lowercase().as_str() {
-                "object" | "non-empty-string" | "non-empty-array" | "non-empty-list"
-                | "positive-int" | "negative-int" | "callable" | "closure" => Some(true),
-                other if is_keyword_type(other) => None,
-                // A class instance is always truthy in PHP.
-                _ => Some(true),
-            },
+            TypeKind::Named(name) => named_truthiness(name),
+            // `class-string<Foo>` names a class and `Collection<int>` is an
+            // instance of one, so each is truthy whatever its arguments.
+            TypeKind::Generic(generic) => named_truthiness(&generic.name),
+            TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(true),
             // An object shape or an intersection is an object, and an object
             // is always truthy.  A shape with at least one required field is
             // a non-empty array; an empty one (`array{}`) is falsy.
@@ -2644,13 +3050,11 @@ impl PhpType {
     ///
     /// The mirror of [`Self::truthy_type`], for the branch an `if ($x)`
     /// skips rather than the one it enters. Members that are *always*
-    /// truthy are dropped and `bool` keeps only its `false` half; `None`
-    /// comes back when nothing the type describes could have been falsy.
-    ///
-    /// As on the truthy side, refinements the test justifies but PHP has
-    /// no plain spelling for are left alone: `string` stays `string`
-    /// rather than becoming the pair of empty spellings that are falsy,
-    /// and `int` stays `int` rather than becoming `0`.
+    /// truthy are dropped and the rest keep only their falsy values: `bool`
+    /// becomes `false`, `int` becomes `0`, `string` becomes `''|'0'`, an
+    /// array that may be empty becomes `array{}`, and `mixed` becomes the
+    /// fixed set of every falsy value.  `None` comes back when nothing the
+    /// type describes could have been falsy.
     pub fn falsy_type(&self) -> Option<PhpType> {
         let mut falsy = Vec::new();
         self.push_falsy_members(&mut falsy);
@@ -2682,6 +3086,60 @@ impl PhpType {
             }
             _ if self.truthiness() == Some(true) => {}
             _ if self.is_bool() => out.push(PhpType::false_()),
+            _ if self.is_mixed() => {
+                out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                    PhpType::array_shape(Vec::new()),
+                    PhpType::false_(),
+                    PhpType::null(),
+                ]);
+            }
+            TypeKind::IntRange(min, max) => {
+                let bound = |b: &Atom| b.parse::<i64>().ok();
+                let above_min = bound(min).is_none_or(|min| min <= 0);
+                let below_max = bound(max).is_none_or(|max| max >= 0);
+                if above_min && below_max {
+                    out.push(PhpType::literal_int("0"));
+                }
+            }
+            TypeKind::Named(name) => match keyword_lowercase(name).as_str() {
+                "int" | "integer" | "non-negative-int" | "non-positive-int" => {
+                    out.push(PhpType::literal_int("0"));
+                }
+                "float" | "double" => out.push(PhpType::literal_float("0.0")),
+                "string" => {
+                    out.push(PhpType::literal_string_value(""));
+                    out.push(PhpType::literal_string_value("0"));
+                }
+                "non-empty-string" | "numeric-string" => {
+                    out.push(PhpType::literal_string_value("0"));
+                }
+                "numeric" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value("0"),
+                ]),
+                "array-key" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                ]),
+                "scalar" => out.extend([
+                    PhpType::literal_int("0"),
+                    PhpType::literal_float("0.0"),
+                    PhpType::literal_string_value(""),
+                    PhpType::literal_string_value("0"),
+                    PhpType::false_(),
+                ]),
+                _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
+                _ => out.push(self.clone()),
+            },
+            // `[]` is the only falsy array, whatever the array was declared
+            // to hold.
+            _ if self.is_array_like() => out.push(PhpType::array_shape(Vec::new())),
             _ => out.push(self.clone()),
         }
     }
@@ -2747,20 +3205,32 @@ impl PhpType {
     ///
     /// A `non-empty-array`/`non-empty-list` (tracked by name, not by
     /// entries) loses that promise unconditionally: removing any one
-    /// element could have emptied it out entirely.
+    /// element could have emptied it out entirely. A `list<T>` that may
+    /// have lost an entry leaves a gap in its keys, so it becomes
+    /// `array<int, T>`.
     pub fn after_element_unset(&self, key: Option<&str>) -> PhpType {
         match self.kind() {
             TypeKind::Nullable(inner) => PhpType::nullable(inner.after_element_unset(key)),
             TypeKind::Union(members) => {
                 PhpType::union(members.iter().map(|m| m.after_element_unset(key)).collect())
             }
+            // A list has no string keys, so removing one leaves it as it was.
+            TypeKind::Named(name) if key.is_some() && is_list_name(name.as_str()) => self.clone(),
+            TypeKind::Generic(generic) if key.is_some() && is_list_name(generic.name.as_str()) => {
+                self.clone()
+            }
             TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
-            TypeKind::Named(name) if name == "non-empty-list" => PhpType::named(atom("list")),
+            TypeKind::Named(name) if is_list_name(name.as_str()) => {
+                PhpType::generic_array(PhpType::int(), PhpType::mixed())
+            }
             TypeKind::Generic(generic) if generic.name == "non-empty-array" => {
                 PhpType::generic_atom(atom("array"), generic.args.clone())
             }
-            TypeKind::Generic(generic) if generic.name == "non-empty-list" => {
-                PhpType::generic_atom(atom("list"), generic.args.clone())
+            TypeKind::Generic(generic) if is_list_name(generic.name.as_str()) => {
+                PhpType::generic_array(
+                    PhpType::int(),
+                    generic.args.first().cloned().unwrap_or_else(PhpType::mixed),
+                )
             }
             TypeKind::ArrayShape(entries) => {
                 let updated: Vec<ShapeEntry> = match key {
@@ -2911,8 +3381,10 @@ impl PhpType {
     /// parse→check round-trip when the caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.is_informative(),
-            TypeKind::Generic(..) => true,
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.is_informative(),
+            TypeKind::Generic(..) | TypeKind::UnsealedShape(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
             TypeKind::Union(members) => members.iter().any(|m| m.is_informative()),
@@ -2933,7 +3405,7 @@ impl PhpType {
             TypeKind::Conditional(..) => true,
             TypeKind::IntRange(..) => true,
             TypeKind::Literal(..) => true,
-            TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) | TypeKind::TemplateParam(..) => true,
             TypeKind::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
         }
     }
@@ -2971,10 +3443,19 @@ impl PhpType {
             return false;
         }
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => {
                 inner.references_any_template_param(template_params)
             }
+            TypeKind::UnsealedShape(unsealed) => unsealed
+                .widened
+                .references_any_template_param(template_params),
             TypeKind::Named(name) => template_params.iter().any(|p| p == name),
+            TypeKind::TemplateParam(name, bound) => {
+                template_params.iter().any(|p| p == name)
+                    || bound.references_any_template_param(template_params)
+            }
             TypeKind::Nullable(inner) => inner.references_any_template_param(template_params),
             TypeKind::Union(members) | TypeKind::Intersection(members) => members
                 .iter()
@@ -3063,18 +3544,6 @@ impl PhpType {
     /// Whether this type is `void`.
     pub fn is_void(&self) -> bool {
         matches!(self.kind(), TypeKind::Named(s) if s.eq_ignore_ascii_case("void"))
-    }
-
-    /// Whether this type conveys no useful return type information.
-    ///
-    /// Returns `true` only for `void` and `never` — the two types that
-    /// genuinely carry no value. `mixed` is *informative*: it means "some
-    /// value of unknown type", which downstream narrowing (`is_string`,
-    /// `instanceof`, …) can still refine. Treating `mixed` as uninformative
-    /// here would strip the type entirely and leave the variable untyped, so
-    /// a conditional branch selecting `mixed` must flow `mixed` through.
-    pub fn is_uninformative_return(&self) -> bool {
-        self.is_void() || self.is_never()
     }
 
     /// Whether this type is a PHP keyword type (scalar, special, or pseudo-type).

@@ -1,28 +1,10 @@
 use crate::common::{
     create_psr4_workspace, create_test_backend, create_test_backend_with_full_stubs,
+    unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Open a file, run full slow diagnostics (which activates the diagnostic
-/// scope cache and the forward walker), then filter to unknown_member
-/// diagnostics only.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Closure with unresolvable param type still resolves $this
@@ -476,6 +458,49 @@ function render(array $variables): string {
         type_errors.is_empty(),
         "Expected no argument type mismatch: the $variables passed to array_map() \
          should resolve to its pre-assignment `array` type, got: {type_errors:?}"
+    );
+}
+
+/// A closure that captures its own variable by reference sees the closure
+/// itself inside its body, not `null`.
+///
+/// PHP creates the closure object and only then stores it into `$callback`,
+/// so by the time the body ever runs the by-reference capture is bound to
+/// the closure. Unlike `self_referencing_reassignment_uses_pre_assignment_scope`
+/// above (a plain, by-value reference to the same variable, which must see
+/// the *old* value), a by-reference self-capture must see the *new* one.
+#[test]
+fn self_referencing_by_ref_capture_sees_the_closure_not_null() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///self_ref_by_ref.php";
+    let text = r#"<?php
+function invoke(callable $cb): void {}
+
+function register(): void {
+    $callback = function () use (&$callback): void {
+        invoke($callback);
+    };
+}
+"#;
+    backend.update_ast(uri, text);
+
+    let mut diags = Vec::new();
+    backend.collect_slow_diagnostics(uri, text, &mut diags);
+
+    let type_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.code.as_ref().is_some_and(
+                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
+            )
+        })
+        .map(|d| d.message.clone())
+        .collect();
+
+    assert!(
+        type_errors.is_empty(),
+        "Expected no argument type mismatch: the by-reference self-capture of \
+         $callback should resolve to the closure, not null, got: {type_errors:?}"
     );
 }
 

@@ -6,7 +6,10 @@
 //! these as [`crate::symbol_map::LaravelStringKey`] spans; this module turns
 //! a span (kind + key) into concrete definition/reference [`Location`]s.
 
-use super::{find_all_config_references, resolve_config_key_declaration};
+use super::{
+    find_all_config_references, resolve_config_key_declaration,
+    resolve_config_key_declaration_exact,
+};
 use super::{route_names, trans_keys, view_names};
 
 use tower_lsp::lsp_types::Location;
@@ -36,9 +39,23 @@ pub(crate) fn resolve_laravel_string_key(
         LaravelStringKind::Stack => {
             backend.blade_block_definitions(uri, crate::blade::blocks::BlockKind::Stack, key)
         }
-        LaravelStringKind::Config => resolve_config_key_declaration(backend, key)
-            .into_iter()
-            .collect(),
+        LaravelStringKind::Config => {
+            if crate::symbol_map::laravel_resources::resource_from_config_key(key).is_some() {
+                resolve_config_key_declaration_exact(backend, key)
+                    .into_iter()
+                    .collect()
+            } else {
+                resolve_config_key_declaration(backend, key)
+                    .into_iter()
+                    .collect()
+            }
+        }
+        LaravelStringKind::ConfigResource(resource) => {
+            let config_key = crate::symbol_map::laravel_resources::config_key(*resource, key);
+            resolve_config_key_declaration_exact(backend, &config_key)
+                .into_iter()
+                .collect()
+        }
         LaravelStringKind::View => view_names::resolve_view_definitions(backend, key),
         LaravelStringKind::Route => route_names::resolve_route_definitions(backend, key),
         LaravelStringKind::Trans => trans_keys::resolve_trans_definitions(backend, key),
@@ -106,13 +123,12 @@ fn resolve_gate_ability_definitions(backend: &crate::Backend, ability: &str) -> 
     }
 
     for (policy, method) in super::gates::policy_methods_named(backend, ability) {
-        if let Some(location) = policy_method_location(backend, &policy, &method) {
-            crate::references::push_unique_location(
-                &mut locations,
-                &location.uri,
-                location.range.start,
-                location.range.end,
-            );
+        if let Some(location) = policy_method_location(backend, &policy, &method)
+            && !locations
+                .iter()
+                .any(|l| l.uri == location.uri && l.range.start == location.range.start)
+        {
+            locations.push(location);
         }
     }
 
@@ -211,8 +227,8 @@ pub(crate) fn find_laravel_string_key_references(
 ) -> Vec<Location> {
     use crate::symbol_map::LaravelStringKind;
     let mut locations = match kind {
-        LaravelStringKind::Config => {
-            find_all_config_references(backend, key, snapshot, include_declaration)
+        LaravelStringKind::Config | LaravelStringKind::ConfigResource(_) => {
+            find_all_config_references(backend, kind, key, snapshot, include_declaration)
         }
         // Two unrelated pages that both fill `content` fill two different
         // sections, so the span index's project-wide answer is the wrong
@@ -241,14 +257,19 @@ pub(crate) fn find_laravel_string_key_references(
         | LaravelStringKind::Env => find_string_key_usages(kind, key, backend, snapshot),
     };
 
-    if include_declaration && kind != &LaravelStringKind::Config {
+    if include_declaration && !kind.is_config_backed() {
         for decl in resolve_laravel_string_key(backend, kind, key, uri) {
-            crate::references::push_unique_location(
-                &mut locations,
-                &decl.uri,
-                decl.range.start,
-                decl.range.end,
-            );
+            // A declaration is in its file's own coordinates, as
+            // go-to-definition reports it, but every other location here
+            // indexes a template's virtual PHP, and the `references` handler
+            // translates the whole list back as though it all did.
+            let decl_uri = decl.uri.as_str();
+            let range = if backend.is_blade_file(decl_uri) {
+                backend.translate_blade_range_to_php(decl_uri, decl.range)
+            } else {
+                decl.range
+            };
+            crate::references::push_location(&mut locations, &decl.uri, range.start, range.end);
         }
     }
 
@@ -263,9 +284,9 @@ fn find_string_key_usages(
     backend: &crate::Backend,
     snapshot: &[(String, std::sync::Arc<crate::symbol_map::SymbolMap>)],
 ) -> Vec<Location> {
-    use crate::references::push_unique_location;
+    use crate::references::push_location;
     use crate::symbol_map::SymbolKind;
-    use crate::text_position::offset_to_position;
+    use crate::text_position::LineIndex;
     use tower_lsp::lsp_types::Url;
 
     let mut locations = Vec::new();
@@ -319,9 +340,12 @@ fn find_string_key_usages(
         let Ok(parsed_uri) = Url::parse(file_uri) else {
             continue;
         };
-        let Some(content) = backend.get_file_content_arc(file_uri) else {
+        // A template's spans index the virtual PHP it lowers to, which the
+        // `references` handler translates back into the template afterwards.
+        let Some(content) = backend.reference_file_content_arc(file_uri) else {
             continue;
         };
+        let lines = LineIndex::new(&content);
         for span in spans() {
             if let SymbolKind::LaravelStringKey {
                 kind: span_kind,
@@ -331,11 +355,69 @@ fn find_string_key_usages(
                 && span_kind == kind
                 && span_key == key
             {
-                let start = offset_to_position(&content, span.start as usize);
-                let end = offset_to_position(&content, span.end as usize);
-                push_unique_location(&mut locations, &parsed_uri, start, end);
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
+                push_location(&mut locations, &parsed_uri, start, end);
             }
         }
     }
     locations
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+
+    #[test]
+    fn configured_resources_resolve_exact_entries_without_file_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("config/cache.php");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(
+            &config,
+            "<?php return ['stores' => ['redis' => ['driver' => 'redis']]];\n",
+        )
+        .unwrap();
+
+        let backend = crate::Backend::new_test();
+        *backend.workspace.workspace_root.write() = Some(dir.path().to_path_buf());
+        let usage_uri = "file:///project/usage.php";
+        let resource_kind = LaravelStringKind::ConfigResource(LaravelConfigResource::CacheStore);
+
+        let short = resolve_laravel_string_key(&backend, &resource_kind, "redis", usage_uri);
+        let full = resolve_laravel_string_key(
+            &backend,
+            &LaravelStringKind::Config,
+            "cache.stores.redis",
+            usage_uri,
+        );
+        assert_eq!(short, full);
+        assert_eq!(short.len(), 1);
+
+        assert!(
+            resolve_laravel_string_key(&backend, &resource_kind, "missing", usage_uri).is_empty()
+        );
+        assert!(
+            resolve_laravel_string_key(
+                &backend,
+                &LaravelStringKind::Config,
+                "cache.stores.missing",
+                usage_uri,
+            )
+            .is_empty()
+        );
+
+        let generic = resolve_laravel_string_key(
+            &backend,
+            &LaravelStringKind::Config,
+            "cache.unlisted",
+            usage_uri,
+        );
+        assert_eq!(generic.len(), 1);
+        assert_eq!(
+            generic[0].range.start,
+            tower_lsp::lsp_types::Position::new(0, 0)
+        );
+    }
 }

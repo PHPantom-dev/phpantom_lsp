@@ -324,6 +324,9 @@ fn emit_tag_symbols(tag: &Tag<'_>, docblock: &str, base_offset: u32, sink: &mut 
                     sink.spans,
                 );
             }
+            TagKind::DataProvider | TagKind::Depends => {
+                emit_test_method_tag_symbol(&text.value, docblock, base_offset, sink.spans);
+            }
             _ => {}
         },
         _ => {}
@@ -544,7 +547,7 @@ pub(super) fn retag_as_covers_target(spans: &mut [SymbolSpan]) {
                 ..
             } => *is_docblock_reference = false,
             SymbolKind::MemberAccess { docblock_ref, .. } => {
-                *docblock_ref = DocblockMemberRef::Coverage;
+                *docblock_ref = DocblockMemberRef::PhpUnit;
             }
             _ => {}
         }
@@ -593,7 +596,7 @@ fn emit_covers_reference(
             member_name: crate::atom::atom(member),
             is_static: true,
             is_method_call: false,
-            docblock_ref: DocblockMemberRef::Coverage,
+            docblock_ref: DocblockMemberRef::PhpUnit,
             is_array_callable: false,
             is_nullsafe: false,
         },
@@ -611,6 +614,92 @@ fn emit_covers_reference(
         start: member_start,
         end: member_end,
         kind,
+    });
+}
+
+/// Modifiers a `@depends` tag may put ahead of the test it names.
+const DEPENDS_MODIFIERS: [&str; 4] = ["clone", "shallowClone", "!clone", "!shallowClone"];
+
+/// Emit the method a PHPUnit `@dataProvider` / `@depends` tag names.
+///
+/// A bare name is a method of the test class itself and `Foo::name` one of
+/// `Foo`.  `@depends` may lead with a cloning modifier, and may name a whole
+/// test class as `Foo::class`.
+fn emit_test_method_tag_symbol(
+    text: &Text<'_>,
+    docblock: &str,
+    base_offset: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let start = text.span.start.offset.saturating_sub(base_offset) as usize;
+    let end = (text.span.end.offset.saturating_sub(base_offset) as usize).min(docblock.len());
+    let Some(raw) = docblock.get(start..end) else {
+        return;
+    };
+    // A modifier alone on its line must not adopt the next line's `*`.
+    let line = raw.split(['\n', '\r']).next().unwrap_or_default();
+
+    let mut tokens = line.split_whitespace();
+    let Some(mut reference) = tokens.next() else {
+        return;
+    };
+    if DEPENDS_MODIFIERS.contains(&reference) {
+        let Some(next) = tokens.next() else {
+            return;
+        };
+        reference = next;
+    }
+    // `split_whitespace` yields subslices of `line`, so the token's position
+    // in it is a pointer difference.
+    let offset =
+        text.span.start.offset + (reference.as_ptr() as usize - line.as_ptr() as usize) as u32;
+    let reference = reference.strip_suffix("()").unwrap_or(reference);
+
+    if let Some((class_part, member)) = reference.split_once("::") {
+        if member.eq_ignore_ascii_case("class") {
+            emit_see_reference(class_part, offset, spans);
+            return;
+        }
+        let first_new = spans.len();
+        emit_see_reference(reference, offset, spans);
+        for span in &mut spans[first_new..] {
+            if let SymbolKind::MemberAccess {
+                is_method_call,
+                docblock_ref,
+                ..
+            } = &mut span.kind
+            {
+                *is_method_call = true;
+                *docblock_ref = DocblockMemberRef::PhpUnit;
+            }
+        }
+        return;
+    }
+
+    let is_identifier = reference
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && reference
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_');
+    if !is_identifier {
+        return;
+    }
+    // PHPUnit looks a bare name up on the test class, which is what
+    // `static` names at the docblock's position.
+    spans.push(SymbolSpan {
+        start: offset,
+        end: offset + reference.len() as u32,
+        kind: SymbolKind::MemberAccess {
+            subject_text: SubjectText::owned("static".to_owned()),
+            member_name: crate::atom::atom(reference),
+            is_static: true,
+            is_method_call: true,
+            docblock_ref: DocblockMemberRef::PhpUnit,
+            is_array_callable: false,
+            is_nullsafe: false,
+        },
     });
 }
 

@@ -248,28 +248,30 @@ fn a_failure_is_always_an_error_annotation() {
 #[test]
 fn json_lists_the_files_and_the_failures() {
     let (reformatted, failures) = sample();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_report(&reformatted, &failures, true)).expect("valid json");
     assert_eq!(
-        json_report(&reformatted, &failures, true),
-        r#"{
-  "totals": { "files": 1, "errors": 1, "check": true },
-  "files": [
-    "resources/views/home.blade.php"
-  ],
-  "errors": [
-    { "file": "src/Foo.php", "message": "pint failed" }
-  ]
-}"#
+        parsed["totals"],
+        serde_json::json!({ "files": 1, "errors": 1, "check": true })
+    );
+    assert_eq!(
+        parsed["files"],
+        serde_json::json!(["resources/views/home.blade.php"])
+    );
+    assert_eq!(
+        parsed["errors"],
+        serde_json::json!([{ "file": "src/Foo.php", "message": "pint failed" }])
     );
 }
 
 #[test]
 fn json_of_a_clean_run_has_empty_lists() {
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_report(&[], &[], false)).expect("valid json");
     assert_eq!(
-        json_report(&[], &[], false),
-        r#"{
-  "totals": { "files": 0, "errors": 0, "check": false },
-  "files": [],
-  "errors": []
-}"#
+        parsed["totals"],
+        serde_json::json!({ "files": 0, "errors": 0, "check": false })
     );
+    assert_eq!(parsed["files"], serde_json::json!([]));
+    assert_eq!(parsed["errors"], serde_json::json!([]));
 }

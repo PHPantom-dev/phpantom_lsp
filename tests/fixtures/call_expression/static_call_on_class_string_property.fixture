@@ -1,0 +1,27 @@
+// test: static call on a property holding a class-string resolves through the class it names
+// feature: completion
+// expect: ship(
+---
+<?php
+
+class Parcel
+{
+    public static function make(): self
+    {
+        return new self();
+    }
+
+    public function ship(): void {}
+}
+
+class Courier
+{
+    /** @var class-string<Parcel> */
+    private string $parcelClass = Parcel::class;
+
+    public function run(): void
+    {
+        $parcel = $this->parcelClass::make();
+        $parcel-><>
+    }
+}

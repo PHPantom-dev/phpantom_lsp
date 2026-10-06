@@ -26,12 +26,7 @@ impl Backend {
         if map.morph_column_sites.is_empty() {
             return empty_spans();
         }
-        let content = self
-            .blade_virtual_content
-            .read()
-            .get(uri)
-            .map(|content| Arc::new(content.clone()))
-            .or_else(|| self.get_file_content_arc(uri));
+        let content = self.analysable_content(uri);
         let Some(content) = content.filter(|content| map.matches_source(content)) else {
             return empty_spans();
         };
@@ -65,6 +60,7 @@ impl Backend {
         content: &str,
         sites: &[MorphColumnSite],
     ) -> Vec<SymbolSpan> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let mut by_receiver: HashMap<(u32, u32), Vec<&MorphColumnSite>> = HashMap::new();
         for site in sites {
             by_receiver
@@ -73,9 +69,8 @@ impl Backend {
                 .push(site);
         }
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
         let default_class = ClassInfo::default();
         let mut confirmed = Vec::new();
         crate::parser::with_parsed_program(content, "morph_columns", |program, content| {
@@ -87,25 +82,24 @@ impl Backend {
                 };
                 let site = candidates[0];
                 let offset = span.start.offset;
+                let class_loader = class_loaders.at(offset);
+                let function_loader = function_loaders.at(offset);
+                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let current_class =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, offset)
                         .unwrap_or(&default_class);
                 let var_ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class,
-                    all_classes: &file_ctx.classes,
-                    content,
-                    cursor_offset: offset,
-                    class_loader: &class_loader,
                     backend: Some(self),
                     loaders: Loaders::with_function(Some(&function_loader_cl)),
                     resolved_class_cache: Some(&self.resolved_class_cache),
-                    enclosing_return_type: None,
-                    branch_aware: false,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        current_class,
+                        &file_ctx.classes,
+                        content,
+                        offset,
+                        class_loader,
+                    )
                 };
                 let ty = if matches!(
                     expr,
@@ -121,10 +115,10 @@ impl Backend {
                         offset,
                         &crate::type_engine::subject_resolution::SubjectResolutionCtx {
                             local_classes: &file_ctx.classes,
-                            use_map: &file_ctx.use_map,
+                            use_map: file_ctx.use_map_at(offset),
                             namespace: file_ctx.namespace_at(offset),
                             content,
-                            class_loader: &class_loader,
+                            class_loader,
                             backend: Some(self),
                             function_loader: &function_loader_cl,
                         },

@@ -4,7 +4,6 @@
 /// (class bodies, function/method bodies, closures, arrays, control-flow
 /// blocks, argument/parameter lists), and scans trivia for doc-block and
 /// consecutive single-line comment ranges.
-use mago_allocator::LocalArena;
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
 use tower_lsp::lsp_types::{FoldingRange, FoldingRangeKind};
@@ -16,32 +15,31 @@ use crate::Backend;
 impl Backend {
     /// Compute folding ranges for the given file content.
     ///
-    /// Re-parses the source with `mago_syntax` (the raw AST is not cached)
-    /// and walks every statement/expression to emit `FoldingRange` entries.
-    /// `content` is the virtual PHP the preprocessor emits for a Blade
-    /// file, so its ranges are translated back to the original template
-    /// through the source map before Blade-native fold regions (directive
-    /// blocks, component tag bodies) are added on top, in Blade coordinates
-    /// directly.
+    /// Walks every statement/expression of the parsed source to emit
+    /// `FoldingRange` entries.  `content` is the virtual PHP the
+    /// preprocessor emits for a Blade file, so its ranges are translated
+    /// back to the original template through the source map before
+    /// Blade-native fold regions (directive blocks, component tag bodies)
+    /// are added on top, in Blade coordinates directly.
     pub fn handle_folding_range(&self, uri: &str, content: &str) -> Option<Vec<FoldingRange>> {
-        let arena = LocalArena::new();
-        let file_id = mago_database::file::FileId::new(b"input.php");
-        let program = mago_syntax::parser::parse_file_content(&arena, file_id, content.as_bytes());
+        let mut ranges: Vec<FoldingRange> =
+            crate::parser::with_parsed_program(content, "folding_range", |program, content| {
+                // Precompute line starts once. Each folding range converts
+                // two byte offsets to positions, and a large file has many
+                // nested blocks, so converting each offset by rescanning
+                // from the start would be O(n²).
+                let idx = crate::text_position::LineIndex::new(content);
+                let mut ranges = Vec::new();
 
-        // Precompute line starts once. Each folding range converts two byte
-        // offsets to positions, and a large file has many nested blocks, so
-        // converting each offset by rescanning from the start would be O(n²).
-        let idx = crate::text_position::LineIndex::new(content);
+                // ── AST walk ──
+                for stmt in program.statements.iter() {
+                    collect_from_statement(stmt, &idx, &mut ranges);
+                }
 
-        let mut ranges: Vec<FoldingRange> = Vec::new();
-
-        // ── AST walk ──
-        for stmt in program.statements.iter() {
-            collect_from_statement(stmt, &idx, &mut ranges);
-        }
-
-        // ── Trivia (comments) ──
-        collect_comment_ranges(&program.trivia, &idx, &mut ranges);
+                // ── Trivia (comments) ──
+                collect_comment_ranges(&program.trivia, &idx, &mut ranges);
+                ranges
+            });
 
         if self.is_blade_file(uri) {
             ranges = ranges

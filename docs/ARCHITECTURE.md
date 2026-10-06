@@ -46,8 +46,8 @@ sit next to.
 src/
 ├── lib.rs                  # Backend struct, state, module declarations, shared constants (PARSE_WORKER_STACK_SIZE, …)
 ├── main.rs                 # Entry point (stdin/stdout LSP transport, CLI dispatch)
-├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …) + workspace init/indexing
-├── backend.rs, backend/    # Backend construction and file access
+├── server.rs               # LSP protocol handlers (initialize, didOpen, completion, …), each delegating to its module
+├── backend.rs, backend/    # Backend construction, file access, workspace startup (startup.rs), document lifecycle (documents.rs)
 ├── config.rs               # .phpantom.toml / workspace configuration
 │
 │   # Data model
@@ -70,7 +70,7 @@ src/
 ├── class_lookup.rs         # Subtype checks (is_subtype_of_typed) and class-lookup helpers
 ├── inheritance/            # Parent/trait/mixin member merging, generics substitution
 ├── virtual_members/        # Synthesized members: phpdoc.rs (@method/@property/@mixin) + laravel/ (one file per Eloquent/framework feature)
-├── stubs.rs, stub_patches.rs  # Embedded phpstorm-stubs index + hand patches
+├── stubs.rs, stub_patches/   # Embedded phpstorm-stubs index + hand patches
 ├── phar.rs                 # Class discovery inside PHAR archives
 │
 │   # The shared type engine ("what is the type of this expression here?")
@@ -107,13 +107,13 @@ src/
 │   # Diagnostics
 ├── diagnostics/
 │   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
 │   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
 │   └── <collector>.rs      # One module per diagnostic (unknown_classes, unknown_functions,
 │                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
 │
 │   # External tools & CLI subcommands
-├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 ├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
@@ -129,7 +129,7 @@ tests/
 ├── integration/            # One file per feature area (completion_*, definition_*, code_action_*, diagnostics_*, hover, …); shared helpers in common/mod.rs
 ├── unit/                   # Unit tests (composer, docblock, named args, …)
 ├── fixtures/               # Fixtures driven by fixture_runner.rs
-├── psalm_assertions/, phpstan_nsrt/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
+├── psalm_assertions/, phpstan_nsrt/, phpstan_data/   # `$var => 'ExpectedType'` assertion suites ported from Psalm / PHPStan
 └── assert_type_runner.rs, fixture_runner.rs
 ```
 
@@ -239,6 +239,7 @@ The symbol map also stores:
 - **Template parameter definitions** (`template_defs`): `@template` tag locations so that template parameter names (e.g. `TKey`, `TModel`) that appear in docblock types can be resolved to their declaration site.
 - **Candidate render sites** (`view_receiver_sites`): the view names a method call spells when only the receiver's *type* decides whether it renders — a constructor-injected `Factory $views` behind `$this->views->make('page')`, a mailable held in a local. Extraction runs before the file's classes are resolved and cannot type the receiver, so it records the candidates and `blade/typed_receiver.rs` confirms them lazily through the shared type engine, once per file. Consumers of view keys (the call-site diagnostics, call-site inference, `lookup_symbol_map`, find-references) read the confirmed spans alongside the map's own `LaravelStringKey` spans. The reference candidate index takes the *unconfirmed* candidates, since a file has to be findable before it can be asked.
 - **Candidate morph-column aliases** (`morph_column_sites`): literals compared with properties or query columns are confirmed lazily by `virtual_members/laravel/typed_morph_columns.rs`. The shared type engine identifies the receiver model, and its parsed `morphTo()` metadata identifies the column. Array values in one query share a single model and column check. Confirmed literals become ordinary `MorphAlias` spans for completion, navigation, references, and diagnostics. Model metadata changes invalidate dependent confirmations, including when a relation's column changes without changing its PHP signature.
+- **Config-backed Laravel resource names**: one declarative table maps direct helpers, facades, contextual attributes, and middleware parameters to their config subtrees. A `SymbolSpan` whose Laravel string kind is `ConfigResource(...)` stores the short source name, while completion, navigation, diagnostics, and references derive the full dot key only at the config boundary. This keeps source ranges and reference identity exact without duplicating one trigger table across LSP features.
 
 ### Tier 2: Stored Byte Offsets (cross-file jumps)
 
@@ -567,7 +568,7 @@ The embedded phpstorm-stubs sometimes lack `@template` annotations or have overl
 
 #### Function patches
 
-`stub_patches.rs` provides `apply_function_stub_patches(func)`, called from `find_or_load_function` in Phase 2 after parsing each function from stub source and before caching it in `global_functions`. The function dispatches to per-function patch functions based on the function name. Only functions with known deficiencies are patched; all others pass through unchanged.
+`stub_patches/` provides `apply_function_stub_patches(func)`, called from `find_or_load_function` in Phase 2 after parsing each function from stub source and before caching it in `global_functions`. The function dispatches to per-function patch functions based on the function name. Only functions with known deficiencies are patched; all others pass through unchanged.
 
 Current patches:
 
@@ -575,7 +576,7 @@ Current patches:
 
 This is analogous to the [Laravel Class Patches](#laravel-class-patches) system but for built-in PHP functions rather than framework classes. When phpstorm-stubs gains proper annotations for a patched function, the corresponding patch can be deleted.
 
-**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches.rs`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `type_engine/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
+**When to add a patch here vs. hardcoded logic in `rhs_resolution.rs`:** if the correct behaviour can be expressed with `@template` / `@return` annotations (i.e. PHPStan's own stubs already have the fix), it belongs in `stub_patches/`. If the behaviour requires inspecting call-site argument *values* at resolution time (e.g. `array_map`'s callback return type, or `array_filter` preserving the input array's element type), it must stay as hardcoded logic in `rhs_resolution.rs` / `raw_type_inference.rs`. Those functions are tracked in `ARRAY_PRESERVING_FUNCS` and `ARRAY_ELEMENT_FUNCS` in `type_engine/variable/mod.rs`, with the full inventory in `docs/todo/completion.md` C1.
 
 #### Class patches
 
@@ -668,7 +669,7 @@ Provider priority order (highest first):
 
 Two providers are currently registered in `default_providers()`:
 
-- **`LaravelModelProvider`** (`virtual_members/laravel.rs`): synthesizes virtual members for classes extending `Illuminate\Database\Eloquent\Model`. Produces relationship properties (methods returning `HasMany`, `HasOne`, `BelongsTo`, etc. generate a virtual property typed from the relationship's generic parameters), scope methods (both the `scopeActive` naming convention and the `#[Scope]` attribute from Laravel 11+ are supported; either style becomes `active()` as both static and instance), Builder-as-static forwarding (`User::where()->get()` resolves end-to-end), accessors (legacy `getXAttribute()` and modern `Attribute` casts), and cast properties (`$casts` array or `casts()` method entries are mapped to PHP types like `datetime` to `\Carbon\Carbon`, `boolean` to `bool`, custom cast classes to their `get()` return type). Highest priority among virtual member providers. Scope methods are also injected onto `Builder<Model>` instances via a post-generic-substitution hook in `type_hint_to_classes_depth` (see "Scope Methods on Builder Instances" below).
+- **`LaravelModelProvider`** (`virtual_members/laravel.rs`): synthesizes virtual members for classes extending `Illuminate\Database\Eloquent\Model`. Produces relationship properties (methods returning `HasMany`, `HasOne`, `BelongsTo`, etc. generate a virtual property typed from the relationship's generic parameters), scope methods (both the `scopeActive` naming convention and the `#[Scope]` attribute from Laravel 11+ are supported; either style becomes `active()` as both static and instance), Builder-as-static forwarding (`User::where()->get()` resolves end-to-end), accessors (legacy `getXAttribute()` and modern `Attribute` casts), and cast properties (`$casts` array or `casts()` method entries are mapped to PHP types like `datetime` to `\Carbon\Carbon`, `boolean` to `bool`, framework class casts such as `AsEnumCollection::of(Status::class)` to `Collection<array-key, Status>`, custom cast classes to their `get()` return type). Highest priority among virtual member providers. Scope methods are also injected onto `Builder<Model>` instances via a post-generic-substitution hook in `type_hint_to_classes_depth` (see "Scope Methods on Builder Instances" below).
 - **`PHPDocProvider`** (`virtual_members/phpdoc.rs`): surfaces `@method`, `@property`, `@property-read`, `@property-write`, and `@mixin` tags from the class-level docblock. Explicit `@method` / `@property` tags are parsed once during AST extraction into `ClassInfo.doc_members` (an `Arc<DocblockMembers>`, `None` when the docblock declares neither), so `provide` only reads structured data and applies the per-consumer generic substitutions. The provider collects those tags from the class itself, its used traits, its parent chain, and its implemented interfaces. For `@mixin` tags, it loads the referenced classes and merges their public members. Within the provider, explicit tags take precedence over mixin members. Recurses into mixin-of-mixin chains up to `MAX_MIXIN_DEPTH`.
 
 ### Laravel Class Patches
@@ -748,6 +749,8 @@ The indexing strategy is configurable via `[indexing] strategy` in `.phpantom.to
 The merged pipeline works in three steps: (1) load `autoload_classmap.php` into a `HashMap<String, PathBuf>`, (2) collect the classmap's file paths into a `HashSet<PathBuf>` skip set, (3) self-scan all PSR-4 and vendor directories, skipping files already in the skip set. The result is a merged index: classmap entries for everything Composer already knew about, plus self-scanned entries for everything it missed. When the classmap is complete (the common case), the self-scanner walks directories but skips every file, finishing almost instantly. When the classmap is empty or absent, it falls back to a full self-scan. When the classmap is partial (e.g. vendor classes only), vendor files are skipped and only user code is scanned. Every state of the classmap helps.
 
 When self-scanning with a `composer.json` present, the scanner reads `autoload.psr-4`, `autoload-dev.psr-4`, `autoload.classmap`, and `autoload-dev.classmap` to determine which directories to walk. PSR-4 directories are filtered: only classes whose FQN matches the namespace prefix plus the relative file path are included. Vendor packages are discovered from `vendor/composer/installed.json` (both Composer 1 and 2 formats); the JSON packages array is borrowed rather than cloned to avoid allocating a copy of the entire vendor manifest. All directory walkers (full-scan, PSR-4 scanner, vendor package scanner, and go-to-implementation file collector) use the `ignore` crate for gitignore-aware traversal. Hidden directories are skipped automatically, and `.gitignore` rules are respected at every level. When no `composer.json` exists at all, the scanner falls back to walking all `.php` files under the workspace root.
+
+**Directory symlinks.** The walkers descend into a symlinked directory, so a project that keeps its framework or a shared library outside the repository and links it into the tree gets the linked code indexed with the rest. Every path keeps the symlink spelling rather than the target's, which is what makes a file reached through the link the same file the editor opened. `LinkClaims` gives each walk one visit per target directory: the walk's own roots and its skipped trees are claimed up front, and each link claims its target the first time it is descended, so two links to one tree, a link pointing back at something the walk already covers, and a chain of directories holding several links apiece all cost one pass rather than one per route. `orchestra/testbench-core` ships `laravel/vendor -> <project>/vendor`, which is why the skipped trees are claimed and not merely pruned by path. Each link the index reached through also gets a watcher based at it (see `build_watched_file_registration`), since a workspace-relative watcher pattern never covers a path outside the workspace folders.
 
 The scan results are converted to URI strings and inserted into `fqn_uri_index`. Everything downstream (resolution, diagnostics, go-to-definition) uses the unified index.
 
@@ -854,7 +857,7 @@ Phases 3–5 avoid expensive parsing by first reading the raw file content and c
 
 ### Member-Level Implementation
 
-When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the nearest ancestor that declares it, since a class that inherits a method unchanged still implements it. A method that is only re-declared `abstract` is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the *class* is abstract says nothing about the method that was asked for.
+When the cursor is on a method call (e.g. `$repo->find()`), `resolve_member_implementations` first resolves the subject to candidate classes. If any candidate is an interface or abstract class, `find_implementors` is called and each implementor is checked for the specific method. The location returned for an implementor is the declaration that supplies the body: its own when it declares the method, otherwise the trait or ancestor it inherits the method from, searched in PHP's member precedence order, since a class that inherits a method unchanged still implements it. The implementation CodeLens counts through the same helpers, so its count and go-to-implementation's list agree. A method that is only re-declared `abstract` is another declaration rather than an implementation and is skipped, which is also why implementors are collected with abstract classes included — whether the *class* is abstract says nothing about the method that was asked for.
 
 ### Reverse Jump: Concrete Method → Prototype Declaration
 
@@ -906,7 +909,9 @@ When the user triggers "Find References" on a method, property, or constant, the
 The hierarchy set is built in two passes:
 
 1. **Ancestors** — walk the parent chain, interfaces, traits, and mixins upward from the target class, collecting every FQN encountered.
-2. **Descendants** — scan all classes in `uri_classes_index` and `fqn_uri_index` for classes that extend, implement, or use anything already in the set. This repeats until no new FQNs are added (transitive closure), bounded by `MAX_INHERITANCE_DEPTH`.
+2. **Descendants** — walk the reverse inheritance index (`gti_index`) down from the declaring classes until no new FQNs are added (transitive closure).
+
+That index only holds classes from files something has parsed, so a receiver it does not account for (typically a class in a package nothing has needed yet) is settled by walking up from the receiver's own class to the declaring classes instead, loading the ancestors that walk needs. Without it the same search would answer differently depending on what the session parsed before it.
 
 For each candidate `MemberAccess` span, the subject text is resolved to class FQNs using a lightweight path:
 
@@ -1154,6 +1159,7 @@ Diagnostics run in three independent background `tokio::spawn` tasks so they nev
 1. **Native diagnostic worker** — collects fast (syntax errors, unused imports, deprecated usage) and slow (unknown classes/members/functions, argument count, implementation errors) diagnostics. Debounces at 500 ms.
 2. **PHPStan worker** — runs PHPStan in editor mode (`--tmp-file` / `--instead-of`). Debounces at 2 000 ms.
 3. **PHPCS worker** — runs PHP_CodeSniffer via `phpcs --report=json` with stdin piping. Debounces at 2 000 ms.
+4. **PHPMD worker** — runs PHP Mess Detector 3 via `phpmd analyze --format=json -` with stdin piping.
 
 ### Native transport choice
 

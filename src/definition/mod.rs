@@ -54,7 +54,7 @@
 use tower_lsp::lsp_types::{Location, Position, Range, Url};
 
 mod blade_component;
-mod implementation;
+pub(crate) mod implementation;
 pub(crate) mod member;
 mod resolve;
 mod type_definition;

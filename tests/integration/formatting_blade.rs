@@ -76,7 +76,8 @@ mod tests {
     async fn test_blade_formatting_never_touches_line_content() {
         let backend = create_test_backend();
         let uri = Url::parse("file:///resources/views/view.blade.php").unwrap();
-        // The PHP formatter would rewrite this line; the Blade one may not.
+        // The PHP formatter would rewrite this line; the Blade one may not
+        // unless the project sets `blade-php = true`.
         let text = "@php\necho   'hello' ;\n@endphp\n";
 
         let result = format(&backend, uri, "php", text).await;

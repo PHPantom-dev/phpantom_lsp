@@ -18,6 +18,7 @@ pub mod preprocessor;
 pub(crate) mod shared_vars;
 pub(crate) mod signature;
 pub mod source_map;
+pub(crate) mod translate;
 pub(crate) mod typed_receiver;
 pub(crate) mod use_directive;
 pub(crate) mod view_call_walker;
@@ -136,6 +137,21 @@ pub fn is_scope_class(name: &str) -> bool {
 }
 
 /// Check whether a URI refers to a Blade template file.
+/// The contents of the plain string literal `text` starts with, as a
+/// slice of `text` so a caller can derive its span.
+///
+/// A double-quoted literal that interpolates names nothing that can be
+/// read statically, so it yields nothing.
+pub(crate) fn plain_string_literal(text: &str) -> Option<&str> {
+    let quote = text.chars().next().filter(|ch| *ch == '\'' || *ch == '"')?;
+    let rest = &text[quote.len_utf8()..];
+    let value = &rest[..rest.find(quote)?];
+    if quote == '"' && value.contains(['$', '{']) {
+        return None;
+    }
+    Some(value)
+}
+
 pub fn is_blade_file(uri: &str) -> bool {
     uri.ends_with(".blade.php")
 }

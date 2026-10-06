@@ -2,28 +2,37 @@ use mago_span::HasSpan;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
 
 use super::*;
+use crate::virtual_members::laravel::helpers::string_literal_at_range;
 
 /// Namespace prefix for Laravel's container-injection attributes.
 pub(super) const LARAVEL_CONTAINER_ATTR_NS: &str = "Illuminate\\Container\\Attributes\\";
-/// Short (non-FQN) names of the container-injection attributes.
-pub(super) const LARAVEL_CONTAINER_ATTR_NAMES: &[&str] = &[
-    "Config",
-    "Database",
-    "DB",
-    "Cache",
-    "Log",
-    "Storage",
-    "Auth",
-    "Authenticated",
-];
+
+/// Whether a semantically resolved class is either Laravel's global runtime
+/// alias or the exact class inside `namespace`.
+pub(super) fn matches_laravel_class(class_name: &str, namespace: &str, short: &str) -> bool {
+    let class_name = class_name.trim_start_matches('\\');
+    if class_name.eq_ignore_ascii_case(short) {
+        return true;
+    }
+    class_name
+        .rsplit_once('\\')
+        .is_some_and(|(actual_namespace, actual_short)| {
+            actual_namespace.eq_ignore_ascii_case(namespace)
+                && actual_short.eq_ignore_ascii_case(short)
+        })
+}
+
+/// Whether a semantically resolved class names one Laravel facade.
+pub(super) fn matches_laravel_facade(class_name: &str, short: &str) -> bool {
+    matches_laravel_class(class_name, "Illuminate\\Support\\Facades", short)
+}
 
 /// The Laravel-specific meaning of a container-injection attribute.
 pub(super) enum LaravelContainerAttribute {
-    /// A full config key, as accepted by `#[Config]` and the pre-existing
-    /// generic handling for the other container attributes.
+    /// A full config key accepted by `#[Config]`.
     Config,
-    /// A disk name accepted by `#[Storage]`.
-    StorageDisk,
+    /// A named config resource accepted by the matching container attribute.
+    Resource(crate::symbol_map::laravel_resources::ResourceTriggerMatch),
 }
 
 /// Check whether an attribute class name refers to a Laravel container
@@ -36,45 +45,34 @@ pub(super) enum LaravelContainerAttribute {
 /// `import_cache` to avoid repeated linear scans of the file content.
 pub(super) fn resolve_laravel_container_attr(
     class_name: &str,
+    allow_short_import_heuristic: bool,
     import_cache: &mut Option<bool>,
     content: &str,
 ) -> Option<LaravelContainerAttribute> {
     let short = if class_name.contains('\\') {
-        class_name.strip_prefix(LARAVEL_CONTAINER_ATTR_NS)?
-    } else {
-        if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&class_name) {
+        let class_name = class_name.trim_start_matches('\\');
+        let prefix = class_name.get(..LARAVEL_CONTAINER_ATTR_NS.len())?;
+        if !prefix.eq_ignore_ascii_case(LARAVEL_CONTAINER_ATTR_NS) {
             return None;
         }
-        let has_import =
-            *import_cache.get_or_insert_with(|| content.contains(LARAVEL_CONTAINER_ATTR_NS));
+        class_name.get(LARAVEL_CONTAINER_ATTR_NS.len()..)?
+    } else {
+        if !allow_short_import_heuristic {
+            return None;
+        }
+        let has_import = *import_cache
+            .get_or_insert_with(|| content.contains("use Illuminate\\Container\\Attributes\\"));
         if !has_import {
             return None;
         }
         class_name
     };
-    if !LARAVEL_CONTAINER_ATTR_NAMES.contains(&short) {
-        return None;
-    }
-    if short != "Storage" {
+
+    if short.eq_ignore_ascii_case("Config") {
         return Some(LaravelContainerAttribute::Config);
     }
-    // Every other container attribute names a whole config key, so a
-    // dotless argument from an application's own same-named attribute
-    // records nothing.  `#[Storage]` prepends a subtree instead, turning
-    // any argument into a well-formed key, so the short spelling has to be
-    // imported by that exact name before it is read as a disk.
-    (class_name.contains('\\') || imports_laravel_storage_attribute(content))
-        .then_some(LaravelContainerAttribute::StorageDisk)
-}
-
-/// Whether the file imports `#[Storage]` from Laravel's container-attribute
-/// namespace under that short name.
-fn imports_laravel_storage_attribute(content: &str) -> bool {
-    crate::text_scan::imports_class_as(
-        content,
-        &format!("{LARAVEL_CONTAINER_ATTR_NS}Storage"),
-        "Storage",
-    )
+    crate::symbol_map::laravel_resources::attribute_trigger(short)
+        .map(LaravelContainerAttribute::Resource)
 }
 
 /// Namespace prefix for the attributes a form request is configured with.
@@ -143,81 +141,54 @@ pub(super) fn try_emit_laravel_string_spans_all(
     spans: &mut Vec<SymbolSpan>,
 ) {
     for argument in argument_list.arguments.iter() {
-        push_laravel_string_span(kind.clone(), false, false, argument.value(), content, spans);
+        push_laravel_string_span(kind, false, false, argument.value(), content, spans);
     }
 }
 
-const STORAGE_DISK_CONFIG_PREFIX: &str = "filesystems.disks.";
-
-/// Emit config-key spans for the disk names accepted by Laravel's `Storage`
-/// facade. Registration helpers are writes; `forgetDisk()` is an optional
-/// read because forgetting an unconfigured disk is valid.
-///
-/// `disk`, `fake` and `forgetDisk` are common method names on other facades
-/// (`Http::fake()`, `Mail::fake()`, …), so the names the `Storage` facade
-/// answers to in this file are resolved once and cached in `facade_names`
-/// rather than rescanning the source at every such call.
-pub(super) fn try_emit_laravel_storage_disk_spans(
-    facade: &str,
-    member_name: &str,
+/// Emit a config-backed resource name from a parameter selected by name or
+/// positional slot.
+pub(super) fn try_emit_laravel_config_resource_span_for_parameter(
+    resource: crate::symbol_map::LaravelConfigResource,
+    shape: crate::symbol_map::laravel_resources::ResourceArgumentShape,
+    access: crate::symbol_map::laravel_resources::ResourceAccess,
     argument_list: &ArgumentList<'_>,
-    facade_names: &mut Option<Vec<String>>,
+    parameter: &str,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let (parameter, accepts_array, is_write, is_optional) =
-        if member_name.eq_ignore_ascii_case("disk") {
-            ("name", false, false, false)
-        } else if member_name.eq_ignore_ascii_case("fake")
-            || member_name.eq_ignore_ascii_case("persistentFake")
-        {
-            ("disk", false, true, false)
-        } else if member_name.eq_ignore_ascii_case("forgetDisk") {
-            ("disk", true, false, true)
-        } else {
-            return;
-        };
-    let facade_names = facade_names.get_or_insert_with(|| {
-        crate::virtual_members::laravel::storage_facade_local_names(content)
-    });
-    if !crate::virtual_members::laravel::is_storage_facade_name(facade, facade_names) {
-        return;
-    }
-
     let Some(argument) = argument_expr_for_parameter(argument_list, parameter) else {
         return;
     };
-    if accepts_array {
-        let elements = match argument {
-            Expression::Array(array) => Some(&array.elements),
-            Expression::LegacyArray(array) => Some(&array.elements),
-            _ => None,
-        };
-        if let Some(elements) = elements {
-            for element in elements.iter() {
-                let value = match element {
-                    ArrayElement::KeyValue(element) => element.value,
-                    ArrayElement::Value(element) => element.value,
-                    ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
-                };
-                push_storage_disk_span(value, is_write, is_optional, content, spans);
-            }
-            return;
+    let elements = match argument {
+        Expression::Array(array) if shape.accepts_array() => Some(&array.elements),
+        Expression::LegacyArray(array) if shape.accepts_array() => Some(&array.elements),
+        _ => None,
+    };
+    if let Some(elements) = elements {
+        for element in elements.iter() {
+            let value = match element {
+                ArrayElement::KeyValue(element) => element.value,
+                ArrayElement::Value(element) => element.value,
+                ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+            };
+            push_laravel_string_span(
+                crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+                access.is_write(),
+                access.is_optional(),
+                value,
+                content,
+                spans,
+            );
         }
-    }
-    push_storage_disk_span(argument, is_write, is_optional, content, spans);
-}
-
-/// Emit the disk name accepted by Laravel's `#[Storage]` container
-/// attribute, selecting the `disk` argument even when named arguments are
-/// reordered.
-pub(super) fn try_emit_laravel_storage_disk_span_partial(
-    argument_list: &PartialArgumentList<'_>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    if let Some(argument) = partial_argument_expr_for_parameter(argument_list, "disk") {
-        push_storage_disk_span(argument, false, false, content, spans);
+    } else if shape.accepts_scalar() {
+        push_laravel_string_span(
+            crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+            access.is_write(),
+            access.is_optional(),
+            argument,
+            content,
+            spans,
+        );
     }
 }
 
@@ -227,7 +198,7 @@ fn argument_expr_for_parameter<'a>(
 ) -> Option<&'a Expression<'a>> {
     for argument in argument_list.arguments.iter() {
         if let Argument::Named(named) = argument
-            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+            && bytes_to_str(named.name.value) == parameter
         {
             return Some(named.value);
         }
@@ -247,7 +218,7 @@ fn partial_argument_expr_for_parameter<'a>(
 ) -> Option<&'a Expression<'a>> {
     for argument in argument_list.arguments.iter() {
         if let PartialArgument::Named(named) = argument
-            && bytes_to_str(named.name.value).eq_ignore_ascii_case(parameter)
+            && bytes_to_str(named.name.value) == parameter
         {
             return Some(named.value);
         }
@@ -259,49 +230,6 @@ fn partial_argument_expr_for_parameter<'a>(
             PartialArgument::Positional(positional) => Some(positional.value),
             _ => None,
         })
-}
-
-fn push_storage_disk_span(
-    expression: &Expression<'_>,
-    is_write: bool,
-    is_optional: bool,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let Some((start, end, disk)) = string_literal_content(expression, content) else {
-        return;
-    };
-    let mut key = String::with_capacity(STORAGE_DISK_CONFIG_PREFIX.len() + disk.len());
-    key.push_str(STORAGE_DISK_CONFIG_PREFIX);
-    key.push_str(disk);
-    spans.push(SymbolSpan {
-        start,
-        end,
-        kind: SymbolKind::LaravelStringKey {
-            key,
-            kind: crate::symbol_map::LaravelStringKind::Config,
-            is_write,
-            is_optional,
-        },
-    });
-}
-
-/// The offsets and text of a plain string literal's content, between the
-/// quotes.  An interpolated or concatenated expression, or an empty string,
-/// names nothing and yields `None`.
-fn string_literal_content<'a>(
-    expr: &Expression<'_>,
-    content: &'a str,
-) -> Option<(u32, u32, &'a str)> {
-    let Expression::Literal(literal::Literal::String(string)) = expr else {
-        return None;
-    };
-    let start = string.span.start.offset + 1;
-    let end = string.span.end.offset - 1;
-    if start >= end || end as usize > content.len() {
-        return None;
-    }
-    Some((start, end, &content[start as usize..end as usize]))
 }
 
 /// Emit the section- or stack-name span for one of the marker calls the
@@ -349,10 +277,11 @@ pub(super) fn try_emit_laravel_config_key_span(
     spans: &mut Vec<SymbolSpan>,
 ) {
     if member_name.eq_ignore_ascii_case("getMany") {
-        return try_emit_config_get_many_spans(argument_list, content, spans);
+        try_emit_config_array_spans(argument_list, false, content, spans);
+        return;
     }
     let is_write = member_name.eq_ignore_ascii_case("set");
-    if is_write && try_emit_config_write_array_spans(argument_list, content, spans) {
+    if is_write && try_emit_config_array_spans(argument_list, true, content, spans) {
         return;
     }
     emit_laravel_string_span(
@@ -373,7 +302,7 @@ pub(super) fn try_emit_laravel_config_helper_spans(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    if try_emit_config_write_array_spans(argument_list, content, spans) {
+    if try_emit_config_array_spans(argument_list, true, content, spans) {
         return;
     }
     emit_laravel_string_span(
@@ -386,72 +315,62 @@ pub(super) fn try_emit_laravel_config_helper_spans(
     );
 }
 
-/// Push a write span for every key the `['app.name' => 'Acme']` argument of a
-/// `set()`-shaped call declares, reporting whether that argument was an array
-/// at all so the caller can fall back to the single-key spelling.
+/// Apply `push` to each value of `expr`, which Laravel accepts as either a
+/// single value or an array of them.
 ///
-/// The value side is left alone: only the key names a config path.
-fn try_emit_config_write_array_spans(
+/// A key/value entry is skipped: every argument shaped this way is a list.
+fn for_each_value<'ast>(expr: &Expression<'ast>, mut push: impl FnMut(&Expression<'ast>)) {
+    let Some(elements) = crate::parser::array_literal_elements(expr) else {
+        push(expr);
+        return;
+    };
+    for element in elements.iter() {
+        if let ArrayElement::Value(value) = element {
+            push(value.value);
+        }
+    }
+}
+
+/// Push a config-key span for every key the array argument of a
+/// `set()`- or `getMany()`-shaped call names, reporting whether that
+/// argument was an array at all so a caller can fall back to the
+/// single-key spelling.
+///
+/// A `set()` array is written (`['app.name' => 'Acme']`), and only its key
+/// side names a config path. A `getMany()` array is read and takes both
+/// spellings the repository accepts: a bare entry is the key itself, and a
+/// key/value entry names the key on the left with the default it falls back
+/// to on the right.
+fn try_emit_config_array_spans(
     argument_list: &ArgumentList<'_>,
+    is_write: bool,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) -> bool {
     let Some(first_arg) = argument_list.arguments.iter().next() else {
         return false;
     };
-    let elements = match first_arg.value() {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        _ => return false,
-    };
-    for element in elements.iter() {
-        if let ArrayElement::KeyValue(kv) = element {
-            push_laravel_string_span(
-                crate::symbol_map::LaravelStringKind::Config,
-                true,
-                false,
-                kv.key,
-                content,
-                spans,
-            );
-        }
-    }
-    true
-}
-
-/// Push a config-key span for every key a `getMany()` argument names.
-///
-/// The array takes both spellings the repository reads: a bare entry is the
-/// key itself, and a key/value entry names the key on the left with the
-/// default it falls back to on the right.
-pub(super) fn try_emit_config_get_many_spans(
-    argument_list: &ArgumentList<'_>,
-    content: &str,
-    spans: &mut Vec<SymbolSpan>,
-) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
-        return;
-    };
-    let elements = match first_arg.value() {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        _ => return,
+    let Some(elements) = crate::parser::array_literal_elements(first_arg.value()) else {
+        return false;
     };
     for element in elements.iter() {
         let key = match element {
-            ArrayElement::Value(value) => value.value,
             ArrayElement::KeyValue(kv) => kv.key,
-            ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+            // A bare entry is a key only where the array is read; on the
+            // write side it carries no key to name.
+            ArrayElement::Value(value) if !is_write => value.value,
+            _ => continue,
         };
         push_laravel_string_span(
             crate::symbol_map::LaravelStringKind::Config,
-            false,
+            is_write,
             false,
             key,
             content,
             spans,
         );
     }
+    true
 }
 
 fn emit_laravel_string_span(
@@ -469,6 +388,10 @@ fn emit_laravel_string_span(
 }
 
 /// Emit the span for one string-literal expression that names a key.
+///
+/// The key compared against declared config/route/view/translation names is
+/// the literal's unescaped runtime `value` (`'it\'s'` names `it's`), not the
+/// raw source between the quotes; the span still covers the source text.
 fn push_laravel_string_span(
     kind: crate::symbol_map::LaravelStringKind,
     is_write: bool,
@@ -477,12 +400,21 @@ fn push_laravel_string_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some((inner_start, mut inner_end, mut key)) = string_literal_content(expr, content) else {
+    let Expression::Literal(literal::Literal::String(s)) = expr else {
+        return;
+    };
+    let inner_start = s.span.start.offset + 1;
+    let mut inner_end = s.span.end.offset - 1;
+    if inner_start >= inner_end || inner_end as usize > content.len() {
+        return;
+    }
+    let Some(mut key) = s.value.and_then(crate::atom::literal_bytes_to_str) else {
         return;
     };
 
-    if kind == crate::symbol_map::LaravelStringKind::Config && !key.contains('.') {
-        // Require at least one dot: bare keys like 'app' are not valid config paths.
+    if kind == crate::symbol_map::LaravelStringKind::Config && !is_write && !key.contains('.') {
+        // A bare read names a config file, not one of its keys. A write can
+        // establish that whole file's namespace with an opaque runtime value.
         return;
     }
 
@@ -506,7 +438,7 @@ fn push_laravel_string_span(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
-            key: normalised_key(kind.clone(), key),
+            key: normalised_key(kind, key),
             kind,
             is_write,
             is_optional,
@@ -531,17 +463,15 @@ pub(super) fn try_emit_laravel_view_span_at(
     let Some(arg) = argument_list.arguments.iter().nth(index) else {
         return;
     };
-    let elements = match arg.value() {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        expr => return push_laravel_string_span(kind, false, false, expr, content, spans),
+    let Some(elements) = crate::parser::array_literal_elements(arg.value()) else {
+        return push_laravel_string_span(kind, false, false, arg.value(), content, spans);
     };
     // Only one candidate of the list is rendered, and which one depends on
     // what exists on disk, so a candidate that names nothing is the shape
     // working as intended rather than a typo.
     for element in elements.iter() {
         if let ArrayElement::Value(value) = element {
-            push_laravel_string_span(kind.clone(), false, true, value.value, content, spans);
+            push_laravel_string_span(kind, false, true, value.value, content, spans);
         }
     }
 }
@@ -669,15 +599,10 @@ fn names_a_render_each_template(
     let Some(arg) = argument_list.arguments.iter().nth(index) else {
         return false;
     };
-    let Expression::Literal(literal::Literal::String(s)) = arg.value() else {
-        return true;
-    };
-    let inner_start = (s.span.start.offset + 1) as usize;
-    let inner_end = (s.span.end.offset - 1) as usize;
-    if inner_start >= inner_end || inner_end > content.len() {
-        return true;
+    match string_literal_at_range(arg.value(), content) {
+        Some((text, _, _)) => !text.starts_with("raw|"),
+        None => true,
     }
-    !content[inner_start..inner_end].starts_with("raw|")
 }
 
 /// The class a receiver has to be for the method call it receives to name a
@@ -840,7 +765,7 @@ pub(super) fn is_route_facade_pattern_method(member_name: &str) -> bool {
 /// A receiver whose containerness is only knowable from its type (an injected
 /// `Container $container`) is left out: the spelling has to say so, the same
 /// bar every other string kind extracted here is held to.
-pub(super) fn is_laravel_container_expr(object: &Expression<'_>) -> bool {
+pub(crate) fn is_laravel_container_expr(object: &Expression<'_>) -> bool {
     match object {
         Expression::Variable(Variable::Direct(var)) => var.name == b"$app",
         Expression::Access(Access::Property(access)) => {
@@ -957,10 +882,8 @@ pub(super) fn try_emit_morph_map_key_spans(
     let Some(first_arg) = argument_list.arguments.iter().next() else {
         return;
     };
-    let elements = match first_arg.value() {
-        Expression::Array(array) => &array.elements,
-        Expression::LegacyArray(array) => &array.elements,
-        _ => return,
+    let Some(elements) = crate::parser::array_literal_elements(first_arg.value()) else {
+        return;
     };
     for element in elements.iter() {
         if let ArrayElement::KeyValue(kv) = element {
@@ -980,46 +903,26 @@ pub(super) fn try_emit_morph_type_spans(
     let Some(arg) = argument_list.arguments.iter().nth(arg_index) else {
         return;
     };
-    match arg.value() {
-        Expression::Array(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_morph_alias_span(value.value, content, spans);
-                }
-            }
-        }
-        Expression::LegacyArray(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_morph_alias_span(value.value, content, spans);
-                }
-            }
-        }
-        expr => push_morph_alias_span(expr, content, spans),
-    }
+    for_each_value(arg.value(), |expr| {
+        push_morph_alias_span(expr, content, spans)
+    });
 }
 
 /// Push a morph-alias span for a single string-literal expression, skipping the
 /// spellings that are not aliases.
 fn push_morph_alias_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
-    let Expression::Literal(literal::Literal::String(s)) = expr else {
+    let Some((alias, start, end)) = string_literal_at_range(expr, content) else {
         return;
     };
-    let inner_start = s.span.start.offset + 1;
-    let inner_end = s.span.end.offset - 1;
-    if inner_start >= inner_end || inner_end as usize > content.len() {
-        return;
-    }
-    let alias = &content[inner_start as usize..inner_end as usize];
     // `'*'` is the wildcard the `whereHasMorph()` family accepts, and a value
     // containing a namespace separator is a class name rather than an alias
     // (both APIs take either form).
-    if alias.is_empty() || alias == "*" || alias.contains('\\') {
+    if alias == "*" || alias.contains('\\') {
         return;
     }
     spans.push(SymbolSpan {
-        start: inner_start,
-        end: inner_end,
+        start,
+        end,
         kind: SymbolKind::LaravelStringKey {
             kind: crate::symbol_map::LaravelStringKind::MorphAlias,
             key: alias.to_string(),
@@ -1076,20 +979,14 @@ pub(super) fn is_gate_facade(clean_subject: &str) -> bool {
         || clean_subject.eq_ignore_ascii_case("Illuminate\\Support\\Facades\\Gate")
 }
 
-/// How far back down a method chain a facade root is looked for.
-///
-/// The chains this recognises are short — `Gate::forUser($user)->allows(…)` is
-/// one link, `Route::get(…)->name(…)->middleware(…)` a handful. The bound is
-/// what keeps the cost linear: several of the method names that start this
-/// search (`has`, `any`, `check`) are also ordinary query-builder methods, and
-/// an unbounded walk would rescan the whole spine at every link of a long
-/// Eloquent chain.
-const FACADE_CHAIN_DEPTH: usize = 4;
-
 /// Whether an instance-method chain roots at the `Gate` facade, as
 /// `Gate::forUser($user)->allows('update', $post)` does.
 pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
-    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| is_gate_facade(name))
+    chain_roots_at_facade(
+        expr,
+        crate::symbol_map::laravel_resources::FACADE_CHAIN_DEPTH,
+        &|name| is_gate_facade(name),
+    )
 }
 
 /// Whether an instance-method chain roots at the `Route` facade, as
@@ -1097,15 +994,79 @@ pub(super) fn chain_roots_at_gate(expr: &Expression<'_>) -> bool {
 ///
 /// The `can()` there names an ability, but its second argument is a *route
 /// parameter* name rather than a model, so no model subject is recorded.
-pub(super) fn chain_roots_at_route_facade(expr: &Expression<'_>) -> bool {
-    chain_roots_at_facade(expr, FACADE_CHAIN_DEPTH, &|name| {
-        name.eq_ignore_ascii_case("Route")
-    })
+pub(super) fn chain_roots_at_route_facade(
+    expr: &Expression<'_>,
+    resolved_names: Option<&crate::names::OwnedResolvedNames>,
+) -> bool {
+    chain_roots_at_route_facade_inner(
+        expr,
+        crate::symbol_map::laravel_resources::FACADE_CHAIN_DEPTH,
+        resolved_names,
+    )
+}
+
+/// Return the real global class that can suppress a fluent chain rooted at
+/// Laravel's optional `Route` alias. Imported/FQN facade roots are
+/// unambiguous and therefore have no dependency.
+pub(super) fn route_facade_root_dependency(
+    expr: &Expression<'_>,
+    resolved_names: &crate::names::OwnedResolvedNames,
+) -> Option<crate::symbol_map::LaravelStringDependency> {
+    route_facade_root_dependency_inner(
+        expr,
+        crate::symbol_map::laravel_resources::FACADE_CHAIN_DEPTH,
+        resolved_names,
+    )
+}
+
+fn route_facade_root_dependency_inner(
+    expr: &Expression<'_>,
+    depth: usize,
+    resolved_names: &crate::names::OwnedResolvedNames,
+) -> Option<crate::symbol_map::LaravelStringDependency> {
+    if depth == 0 {
+        return None;
+    }
+    match expr {
+        Expression::Call(Call::Method(call)) => {
+            route_facade_root_dependency_inner(call.object, depth - 1, resolved_names)
+        }
+        Expression::Call(Call::StaticMethod(call)) => {
+            let name = resolved_names.get(call.class.span().start.offset)?;
+            crate::symbol_map::LaravelStringDependency::root_facade(name)
+        }
+        _ => None,
+    }
+}
+
+fn chain_roots_at_route_facade_inner(
+    expr: &Expression<'_>,
+    depth: usize,
+    resolved_names: Option<&crate::names::OwnedResolvedNames>,
+) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    match expr {
+        Expression::Call(Call::Method(call)) => {
+            chain_roots_at_route_facade_inner(call.object, depth - 1, resolved_names)
+        }
+        Expression::Call(Call::StaticMethod(call)) => {
+            if let Some(names) = resolved_names {
+                names
+                    .get(call.class.span().start.offset)
+                    .is_some_and(|name| matches_laravel_facade(name, "Route"))
+            } else {
+                matches_laravel_facade(strip_fqn_prefix(&expr_to_subject_text(call.class)), "Route")
+            }
+        }
+        _ => false,
+    }
 }
 
 /// Walk at most `depth` links down a method chain looking for a static call
 /// whose class satisfies `is_facade`.
-fn chain_roots_at_facade(
+pub(crate) fn chain_roots_at_facade(
     expr: &Expression<'_>,
     depth: usize,
     is_facade: &dyn Fn(&str) -> bool,
@@ -1178,23 +1139,9 @@ pub(super) fn try_emit_gate_ability_spans(
     };
 
     let first_span = spans.len();
-    match ability_arg.value() {
-        Expression::Array(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_gate_ability_span(value.value, role, content, spans);
-                }
-            }
-        }
-        Expression::LegacyArray(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_gate_ability_span(value.value, role, content, spans);
-                }
-            }
-        }
-        expr => push_gate_ability_span(expr, role, content, spans),
-    }
+    for_each_value(ability_arg.value(), |expr| {
+        push_gate_ability_span(expr, role, content, spans)
+    });
     if spans.len() == first_span {
         return;
     }
@@ -1224,20 +1171,14 @@ fn push_gate_ability_span(
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Expression::Literal(literal::Literal::String(s)) = expr else {
+    // An empty literal is rejected by the extractor, so whatever is
+    // between the quotes is a name.
+    let Some((ability, start, end)) = string_literal_at_range(expr, content) else {
         return;
     };
-    let inner_start = s.span.start.offset + 1;
-    let inner_end = s.span.end.offset - 1;
-    if inner_start >= inner_end || inner_end as usize > content.len() {
-        return;
-    }
-    // The span check above already rejects an empty literal, so whatever is
-    // between the quotes is a name.
-    let ability = &content[inner_start as usize..inner_end as usize];
     spans.push(SymbolSpan {
-        start: inner_start,
-        end: inner_end,
+        start,
+        end,
         kind: SymbolKind::LaravelStringKey {
             kind: crate::symbol_map::LaravelStringKind::GateAbility,
             key: ability.to_string(),
@@ -1294,62 +1235,89 @@ fn gate_model_subject(
     }
 }
 
-/// Emit gate-ability spans for the `can:ability,Model` entries of a
-/// `middleware(...)` argument, which Laravel accepts as a single string or an
-/// array of them.
+/// Emit navigable parameters embedded in Laravel middleware strings.
+///
+/// Handles `can:ability,Model` and, when `include_auth_guards` is true,
+/// `auth:guard[,guard]`, each accepted as one string or as an array value.
 pub(super) fn try_emit_can_middleware_spans(
     argument_list: &ArgumentList<'_>,
+    include_auth_guards: bool,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
+    let Some(middleware) = argument_expr_for_parameter(argument_list, "middleware") else {
         return;
     };
-    match first_arg.value() {
-        Expression::Array(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_can_middleware_span(value.value, content, spans);
-                }
-            }
-        }
-        Expression::LegacyArray(array) => {
-            for element in array.elements.iter() {
-                if let ArrayElement::Value(value) = element {
-                    push_can_middleware_span(value.value, content, spans);
-                }
-            }
-        }
-        expr => push_can_middleware_span(expr, content, spans),
+    // Laravel reads a middleware array's values whatever their keys.
+    let Some(elements) = crate::parser::array_literal_elements(middleware) else {
+        push_middleware_parameter_spans(middleware, include_auth_guards, content, spans);
+        return;
+    };
+    for element in elements.iter() {
+        let value = match element {
+            ArrayElement::KeyValue(element) => element.value,
+            ArrayElement::Value(element) => element.value,
+            ArrayElement::Variadic(_) | ArrayElement::Missing(_) => continue,
+        };
+        push_middleware_parameter_spans(value, include_auth_guards, content, spans);
     }
 }
 
-/// Push a gate-ability span covering just the ability part of a
-/// `'can:update,post'` middleware string.
-fn push_can_middleware_span(expr: &Expression<'_>, content: &str, spans: &mut Vec<SymbolSpan>) {
-    let Expression::Literal(literal::Literal::String(s)) = expr else {
+fn push_middleware_parameter_spans(
+    expr: &Expression<'_>,
+    include_auth_guards: bool,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some((text, inner_start, _)) = string_literal_at_range(expr, content) else {
         return;
     };
-    let inner_start = s.span.start.offset + 1;
-    let inner_end = s.span.end.offset - 1;
-    if inner_start >= inner_end || inner_end as usize > content.len() {
-        return;
-    }
-    let text = &content[inner_start as usize..inner_end as usize];
-    let Some(rest) = text.strip_prefix("can:") else {
+    let Some((alias, parameters)) = text.split_once(':') else {
         return;
     };
-    let ability = rest.split(',').next().unwrap_or(rest);
-    if ability.is_empty() {
+    let parameter_start = inner_start + alias.len() as u32 + 1;
+    if alias == "can" {
+        let ability = parameters.split(',').next().unwrap_or(parameters);
+        push_embedded_string_span(
+            crate::symbol_map::LaravelStringKind::GateAbility,
+            ability,
+            parameter_start,
+            spans,
+        );
+    } else if include_auth_guards
+        && crate::symbol_map::laravel_resources::middleware_resource(&text[..alias.len() + 1])
+            == Some(crate::symbol_map::LaravelConfigResource::AuthGuard)
+    {
+        let mut offset = parameter_start;
+        for guard in parameters.split(',') {
+            push_embedded_string_span(
+                crate::symbol_map::LaravelStringKind::ConfigResource(
+                    crate::symbol_map::LaravelConfigResource::AuthGuard,
+                ),
+                guard,
+                offset,
+                spans,
+            );
+            offset += guard.len() as u32 + 1;
+        }
+    }
+}
+
+fn push_embedded_string_span(
+    kind: crate::symbol_map::LaravelStringKind,
+    key: &str,
+    start: u32,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    if key.is_empty() {
         return;
     }
-    let start = inner_start + "can:".len() as u32;
     spans.push(SymbolSpan {
         start,
-        end: start + ability.len() as u32,
+        end: start + key.len() as u32,
         kind: SymbolKind::LaravelStringKey {
-            kind: crate::symbol_map::LaravelStringKind::GateAbility,
-            key: ability.to_string(),
+            kind,
+            key: key.to_string(),
             is_write: false,
             is_optional: false,
         },
@@ -1399,16 +1367,16 @@ pub(super) fn try_emit_command_own_param_span(
 /// `Config::get()` / `Config::set()` static-call extractor so that
 /// find-references and go-to-definition for Laravel config keys can use
 /// the pre-built symbol map instead of re-parsing every file on demand.
-pub(super) fn try_emit_laravel_string_span_partial(
+pub(super) fn try_emit_laravel_string_span_partial_for_parameter(
     kind: crate::symbol_map::LaravelStringKind,
     argument_list: &PartialArgumentList<'_>,
+    parameter: &str,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(first_arg) = argument_list.arguments.iter().next() else {
-        return;
-    };
-    let Some(Expression::Literal(literal::Literal::String(s))) = first_arg.value() else {
+    let Some(Expression::Literal(literal::Literal::String(s))) =
+        partial_argument_expr_for_parameter(argument_list, parameter)
+    else {
         return;
     };
     let inner_start = s.span.start.offset + 1;
@@ -1430,12 +1398,34 @@ pub(super) fn try_emit_laravel_string_span_partial(
         start: inner_start,
         end: inner_end,
         kind: SymbolKind::LaravelStringKey {
-            key: normalised_key(kind.clone(), key),
+            key: normalised_key(kind, key),
             kind,
             is_write: false,
             is_optional: false,
         },
     });
+}
+
+/// Attribute counterpart of named parameter selection for config resources.
+pub(super) fn try_emit_laravel_config_resource_span_partial_for_parameter(
+    resource: crate::symbol_map::LaravelConfigResource,
+    access: crate::symbol_map::laravel_resources::ResourceAccess,
+    argument_list: &PartialArgumentList<'_>,
+    parameter: &str,
+    content: &str,
+    spans: &mut Vec<SymbolSpan>,
+) {
+    let Some(expr) = partial_argument_expr_for_parameter(argument_list, parameter) else {
+        return;
+    };
+    push_laravel_string_span(
+        crate::symbol_map::LaravelStringKind::ConfigResource(resource),
+        access.is_write(),
+        access.is_optional(),
+        expr,
+        content,
+        spans,
+    );
 }
 
 /// If `argument_list` starts with a plain, non-empty string literal, push a
@@ -1797,19 +1787,11 @@ pub(super) fn laravel_route_scan_stmt(
             }
         }
         Statement::If(if_stmt) => {
-            for s in if_stmt.body.statements() {
-                laravel_route_scan_stmt(s, controller, content, spans);
-            }
-            for stmts in if_stmt.body.else_if_statements() {
-                for s in stmts {
+            crate::parser::for_each_if_branch(if_stmt, |statements| {
+                for s in statements {
                     laravel_route_scan_stmt(s, controller, content, spans);
                 }
-            }
-            if let Some(else_stmts) = if_stmt.body.else_statements() {
-                for s in else_stmts {
-                    laravel_route_scan_stmt(s, controller, content, spans);
-                }
-            }
+            });
         }
         Statement::Foreach(fe) => {
             for s in fe.body.statements() {
@@ -1920,24 +1902,41 @@ mod storage_disk_tests {
     use super::*;
 
     #[test]
+    fn facade_matching_accepts_only_runtime_aliases_and_laravel_facades() {
+        assert!(matches_laravel_facade("Storage", "Storage"));
+        assert!(matches_laravel_facade(
+            "Illuminate\\Support\\Facades\\Storage",
+            "Storage"
+        ));
+        assert!(!matches_laravel_facade("App\\Storage", "Storage"));
+        assert!(!matches_laravel_facade("Acme\\Storage", "Storage"));
+    }
+
+    #[test]
     fn fully_qualified_container_attributes_keep_their_distinct_meanings() {
         let mut import_cache = None;
         assert!(matches!(
             resolve_laravel_container_attr(
                 "Illuminate\\Container\\Attributes\\Storage",
+                false,
                 &mut import_cache,
                 ""
             ),
-            Some(LaravelContainerAttribute::StorageDisk)
+            Some(LaravelContainerAttribute::Resource(trigger))
+                if trigger.kind == crate::symbol_map::LaravelConfigResource::StorageDisk
         ));
         assert!(matches!(
             resolve_laravel_container_attr(
                 "Illuminate\\Container\\Attributes\\Config",
+                false,
                 &mut import_cache,
                 ""
             ),
             Some(LaravelContainerAttribute::Config)
         ));
+        assert!(
+            resolve_laravel_container_attr("App\\Storage", false, &mut import_cache, "").is_none()
+        );
     }
 
     #[test]

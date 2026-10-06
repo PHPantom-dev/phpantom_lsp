@@ -17,13 +17,17 @@ use mago_syntax::cst::*;
 
 use crate::atom::{Atom, atom, bytes_to_str, last_segment, literal_bytes_to_str};
 use crate::parser::DocblockCtx;
-use crate::php_type::PhpType;
-use crate::types::{FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation};
-use crate::util::strip_fqn_prefix;
+use crate::php_type::{PhpType, TypeKind};
+use crate::types::{
+    CastSources, FacadeAccessor, LaravelMetadata, MethodInfo, PivotAccessor, PivotRelation,
+    model_declaration,
+};
+use crate::util::{short_name, strip_fqn_prefix};
 
+use super::relationships::is_inferable_relationship_short_name;
 use super::{
     extract_pivot_accessor, extract_pivot_using, extract_with_pivot_columns,
-    infer_relationship_from_body,
+    infer_relationship_from_body, is_soft_deletes_trait,
 };
 
 /// Check whether a method has the `#[Scope]` attribute (Laravel 11+).
@@ -51,7 +55,7 @@ pub(crate) fn has_scope_attribute(method: &class_like::method::Method<'_>) -> bo
 ///
 /// This enables relationship property synthesis on models whose
 /// relationship methods carry no generic `@return` annotation.
-pub(crate) fn infer_relationship_from_method<'a>(
+fn infer_relationship_from_method<'a>(
     method: &class_like::method::Method<'a>,
     doc_ctx: Option<&DocblockCtx<'a>>,
 ) -> Option<PhpType> {
@@ -71,34 +75,34 @@ pub(crate) fn infer_relationship_from_method<'a>(
     infer_relationship_from_body(body_text)
 }
 
-/// Extract the custom collection class name from a `#[CollectedBy(X::class)]` attribute.
+/// A method's return type, filled in from its body when that says more.
 ///
-/// Scans the class's attribute lists for an attribute whose short name is
-/// `CollectedBy` and extracts the first argument's text with `::class` stripped.
-/// Returns `None` if no such attribute exists.
-fn extract_collected_by_attribute(
-    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
-    content: &str,
-) -> Option<String> {
-    for attr_list in attribute_lists.iter() {
-        for attr in attr_list.attributes.iter() {
-            let short = last_segment(attr.name.value());
-            if short != b"CollectedBy" {
-                continue;
-            }
-            let arg_list = attr.argument_list.as_ref()?;
-            let first_arg = arg_list.arguments.first()?;
-            let span = first_arg.span();
-            let start = span.start.offset as usize;
-            let end = span.end.offset as usize;
-            let text = content.get(start..end)?;
-            let class_name = text.trim_end_matches("::class").trim();
-            if !class_name.is_empty() {
-                return Some(class_name.to_string());
-            }
-        }
+/// With no declared type, the body's `$this->hasMany(Post::class)` is the
+/// only source.  A bare relationship class as the declared type
+/// (`: HasMany`, the usual way to write a relationship without a
+/// docblock) names the relationship but not the related model, which the
+/// same body call supplies.
+pub(crate) fn relationship_return_type<'a>(
+    declared: Option<PhpType>,
+    method: &class_like::method::Method<'a>,
+    doc_ctx: Option<&DocblockCtx<'a>>,
+) -> Option<PhpType> {
+    let Some(declared) = declared else {
+        return infer_relationship_from_method(method, doc_ctx);
+    };
+    let TypeKind::Named(name) = declared.kind() else {
+        return Some(declared);
+    };
+    let declared_short = short_name(name);
+    if !is_inferable_relationship_short_name(declared_short) {
+        return Some(declared);
     }
-    None
+    match infer_relationship_from_method(method, doc_ctx) {
+        Some(inferred) if matches!(inferred.kind(), TypeKind::Generic(g) if short_name(&g.name) == declared_short) => {
+            Some(inferred)
+        }
+        _ => Some(declared),
+    }
 }
 
 /// Extract the policy class name from a `#[UsePolicy(X::class)]` attribute.
@@ -107,14 +111,6 @@ fn extract_use_policy_attribute(
     content: &str,
 ) -> Option<String> {
     extract_class_constant_attribute(attribute_lists, content, b"UsePolicy")
-}
-
-/// Extract the custom builder class name from a `#[UseEloquentBuilder(X::class)]` attribute.
-fn extract_use_eloquent_builder_attribute(
-    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
-    content: &str,
-) -> Option<String> {
-    extract_class_constant_attribute(attribute_lists, content, b"UseEloquentBuilder")
 }
 
 /// The `X` of the first `#[Name(X::class)]` attribute whose short name is
@@ -218,97 +214,89 @@ fn extract_laravel_table_attribute(
 ///
 /// Checks three sources in priority order:
 ///
-/// 1. `#[UseEloquentBuilder(CustomBuilder::class)]` attribute on the class.
-/// 2. `/** @use HasBuilder<CustomBuilder> */` in `use_generics`.
-/// 3. A `newEloquentBuilder()` method override whose return type names the
-///    custom builder class.
+/// 1. A `newEloquentBuilder()` override with a concrete return type.
+/// 2. `#[UseEloquentBuilder(CustomBuilder::class)]` on the class.
+/// 3. `/** @use HasBuilder<CustomBuilder> */` in `use_generics`.
 fn extract_custom_builder(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     use_generics: &[(Atom, Vec<PhpType>)],
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    if let Some(name) = extract_use_eloquent_builder_attribute(attribute_lists, content) {
-        return Some(PhpType::named(atom(&name)));
-    }
-
-    for (trait_name, args) in use_generics {
-        let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
-        if (short == "HasBuilder" || short == "CustomizeQueryBuilder") && !args.is_empty() {
-            return Some(args[0].clone());
-        }
-    }
-
-    let method = methods.iter().find(|m| m.name == "newEloquentBuilder")?;
-    let return_type = method.return_type.as_ref()?;
-    let base = return_type.base_name()?;
-    if base == "Illuminate\\Database\\Eloquent\\Builder" || base == "Builder" || base.is_empty() {
-        return None;
-    }
-
-    Some(return_type.clone())
+    extract_customisation(
+        attribute_lists,
+        use_generics,
+        methods,
+        content,
+        b"UseEloquentBuilder",
+        &["HasBuilder", "CustomizeQueryBuilder"],
+        "newEloquentBuilder",
+        &["Illuminate\\Database\\Eloquent\\Builder", "Builder"],
+    )
 }
 
 /// Determine the custom collection class for an Eloquent model.
 ///
-/// Checks three sources in priority order:
-///
-/// 1. `#[CollectedBy(CustomCollection::class)]` attribute on the class.
-/// 2. `/** @use HasCollection<CustomCollection> */` in `use_generics`.
-/// 3. A `newCollection()` method override whose return type names the
-///    custom collection class.
-///
-/// The attribute takes priority because it is the newer Laravel API.
+/// Checks the same three sources [`extract_custom_builder`] does, in the
+/// same order: `newCollection()`, `#[CollectedBy(CustomCollection::class)]`,
+/// and `/** @use HasCollection<CustomCollection> */`.
 fn extract_custom_collection(
     attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
     use_generics: &[(Atom, Vec<PhpType>)],
     methods: &[MethodInfo],
     content: &str,
 ) -> Option<PhpType> {
-    if let Some(name) = extract_collected_by_attribute(attribute_lists, content) {
+    extract_customisation(
+        attribute_lists,
+        use_generics,
+        methods,
+        content,
+        b"CollectedBy",
+        &["HasCollection"],
+        "newCollection",
+        &["Illuminate\\Database\\Eloquent\\Collection", "Collection"],
+    )
+}
+
+/// The class a model substitutes for one of Eloquent's defaults, in the
+/// three ways a model can name it.
+///
+/// `attr_name` is the `#[…(X::class)]` attribute, `traits` the generic
+/// traits whose first argument names it, `factory_method` the `new…()`
+/// override that returns it, and `defaults` the base classes that method
+/// returns when nothing is customised.
+#[allow(clippy::too_many_arguments)]
+fn extract_customisation(
+    attribute_lists: &Sequence<'_, attribute::AttributeList<'_>>,
+    use_generics: &[(Atom, Vec<PhpType>)],
+    methods: &[MethodInfo],
+    content: &str,
+    attr_name: &[u8],
+    traits: &[&str],
+    factory_method: &str,
+    defaults: &[&str],
+) -> Option<PhpType> {
+    if let Some(method) = methods.iter().find(|m| m.name == factory_method)
+        && let Some(return_type) = method.return_type.as_ref()
+        && let Some(base) = return_type.base_name()
+        && !base.is_empty()
+        && !defaults.contains(&base)
+    {
+        return Some(return_type.clone());
+    }
+
+    if let Some(name) = extract_class_constant_attribute(attribute_lists, content, attr_name) {
         return Some(PhpType::named(atom(&name)));
     }
 
     for (trait_name, args) in use_generics {
-        let short = trait_name.rsplit('\\').next().unwrap_or(trait_name);
-        if short == "HasCollection" && !args.is_empty() {
+        let short = crate::util::short_name(trait_name);
+        if traits.contains(&short) && !args.is_empty() {
             return Some(args[0].clone());
         }
     }
 
-    extract_custom_collection_from_new_collection(methods)
-}
-
-/// Extract the custom collection class from a `newCollection()` method
-/// override.
-///
-/// Laravel models can override `newCollection()` to return a custom
-/// collection class.  If the method's return type is not the standard
-/// `Illuminate\Database\Eloquent\Collection` (or its short name
-/// `Collection`), it is treated as a custom collection class.
-///
-/// Returns `None` if no `newCollection` method exists, if it has no
-/// return type, or if the return type is the standard Eloquent
-/// Collection.
-fn extract_custom_collection_from_new_collection(methods: &[MethodInfo]) -> Option<PhpType> {
-    let method = methods.iter().find(|m| m.name == "newCollection")?;
-    let return_type = method.return_type.as_ref()?;
-
-    // `base_name()` strips leading `\` and generic parameters, giving a
-    // clean class name suitable for comparison.
-    let base = return_type.base_name()?;
-
-    // Ignore the standard Eloquent Collection — that's the default, not
-    // a custom override.
-    if base == "Illuminate\\Database\\Eloquent\\Collection" || base == "Collection" {
-        return None;
-    }
-
-    if base.is_empty() {
-        return None;
-    }
-
-    Some(return_type.clone())
+    None
 }
 
 /// Extract the model class explicitly configured on a Laravel factory.
@@ -381,23 +369,104 @@ fn extract_factory_model<'a>(
     None
 }
 
+fn extract_class_property<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    property: &str,
+) -> Option<PhpType> {
+    for member in members {
+        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
+            plain,
+        )) = member
+        else {
+            continue;
+        };
+        if !plain.modifiers.iter().any(|modifier| modifier.is_static()) {
+            continue;
+        }
+        for item in plain.items.iter() {
+            if bytes_to_str(item.variable().name).trim_start_matches('$') != property {
+                continue;
+            }
+            let class_like::property::PropertyItem::Concrete(concrete) = item else {
+                continue;
+            };
+            if let Expression::Access(Access::ClassConstant(access)) = concrete.value
+                && matches!(&access.constant, ClassLikeConstantSelector::Identifier(identifier)
+                    if bytes_to_str(identifier.value).eq_ignore_ascii_case("class"))
+                && let Expression::Identifier(identifier) = access.class
+            {
+                return Some(PhpType::named(atom(bytes_to_str(identifier.value()))));
+            }
+            if let Expression::Literal(Literal::String(literal)) = concrete.value
+                && let Some(name) = literal.value.and_then(literal_bytes_to_str)
+            {
+                return Some(PhpType::named(atom(&format!(
+                    "\\{}",
+                    name.trim_start_matches('\\')
+                ))));
+            }
+        }
+    }
+    None
+}
+
+fn extract_class_return_from_body<'a>(
+    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    method_name: &str,
+) -> Option<PhpType> {
+    let method = members.find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case(method_name) =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let value = block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })?;
+    let name = match value {
+        Expression::Instantiation(inst) => match inst.class {
+            Expression::Identifier(id) => Some(bytes_to_str(id.value())),
+            _ => None,
+        },
+        Expression::Call(Call::StaticMethod(call)) => match (&call.class, &call.method) {
+            (Expression::Identifier(id), ClassLikeMemberSelector::Identifier(method))
+                if bytes_to_str(method.value).eq_ignore_ascii_case("new") =>
+            {
+                Some(bytes_to_str(id.value()))
+            }
+            _ => None,
+        },
+        _ => None,
+    }?;
+    Some(PhpType::named(atom(name)))
+}
+
+/// A `(column_name, cast_type)` pair.
+type CastEntry = (String, String);
+
 /// Extract Eloquent cast definitions from a class's members.
 ///
 /// Scans the class members for:
 /// 1. A `$casts` property with an array initializer (`protected $casts = [...]`)
 /// 2. A `casts()` method whose body contains a `return [...]` statement
 ///
-/// Returns a list of `(column_name, cast_type)` pairs extracted from the
-/// array literal text.  Both sources are merged: entries from the
-/// `casts()` method take priority over `$casts` property entries when
-/// the same column appears in both.  This matches Laravel's runtime
-/// behaviour where `Model::casts()` overrides `$casts`.
-fn extract_casts_definitions<'a>(
+/// Returns the `(column_name, cast_type)` pairs of each source, `None`
+/// for a source the class does not declare. [`overlay_casts`] merges
+/// them the way Laravel does at runtime.
+fn extract_cast_sources<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
-) -> Vec<(String, String)> {
-    let mut property_text: Option<String> = None;
-    let mut method_text: Option<String> = None;
+) -> (Option<Vec<CastEntry>>, Option<Vec<CastEntry>>) {
+    let mut property_text: Option<&str> = None;
+    let mut method_text: Option<&str> = None;
+    let mut has_property = false;
+    let mut has_method = false;
 
     for member in members {
         match member {
@@ -410,58 +479,117 @@ fn extract_casts_definitions<'a>(
                     if stripped != "casts" {
                         continue;
                     }
+                    has_property = true;
                     if let class_like::property::PropertyItem::Concrete(concrete) = item {
                         let span = concrete.value.span();
                         let start = span.start.offset as usize;
                         let end = span.end.offset as usize;
-                        if let Some(text) = content.get(start..end) {
-                            property_text = Some(text.to_string());
-                        }
+                        property_text = content.get(start..end);
                     }
                 }
             }
             class_like::member::ClassLikeMember::Method(method)
-                if method.name.value == b"casts" =>
+                if method.name.value.eq_ignore_ascii_case(b"casts") =>
             {
-                if let class_like::method::MethodBody::Concrete(block) = &method.body {
-                    let start = block.left_brace.start.offset as usize;
-                    let end = block.right_brace.end.offset as usize;
-                    if let Some(text) = content.get(start..end) {
-                        method_text = Some(text.to_string());
-                    }
+                has_method = true;
+                if let class_like::method::MethodBody::Concrete(block) = &method.body
+                    && let Some(value) = block.statements.iter().find_map(|stmt| match stmt {
+                        Statement::Return(ret) => ret.value,
+                        _ => None,
+                    })
+                {
+                    let span = value.span();
+                    method_text = content.get(span.start.offset as usize..span.end.offset as usize);
                 }
             }
             _ => {}
         }
     }
 
-    let mut merged: Vec<(String, String)> = Vec::new();
+    let property = has_property.then(|| property_text.map(parse_casts_array).unwrap_or_default());
+    let method = has_method.then(|| method_text.map(parse_casts_array).unwrap_or_default());
+    (property, method)
+}
 
-    if let Some(ref text) = property_text {
-        merged = parse_casts_array(text);
-    }
-
-    // Merge casts() method entries on top — method entries override
-    // property entries for the same column, matching Laravel's runtime
-    // behaviour.
-    if let Some(ref text) = method_text
-        && let Some(arr_start) = text.find("return")
-    {
-        let after_return = &text[arr_start + 6..];
-        if let Some(bracket_pos) = after_return.find('[') {
-            let array_text = &after_return[bracket_pos..];
-            let method_defs = parse_casts_array(array_text);
-            for (key, value) in method_defs {
-                if let Some(existing) = merged.iter_mut().find(|(k, _)| *k == key) {
-                    existing.1 = value;
-                } else {
-                    merged.push((key, value));
-                }
-            }
+/// Merge a model's `$casts` property entries with its `casts()` method
+/// entries.
+///
+/// Method entries override property entries for the same column,
+/// matching Laravel's runtime behaviour where `Model::casts()` is merged
+/// over `$casts`.
+pub(crate) fn overlay_casts(
+    property: &[(String, String)],
+    method: &[(String, String)],
+) -> Vec<(String, String)> {
+    let mut merged = property.to_vec();
+    for (key, value) in method {
+        if let Some(existing) = merged.iter_mut().find(|(k, _)| k == key) {
+            existing.1.clone_from(value);
+        } else {
+            merged.push((key.clone(), value.clone()));
         }
     }
-
     merged
+}
+
+/// The trimmed, non-empty entries of a PHP array literal written as `[…]`.
+///
+/// Commas inside parentheses, brackets, braces, or quotes do not split an
+/// entry, so `AsCollection::using(Custom::class, Item::class)` stays one
+/// value. Text that is not an array literal yields nothing.
+fn array_literal_entries(text: &str) -> impl Iterator<Item = &str> {
+    let inner = text
+        .trim()
+        .strip_prefix('[')
+        .map(|s| s.strip_suffix(']').unwrap_or(s));
+    inner
+        .into_iter()
+        .flat_map(split_top_level_commas)
+        .filter(|segment| !segment.is_empty())
+}
+
+/// Split `text` on commas that are not nested in `()`, `[]`, `{}`, or a
+/// quoted string. Empty segments (a trailing comma) are kept out.
+fn split_top_level_commas(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < text.len() {
+        let c = text[i..].chars().next().unwrap_or('\0');
+        let len = c.len_utf8();
+        if let Some(q) = quote {
+            if c == '\\' {
+                i += len + text[i + len..].chars().next().map_or(0, char::len_utf8);
+                continue;
+            }
+            if c == q {
+                quote = None;
+            }
+            i += len;
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ',' if depth == 0 => {
+                let segment = text[start..i].trim();
+                if !segment.is_empty() {
+                    out.push(segment);
+                }
+                start = i + len;
+            }
+            _ => {}
+        }
+        i += len;
+    }
+    let tail = text[start..].trim();
+    if !tail.is_empty() {
+        out.push(tail);
+    }
+    out
 }
 
 /// Parse key-value pairs from a PHP array literal text.
@@ -473,32 +601,12 @@ fn extract_casts_definitions<'a>(
 /// Returns a list of `(key, value)` string pairs.
 fn parse_casts_array(text: &str) -> Vec<(String, String)> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    // Splitting on commas works here because cast arrays contain only
-    // string literals — no nested arrays or complex expressions to trip
-    // up a naive split.
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
-
+    for segment in array_literal_entries(text) {
         let Some(arrow_pos) = segment.find("=>") else {
             continue;
         };
-
-        let key_part = segment[..arrow_pos].trim();
-        let value_part = segment[arrow_pos + 2..].trim();
-
-        let key = extract_string_literal(key_part);
-        let value = extract_string_literal(value_part);
+        let key = extract_string_literal(segment[..arrow_pos].trim());
+        let value = extract_cast_value(segment[arrow_pos + 2..].trim());
 
         if let (Some(k), Some(v)) = (key, value)
             && !k.is_empty()
@@ -507,7 +615,6 @@ fn parse_casts_array(text: &str) -> Vec<(String, String)> {
             results.push((k, v));
         }
     }
-
     results
 }
 
@@ -539,6 +646,176 @@ fn extract_string_literal(text: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// The cast type string a `$casts` / `casts()` value names.
+///
+/// Accepts the forms Eloquent evaluates before it stores a cast:
+/// - a quoted string (`'boolean'`, `'decimal:2'`)
+/// - `SomeCast::class`, including a concatenated argument
+///   (`Address::class.':nullable'`, `AsEnumCollection::class.':'.Status::class`)
+/// - a static call whose return value is that string
+///   (`AsEnumCollection::of(Status::class)`, `AsCollection::using(Custom::class, Item::class)`,
+///   `AsBinary::uuid()`)
+///
+/// A call is stored with its method kept (`AsEnumCollection::of:Status`) so
+/// the type resolver can tell `of()` from `using()` after the class name has
+/// been resolved. Arguments that are not a class constant or a string literal
+/// are dropped: a variable there is not knowable statically.
+fn extract_cast_value(text: &str) -> Option<String> {
+    let t = text.trim().trim_end_matches(';').trim();
+    if let Some(value) = extract_string_literal_quoted(t) {
+        return Some(value);
+    }
+    if let Some(value) = extract_static_cast_call(t) {
+        return Some(value);
+    }
+    extract_class_const_cast(t)
+}
+
+fn extract_string_literal_quoted(text: &str) -> Option<String> {
+    if ((text.starts_with('\'') && text.ends_with('\''))
+        || (text.starts_with('"') && text.ends_with('"')))
+        && text.len() >= 2
+    {
+        return Some(text[1..text.len() - 1].to_string());
+    }
+    None
+}
+
+/// `Class::method(args)` as the cast string the method returns.
+///
+/// `::class` is a constant, not a call, and is left for
+/// [`extract_class_const_cast`].
+fn extract_static_cast_call(text: &str) -> Option<String> {
+    let open = text.find('(')?;
+    let close = text.rfind(')')?;
+    if close < open || !text[close + 1..].trim().is_empty() {
+        return None;
+    }
+    let head = text[..open].trim();
+    let sep = head.rfind("::")?;
+    let class = strip_fqn_prefix(head[..sep].trim());
+    let method = head[sep + 2..].trim();
+    if method == "class" || !is_php_ident(method) || !is_php_class_name(class) {
+        return None;
+    }
+    let args = parse_cast_call_args(&text[open + 1..close]);
+    Some(super::casts::format_cast_reference(
+        class,
+        Some(method),
+        &args,
+    ))
+}
+
+fn parse_cast_call_args(inner: &str) -> Vec<String> {
+    if inner.trim().is_empty() {
+        return Vec::new();
+    }
+    split_top_level_commas(inner)
+        .into_iter()
+        .map(|arg| extract_cast_call_arg(arg).unwrap_or_default())
+        .collect()
+}
+
+fn extract_cast_call_arg(arg: &str) -> Option<String> {
+    let arg = strip_named_argument(arg.trim());
+    if let Some(value) = extract_string_literal_quoted(arg) {
+        return Some(value);
+    }
+    if let Some(class_pos) = arg.find("::class") {
+        let name = strip_fqn_prefix(arg[..class_pos].trim());
+        if is_php_class_name(name) {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// `name: value` with a single colon, not the `::` of a class constant.
+fn strip_named_argument(arg: &str) -> &str {
+    if let Some(idx) = arg.find(':')
+        && !arg[..idx].contains(':')
+        && arg.as_bytes().get(idx + 1) != Some(&b':')
+    {
+        let name = arg[..idx].trim();
+        if is_php_ident(name) {
+            return arg[idx + 1..].trim();
+        }
+    }
+    arg
+}
+
+/// `Class::class`, plus any `.'…'` / `.Other::class` concatenations after it.
+///
+/// `Address::class.':nullable'` is `Address:nullable`.
+/// `AsEnumCollection::class.':'.Status::class` is `AsEnumCollection:Status`.
+fn extract_class_const_cast(text: &str) -> Option<String> {
+    let class_pos = text.find("::class")?;
+    let name = strip_fqn_prefix(text[..class_pos].trim());
+    if !is_php_class_name(name) {
+        return None;
+    }
+    let mut result = name.to_string();
+    let mut rest = text[class_pos + "::class".len()..].trim();
+    while let Some(stripped) = rest.strip_prefix('.') {
+        rest = stripped.trim();
+        if let Some(quoted) = leading_quoted(rest) {
+            if let Some(value) = extract_string_literal_quoted(quoted) {
+                result.push_str(&value);
+            }
+            rest = rest[quoted.len()..].trim();
+            continue;
+        }
+        let Some(next) = rest.find("::class") else {
+            break;
+        };
+        let other = strip_fqn_prefix(rest[..next].trim());
+        if !is_php_class_name(other) {
+            break;
+        }
+        result.push_str(other);
+        rest = rest[next + "::class".len()..].trim();
+    }
+    Some(result)
+}
+
+/// The quoted literal `rest` starts with, if it starts with one.
+fn leading_quoted(rest: &str) -> Option<&str> {
+    let quote = rest.chars().next()?;
+    if quote != '\'' && quote != '"' {
+        return None;
+    }
+    let mut chars = rest.char_indices().skip(1);
+    while let Some((idx, c)) = chars.next() {
+        if c == '\\' {
+            chars.next();
+            continue;
+        }
+        if c == quote {
+            return Some(&rest[..=idx]);
+        }
+    }
+    None
+}
+
+fn is_php_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn is_php_class_name(name: &str) -> bool {
+    let name = name.strip_prefix('\\').unwrap_or(name);
+    !name.is_empty()
+        && !name.ends_with('\\')
+        && !name.contains("\\\\")
+        && name
+            .split('\\')
+            .all(|segment| !segment.is_empty() && is_php_ident(segment))
 }
 
 /// Extract Eloquent attribute defaults from a class's `$attributes` property.
@@ -647,22 +924,24 @@ fn parse_attributes_array(text: &str) -> Vec<(String, PhpType, String)> {
 
 /// Extract timestamp configuration from a model class.
 ///
-/// Reads three sources:
+/// Reads four sources:
 ///
 /// - `$timestamps` property — `true` (default) or `false`.
 /// - `CREATED_AT` constant — column name string or `null`.
 /// - `UPDATED_AT` constant — column name string or `null`.
+/// - `DELETED_AT` constant — the `SoftDeletes` column name string.
 ///
-/// Returns `(timestamps, created_at_name, updated_at_name)` using the
-/// same `Option` semantics as `LaravelMetadata`: outer `None` means
-/// "not declared", `Some(None)` means "explicitly `null`".
+/// Each field uses the same `Option` semantics as the `LaravelMetadata`
+/// field of that name: outer `None` means "not declared", `Some(None)`
+/// means "explicitly `null`".
 fn extract_timestamp_config<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
-) -> (Option<bool>, Option<Option<String>>, Option<Option<String>>) {
+) -> TimestampConfig {
     let mut timestamps: Option<bool> = None;
     let mut created_at: Option<Option<String>> = None;
     let mut updated_at: Option<Option<String>> = None;
+    let mut deleted_at: Option<String> = None;
 
     for member in members {
         match member {
@@ -693,7 +972,7 @@ fn extract_timestamp_config<'a>(
             class_like::member::ClassLikeMember::Constant(constant) => {
                 for item in constant.items.iter() {
                     let name = bytes_to_str(item.name.value).to_string();
-                    if name != "CREATED_AT" && name != "UPDATED_AT" {
+                    if name != "CREATED_AT" && name != "UPDATED_AT" && name != "DELETED_AT" {
                         continue;
                     }
                     let span = item.value.span();
@@ -706,10 +985,10 @@ fn extract_timestamp_config<'a>(
                         None => None,
                     };
                     if let Some(val) = parsed {
-                        if name == "CREATED_AT" {
-                            created_at = Some(val);
-                        } else {
-                            updated_at = Some(val);
+                        match name.as_str() {
+                            "CREATED_AT" => created_at = Some(val),
+                            "UPDATED_AT" => updated_at = Some(val),
+                            _ => deleted_at = val,
                         }
                     }
                 }
@@ -718,7 +997,20 @@ fn extract_timestamp_config<'a>(
         }
     }
 
-    (timestamps, created_at, updated_at)
+    TimestampConfig {
+        timestamps,
+        created_at_name: created_at,
+        updated_at_name: updated_at,
+        deleted_at_name: deleted_at,
+    }
+}
+
+/// The timestamp configuration [`extract_timestamp_config`] reads.
+struct TimestampConfig {
+    timestamps: Option<bool>,
+    created_at_name: Option<Option<String>>,
+    updated_at_name: Option<Option<String>>,
+    deleted_at_name: Option<String>,
 }
 
 /// Extract column names from `$fillable`, `$guarded`, `$hidden`, `$visible`,
@@ -730,13 +1022,22 @@ fn extract_timestamp_config<'a>(
 /// for columns not already covered by `$casts` or `$attributes`.
 ///
 /// All five arrays are merged; duplicates are removed (first occurrence
-/// wins).
+/// wins). Returns the names, the [`model_declaration`] list flags of each
+/// name (index for index), and the flags of every list the class declares.
 fn extract_column_names<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
-) -> Vec<String> {
-    let mut names = Vec::new();
-    let targets = ["fillable", "guarded", "hidden", "visible", "appends"];
+) -> (Vec<String>, Vec<u16>, u16) {
+    let mut names: Vec<String> = Vec::new();
+    let mut sources: Vec<u16> = Vec::new();
+    let mut declared = 0;
+    let targets = [
+        ("fillable", model_declaration::FILLABLE),
+        ("guarded", model_declaration::GUARDED),
+        ("hidden", model_declaration::HIDDEN),
+        ("visible", model_declaration::VISIBLE),
+        ("appends", model_declaration::APPENDS),
+    ];
 
     for member in members {
         if let class_like::member::ClassLikeMember::Property(
@@ -744,19 +1045,23 @@ fn extract_column_names<'a>(
         ) = member
         {
             for item in plain.items.iter() {
-                let var_name = bytes_to_str(item.variable().name).to_string();
-                let stripped = var_name.strip_prefix('$').unwrap_or(&var_name);
-                if !targets.contains(&stripped) {
+                let var_name = bytes_to_str(item.variable().name);
+                let stripped = var_name.strip_prefix('$').unwrap_or(var_name);
+                let Some(&(_, flag)) = targets.iter().find(|(name, _)| *name == stripped) else {
                     continue;
-                }
+                };
+                declared |= flag;
                 if let class_like::property::PropertyItem::Concrete(concrete) = item {
                     let span = concrete.value.span();
                     let start = span.start.offset as usize;
                     let end = span.end.offset as usize;
                     if let Some(text) = content.get(start..end) {
                         for name in parse_string_list(text) {
-                            if !names.contains(&name) {
+                            if let Some(pos) = names.iter().position(|n| *n == name) {
+                                sources[pos] |= flag;
+                            } else {
                                 names.push(name);
+                                sources.push(flag);
                             }
                         }
                     }
@@ -765,7 +1070,27 @@ fn extract_column_names<'a>(
         }
     }
 
-    names
+    (names, sources, declared)
+}
+
+/// Whether the class declares a plain property named `target` (without
+/// the `$`), whatever its initializer.
+fn declares_property<'a>(
+    mut members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    target: &str,
+) -> bool {
+    members.any(|member| {
+        let class_like::member::ClassLikeMember::Property(class_like::property::Property::Plain(
+            plain,
+        )) = member
+        else {
+            return false;
+        };
+        plain.items.iter().any(|item| {
+            let name = bytes_to_str(item.variable().name);
+            name.strip_prefix('$').unwrap_or(name) == target
+        })
+    })
 }
 
 /// Extract column names from the deprecated `$dates` property array.
@@ -857,6 +1182,46 @@ fn extract_facade_accessor<'a>(
     (!name.is_empty()).then(|| FacadeAccessor::Class(atom(name)))
 }
 
+/// Extract the columns a model's own `uniqueIds()` override returns.
+///
+/// Only a `return [...]` of string literals is statically knowable. Any
+/// other shape (`[$this->getKeyName(), 'uuid']`, a spread of
+/// `parent::uniqueIds()`, a computed value) yields `None`, as does a
+/// model that does not declare the method.
+fn extract_unique_ids<'a>(
+    members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
+    content: &str,
+) -> Option<Vec<String>> {
+    let method = members.into_iter().find_map(|member| match member {
+        class_like::member::ClassLikeMember::Method(method)
+            if bytes_to_str(method.name.value).eq_ignore_ascii_case("uniqueIds") =>
+        {
+            Some(method)
+        }
+        _ => None,
+    })?;
+    let class_like::method::MethodBody::Concrete(block) = &method.body else {
+        return None;
+    };
+    let value = block.statements.iter().find_map(|stmt| match stmt {
+        Statement::Return(ret) => ret.value,
+        _ => None,
+    })?;
+    let elements = match value {
+        Expression::Array(arr) => &arr.elements,
+        Expression::LegacyArray(arr) => &arr.elements,
+        _ => return None,
+    };
+    elements
+        .iter()
+        .map(|element| match element {
+            ArrayElement::Value(v) => super::helpers::extract_string_literal(v.value, content)
+                .map(|(text, _, _)| text.to_string()),
+            _ => None,
+        })
+        .collect()
+}
+
 fn extract_string_property<'a>(
     members: impl Iterator<Item = &'a class_like::member::ClassLikeMember<'a>>,
     content: &str,
@@ -896,19 +1261,7 @@ fn extract_string_property<'a>(
 /// returns `["name", "email", "password"]`.
 fn parse_string_list(text: &str) -> Vec<String> {
     let mut results = Vec::new();
-    let trimmed = text.trim();
-
-    let inner = if let Some(s) = trimmed.strip_prefix('[') {
-        s.strip_suffix(']').unwrap_or(s)
-    } else {
-        return results;
-    };
-
-    for segment in inner.split(',') {
-        let segment = segment.trim();
-        if segment.is_empty() {
-            continue;
-        }
+    for segment in array_literal_entries(text) {
         // Skip key-value pairs (these belong to a different kind of array).
         if segment.contains("=>") {
             continue;
@@ -919,7 +1272,6 @@ fn parse_string_list(text: &str) -> Vec<String> {
             results.push(s);
         }
     }
-
     results
 }
 
@@ -1153,33 +1505,87 @@ fn morph_argument_string<'a>(value: Option<&Expression<'a>>) -> Option<Option<&'
 /// (custom builder/collection, relationship-derived timestamps) key off
 /// already-resolved method return types. `use_generics` is the merged
 /// docblock + inline `@use` generics list, needed for
-/// `HasBuilder`/`HasCollection` detection.
+/// `HasBuilder`/`HasCollection` detection, and `used_traits` the traits
+/// the class body uses, needed for `SoftDeletes` detection.
 pub(crate) fn extract_laravel_metadata<'a>(
     class: &class_like::Class<'a>,
     methods: &[MethodInfo],
+    used_traits: &[Atom],
     use_generics: &[(Atom, Vec<PhpType>)],
     content: &str,
     doc_ctx: Option<&DocblockCtx<'a>>,
 ) -> LaravelMetadata {
     let factory_model = extract_factory_model(class.members.iter());
 
-    let custom_collection =
-        extract_custom_collection(&class.attribute_lists, use_generics, methods, content);
+    let custom_collection = extract_class_return_from_body(class.members.iter(), "newCollection")
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Collection" && name != "Illuminate\\Database\\Eloquent\\Collection"
+            })
+        })
+        .or_else(|| {
+            extract_custom_collection(&class.attribute_lists, use_generics, methods, content)
+        });
 
-    let custom_builder =
-        extract_custom_builder(&class.attribute_lists, use_generics, methods, content);
+    let custom_builder = extract_class_return_from_body(class.members.iter(), "newEloquentBuilder")
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Builder" && name != "Illuminate\\Database\\Eloquent\\Builder"
+            })
+        })
+        .or_else(|| extract_custom_builder(&class.attribute_lists, use_generics, methods, content));
+
+    let custom_factory = methods
+        .iter()
+        .find(|m| m.name == "newFactory")
+        .and_then(|m| m.return_type.as_ref())
+        .filter(|ty| {
+            ty.base_name().is_some_and(|name| {
+                name != "Factory" && name != "Illuminate\\Database\\Eloquent\\Factories\\Factory"
+            })
+        })
+        .cloned()
+        .or_else(|| extract_class_return_from_body(class.members.iter(), "newFactory"))
+        .or_else(|| extract_class_property(class.members.iter(), "factory"))
+        .or_else(|| {
+            extract_class_constant_attribute(&class.attribute_lists, content, b"UseFactory")
+                .map(|name| PhpType::named(atom(&name)))
+        });
 
     let policy_class = extract_use_policy_attribute(&class.attribute_lists, content);
 
-    let casts_definitions = extract_casts_definitions(class.members.iter(), content);
+    let (property_casts, method_casts) = extract_cast_sources(class.members.iter(), content);
+    let mut declared = 0;
+    if property_casts.is_some() {
+        declared |= model_declaration::CASTS_PROPERTY;
+    }
+    if method_casts.is_some() {
+        declared |= model_declaration::CASTS_METHOD;
+    }
+    let (casts_definitions, cast_sources) = match (property_casts, method_casts) {
+        (Some(property), Some(method)) => {
+            let merged = overlay_casts(&property, &method);
+            (merged, Some(Box::new(CastSources { property, method })))
+        }
+        (Some(only), None) | (None, Some(only)) => (only, None),
+        (None, None) => (Vec::new(), None),
+    };
 
     let belongs_to_many_pivots = extract_pivot_relations(class.members.iter(), content);
     let morph_type_columns = extract_morph_type_columns(class.members.iter(), content);
 
     let attributes_definitions = extract_attributes_definitions(class.members.iter(), content);
     let attribute_defaults = extract_attribute_defaults(class.members.iter(), content);
+    if declares_property(class.members.iter(), "attributes") {
+        declared |= model_declaration::ATTRIBUTES;
+    }
+    if declares_property(class.members.iter(), "dates") {
+        declared |= model_declaration::DATES;
+    }
 
-    let column_names = extract_column_names(class.members.iter(), content);
+    let (column_names, column_sources, column_lists) =
+        extract_column_names(class.members.iter(), content);
+    declared |= column_lists;
 
     let connection_name =
         extract_laravel_connection_attribute(&class.attribute_lists, content, doc_ctx)
@@ -1200,11 +1606,21 @@ pub(crate) fn extract_laravel_metadata<'a>(
     let has_get_key_name_method = methods
         .iter()
         .any(|m| m.name.eq_ignore_ascii_case("getKeyName"));
+    let unique_ids = methods
+        .iter()
+        .any(|m| m.name.eq_ignore_ascii_case("uniqueIds"))
+        .then(|| extract_unique_ids(class.members.iter(), content))
+        .flatten();
 
     let dates_definitions = extract_dates_definitions(class.members.iter(), content);
 
-    let (timestamps, created_at_name, updated_at_name) =
-        extract_timestamp_config(class.members.iter(), content);
+    let TimestampConfig {
+        timestamps,
+        created_at_name,
+        updated_at_name,
+        deleted_at_name,
+    } = extract_timestamp_config(class.members.iter(), content);
+    let soft_deletes = used_traits.iter().any(|t| is_soft_deletes_trait(t));
 
     // Gate the member walk on the already-extracted method list: all but
     // the handful of facades in a project declare no `getFacadeAccessor()`,
@@ -1216,13 +1632,17 @@ pub(crate) fn extract_laravel_metadata<'a>(
         .flatten();
 
     LaravelMetadata {
+        custom_factory,
         factory_model,
         custom_collection,
         casts_definitions,
+        cast_sources,
+        declared,
         dates_definitions,
         attributes_definitions,
         attribute_defaults,
         column_names,
+        column_sources,
         connection_name,
         table_name,
         has_get_connection_name_method,
@@ -1230,9 +1650,12 @@ pub(crate) fn extract_laravel_metadata<'a>(
         primary_key,
         key_type,
         has_get_key_name_method,
+        unique_ids,
         timestamps,
         created_at_name,
         updated_at_name,
+        soft_deletes,
+        deleted_at_name,
         custom_builder,
         policy_class,
         belongs_to_many_pivots,
@@ -1241,12 +1664,246 @@ pub(crate) fn extract_laravel_metadata<'a>(
     }
 }
 
+/// The [`model_declaration`] flags of `meta`, counting a non-empty list
+/// with no flag as declared.
+///
+/// Metadata built by hand rather than parsed fills in the lists without
+/// the flags; the lists alone are then the only record of a declaration.
+fn declared_flags(meta: &LaravelMetadata) -> u16 {
+    use model_declaration::*;
+    let mut flags = meta.declared;
+    if flags & (CASTS_PROPERTY | CASTS_METHOD) == 0 && !meta.casts_definitions.is_empty() {
+        flags |= CASTS_PROPERTY;
+    }
+    if !meta.dates_definitions.is_empty() {
+        flags |= DATES;
+    }
+    if !meta.attributes_definitions.is_empty() || !meta.attribute_defaults.is_empty() {
+        flags |= ATTRIBUTES;
+    }
+    if flags & COLUMN_LISTS == 0 && !meta.column_names.is_empty() {
+        flags |= FILLABLE;
+    }
+    flags
+}
+
+/// The `$casts` property and `casts()` method entries of `meta`, `None`
+/// for a source it does not declare.
+fn cast_parts(meta: &LaravelMetadata, flags: u16) -> (Option<&[CastEntry]>, Option<&[CastEntry]>) {
+    let property = flags & model_declaration::CASTS_PROPERTY != 0;
+    let method = flags & model_declaration::CASTS_METHOD != 0;
+    match (property, method, meta.cast_sources.as_deref()) {
+        (true, true, Some(sources)) => (Some(&sources.property), Some(&sources.method)),
+        (true, true, None) => (Some(&meta.casts_definitions), Some(&[])),
+        (true, false, _) => (Some(&meta.casts_definitions), None),
+        (false, true, _) => (None, Some(&meta.casts_definitions)),
+        (false, false, _) => (None, None),
+    }
+}
+
+/// Whether `meta` declares anything a subclass could inherit through
+/// [`inherit_model_metadata`].
+pub(crate) fn has_inheritable_model_metadata(meta: &LaravelMetadata) -> bool {
+    declared_flags(meta) != 0
+        || meta.primary_key.is_some()
+        || meta.key_type.is_some()
+        || meta.timestamps.is_some()
+        || meta.created_at_name.is_some()
+        || meta.updated_at_name.is_some()
+        || meta.soft_deletes
+        || meta.deleted_at_name.is_some()
+        || meta.connection_name.is_some()
+        || meta.table_name.is_some()
+        || meta.has_get_connection_name_method
+        || meta.has_get_table_method
+        || meta.has_get_key_name_method
+}
+
+/// Fill in the model configuration `child` does not declare from its
+/// parent's.
+///
+/// PHP hands a subclass every property and constant it does not
+/// redeclare, so `$fillable`, `$casts`, `$primaryKey`, `CREATED_AT` and
+/// the rest each come from the nearest class in the parent chain that
+/// declares them. Called once per parent while walking up the chain
+/// nearest-first, so a declaration a closer class already supplied is
+/// never overwritten. Each column list and each of `$casts` and `casts()`
+/// is inherited on its own: a subclass that redeclares `$hidden` still
+/// sees the parent's `$fillable`.
+pub(crate) fn inherit_model_metadata(child: &mut LaravelMetadata, parent: &LaravelMetadata) {
+    use model_declaration::*;
+    let child_flags = declared_flags(child);
+    let parent_flags = declared_flags(parent);
+    let inherited = parent_flags & !child_flags;
+
+    if inherited & (CASTS_PROPERTY | CASTS_METHOD) != 0 {
+        let (own_property, own_method) = cast_parts(child, child_flags);
+        let (parent_property, parent_method) = cast_parts(parent, parent_flags);
+        let property = own_property.or(parent_property).map(<[_]>::to_vec);
+        let method = own_method.or(parent_method).map(<[_]>::to_vec);
+        match (property, method) {
+            (Some(property), Some(method)) => {
+                child.casts_definitions = overlay_casts(&property, &method);
+                child.cast_sources = Some(Box::new(CastSources { property, method }));
+            }
+            (Some(only), None) | (None, Some(only)) => child.casts_definitions = only,
+            (None, None) => {}
+        }
+    }
+
+    if inherited & DATES != 0 {
+        child
+            .dates_definitions
+            .clone_from(&parent.dates_definitions);
+    }
+    if inherited & ATTRIBUTES != 0 {
+        child
+            .attributes_definitions
+            .clone_from(&parent.attributes_definitions);
+        child
+            .attribute_defaults
+            .clone_from(&parent.attribute_defaults);
+    }
+
+    let inherited_lists = inherited & COLUMN_LISTS;
+    if inherited_lists != 0 {
+        child
+            .column_sources
+            .resize(child.column_names.len(), child_flags & COLUMN_LISTS);
+        for (i, name) in parent.column_names.iter().enumerate() {
+            let lists = parent
+                .column_sources
+                .get(i)
+                .copied()
+                .unwrap_or(parent_flags & COLUMN_LISTS)
+                & inherited_lists;
+            if lists == 0 {
+                continue;
+            }
+            if let Some(pos) = child.column_names.iter().position(|n| n == name) {
+                child.column_sources[pos] |= lists;
+            } else {
+                child.column_names.push(name.clone());
+                child.column_sources.push(lists);
+            }
+        }
+    }
+
+    child.declared = child_flags | inherited;
+
+    fn inherit<T: std::clone::Clone>(own: &mut Option<T>, parent: &Option<T>) {
+        if own.is_none() {
+            own.clone_from(parent);
+        }
+    }
+    inherit(&mut child.primary_key, &parent.primary_key);
+    inherit(&mut child.key_type, &parent.key_type);
+    inherit(&mut child.timestamps, &parent.timestamps);
+    inherit(&mut child.created_at_name, &parent.created_at_name);
+    inherit(&mut child.updated_at_name, &parent.updated_at_name);
+    inherit(&mut child.deleted_at_name, &parent.deleted_at_name);
+    child.soft_deletes |= parent.soft_deletes;
+    inherit(&mut child.connection_name, &parent.connection_name);
+    inherit(&mut child.table_name, &parent.table_name);
+    child.has_get_connection_name_method |= parent.has_get_connection_name_method;
+    child.has_get_table_method |= parent.has_get_table_method;
+    child.has_get_key_name_method |= parent.has_get_key_name_method;
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use crate::Backend;
     use crate::atom::atom;
+
+    #[test]
+    fn casts_method_returning_a_single_line_array_keeps_its_last_entry() {
+        let src = r#"<?php
+class User {
+    protected function casts(): array {
+        return ['nickname' => 'string', 'is_admin' => 'boolean'];
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let laravel = classes[0].0.laravel().unwrap();
+        assert_eq!(
+            laravel.casts_definitions,
+            [
+                ("nickname".to_string(), "string".to_string()),
+                ("is_admin".to_string(), "boolean".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn class_based_cast_calls_keep_their_method_and_arguments() {
+        let src = r#"<?php
+class User {
+    protected function casts(): array {
+        return [
+            'statuses' => AsEnumCollection::of(OrderStatus::class),
+            'flavors' => AsEnumArrayObject::of(JamFlavor::class),
+            'options' => AsArrayObject::class,
+            'tags' => AsCollection::class,
+            'toppings' => AsCollection::of(Frosting::class),
+            'notes' => AsCollection::using(PostCollection::class),
+            'mapped' => AsCollection::using(PostCollection::class, Frosting::class),
+            'secrets' => AsEncryptedCollection::of(Frosting::class),
+            'directory' => AsStringable::class,
+            'uuid' => AsBinary::uuid(),
+            'ulid' => AsBinary::ulid(),
+            'binary' => AsBinary::of('uuid'),
+            'address' => Address::class.':nullable',
+            'joined' => AsEnumCollection::class.':'.OrderStatus::class,
+        ];
+    }
+}
+"#;
+        let classes = Backend::parse_php_versioned_with_namespaces(src, None);
+        let laravel = classes[0].0.laravel().unwrap();
+        assert_eq!(
+            laravel.casts_definitions,
+            [
+                (
+                    "statuses".to_string(),
+                    "AsEnumCollection::of:OrderStatus".to_string()
+                ),
+                (
+                    "flavors".to_string(),
+                    "AsEnumArrayObject::of:JamFlavor".to_string()
+                ),
+                ("options".to_string(), "AsArrayObject".to_string()),
+                ("tags".to_string(), "AsCollection".to_string()),
+                (
+                    "toppings".to_string(),
+                    "AsCollection::of:Frosting".to_string()
+                ),
+                (
+                    "notes".to_string(),
+                    "AsCollection::using:PostCollection".to_string()
+                ),
+                (
+                    "mapped".to_string(),
+                    "AsCollection::using:PostCollection,Frosting".to_string()
+                ),
+                (
+                    "secrets".to_string(),
+                    "AsEncryptedCollection::of:Frosting".to_string()
+                ),
+                ("directory".to_string(), "AsStringable".to_string()),
+                ("uuid".to_string(), "AsBinary::uuid".to_string()),
+                ("ulid".to_string(), "AsBinary::ulid".to_string()),
+                ("binary".to_string(), "AsBinary::of:uuid".to_string()),
+                ("address".to_string(), "Address:nullable".to_string()),
+                (
+                    "joined".to_string(),
+                    "AsEnumCollection:OrderStatus".to_string()
+                ),
+            ]
+        );
+    }
 
     #[test]
     fn laravel_model_table_and_connection_attributes_are_extracted() {

@@ -28,6 +28,170 @@ fn applies_to_model_subclass() {
     assert!(provider.applies_to(&user, &loader));
 }
 
+/// A model union is expanded model by model, so the one with a custom
+/// builder keeps it while the one without falls back — and an operator
+/// nested inside another type is rewritten where it sits.
+#[test]
+fn model_type_operators_preserve_unions_keys_and_nested_positions() {
+    let model = make_class(ELOQUENT_MODEL_FQN);
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
+    user.laravel_mut().custom_builder = Some(PhpType::named(atom("App\\Builders\\UserBuilder")));
+    let mut user_builder = make_class("App\\Builders\\UserBuilder");
+    user_builder.parent_class = Some(atom(ELOQUENT_BUILDER_FQN));
+    let mut post = make_class("App\\Models\\Post");
+    post.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
+    let loader = |name: &str| match name {
+        ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
+        ELOQUENT_BUILDER_FQN => Some(Arc::new(make_class(ELOQUENT_BUILDER_FQN))),
+        "App\\Models\\User" => Some(Arc::new(user.clone())),
+        "App\\Models\\Post" => Some(Arc::new(post.clone())),
+        "App\\Builders\\UserBuilder" => Some(Arc::new(user_builder.clone())),
+        _ => None,
+    };
+    assert_eq!(
+        expand_model_type(
+            &PhpType::parse("builder-of<App\\Models\\User|App\\Models\\Post>"),
+            &loader,
+        ),
+        PhpType::union(vec![
+            PhpType::generic(
+                "App\\Builders\\UserBuilder",
+                vec![PhpType::named(atom("App\\Models\\User"))]
+            ),
+            PhpType::generic(
+                ELOQUENT_BUILDER_FQN,
+                vec![PhpType::named(atom("App\\Models\\Post"))]
+            ),
+        ])
+    );
+    assert_eq!(
+        expand_model_type(
+            &PhpType::parse("list<collection-of<string, App\\Models\\User>>"),
+            &loader
+        ),
+        PhpType::list(PhpType::generic(
+            ELOQUENT_COLLECTION_FQN,
+            vec![PhpType::string(), PhpType::named(atom("App\\Models\\User"))]
+        )),
+    );
+    assert_eq!(
+        expand_model_type(&PhpType::parse("factory-of<App\\Models\\User>"), &loader),
+        PhpType::generic(
+            "Illuminate\\Database\\Eloquent\\Factories\\Factory",
+            vec![PhpType::named(atom("App\\Models\\User"))]
+        ),
+    );
+}
+
+/// Every operator answers with the framework's base class rather than
+/// leaving its pseudo-type standing, whenever the model cannot be loaded,
+/// is not an Eloquent model, or names a customisation that resolves to
+/// nothing.  A type that resolves to nothing types the subject as nothing;
+/// the base class still carries every method the framework declares.
+#[test]
+fn model_type_operators_fall_back_to_the_framework_base_classes() {
+    let model = make_class(ELOQUENT_MODEL_FQN);
+    let mut user = make_class("App\\Models\\User");
+    user.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
+    // Declared, but nothing in the project answers for either name.
+    user.laravel_mut().custom_builder = Some(PhpType::named(atom("App\\Builders\\Missing")));
+    user.laravel_mut().custom_collection = Some(PhpType::named(atom("App\\Collections\\Missing")));
+    let service = make_class("App\\Services\\NotAModel");
+    let loader = |name: &str| match name {
+        ELOQUENT_MODEL_FQN => Some(Arc::new(model.clone())),
+        "App\\Models\\User" => Some(Arc::new(user.clone())),
+        "App\\Services\\NotAModel" => Some(Arc::new(service.clone())),
+        _ => None,
+    };
+
+    let model_named = PhpType::named(atom(ELOQUENT_MODEL_FQN));
+    let user_named = PhpType::named(atom("App\\Models\\User"));
+    let array_key = PhpType::union(vec![PhpType::int(), PhpType::string()]);
+
+    // A customisation naming a class nothing can load.
+    assert_eq!(
+        expand_model_type(&PhpType::parse("builder-of<App\\Models\\User>"), &loader),
+        PhpType::generic(ELOQUENT_BUILDER_FQN, vec![user_named.clone()]),
+    );
+    assert_eq!(
+        expand_model_type(&PhpType::parse("collection-of<App\\Models\\User>"), &loader),
+        PhpType::generic(
+            ELOQUENT_COLLECTION_FQN,
+            vec![array_key.clone(), user_named.clone()]
+        ),
+    );
+    // No factory exists for the model, by convention or otherwise.
+    assert_eq!(
+        expand_model_type(&PhpType::parse("factory-of<App\\Models\\User>"), &loader),
+        PhpType::generic(
+            "Illuminate\\Database\\Eloquent\\Factories\\Factory",
+            vec![user_named.clone()]
+        ),
+    );
+    // A relation path naming a method the model does not declare keeps the
+    // declaring model it was written against.
+    assert_eq!(
+        expand_model_type(
+            &PhpType::parse("relation-of<App\\Models\\User, 'nothing'>"),
+            &loader
+        ),
+        PhpType::generic(
+            ELOQUENT_RELATION_FQN,
+            vec![model_named.clone(), user_named, PhpType::mixed()]
+        ),
+    );
+
+    // A model nothing can load, and one that is not an Eloquent model at
+    // all: neither settles a model, so the base classes stand alone.
+    for subject in ["App\\Models\\Ghost", "App\\Services\\NotAModel"] {
+        assert_eq!(
+            expand_model_type(&PhpType::parse(&format!("builder-of<{subject}>")), &loader),
+            PhpType::generic(ELOQUENT_BUILDER_FQN, vec![model_named.clone()]),
+            "builder-of<{subject}>",
+        );
+        assert_eq!(
+            expand_model_type(
+                &PhpType::parse(&format!("collection-of<string, {subject}>")),
+                &loader
+            ),
+            PhpType::generic(
+                ELOQUENT_COLLECTION_FQN,
+                vec![PhpType::string(), model_named.clone()]
+            ),
+            "collection-of<string, {subject}>",
+        );
+        assert_eq!(
+            expand_model_type(&PhpType::parse(&format!("factory-of<{subject}>")), &loader),
+            PhpType::generic(
+                "Illuminate\\Database\\Eloquent\\Factories\\Factory",
+                vec![model_named.clone()]
+            ),
+            "factory-of<{subject}>",
+        );
+        assert_eq!(
+            expand_model_type(
+                &PhpType::parse(&format!("relation-of<{subject}, 'posts'>")),
+                &loader
+            ),
+            PhpType::generic(
+                ELOQUENT_RELATION_FQN,
+                vec![model_named.clone(), model_named.clone(), PhpType::mixed()]
+            ),
+            "relation-of<{subject}, 'posts'>",
+        );
+    }
+
+    // An operator written without the arguments it needs.
+    assert_eq!(
+        expand_model_type(&PhpType::parse("relation-of<App\\Models\\User>"), &loader),
+        PhpType::generic(
+            ELOQUENT_RELATION_FQN,
+            vec![model_named.clone(), model_named, PhpType::mixed()]
+        ),
+    );
+}
+
 #[test]
 fn does_not_apply_to_non_model() {
     let provider = LaravelModelProvider;

@@ -2,9 +2,7 @@
 //! (`resolve('blade.compiler')`) and global facade class aliases (`\App`),
 //! both sourced by parsing the installed framework's own declarations.
 
-use crate::common::create_psr4_workspace;
-use tower_lsp::LanguageServer;
-use tower_lsp::lsp_types::*;
+use crate::common::{complete_labels_at_opened, create_psr4_workspace, open_php_at};
 
 const COMPOSER_JSON: &str = r#"{
     "autoload": {
@@ -117,37 +115,8 @@ async fn complete_labels(
     character: u32,
 ) -> Vec<String> {
     let (backend, dir) = create_psr4_workspace(COMPOSER_JSON, files);
-    let uri = Url::from_file_path(dir.path().join(open_path)).unwrap();
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: content.to_string(),
-            },
-        })
-        .await;
-
-    let result = backend
-        .completion(CompletionParams {
-            text_document_position: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            context: None,
-        })
-        .await
-        .unwrap();
-
-    let items = match result {
-        Some(CompletionResponse::Array(items)) => items,
-        Some(CompletionResponse::List(list)) => list.items,
-        _ => Vec::new(),
-    };
-    items.into_iter().map(|i| i.label).collect()
+    let uri = open_php_at(&backend, &dir, open_path, content).await;
+    complete_labels_at_opened(&backend, &uri, line, character).await
 }
 
 /// `resolve('blade.compiler')` binds the string to its concrete class, so the

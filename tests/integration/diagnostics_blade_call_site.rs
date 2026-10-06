@@ -8,7 +8,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{USER_MODEL_STUB, create_psr4_workspace, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -16,9 +16,6 @@ mod tests {
         "require": { "laravel/framework": "^11.0" },
         "autoload": { "psr-4": { "App\\": "app/", "Illuminate\\": "illuminate/" } }
     }"#;
-
-    const USER_CLASS: &str =
-        "<?php\nnamespace App\\Models;\nclass User { public string $email = ''; }\n";
 
     /// A template declaring `$title` (string) and `$user` (User).
     const PROFILE: &str = "@php\n\
@@ -52,7 +49,7 @@ class ViewServiceProvider
 "#;
 
     fn workspace(files: &[(&str, &str)]) -> (phpantom_lsp::Backend, tempfile::TempDir) {
-        let mut all = vec![("app/Models/User.php", USER_CLASS)];
+        let mut all = vec![("app/Models/User.php", USER_MODEL_STUB)];
         all.extend_from_slice(files);
         create_psr4_workspace(COMPOSER, &all)
     }

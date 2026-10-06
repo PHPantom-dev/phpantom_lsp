@@ -43,6 +43,7 @@ use crate::class_loader_memo;
 use crate::composer;
 use crate::definition::member::MemberKind;
 use crate::php_type::{PhpType, is_builtin_non_class_type};
+use crate::type_engine::resolver::{CtxLoaders, ResolutionCtx};
 use crate::types::{ClassInfo, FacadeAccessor, FileContext, FunctionInfo, PhpVersion};
 use crate::util::short_name;
 
@@ -167,6 +168,17 @@ impl Backend {
     ///
     /// Returns a shared `Arc<ClassInfo>` if found, or `None`.
     pub(crate) fn find_or_load_class(&self, class_name: &str) -> Option<Arc<ClassInfo>> {
+        self.find_or_load_class_with_aliases(class_name, true)
+    }
+
+    /// [`find_or_load_class`](Self::find_or_load_class), with Laravel's
+    /// facade class-alias table consulted only when `facade_aliases` is set.
+    /// The container string-binding table is always consulted.
+    fn find_or_load_class_with_aliases(
+        &self,
+        class_name: &str,
+        facade_aliases: bool,
+    ) -> Option<Arc<ClassInfo>> {
         if class_name == crate::virtual_members::laravel::CONFIGURED_DATE_CLASS_FQN {
             let configured = self.laravel_date_class.read().clone()?;
             let configured = configured
@@ -196,29 +208,18 @@ impl Backend {
         // real project class of the same name always wins, and non-class
         // strings like `blade.compiler` still resolve to their bound concrete
         // class.
-        self.resolve_laravel_alias(class_name)
+        if facade_aliases {
+            self.resolve_laravel_alias(class_name)
+        } else {
+            self.resolve_laravel_container_alias(class_name)
+        }
     }
 
     /// Like [`find_or_load_class`], but accepts a pre-parsed `PhpType`,
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
-        // The name search is memoised per thread on the interned type
-        // handle: the diagnostic pass asks for the same types millions of
-        // times, and every miss costs two case-insensitive hash lookups
-        // behind locks the whole worker pool shares.  Read the generation
-        // first so that a change landing mid-search retires the answer.
-        let generation = self.symbols.class_lookup_generation();
-        let mut loaded = match class_loader_memo::probe(self.symbols.id(), generation, ty) {
-            Some(memoised) => memoised?,
-            None => {
-                let found = ty
-                    .base_name()
-                    .and_then(|base| self.find_or_load_class_inner(base));
-                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
-                found?
-            }
-        };
+        let mut loaded = self.link_imported_type_aliases(self.find_indexed_class(ty)?);
         // The refinements below stay outside the memo: each depends on an
         // index of its own (the configured auth model, registered macros,
         // many-to-many targets) that keeps changing as files are indexed.
@@ -256,6 +257,75 @@ impl Backend {
         Some(loaded)
     }
 
+    /// The class `ty` names as indexed, before
+    /// [`find_or_load_class_typed`](Self::find_or_load_class_typed) links
+    /// its imported type aliases and refines it.
+    fn find_indexed_class(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
+        // Report the lookup to whoever is recording what a resolution
+        // depends on, before the memo below can answer it without touching
+        // the class index.  A name that finds nothing is reported too: it
+        // gains a declaration as readily as an existing one changes.
+        if let Some(base) = ty.base_name() {
+            crate::resolution_deps::record(base);
+        }
+        // The name search is memoised per thread on the interned type
+        // handle: the diagnostic pass asks for the same types millions of
+        // times, and every miss costs two case-insensitive hash lookups
+        // behind locks the whole worker pool shares.  Read the generation
+        // first so that a change landing mid-search retires the answer.
+        let generation = self.symbols.class_lookup_generation();
+        match class_loader_memo::probe(self.symbols.id(), generation, ty) {
+            Some(memoised) => memoised,
+            None => {
+                let found = ty
+                    .base_name()
+                    .and_then(|base| self.find_or_load_class_inner(base));
+                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
+                found
+            }
+        }
+    }
+
+    /// `class` with the type aliases it imports linked into its members.
+    ///
+    /// An imported alias names a class in another file, so it cannot be
+    /// expanded when the importer is parsed the way a local alias is.  The
+    /// linked copy is cached against this very `Arc` together with the
+    /// classes the imports were read from, so that editing either one
+    /// drops it (see `evict_fqn`).
+    fn link_imported_type_aliases(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        use crate::type_engine::types::aliases;
+        if !aliases::has_imported_type_aliases(&class) {
+            return class;
+        }
+        if let Some((linked, sources)) = self.resolved_class_cache.read().get_linked_aliases(&class)
+        {
+            // Whoever is recording what this lookup depends on depends on
+            // the source classes too, cached or not.
+            for source in sources {
+                crate::resolution_deps::record(source);
+            }
+            return linked;
+        }
+        let sources = std::cell::RefCell::new(Vec::new());
+        // The source classes are loaded unlinked: linking only reads their
+        // alias definitions, and two classes may import from each other.
+        let loader = |name: &str| {
+            sources.borrow_mut().push(name.to_string());
+            self.find_indexed_class(&PhpType::parse(name))
+        };
+        let (linked, complete) = aliases::link_imported_type_aliases(&class, &loader);
+        let result = linked.map_or_else(|| Arc::clone(&class), Arc::new);
+        if complete {
+            self.resolved_class_cache.write().insert_linked_aliases(
+                &class,
+                Arc::clone(&result),
+                sources.into_inner(),
+            );
+        }
+        result
+    }
+
     /// Add Laravel macro methods registered on `class` (by FQN).
     ///
     /// A no-op unless the project registered at least one
@@ -291,19 +361,40 @@ impl Backend {
     }
 
     /// Mark the reverse pivot index stale when `content` (at `uri`) affects
-    /// many-to-many relationships — either it now contains a `belongsToMany`/
-    /// `morphToMany` call, or it previously contributed one (an edit may have
+    /// many-to-many relationships — either it now looks like it declares
+    /// one, or it previously contributed one (an edit may have
     /// removed the last such relation). A no-op for unrelated edits.
     pub(crate) fn refresh_laravel_pivots(&self, uri: &str, content: &str) {
         use std::sync::atomic::Ordering;
         if self.laravel_pivots_dirty.load(Ordering::Relaxed) {
             return;
         }
-        let has_m2m = memchr::memmem::find(content.as_bytes(), b"belongsToMany").is_some()
-            || memchr::memmem::find(content.as_bytes(), b"morphToMany").is_some();
+        let has_m2m = crate::virtual_members::laravel::source_may_declare_pivot_relationship(
+            content.as_bytes(),
+        );
         if has_m2m || self.laravel_pivots.read().contributes(uri) {
             self.laravel_pivots_dirty.store(true, Ordering::Relaxed);
+            // A pivot accessor is attached to the *target* model, which the
+            // file declaring the relation never has to be looked up for, so a
+            // cached receiver resolution records no dependency on this index.
+            self.clear_resolved_member_files();
         }
+    }
+
+    /// Empty the resolved-class cache, and the caches whose entries were
+    /// derived from it.
+    ///
+    /// The cached receiver resolutions a reference search leaves behind are
+    /// kept across an edit by intersecting what each one consulted with what
+    /// the edit changed, and the *unconsulted* half of that, a parent read
+    /// out of this cache rather than loaded, is recovered from this cache's
+    /// reverse-dependency graph.  Emptying the cache discards that graph, so
+    /// there is no longer anything to recover it from and the resolutions go
+    /// with it.  Prefer `evict_fqn` over this wherever the changed classes
+    /// can be named.
+    pub(crate) fn clear_resolved_class_cache(&self) {
+        self.resolved_class_cache.write().clear();
+        self.clear_resolved_member_files();
     }
 
     /// Rebuild the reverse pivot index from every parsed class.
@@ -708,36 +799,28 @@ impl Backend {
         // Parse classes with per-class namespace tracking so that
         // multi-namespace files (e.g. PDO.php with both `namespace { }`
         // and `namespace Pdo { }`) resolve parent names correctly.
-        let classes_with_ns = Self::parse_php_versioned_with_namespaces(content, php_version);
+        let (mut classes_with_ns, blocks) = Self::parse_php_classes_by_block(content, php_version);
 
-        // Group classes by their enclosing namespace and resolve parent
-        // names once per group, mirroring the logic in `update_ast_inner`.
+        // Resolve parent names against each class's own namespace block
+        // (namespace and imports), mirroring the logic in `update_ast_inner`,
+        // so that classes in `namespace { }` are not polluted by a sibling
+        // `namespace Pdo { }` block.
+        Self::resolve_parent_class_names_by_block(
+            &mut classes_with_ns,
+            &blocks,
+            &file_use_map,
+            &file_namespace,
+        );
+        let single_namespace = {
+            let mut namespaces = classes_with_ns.iter().map(|(_, ns, _)| ns);
+            let first = namespaces.next();
+            namespaces.all(|ns| Some(ns) == first)
+        };
         let mut classes: Vec<ClassInfo> = Vec::with_capacity(classes_with_ns.len());
-        let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-        for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-            ns_groups.entry(ns.clone()).or_default().push(i);
-        }
-
-        // Flatten into a single Vec, preserving original order.
-        for (cls, _) in &classes_with_ns {
-            classes.push(cls.clone());
-        }
-
-        if ns_groups.len() <= 1 {
-            // Single namespace (common case): resolve with file namespace.
-            Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-        } else {
-            // Multi-namespace file: resolve each group with its own
-            // namespace context so that classes in `namespace { }` are
-            // not polluted by a sibling `namespace Pdo { }` block.
-            for (group_ns, indices) in &ns_groups {
-                let mut group: Vec<ClassInfo> =
-                    indices.iter().map(|&i| classes[i].clone()).collect();
-                Self::resolve_parent_class_names(&mut group, &file_use_map, group_ns);
-                for (j, &idx) in indices.iter().enumerate() {
-                    classes[idx] = group[j].clone();
-                }
-            }
+        let mut class_namespaces: Vec<Option<String>> = Vec::with_capacity(classes_with_ns.len());
+        for (cls, ns, _) in classes_with_ns {
+            classes.push(cls);
+            class_namespaces.push(ns);
         }
 
         // Set the per-class file_namespace so that classes loaded via
@@ -752,10 +835,9 @@ impl Backend {
         // the file-level namespace would label it `Pdo\PDO`.  The fallback is
         // only meaningful for single-namespace files, where a missing
         // per-class value means the namespace simply was not tracked.
-        let single_namespace = ns_groups.len() <= 1;
         for (i, cls) in classes.iter_mut().enumerate() {
             if cls.file_namespace.is_none() {
-                let class_ns = classes_with_ns[i].1.as_deref();
+                let class_ns = class_namespaces[i].as_deref();
                 cls.file_namespace = if single_namespace {
                     class_ns.or(file_namespace.as_deref())
                 } else {
@@ -763,7 +845,7 @@ impl Backend {
                 }
                 .map(crate::atom::atom);
             }
-            cls.cache_fqn();
+            cls.cache_fqn_in_uri(uri);
         }
 
         // Apply class stub patches for phpstorm-stubs deficiencies
@@ -988,6 +1070,11 @@ impl Backend {
     /// FQN via use-map, the namespace-qualified name).  The first match
     /// wins.
     pub fn find_or_load_function(&self, candidates: &[&str]) -> Option<FunctionInfo> {
+        // Every spelling tried is a name this resolution depends on, whether
+        // or not it is the one that answers: a function declared under one
+        // of the others later would win instead.
+        crate::resolution_deps::record_all(candidates);
+
         // ── Phase 1: Check global_functions (user code + already-cached stubs) ──
         {
             let fmap = self.symbols.global_functions.read();
@@ -1082,7 +1169,7 @@ impl Backend {
 
                 // Apply stub patches for phpstorm-stubs deficiencies
                 // (e.g. array_reduce returning `mixed` instead of a
-                // template-based type).  See stub_patches.rs.
+                // template-based type).  See `stub_patches`.
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }
@@ -1170,9 +1257,10 @@ impl Backend {
             if let Some(fqn) = file_use_map.get(name) {
                 return self.find_or_load_class(fqn);
             }
-            // Check local classes (same-file shortcut).
-            // In multi-namespace files, prefer the class whose
-            // file_namespace matches the current namespace context.
+            // Check local classes (same-file shortcut).  Only a class in
+            // the current namespace: in a file with several `namespace`
+            // blocks, a same-named class of another block is a different
+            // class.
             let lookup = short_name(name);
             let ns_matches = |c: &ClassInfo| match (&c.file_namespace, file_namespace) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -1181,12 +1269,7 @@ impl Backend {
             };
             let local_match = local_classes
                 .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c))
-                .or_else(|| {
-                    local_classes
-                        .iter()
-                        .find(|c| c.name.eq_ignore_ascii_case(lookup))
-                });
+                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c));
             if let Some(cls) = local_match {
                 return Some(Arc::clone(cls));
             }
@@ -1205,9 +1288,20 @@ impl Backend {
                 if let Some(cls) = self.find_or_load_class(&ns_qualified) {
                     return Some(cls);
                 }
+                // The facade alias table must not be reached from here:
+                // it is populated by a runtime `class_alias()` call that
+                // only ever lands the alias in the *global* namespace,
+                // so a bare `Cache` inside `App\Http` can never actually
+                // be the facade. The container table is exempt from that
+                // rule: its keys (`'sentry'`, `'blade.compiler'`) are
+                // arbitrary runtime strings a provider binds, never real
+                // class-name syntax, so no namespace ever applies to
+                // them in the first place.
+                return self.find_or_load_class_with_aliases(name, false);
             }
-            // Global scope: either no namespace context, or the
-            // namespace-qualified lookup above did not find a match.
+            // Global scope: no namespace context at all, so the alias
+            // fallback is exactly where PHP's own `class_alias()` would
+            // have put it.
             return self.find_or_load_class(name);
         }
 
@@ -1252,6 +1346,30 @@ impl Backend {
         file_namespace: &Option<String>,
     ) -> Option<FunctionInfo> {
         self.resolve_function_name_at(name, None, 0, file_use_map, file_namespace)
+    }
+
+    /// Whether discovery or full parsing has seen this exact function FQN.
+    ///
+    /// This is the allocation-free membership form used when a caller only
+    /// needs to know whether PHP's namespace-local function shadows a global
+    /// fallback. It deliberately does not trigger a lazy parse.
+    pub(crate) fn has_indexed_function(&self, fqn: &str) -> bool {
+        self.symbols.global_functions.read().get(fqn).is_some()
+            || self
+                .symbols
+                .autoload_function_index
+                .read()
+                .get(fqn)
+                .is_some()
+    }
+
+    /// Whether discovery or full parsing has seen this exact class FQN.
+    ///
+    /// Laravel's optional root facade aliases are used only when no real
+    /// global class owns the same name. This membership check does not lazy
+    /// load the class, keeping completion on that fallback allocation-free.
+    pub(crate) fn has_indexed_class(&self, fqn: &str) -> bool {
+        self.symbols.fqn_uri_index.read().get(fqn).is_some()
     }
 
     /// Resolve a function name, consulting mago-names' per-offset
@@ -1338,6 +1456,20 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one class-loader closure per `namespace` block of the file
+    /// behind `ctx`, for a consumer that resolves names across the whole
+    /// file rather than at one position.
+    ///
+    /// Each block's loader resolves source names against that block's own
+    /// imports and namespace; pick the one for a name with
+    /// [`PerBlock::at`](crate::types::PerBlock::at) at the name's offset.
+    pub(crate) fn class_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a> {
+        ctx.per_block(|use_map, namespace| self.class_loader_with(&ctx.classes, use_map, namespace))
     }
 
     /// Return a class-loader closure from individual file-context
@@ -1452,6 +1584,46 @@ impl Backend {
         }
     }
 
+    /// Build a [`ResolutionCtx`](crate::type_engine::resolver::ResolutionCtx)
+    /// for `cursor_offset` in a file.
+    ///
+    /// Fills the fields every request handler repeats: this backend and
+    /// its resolved-class cache, no forward-walker scope, and a cursor
+    /// that is neither inside a static method nor preserving `static`.
+    /// The handful of callers that differ override just those fields
+    /// with struct-update syntax, e.g. a diagnostic pass that already
+    /// knows whether the span sits in a static method:
+    ///
+    /// ```text
+    /// ResolutionCtx {
+    ///     is_in_static_method: symbol_map.is_in_static_method(span.start),
+    ///     ..self.resolution_ctx_at(current_class, classes, content, span.start, loaders)
+    /// }
+    /// ```
+    pub(crate) fn resolution_ctx_at<'a>(
+        &'a self,
+        current_class: Option<&'a ClassInfo>,
+        all_classes: &'a [Arc<ClassInfo>],
+        content: &'a str,
+        cursor_offset: u32,
+        loaders: CtxLoaders<'a>,
+    ) -> ResolutionCtx<'a> {
+        ResolutionCtx {
+            current_class,
+            all_classes,
+            content,
+            cursor_offset,
+            class_loader: loaders.class_loader,
+            backend: Some(self),
+            laravel_macro_this_resolver: loaders.laravel_macro_this_resolver,
+            resolved_class_cache: Some(&self.resolved_class_cache),
+            function_loader: loaders.function_loader,
+            scope_var_resolver: None,
+            is_in_static_method: false,
+            preserve_static: false,
+        }
+    }
+
     /// Return a function-loader closure bound to a [`FileContext`].
     ///
     /// This is the convenience wrapper for the common case where the
@@ -1463,6 +1635,17 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one function-loader closure per `namespace` block of the
+    /// file behind `ctx`; see [`class_loaders`](Self::class_loaders).
+    pub(crate) fn function_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
+        ctx.per_block(|use_map, namespace| {
+            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace)
+        })
     }
 
     /// Return a function-loader closure from individual file-context
@@ -1501,7 +1684,6 @@ impl Backend {
         cursor_offset: u32,
     ) -> Option<ClassInfo> {
         use crate::class_lookup::find_class_at_offset;
-        use crate::type_engine::resolver::ResolutionCtx;
 
         let ctx = self.file_context_at(uri, cursor_offset);
         if let Some(target) =
@@ -1523,20 +1705,17 @@ impl Backend {
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
-        let rctx = ResolutionCtx {
+        let rctx = self.resolution_ctx_at(
             current_class,
-            all_classes: &ctx.classes,
+            &ctx.classes,
             content,
             cursor_offset,
-            class_loader: &class_loader,
-            backend: Some(self),
-            laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-            resolved_class_cache: Some(&self.resolved_class_cache),
-            function_loader: Some(&function_loader),
-            scope_var_resolver: None,
-            is_in_static_method: false,
-            preserve_static: false,
-        };
+            CtxLoaders::new(
+                &class_loader,
+                &function_loader,
+                &laravel_macro_this_resolver,
+            ),
+        );
         crate::type_engine::variable::closure_resolution::find_closure_this_override(&rctx)
     }
 
@@ -1552,6 +1731,41 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<Option<String>> + 'a {
         self.constant_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Bundle the four cross-file resolvers a diagnostic collector hands
+    /// the type engine: function and constant lookup for `ctx`, plus the
+    /// Laravel config and translation resolvers.
+    ///
+    /// Bind the result to a local and call
+    /// [`LendsLoaders::loaders`](crate::type_engine::resolver::LendsLoaders::loaders)
+    /// for the [`Loaders`](crate::type_engine::resolver::Loaders) itself,
+    /// which borrows from it.
+    pub(crate) fn diagnostic_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a {
+        self.diagnostic_loaders_over(self.function_loader(ctx), self.constant_loader(ctx))
+    }
+
+    /// [`diagnostic_loaders`](Self::diagnostic_loaders), for a caller
+    /// that already holds the function and constant loaders and only
+    /// needs the two Laravel resolvers added.
+    pub(crate) fn diagnostic_loaders_over<'a, F, C>(
+        &'a self,
+        function_loader: F,
+        constant_loader: C,
+    ) -> impl crate::type_engine::resolver::LendsLoaders + 'a
+    where
+        F: Fn(&str, u32) -> Option<crate::types::FunctionInfo> + 'a,
+        C: Fn(&str, u32) -> Option<Option<String>> + 'a,
+    {
+        crate::type_engine::resolver::OwnedLoaders::new(
+            function_loader,
+            constant_loader,
+            move |key: &str| self.resolve_config_type(key),
+            move |key: &str| self.resolve_trans_type(key),
+        )
     }
 
     /// Return a constant-value-loader closure from individual file-context

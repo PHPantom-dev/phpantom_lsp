@@ -1117,3 +1117,57 @@ async fn subtypes_includes_unopened_children_when_some_are_indexed() {
         names
     );
 }
+
+// ─── Traits and stale edges ─────────────────────────────────────────────────
+//
+// Cases adapted from laravel-lsp's MIT-licensed test suite.
+
+#[tokio::test]
+async fn subtypes_of_a_trait_are_the_classes_that_use_it() {
+    let sluggable = "<?php\nnamespace App\\Concerns;\ntrait Sluggable {}\n";
+    let post = "<?php\nnamespace App\\Models;\nuse App\\Concerns\\Sluggable;\nclass Post {\n    use Sluggable;\n}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[
+            ("src/Concerns/Sluggable.php", sluggable),
+            ("src/Models/Post.php", post),
+        ],
+    );
+    let post_uri = Url::from_file_path(dir.path().join("src/Models/Post.php")).unwrap();
+    open_php(&backend, &post_uri, post).await;
+    let uri = Url::from_file_path(dir.path().join("src/Concerns/Sluggable.php")).unwrap();
+    open_php(&backend, &uri, sluggable).await;
+
+    let items = prepare_at(&backend, &uri, 2, 8).await;
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        item_names(&subtypes_of(&backend, &items[0]).await),
+        vec!["Post"]
+    );
+}
+
+#[tokio::test]
+async fn subtypes_forget_a_class_edited_to_extend_something_else() {
+    let base = "<?php\nnamespace App;\nclass Base {}\nclass Other {}\n";
+    let child = "<?php\nnamespace App;\nclass Child extends Base {}\n";
+    let (backend, dir) = create_psr4_workspace(
+        r#"{"autoload": {"psr-4": {"App\\": "src/"}}}"#,
+        &[("src/Base.php", base), ("src/Child.php", child)],
+    );
+    let child_uri = Url::from_file_path(dir.path().join("src/Child.php")).unwrap();
+    open_php(&backend, &child_uri, child).await;
+    let uri = Url::from_file_path(dir.path().join("src/Base.php")).unwrap();
+    open_php(&backend, &uri, base).await;
+
+    let items = prepare_at(&backend, &uri, 2, 7).await;
+    assert_eq!(
+        item_names(&subtypes_of(&backend, &items[0]).await),
+        vec!["Child"]
+    );
+
+    let edited = "<?php\nnamespace App;\nclass Child extends Other {}\n";
+    std::fs::write(dir.path().join("src/Child.php"), edited).unwrap();
+    open_php(&backend, &child_uri, edited).await;
+
+    assert!(subtypes_of(&backend, &items[0]).await.is_empty());
+}

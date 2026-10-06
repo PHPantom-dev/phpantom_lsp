@@ -1,4 +1,4 @@
-use crate::common::{create_psr4_workspace, create_test_backend};
+use crate::common::{create_psr4_workspace, create_test_backend, goto_definition_at, open_php};
 use phpantom_lsp::Backend;
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -1196,28 +1196,8 @@ async fn definition_at(
     line: u32,
     character: u32,
 ) -> Option<GotoDefinitionResponse> {
-    backend
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "php".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
-
-    backend
-        .goto_definition(GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier { uri: uri.clone() },
-                position: Position { line, character },
-            },
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-        })
-        .await
-        .unwrap()
+    open_php(backend, uri, text).await;
+    goto_definition_at(backend, uri, line, character).await
 }
 
 #[tokio::test]
@@ -1270,4 +1250,42 @@ async fn goto_definition_on_the_class_a_phpstan_import_type_names() {
         other => panic!("expected a location, got {other:?}"),
     };
     assert_eq!(location.range.start.line, 3, "got {location:?}");
+}
+
+/// Go-to-definition on a class name follows the import of the `namespace`
+/// block it is written in, not a sibling block's import of the same name.
+#[tokio::test]
+async fn test_goto_definition_follows_the_blocks_own_import() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///blocks.php").unwrap();
+    let text = r#"<?php
+namespace X {
+    class Foo {}
+}
+namespace Y {
+    class Foo {}
+}
+namespace A {
+    use X\Foo;
+    function a(Foo $f): void {}
+}
+namespace B {
+    use Y\Foo;
+    function b(Foo $f): void {}
+}
+"#;
+    open_php(&backend, &uri, text).await;
+
+    for (line, target_line) in [(9, 2), (13, 5)] {
+        let locations =
+            crate::common::definition_locations(goto_definition_at(&backend, &uri, line, 16).await);
+        assert_eq!(
+            locations
+                .iter()
+                .map(|l| l.range.start.line)
+                .collect::<Vec<_>>(),
+            vec![target_line],
+            "`Foo` on line {line} should jump to the class on line {target_line}"
+        );
+    }
 }

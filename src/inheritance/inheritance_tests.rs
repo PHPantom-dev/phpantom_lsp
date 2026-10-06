@@ -309,6 +309,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
             is_variadic: false,
             is_reference: false,
             closure_this_type: None,
+            param_out_type: None,
         }]
         .into(),
         return_type: Some(PhpType::parse("TValue")),
@@ -325,6 +326,7 @@ fn test_apply_substitution_to_method_modifies_return_and_params() {
         template_params: Vec::new(),
         template_param_bounds: Default::default(),
         template_bindings: Vec::new(),
+        template_param_defaults: Default::default(),
         has_scope_attribute: false,
         is_abstract: false,
         is_final: false,
@@ -392,6 +394,7 @@ fn test_extends_generics_propagate_through_parent_use_generics() {
             template_params: Vec::new(),
             template_param_bounds: Default::default(),
             template_bindings: Vec::new(),
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -676,4 +679,36 @@ fn method_tag_does_not_shadow_a_real_inherited_method() {
         mock.return_type.as_ref().unwrap().to_string(),
         "Foo&MockInterface"
     );
+}
+
+/// A failed search up a single-`extends` interface chain loads each
+/// interface once, even though the parser records the parent both in
+/// `interfaces` and in `parent_class`.
+#[test]
+fn find_declaring_ancestor_loads_each_interface_once() {
+    use std::cell::Cell;
+
+    const DEPTH: usize = 12;
+    let classes: Vec<Arc<ClassInfo>> = (0..DEPTH)
+        .map(|i| {
+            let mut iface = crate::test_fixtures::make_class(&format!("I{i}"));
+            iface.kind = ClassLikeKind::Interface;
+            if i + 1 < DEPTH {
+                let parent = atom(&format!("I{}", i + 1));
+                iface.parent_class = Some(parent);
+                iface.interfaces = vec![parent];
+            }
+            Arc::new(iface)
+        })
+        .collect();
+    let loads = Cell::new(0usize);
+    let loader = |name: &str| {
+        loads.set(loads.get() + 1);
+        classes.iter().find(|c| c.name == name).cloned()
+    };
+
+    let mut class = crate::test_fixtures::make_class("C");
+    class.interfaces = vec![atom("I0")];
+    assert!(find_declaring_ancestor(&class, &loader, &|_| false).is_none());
+    assert_eq!(loads.get(), DEPTH);
 }

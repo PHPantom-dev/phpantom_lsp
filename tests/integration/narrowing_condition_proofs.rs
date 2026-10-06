@@ -9,25 +9,13 @@
 //! an array element records the element that was checked, not the whole
 //! array's value type.
 
-use crate::common::create_test_backend;
+use crate::common::{
+    create_test_backend, create_test_backend_with_full_stubs, hover_at, hover_text,
+    slow_diagnostic_messages,
+};
 use phpantom_lsp::Backend;
-use tower_lsp::lsp_types::*;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-fn hover_at(backend: &Backend, uri: &str, content: &str, line: u32, character: u32) -> Hover {
-    backend.update_ast(uri, content);
-    backend
-        .handle_hover(uri, content, Position { line, character })
-        .expect("expected hover")
-}
-
-fn hover_text(hover: &Hover) -> &str {
-    match &hover.contents {
-        HoverContents::Markup(markup) => &markup.value,
-        _ => panic!("Expected MarkupContent"),
-    }
-}
 
 /// Hover on the variable that the marker line `// <-- here` points at.
 ///
@@ -40,7 +28,7 @@ fn hover_marked(backend: &Backend, uri: &str, content: &str) -> String {
         .expect("fixture should carry a `// <-- here` marker") as u32;
     let text = content.lines().nth(line as usize).unwrap();
     let column = text.find('$').expect("marked line should name a variable") as u32 + 1;
-    hover_text(&hover_at(backend, uri, content, line, column)).to_string()
+    hover_text(&hover_at(backend, uri, content, line, column).expect("expected hover")).to_string()
 }
 
 const SCAFFOLD: &str = r#"
@@ -169,6 +157,31 @@ function f(): void {{
 
     let text = hover_marked(&backend, uri, &content);
     assert!(text.contains("Image"), "expected Image, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the receiver cannot be null past the guard, got: {text}"
+    );
+}
+
+/// A chain that passes an `instanceof` check held an object, so its
+/// receivers were not null either.
+#[test]
+fn nullsafe_instanceof_guard_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_instanceof.php";
+    let content = r#"<?php
+class Journey {}
+class Tier { public ?Journey $journey = null; }
+function f(?Tier $tier): void {
+    if (!$tier?->journey instanceof Journey) {
+        return;
+    }
+    $tier; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("Tier"), "expected Tier, got: {text}");
     assert!(
         !text.contains("null"),
         "the receiver cannot be null past the guard, got: {text}"
@@ -524,6 +537,27 @@ function f(array $m): void {
     );
 }
 
+/// A variable index can address any entry of a constant shape, so a guard
+/// through one keeps the union of the shape's values rather than `mixed`.
+#[test]
+fn isset_guard_on_a_shape_read_with_a_variable_key_keeps_the_element_type() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_shape_dynamic_key.php";
+    let content = r#"<?php
+class P { public int $id = 0; }
+function f(P $a, P $b, int $k): void {
+    $g = [$a];
+    $g[] = $b;
+    if (!isset($g[$k])) { return; }
+    $x = $g[$k];
+    $x; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("$x = P"), "expected P, got: {text}");
+}
+
 // ─── An optional shape key may not be there at all ─────────────────────────
 
 /// Reading a key the shape marks optional yields the `null` PHP gives for an
@@ -548,7 +582,7 @@ function f(array $frame): void {
         "the key may be absent, and reading a missing offset is null: {text}"
     );
 
-    let required = hover_at(&backend, uri, content, 3, 5);
+    let required = hover_at(&backend, uri, content, 3, 5).expect("expected hover");
     let required = hover_text(&required);
     assert!(
         !required.contains("null"),
@@ -655,6 +689,208 @@ function f(array $frame): void {
     assert!(
         text.contains("null") || text.contains("?string"),
         "the value itself may still be null: {text}"
+    );
+}
+
+/// A key held in a variable proves as much as the literal it holds, and a
+/// failed check drops the optional key from the shape.
+#[test]
+fn array_key_exists_with_a_variable_key_marks_the_shape_key() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_variable_key.php";
+    let content = r#"<?php
+/** @param array{0: int, 1?: string} $shape */
+function f(array $shape): void {
+    $k = 1;
+    if (!array_key_exists($k, $shape)) {
+        $shape; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{int}") || text.contains("array{0: int}"),
+        "the missing key is gone from the shape: {text}"
+    );
+}
+
+/// Whatever key `array_key_exists()` found, the array holding it is not
+/// the `[]` a loop's first pass starts from, so reading the key back does
+/// not give the `null` an empty array would.
+#[test]
+fn array_key_exists_with_an_unknown_key_rules_out_the_empty_array() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_unknown_key.php";
+    let content = r#"<?php
+function f(array $items, array $counts): void {
+    $results = [];
+    foreach ($items as $item) {
+        foreach ($counts as $n) {
+            $key = $item->key();
+            if (array_key_exists($key, $results)) {
+                $row = $results[$key];
+                $row; // <-- here
+                $results[$key]['count'] += $n;
+            } else {
+                $results[$key] = ['count' => $n, 'item' => $item];
+            }
+        }
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("count"),
+        "expected the row shape, got: {text}"
+    );
+    assert!(
+        !text.contains("null"),
+        "the key is known to be present: {text}"
+    );
+}
+
+/// A write through the found key updates the element that is there
+/// rather than creating one, so the array after the loop has no variant
+/// holding only the written key.
+#[test]
+fn array_key_exists_with_an_unknown_key_writes_into_the_existing_element() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_unknown_key_write.php";
+    let content = r#"<?php
+function f(array $items, array $counts): void {
+    $results = [];
+    foreach ($items as $item) {
+        foreach ($counts as $n) {
+            if ($item->matches($n)) {
+                $key = $item->key();
+                if (array_key_exists($key, $results)) {
+                    $results[$key]['count'] += $n;
+                } else {
+                    $results[$key] = ['count' => $n, 'item' => $item];
+                }
+            }
+        }
+    }
+    $results; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("item: mixed"),
+        "expected the row shape, got: {text}"
+    );
+    assert!(
+        !text.contains("array{count: int|float}"),
+        "no element holds only the written key: {text}"
+    );
+}
+
+/// A successful `isset()` on an offset proves the key is one of the keys
+/// the array holds.
+#[test]
+fn isset_on_an_offset_narrows_the_key_to_the_array_keys() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_key_domain.php";
+    let content = r#"<?php
+function f(string $s): void {
+    $arr = ['a' => 1, 'b' => 2, 3 => 3];
+    if (isset($arr[$s])) {
+        $s; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("'3'|'a'|'b'") || text.contains("'a'|'b'|'3'"),
+        "expected the array's keys as strings, got: {text}"
+    );
+}
+
+/// `array_key_exists()` narrows the key to the array's declared key type,
+/// so passing it on as that type is not an error.
+#[test]
+fn array_key_exists_narrows_the_key_to_the_declared_key_type() {
+    let backend = create_test_backend();
+    let uri = "file:///key_exists_key_type.php";
+    let content = r#"<?php
+function takesString(string $s): void {}
+/** @param array<string, int> $values */
+function g(int|string $key, array $values): void {
+    if (array_key_exists($key, $values)) {
+        takesString($key);
+    }
+}
+"#;
+
+    let errors = argument_type_errors(&backend, uri, content);
+    assert!(errors.is_empty(), "unexpected errors: {errors:?}");
+}
+
+/// Writing through a key the check narrowed to the shape's keys keeps the
+/// shape rather than widening it to `array<K, V>`.
+#[test]
+fn writing_through_a_narrowed_key_keeps_the_shape() {
+    let backend = create_test_backend();
+    let uri = "file:///isset_key_write.php";
+    let content = r#"<?php
+function f(string $glue): void {
+    $seen = ['|' => false, '&' => false];
+    assert(isset($seen[$glue]));
+    $seen[$glue] = true;
+    $seen; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("array{'|': bool, '&': bool}"),
+        "expected the shape to survive the write, got: {text}"
+    );
+}
+
+/// A check compared against `true` proves what the check does.
+#[test]
+fn a_check_compared_to_true_narrows_like_the_check() {
+    let backend = create_test_backend();
+    let uri = "file:///check_identical_true.php";
+    let content = r#"<?php
+/** @param list<int> $haystack */
+function f(?int $x, array $haystack): void {
+    if (in_array($x, $haystack, true) === true) {
+        $x; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("int") && !text.contains("?int") && !text.contains("null"),
+        "expected int, got: {text}"
+    );
+}
+
+/// Failing `=== true` proves the check failed only when the check can
+/// return nothing else truthy.
+#[test]
+fn a_check_not_identical_to_false_narrows_only_a_boolean_check() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///check_not_identical_false.php";
+    let content = r#"<?php
+function f(int|string $x): void {
+    if (is_string($x) !== false) {
+        $x; // <-- here
+    }
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(
+        text.contains("string") && !text.contains("int"),
+        "expected string, got: {text}"
     );
 }
 
@@ -915,17 +1151,7 @@ function accept(Agreement $agreement): void {}
 /// Run the slow diagnostic pipeline and keep the argument-type errors a
 /// lost narrowing produces.
 fn argument_type_errors(backend: &Backend, uri: &str, php: &str) -> Vec<String> {
-    backend.update_ast(uri, php);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, php, &mut out);
-    out.iter()
-        .filter(|d| {
-            d.code.as_ref().is_some_and(
-                |c| matches!(c, NumberOrString::String(s) if s == "type_mismatch_argument"),
-            )
-        })
-        .map(|d| d.message.clone())
-        .collect()
+    slow_diagnostic_messages(backend, uri, php, "type_mismatch_argument")
 }
 
 /// The guard names only the chain's *result*, but a null `$agreement`
@@ -1532,7 +1758,7 @@ function f(int $offsetValue, int $max): void {
 
     let text = hover_marked(&backend, uri, content);
     assert!(
-        text.contains("array{int}"),
+        text.contains("array{int}") || text.contains("array{0: int}"),
         "both paths leave an int, got: {text}"
     );
 }
@@ -2272,6 +2498,71 @@ function probe(array $xs): void {
     );
 }
 
+/// A `count()` check on an entry of a union reads the entry off every
+/// member of the union. Taking it from the shape member alone left
+/// `$z['a']` as `array{}`, so ruling the empty array out left `never`.
+#[test]
+fn a_count_guard_on_an_entry_of_a_union_reads_every_member() {
+    let backend = create_test_backend();
+    let uri = "file:///count_union_entry.php";
+    let content = r#"<?php
+/** @param array{a: array{}}|non-empty-array<string, non-empty-list<string>> $z */
+function probe(array $z): void {
+    if (count($z['a']) === 0) {
+        return;
+    }
+    $first = $z['a'];
+    echo $first; // <-- here
+}
+"#;
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("$first = non-empty-list<string>"),
+        "got: {hover}"
+    );
+}
+
+/// Spreading an array a loop filled through a dynamic key, once `count()`
+/// checks have ruled its empty entries out, passes the values the loop put
+/// there, so the call returns what it declares. Iterating the grouped
+/// arrays hands the checks one union to read the entries from.
+#[test]
+fn a_spread_of_an_array_filled_through_a_dynamic_key_is_not_never() {
+    let backend = create_test_backend();
+    let uri = "file:///count_spread_dynamic_key.php";
+    let content = r#"<?php
+class Type {
+    public function equals(Type $other): bool { return true; }
+    public static function union(Type ...$types): Type { return $types[0]; }
+}
+class ConstantType extends Type {}
+/** @return Type[] */
+function flatten(Type $t): array { return [$t]; }
+function probe(Type $a, Type $b): void {
+    $constants = ['a' => [], 'b' => []];
+    $others = ['a' => [], 'b' => []];
+    foreach (['a' => flatten($a), 'b' => flatten($b)] as $key => $types) {
+        foreach ($types as $type) {
+            if ($type instanceof ConstantType) {
+                $constants[$key][] = $type;
+            }
+        }
+    }
+    foreach ([$constants, $others] as $grouped) {
+        if (count($grouped['a']) === 0) {
+            continue;
+        } elseif (count($grouped['b']) === 0) {
+            continue;
+        }
+        $aTypes = Type::union(...$grouped['a']);
+        $aTypes->equals(Type::union(...$grouped['b']));
+    }
+}
+"#;
+    let errors = slow_diagnostic_messages(&backend, uri, content, "scalar_member_access");
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
 /// A bound `count()` cannot fall below says nothing: `count($xs) < 5` is
 /// true of the empty array too.
 #[test]
@@ -2775,11 +3066,10 @@ function f(bool $isI): void {
     assert_eq!(text, "```php\n<?php\n$isI = false\n```");
 }
 
-/// Only the boolean half is refined. A falsy `string` is falsy without
-/// being `false`, and PHP has no narrower spelling for it than `string`,
-/// so the rest of the union survives untouched.
+/// Each member keeps its own falsy values: the boolean half is `false`,
+/// and a falsy `string` is one of the two strings PHP treats as false.
 #[test]
-fn a_falsy_branch_keeps_the_members_it_cannot_refine() {
+fn a_falsy_branch_keeps_each_members_falsy_values() {
     let backend = create_test_backend();
     let uri = "file:///bool_union_else.php";
     let content = r#"<?php
@@ -2792,7 +3082,7 @@ function f($v): void {
 }
 "#;
     let text = hover_marked(&backend, uri, content);
-    assert_eq!(text, "```php\n<?php\n$v = false|string\n```");
+    assert_eq!(text, "```php\n<?php\n$v = false|''|'0'\n```");
 }
 
 /// A `while` runs until its subject is falsy, so a boolean loop condition
@@ -2898,7 +3188,7 @@ function f($v): void {
 }
 "#;
     let text = hover_marked(&backend, uri, content);
-    assert_eq!(text, "```php\n<?php\n$v = string\n```");
+    assert_eq!(text, "```php\n<?php\n$v = ''|'0'\n```");
 }
 
 // ─── Ruling one leg of a disjunction out leaves the other ──────────────────
@@ -3178,4 +3468,333 @@ function f(?Customer $customer): void {
 "#;
     let text = hover_marked(&backend, uri, content);
     assert_eq!(text, "```php\n<?php\n$customer = null|Customer\n```");
+}
+
+// ─── A check against a class that cannot be loaded ─────────────────────────
+
+/// The class still has a name: the branch holds it, the `else` drops it,
+/// and the variable keeps every alternative once the chain joins.
+#[test]
+fn instanceof_an_unloadable_class_keeps_its_name() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Foo {}
+class Other {}
+function f(): void {
+    /** @var Foo|Missing|Other $x */
+    $x = make();
+    if ($x instanceof Foo) {
+    } elseif ($x instanceof Missing) {
+        $x; // <-- here
+    } else {
+        $x;
+    }
+    $x;
+}
+"#;
+    let text = hover_marked(&backend, "file:///unloadable_branch.php", content);
+    assert!(
+        text.contains("Missing") && !text.contains("Other") && !text.contains("Foo"),
+        "expected Missing, got: {text}"
+    );
+
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(
+            &hover_at(
+                &backend,
+                "file:///unloadable_branch.php",
+                content,
+                line as u32,
+                column,
+            )
+            .expect("expected hover"),
+        )
+        .to_string()
+    };
+    let else_text = hover_line(10);
+    assert!(
+        else_text.contains("Other") && !else_text.contains("Missing"),
+        "expected Other in the else branch, got: {else_text}"
+    );
+    let joined = hover_line(12);
+    assert!(
+        joined.contains("Foo") && joined.contains("Missing") && joined.contains("Other"),
+        "expected every alternative after the join, got: {joined}"
+    );
+}
+
+// ─── A condition stored in a variable ──────────────────────────────────────
+
+/// A boolean assigned from a condition stands for it: testing the boolean
+/// narrows what the condition would have, and writing a subject drops it.
+#[test]
+fn a_stored_condition_narrows_where_the_boolean_is_tested() {
+    let backend = create_test_backend_with_full_stubs();
+    let content = r#"<?php
+interface Server { public function ok(): bool; }
+function f(object $c, ?int $limit, int $count, array|string $v): void {
+    $ok = $c instanceof Server ? $c->ok() : false;
+    $show = $limit !== null && $count > $limit;
+    $isArray = is_array($v);
+    if ($ok && $show && $isArray) {
+        $c;
+        $limit;
+        $v;
+    }
+    $v = 'x';
+    if ($isArray) {
+        $v;
+    }
+}
+"#;
+    let uri = "file:///stored_condition.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let c = hover_line(7);
+    assert!(c.contains("Server"), "expected Server, got: {c}");
+    let limit = hover_line(8);
+    assert!(
+        limit.contains("int") && !limit.contains("null") && !limit.contains("?int"),
+        "expected int, got: {limit}"
+    );
+    let v = hover_line(9);
+    assert!(
+        v.contains("array") && !v.contains("string"),
+        "expected array, got: {v}"
+    );
+    let rewritten = hover_line(13);
+    assert!(
+        rewritten.contains("'x'") || rewritten.contains("string"),
+        "writing the subject drops the stored proof, got: {rewritten}"
+    );
+}
+
+/// A stored check on a property narrows the property, whether it is one
+/// check or a conjunction across two objects.
+#[test]
+fn a_stored_condition_narrows_the_property_it_checks() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Unsealed {}
+interface Type {}
+class Shape implements Type {
+    /** @var array{Unsealed, Unsealed}|null */
+    private ?array $unsealed = null;
+    public function f(Type $type): void {
+        if (!$type instanceof self) { return; }
+        $both = $this->unsealed !== null && $type->unsealed !== null;
+        $one = $this->unsealed !== null;
+        if ($both) {
+            [, $mine] = $this->unsealed;
+            [, $theirs] = $type->unsealed;
+        }
+        if ($one) {
+            [$single] = $this->unsealed;
+        }
+        $this->unsealed = null;
+        if ($one) {
+            $rewritten = $this->unsealed;
+        }
+    }
+}
+"#;
+    let uri = "file:///stored_property_condition.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    for (line, name) in [(11, "$mine"), (12, "$theirs"), (15, "$single")] {
+        let hover = hover_line(line);
+        assert!(
+            hover.contains("Unsealed") && !hover.contains("null"),
+            "expected {name} to be Unsealed, got: {hover}"
+        );
+    }
+    let rewritten = hover_line(19);
+    assert!(
+        !rewritten.contains("Unsealed"),
+        "writing the property drops the stored proof, got: {rewritten}"
+    );
+}
+
+// ─── `is_a()` ──────────────────────────────────────────────────────────────
+
+/// A class held in a `class-string<Foo>` variable narrows as the literal
+/// `Foo::class` does, a narrower class-string survives the check, and
+/// `allow_string` keeps the class-name half of a `mixed` subject.
+#[test]
+fn is_a_reads_class_string_variables_and_keeps_narrower_subjects() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Foo {}
+class Bar extends Foo {}
+/**
+ * @param class-string<Foo> $cs
+ * @param class-string<Bar> $b
+ * @param mixed $m
+ */
+function f(object $o, string $cs, string $b, $m): void {
+    if (is_a($o, $cs)) {
+        $o;
+    }
+    if (is_a($b, Foo::class, true)) {
+        $b;
+    }
+    if (is_a($m, Foo::class, true)) {
+        $m;
+    }
+}
+"#;
+    let uri = "file:///is_a_forms.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let o = hover_line(10);
+    assert!(
+        o.contains("Foo") && !o.contains("object"),
+        "expected Foo, got: {o}"
+    );
+    let b = hover_line(13);
+    assert!(
+        b.contains("class-string<Bar>"),
+        "expected class-string<Bar>, got: {b}"
+    );
+    let m = hover_line(16);
+    assert!(
+        m.contains("Foo|class-string<Foo>"),
+        "expected Foo|class-string<Foo>, got: {m}"
+    );
+}
+
+// ─── Loose comparisons ─────────────────────────────────────────────────────
+
+/// `==` against a literal narrows where it means the same as `===`, and a
+/// numeric string does not pin a string subject.
+#[test]
+fn a_loose_comparison_narrows_where_it_is_an_identity() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/** @param 'one'|'two' $s */
+function f(string $s, float $x, string $t, array $a): void {
+    if ($s == 'one') {
+        $s;
+    } else {
+        $s;
+    }
+    if ($x == 3.5) {
+        $x;
+    }
+    if ($t == '1') {
+        $t;
+    }
+    if ($a == []) {
+        $a;
+    }
+}
+"#;
+    let uri = "file:///loose_comparison.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let one = hover_line(4);
+    assert!(
+        one.contains("'one'") && !one.contains("'two'"),
+        "got: {one}"
+    );
+    let two = hover_line(6);
+    assert!(
+        two.contains("'two'") && !two.contains("'one'"),
+        "got: {two}"
+    );
+    let x = hover_line(9);
+    assert!(x.contains("3.5"), "expected 3.5, got: {x}");
+    let t = hover_line(12);
+    assert!(
+        t.contains("string") && !t.contains("'1'"),
+        "' 1' == '1' holds too, so the string stays: {t}"
+    );
+    let a = hover_line(15);
+    assert!(a.contains("array{}"), "expected array{{}}, got: {a}");
+}
+
+// ─── `count()` pinned to one size ──────────────────────────────────────────
+
+/// A list whose `count()` equals a written size, or the length of a fixed
+/// shape, has exactly that many entries.
+#[test]
+fn a_count_check_gives_a_list_its_length() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+/**
+ * @param list<int> $xs
+ * @param array{int, int} $pair
+ * @param list<string> $ys
+ */
+function f(array $xs, array $pair, array $ys): void {
+    if (count($xs) === 3) {
+        $xs;
+    }
+    if (count($pair) == count($ys)) {
+        $ys;
+    }
+}
+"#;
+    let uri = "file:///count_size.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    let xs = hover_line(8);
+    assert!(xs.contains("array{int, int, int}"), "got: {xs}");
+    let ys = hover_line(11);
+    assert!(ys.contains("array{string, string}"), "got: {ys}");
+}
+
+// ─── An assignment on the right of `&&`/`||` sees what the left proved ─────
+
+/// `$e !== null && $x = $e` narrows `$e` for the assignment's right-hand
+/// side, so `$x` ends up `Exception`, not `?Exception`.
+#[test]
+fn an_and_chain_assignment_sees_the_left_operands_proof() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(?Exception $e): void {
+    $e !== null && $x = $e;
+    $x; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, "file:///and_assignment_narrowing.php", content);
+    assert_eq!(text, "```php\n<?php\n$x = Exception\n```");
+}
+
+/// The mirror case for `||`: the right operand only runs when the left
+/// operand is false, so the assignment sees the *inverse* of what the left
+/// operand proved.
+#[test]
+fn an_or_chain_assignment_sees_the_left_operands_inverse_proof() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(?Exception $e): void {
+    $e === null || $x = $e;
+    $x; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, "file:///or_assignment_narrowing.php", content);
+    assert_eq!(text, "```php\n<?php\n$x = Exception\n```");
 }

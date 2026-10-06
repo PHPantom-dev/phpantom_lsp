@@ -4,7 +4,7 @@
 //! the target class: it appears in completion, resolves for member access,
 //! and is not flagged as an unknown member.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_php_str};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -63,10 +63,6 @@ fn workspace_files(consumer: &str) -> (phpantom_lsp::Backend, tempfile::TempDir)
     )
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
-
 #[tokio::test]
 async fn macro_appears_in_member_completion() {
     let consumer = "\
@@ -81,13 +77,13 @@ class Consumer {
 ";
     let (backend, _dir) = workspace_files(consumer);
     // Opening the provider registers the macro in the index.
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_PHP,
     )
     .await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -139,13 +135,13 @@ class Consumer {
 }
 ";
     let (backend, _dir) = workspace_files(consumer);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_RETURNS_THIS_PHP,
     )
     .await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -193,7 +189,7 @@ class Consumer {
 }
 ";
     let (backend, _dir) = workspace_files(consumer);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_PHP,
@@ -238,8 +234,8 @@ class Consumer {
 ";
     let (backend, _dir) = workspace_files(consumer);
     let provider_uri = "file:///src/Providers/AppServiceProvider.php";
-    open(&backend, provider_uri, PROVIDER_PHP).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, provider_uri, PROVIDER_PHP).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .goto_definition(GotoDefinitionParams {
@@ -325,7 +321,7 @@ class Consumer {
     // Full indexing pass: the vendor scan indexes the provider and the macro
     // index scans its registrations. The provider is never opened.
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -375,7 +371,7 @@ class Consumer {
 }
 ";
     let (backend, _dir) = workspace_files(consumer);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_PHP,
@@ -460,7 +456,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -561,7 +557,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -643,8 +639,8 @@ class Consumer {
         ],
     );
 
-    open(&backend, "file:///src/ConfidentialScope.php", scope).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/ConfidentialScope.php", scope).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -750,7 +746,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -864,9 +860,9 @@ class Consumer {
     let provider_uri = Url::from_file_path(dir.path().join("src/Providers/AppServiceProvider.php"))
         .unwrap()
         .to_string();
-    open(&backend, &provider_uri, provider_after).await;
+    open_php_str(&backend, &provider_uri, provider_after).await;
 
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
     let result = backend
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
@@ -913,13 +909,13 @@ class Consumer {
 }
 ";
     let (backend, _dir) = workspace_files(consumer);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_PHP,
     )
     .await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .hover(HoverParams {
@@ -976,13 +972,13 @@ class Consumer {
             ("src/Consumer.php", consumer),
         ],
     );
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/AppServiceProvider.php",
         PROVIDER_RETURNS_THIS_PHP,
     )
     .await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .hover(HoverParams {
@@ -1080,7 +1076,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -1144,7 +1140,7 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
 
     let uri = "file:///src/Consumer.php";
-    open(&backend, uri, consumer).await;
+    open_php_str(&backend, uri, consumer).await;
     backend.update_ast(uri, consumer);
     let mut diagnostics = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, consumer, &mut diagnostics);
@@ -1192,7 +1188,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .goto_definition(GotoDefinitionParams {
@@ -1252,7 +1248,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .hover(HoverParams {
@@ -1348,7 +1344,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     // Hover on `toAssoc` in `$c->toAssoc('id', 'name')` (name starts at col 19).
     let hover = backend
@@ -1453,7 +1449,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     // Hover on `makeWidget` in `$c->makeWidget()` (name starts at col 12).
     let hover = backend
@@ -1580,7 +1576,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -1663,7 +1659,7 @@ class Consumer {
     backend.initialized(InitializedParams {}).await;
 
     let uri = "file:///src/Consumer.php";
-    open(&backend, uri, consumer).await;
+    open_php_str(&backend, uri, consumer).await;
     backend.update_ast(uri, consumer);
     let mut diagnostics = Vec::new();
     backend.collect_unknown_member_diagnostics(uri, consumer, &mut diagnostics);
@@ -1725,7 +1721,7 @@ class Consumer {
     );
 
     backend.initialized(InitializedParams {}).await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {

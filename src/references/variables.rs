@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use tower_lsp::lsp_types::{Location, Range};
 
 use crate::symbol_map::{SelfStaticParentKind, SymbolKind, VarDefKind};
-use crate::text_position::{offset_to_position, position_to_offset};
+use crate::text_position::LineIndex;
 use crate::types::ClassInfo;
 
 impl Backend {
@@ -90,7 +90,27 @@ impl Backend {
         // scope plus every nested closure/arrow-function scope that
         // can see the variable (via explicit `use` or implicit arrow
         // capture) without being shadowed.
-        let reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        let mut reachable_scopes = Self::collect_capture_scopes(symbol_map, var_name, scope_start);
+        // `global $var` binds a function's `$var` to the file's top-level
+        // `$var`, so the program scope and every scope that declares the
+        // global are one variable.
+        let global_decl_scopes = symbol_map
+            .var_defs
+            .iter()
+            .filter(|d| d.name == var_name && d.kind == VarDefKind::GlobalDecl)
+            .map(|d| d.scope_start);
+        if scope_start == 0 || global_decl_scopes.clone().any(|s| s == scope_start) {
+            for scope in std::iter::once(0).chain(global_decl_scopes) {
+                if !reachable_scopes.contains(&scope) {
+                    reachable_scopes
+                        .extend(Self::collect_capture_scopes(symbol_map, var_name, scope));
+                }
+            }
+        }
+        let lines = LineIndex::new(content);
+        // The start offset of every location pushed so far, so the
+        // declaration pass below skips a token the span pass already found.
+        let mut seen_offsets: HashSet<u32> = HashSet::new();
 
         for span in &symbol_map.spans {
             let name = match &span.kind {
@@ -109,8 +129,9 @@ impl Backend {
             if !include_declaration && symbol_map.var_def_kind_at(name, span.start).is_some() {
                 continue;
             }
-            let start = offset_to_position(content, span.start as usize);
-            let end = offset_to_position(content, span.end as usize);
+            seen_offsets.insert(span.start);
+            let start = lines.position(span.start as usize);
+            let end = lines.position(span.end as usize);
             locations.push(Location {
                 uri: parsed_uri.clone(),
                 range: Range { start, end },
@@ -122,20 +143,15 @@ impl Backend {
         // may not have a corresponding Variable span in the spans vec
         // with the exact same offset.
         if include_declaration {
-            let mut seen_offsets: HashSet<u32> = locations
-                .iter()
-                .map(|loc| position_to_offset(content, loc.range.start))
-                .collect();
-
             for def in &symbol_map.var_defs {
                 if def.name == var_name
                     && reachable_scopes.contains(&def.scope_start)
                     && seen_offsets.insert(def.offset)
                 {
-                    let start = offset_to_position(content, def.offset as usize);
+                    let start = lines.position(def.offset as usize);
                     // The token is `$` + name.
                     let end_offset = def.offset as usize + 1 + def.name.len();
-                    let end = offset_to_position(content, end_offset);
+                    let end = lines.position(end_offset);
                     locations.push(Location {
                         uri: parsed_uri.clone(),
                         range: Range { start, end },
@@ -189,103 +205,25 @@ impl Backend {
             })
         }
 
-        // Explicit closure captures: `function () use ($var) { … }`
-        // These have VarDefKind::ClosureCapture with scope_start
-        // pointing to the closure body.
-        for def in &symbol_map.var_defs {
-            if def.name != var_name || def.kind != VarDefKind::ClosureCapture {
-                continue;
-            }
-            // The `use ($var)` token sits physically in the outer scope.
-            // Check if the outer scope is already reachable.
-            let outer_scope = symbol_map.find_enclosing_scope(def.offset);
-            if reachable.contains(&outer_scope) {
-                reachable.insert(def.scope_start);
-            }
-        }
-
-        // Implicit arrow-function captures: `fn () => $var`
-        // Arrow functions have a scope entry but no ClosureCapture def.
-        // A variable is implicitly captured if:
-        //   1. The arrow scope is directly nested in a reachable scope.
-        //   2. There is no parameter with the same name in the arrow scope.
-        //
         // Note: the caller (find_variable_references) has already
         // normalized the incoming root_scope to the actual declaring
         // scope by walking ancestors.  This lets us start from the
         // correct root whether the request originated on a declaration
         // or deep inside nested arrows/closures.
-        for &(scope_start, _scope_end) in &symbol_map.scopes {
-            if reachable.contains(&scope_start) {
-                continue; // Already reachable, skip.
-            }
-            // Find the parent scope of this scope.
-            let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
-            if !reachable.contains(&parent) {
-                continue;
-            }
-            // Check if this is an arrow function scope (no ClosureCapture
-            // or Parameter def that would indicate a closure with `use`).
-            // Arrow scopes don't have braces; their scope_start is the
-            // arrow function expression's start offset.
-            //
-            // Skip if there's a parameter with the same name (shadowed).
-            let has_shadowing_param = symbol_map.var_defs.iter().any(|d| {
-                d.name == var_name
-                    && d.scope_start == scope_start
-                    && d.kind == VarDefKind::Parameter
-            });
-            if has_shadowing_param {
-                continue;
-            }
-            // Check if this scope actually uses the variable (has a
-            // Variable span in it).  Only include it if the variable
-            // appears there to avoid false positives with unrelated
-            // nested functions.
-            //
-            // has_usage uses lexical containment (usage offset lies
-            // inside the scope's byte range) rather than checking
-            // whether find_variable_scope reports exactly this scope.
-            // This is required to correctly handle chains of nested
-            // arrows (`fn()=>fn()=> $var`) where the usage's innermost
-            // scope is deeper than the intermediate arrow.
-            //
-            // We also still need to check: is this scope a closure body
-            // (not an arrow function)?  Closures create new variable
-            // scopes and require explicit `use` — if there's no
-            // ClosureCapture def for this scope, the variable is NOT
-            // available inside a regular closure.  We only auto-include
-            // arrow function scopes.
-            //
-            // Heuristic: if there's any ClosureCapture or Parameter def
-            // for *any* variable scoped to this scope_start, and there's
-            // no ClosureCapture for *our* variable, this is likely a
-            // closure that didn't capture our variable — skip it.
-            let is_closure_scope = symbol_map
-                .var_defs
-                .iter()
-                .any(|d| d.scope_start == scope_start && d.kind == VarDefKind::ClosureCapture);
-            if is_closure_scope {
-                // It's a closure scope.  Our variable is not in the `use`
-                // list (we already handled ClosureCapture above), so the
-                // variable is not available here.
-                continue;
-            }
-            // This is an arrow function scope or similar transparent
-            // scope.  The variable is implicitly captured.
-            if has_usage(symbol_map, var_name, scope_start, &scope_ends) {
-                reachable.insert(scope_start);
-            }
-        }
-
-        // Recurse: newly added scopes may themselves contain nested
-        // closures/arrows that capture the same variable.
-        // Fixed-point iteration until no new scopes are added.
+        //
+        // A scope added in one round may itself hold closures or arrows
+        // that capture the variable, so the two rules below run until no
+        // round adds a scope.
         let mut prev_len = 0;
         while reachable.len() != prev_len {
             prev_len = reachable.len();
             let current = reachable.clone();
 
+            // Explicit closure captures: `function () use ($var) { … }`
+            // These have VarDefKind::ClosureCapture with scope_start
+            // pointing to the closure body.  The `use ($var)` token sits
+            // physically in the outer scope, so the capture reaches the
+            // body once that outer scope is reachable.
             for def in &symbol_map.var_defs {
                 if def.name != var_name || def.kind != VarDefKind::ClosureCapture {
                     continue;
@@ -299,14 +237,25 @@ impl Backend {
                 }
             }
 
+            // Implicit arrow-function captures: `fn () => $var`
+            // Arrow functions have a scope entry but no ClosureCapture def.
+            // A variable is implicitly captured if:
+            //   1. The arrow scope is directly nested in a reachable scope.
+            //   2. There is no parameter with the same name in the arrow scope.
+            // Every other nested scope (a closure, or a function declared
+            // inside the scope) sees an outer variable only through `use`,
+            // which the rule above already handled.
             for &(scope_start, _scope_end) in &symbol_map.scopes {
-                if reachable.contains(&scope_start) {
+                if reachable.contains(&scope_start)
+                    || !symbol_map.arrow_fn_scopes.contains(&scope_start)
+                {
                     continue;
                 }
                 let parent = symbol_map.find_enclosing_scope(scope_start.saturating_sub(1));
                 if !current.contains(&parent) {
                     continue;
                 }
+                // Skip if there's a parameter with the same name (shadowed).
                 let has_shadowing_param = symbol_map.var_defs.iter().any(|d| {
                     d.name == var_name
                         && d.scope_start == scope_start
@@ -315,13 +264,14 @@ impl Backend {
                 if has_shadowing_param {
                     continue;
                 }
-                let is_closure_scope = symbol_map
-                    .var_defs
-                    .iter()
-                    .any(|d| d.scope_start == scope_start && d.kind == VarDefKind::ClosureCapture);
-                if is_closure_scope {
-                    continue;
-                }
+                // Only include the scope if the variable appears in it, to
+                // avoid false positives with unrelated nested functions.
+                // has_usage uses lexical containment (usage offset lies
+                // inside the scope's byte range) rather than checking
+                // whether find_variable_scope reports exactly this scope,
+                // which is what handles chains of nested arrows
+                // (`fn()=>fn()=> $var`) where the usage's innermost scope
+                // is deeper than the intermediate arrow.
                 if has_usage(symbol_map, var_name, scope_start, &scope_ends) {
                     reachable.insert(scope_start);
                 }
@@ -377,6 +327,7 @@ impl Backend {
             }
         };
 
+        let lines = LineIndex::new(content);
         for span in &symbol_map.spans {
             // Only consider spans within the same class body.
             if span.start < class_start || span.start > class_end {
@@ -389,8 +340,8 @@ impl Backend {
             );
 
             if is_this {
-                let start = offset_to_position(content, span.start as usize);
-                let end = offset_to_position(content, span.end as usize);
+                let start = lines.position(span.start as usize);
+                let end = lines.position(span.end as usize);
                 locations.push(Location {
                     uri: parsed_uri.clone(),
                     range: Range { start, end },

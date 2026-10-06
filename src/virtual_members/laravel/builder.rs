@@ -15,12 +15,32 @@
 
 use std::sync::Arc;
 
-use crate::inheritance::apply_substitution_to_conditional;
+use crate::inheritance::{ancestors, apply_substitution_to_conditional};
 use crate::php_type::PhpType;
-use crate::types::{ClassInfo, MAX_INHERITANCE_DEPTH, MethodInfo, Visibility};
+use crate::types::{ClassInfo, MethodInfo, Visibility};
 use crate::virtual_members::ResolvedClassCache;
 
 use super::ELOQUENT_BUILDER_FQN;
+
+/// The custom Eloquent builder a model declares, or inherits from the
+/// nearest parent that declares one.
+///
+/// `#[UseEloquentBuilder]` and `HasBuilder` sit on the class that names
+/// the builder but apply to every subclass.
+pub(crate) fn custom_builder_fqn(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<String> {
+    let declared = |candidate: &ClassInfo| {
+        candidate
+            .laravel()
+            .and_then(|l| l.custom_builder.as_ref())
+            .and_then(|b| b.base_name())
+            .map(str::to_string)
+    };
+    declared(class)
+        .or_else(|| ancestors(class, class_loader).find_map(|(_, parent)| declared(&parent)))
+}
 
 /// Build static virtual methods by forwarding Eloquent Builder's public
 /// instance methods onto the model class. See the module docs for the
@@ -30,26 +50,8 @@ pub(super) fn build_builder_forwarded_methods(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
-    // Walk the parent chain to find a custom builder definition.
-    // Laravel's #[UseEloquentBuilder] and HasBuilder are effectively inherited.
-    let mut requested_builder_fqn = ELOQUENT_BUILDER_FQN.to_string();
-    let mut current = Some(class.clone());
-    for _ in 0..MAX_INHERITANCE_DEPTH {
-        let Some(curr) = current else { break };
-        if let Some(name) = curr
-            .laravel()
-            .and_then(|l| l.custom_builder.as_ref())
-            .and_then(|b| b.base_name())
-        {
-            requested_builder_fqn = name.to_string();
-            break;
-        }
-        current = curr
-            .parent_class
-            .as_ref()
-            .and_then(|p| class_loader(p))
-            .map(Arc::unwrap_or_clone);
-    }
+    let requested_builder_fqn =
+        custom_builder_fqn(class, class_loader).unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
 
     // Load the Eloquent Builder class (or custom builder).
     let (builder_class, builder_fqn) = match class_loader(&requested_builder_fqn) {
@@ -150,12 +152,27 @@ pub(super) fn build_builder_forwarded_methods(
             }
 
             // Rewrite the base Eloquent Collection to whichever collection
-            // the model in the (now substituted) return type builds.
+            // the model in the (now substituted) signature builds.  A
+            // `chunk()` callback is handed that collection just as `get()`
+            // returns it.
             if let Some(ref mut ret) = forwarded.return_type
                 && let Some(rewritten) =
                     super::replace_eloquent_collections_in_type(ret, class_loader)
             {
                 *ret = rewritten;
+            }
+            if forwarded.parameters.iter().any(|p| {
+                p.type_hint
+                    .as_ref()
+                    .is_some_and(super::mentions_eloquent_collection)
+            }) {
+                for param in forwarded.parameters.make_mut() {
+                    if let Some(rewritten) = param.type_hint.as_ref().and_then(|hint| {
+                        super::replace_eloquent_collections_in_param_type(hint, class_loader)
+                    }) {
+                        param.type_hint = Some(rewritten);
+                    }
+                }
             }
 
             forwarded

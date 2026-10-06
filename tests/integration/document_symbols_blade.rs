@@ -3,25 +3,12 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::common::{create_psr4_workspace, open_document};
+    use crate::common::{
+        BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
+        create_psr4_workspace, open_blade_template,
+    };
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
-
-    const COMPOSER: &str = r#"{"autoload": {"psr-4": {
-        "App\\": "app/",
-        "Illuminate\\": "stubs/Illuminate/",
-        "Livewire\\": "stubs/Livewire/"
-    }}}"#;
-
-    const COMPONENT_STUB: &str = "<?php\nnamespace Illuminate\\View;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
-        }\n";
-
-    const LIVEWIRE_STUB: &str = "<?php\nnamespace Livewire;\n\
-        abstract class Component {\n\
-            public function render() {}\n\
-        }\n";
 
     /// The template a class-based component renders, which is also a
     /// Blade file with an outline of its own.
@@ -39,10 +26,13 @@ mod tests {
     /// `relative`.
     async fn outline_of(relative: &str, template: &str) -> Vec<DocumentSymbol> {
         let (backend, _dir) = create_psr4_workspace(
-            COMPOSER,
+            BLADE_COMPONENT_COMPOSER,
             &[
-                ("stubs/Illuminate/View/Component.php", COMPONENT_STUB),
-                ("stubs/Livewire/Component.php", LIVEWIRE_STUB),
+                (
+                    "stubs/Illuminate/View/Component.php",
+                    ILLUMINATE_COMPONENT_STUB,
+                ),
+                ("stubs/Livewire/Component.php", LIVEWIRE_COMPONENT_STUB),
                 (
                     "app/View/Components/Alert.php",
                     "<?php\nnamespace App\\View\\Components;\n\
@@ -67,10 +57,7 @@ mod tests {
                 ("resources/views/page.blade.php", template),
             ],
         );
-        let root = backend.workspace_root().read().clone().unwrap();
-        let uri = Url::from_file_path(root.join(relative)).unwrap();
-        let text = std::fs::read_to_string(root.join(relative)).unwrap();
-        open_document(&backend, &uri, "blade", &text).await;
+        let uri = open_blade_template(&backend, relative).await;
 
         match backend
             .document_symbol(DocumentSymbolParams {
@@ -217,5 +204,77 @@ mod tests {
     async fn a_components_own_template_lists_only_what_it_writes() {
         let symbols = outline_of("resources/views/components/alert.blade.php", "").await;
         assert!(labels(&symbols).is_empty());
+    }
+
+    // ─── Nesting, slots, and unclosed blocks ────────────────────────────
+    //
+    // Cases adapted from laravel-lsp's MIT-licensed test suite.
+
+    /// Each symbol and its children, flattened to `(depth, name)` pairs.
+    fn tree(symbols: &[DocumentSymbol]) -> Vec<(usize, String)> {
+        fn walk(symbols: &[DocumentSymbol], depth: usize, out: &mut Vec<(usize, String)>) {
+            for symbol in symbols {
+                out.push((depth, symbol.name.clone()));
+                walk(symbol.children.as_deref().unwrap_or(&[]), depth + 1, out);
+            }
+        }
+        let mut out = Vec::new();
+        walk(symbols, 0, &mut out);
+        out
+    }
+
+    #[tokio::test]
+    async fn tags_inside_a_paired_component_are_nested_under_it() {
+        let symbols =
+            outline("<x-alert>\n<x-banner headline=\"x\" />\n<livewire:counter />\n</x-alert>\n")
+                .await;
+        assert_eq!(
+            tree(&symbols),
+            [
+                (0, "x-alert".to_string()),
+                (1, "x-banner".to_string()),
+                (1, "livewire:counter".to_string()),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn both_slot_spellings_are_listed_by_the_slot_they_fill() {
+        let symbols = outline(
+            "<x-alert>\n<x-slot:header>T</x-slot:header>\n<x-slot name=\"footer\">F</x-slot>\n</x-alert>\n",
+        )
+        .await;
+        assert_eq!(
+            tree(&symbols),
+            [
+                (0, "x-alert".to_string()),
+                (1, "x-slot:header".to_string()),
+                (1, "x-slot:footer".to_string()),
+            ]
+        );
+        let slots = symbols[0].children.as_deref().unwrap_or(&[]);
+        assert!(slots.iter().all(|slot| slot.detail.is_none()), "{slots:?}");
+    }
+
+    #[tokio::test]
+    async fn an_unclosed_section_is_still_listed() {
+        let symbols = outline("@section('content')\n@yield('inner')\n").await;
+        assert_eq!(
+            tree(&symbols),
+            [(0, "content".to_string()), (0, "inner".to_string())]
+        );
+        assert_eq!(symbols[0].range.end.line, 0, "{:?}", symbols[0].range);
+    }
+
+    #[tokio::test]
+    async fn a_push_inside_a_section_is_nested_under_it() {
+        let symbols = outline(
+            "@section('content')\n@push('scripts')\n<script></script>\n@endpush\n@endsection\n",
+        )
+        .await;
+        assert_eq!(
+            tree(&symbols),
+            [(0, "content".to_string()), (1, "scripts".to_string())]
+        );
     }
 }

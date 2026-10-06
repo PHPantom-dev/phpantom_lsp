@@ -182,6 +182,26 @@ fn join_call_site_types(types: Vec<PhpType>) -> PhpType {
     }
 }
 
+/// Drop every entry a later one at the same call site overwrites.
+///
+/// A PHP array keeps the last of a duplicated key and `View::with()`
+/// assigns over the data the view was made with, so the template only
+/// ever sees the last write. The entries are not collected in source
+/// order (a chained `->with(…)` is walked before the call it hangs off),
+/// so the key's position decides which write is last.
+fn keep_last_writes(vars: &mut Vec<PassedVar>) {
+    let overwritten = |var: &PassedVar| {
+        vars.iter()
+            .any(|other| other.name == var.name && other.key_range.0 > var.key_range.0)
+    };
+    let keep: Vec<bool> = vars.iter().map(|var| !overwritten(var)).collect();
+    if keep.iter().all(|&k| k) {
+        return;
+    }
+    let mut keep = keep.into_iter();
+    vars.retain(|_| keep.next().unwrap_or(true));
+}
+
 /// The canonical spelling of a template path, for comparing against a
 /// canonical view root.
 ///
@@ -439,8 +459,7 @@ impl Backend {
                             "\\Illuminate\\View\\ComponentSlot",
                         )));
                 }
-                let Some(virtual_php) = self.blade_virtual_content.read().get(file_uri).cloned()
-                else {
+                let Some(virtual_php) = self.blade_virtual_php_arc(file_uri) else {
                     continue;
                 };
                 for vars in
@@ -626,11 +645,11 @@ impl Backend {
     /// buffer: re-inferring a template rewrites its prologue, so the map a
     /// reader holds may have been built for a shorter text than the one the
     /// pass has since written.
-    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<String> {
+    fn caller_source(&self, uri: &str, is_blade: bool, map: &SymbolMap) -> Option<Arc<String>> {
         if !is_blade {
-            return self.get_file_content(uri);
+            return self.get_file_content_arc(uri);
         }
-        let content = self.blade_virtual_content.read().get(uri).cloned()?;
+        let content = self.blade_virtual_php_arc(uri)?;
         map.matches_source(&content).then_some(content)
     }
 
@@ -954,7 +973,9 @@ impl Backend {
         // a symlink into a shared directory, since that resolves out of
         // the view root it sits under.
         let canonical = std::cell::OnceCell::new();
-        let mut match_root = |root: &std::path::Path, namespace: &str| {
+        let mut match_root = |root: &std::path::Path,
+                              canonical_root: &dyn Fn() -> Option<std::path::PathBuf>,
+                              namespace: &str| {
             if let Ok(rel) = path.strip_prefix(root) {
                 push_name(rel, namespace);
                 return;
@@ -963,7 +984,7 @@ impl Backend {
             // given relative (the analyse CLI passes `--project-root`
             // through as-is), while `path` came from a file URI and is
             // always absolute.
-            let Ok(root) = root.canonicalize() else {
+            let Some(root) = canonical_root() else {
                 return;
             };
             if let Ok(rel) = path.strip_prefix(&root) {
@@ -980,11 +1001,13 @@ impl Backend {
             }
         };
 
-        for root in self.laravel_view_roots() {
-            match_root(&root, "");
+        // The configured roots come canonicalized already; a provider's
+        // directory is only resolved when its raw spelling misses.
+        for root in self.laravel_view_roots().iter() {
+            match_root(&root.path, &|| root.canonical.clone(), "");
         }
         for res in &self.laravel_provider_resources.read().view_dirs {
-            match_root(&res.path, &res.namespace);
+            match_root(&res.path, &|| res.path.canonicalize().ok(), &res.namespace);
         }
         names
     }
@@ -1005,10 +1028,10 @@ impl Backend {
         content: &str,
         offsets: &[u32],
     ) -> Vec<ResolvedViewCall> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let file_ctx = self.file_context(uri);
-        let class_loader = self.class_loader(&file_ctx);
-        let function_loader = self.function_loader(&file_ctx);
-        let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
+        let class_loaders = self.class_loaders(&file_ctx);
+        let function_loaders = self.function_loaders(&file_ctx);
 
         with_parsed_program(content, "blade_call_site_inference", |program, content| {
             let default_class = ClassInfo::default();
@@ -1027,26 +1050,25 @@ impl Backend {
 
             let mut result = Vec::new();
             for site in collected {
+                let class_loader = class_loaders.at(site.offset);
+                let function_loader = function_loaders.at(site.offset);
+                let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);
                 let enclosing =
                     crate::class_lookup::find_class_at_offset(&file_ctx.classes, site.offset);
                 let current_class = enclosing.unwrap_or(&default_class);
                 let loaders = Loaders::with_function(Some(&function_loader_cl));
                 let var_ctx = VarResolutionCtx {
-                    var_name: "",
-                    top_level_scope: None,
-                    current_class,
-                    all_classes: &file_ctx.classes,
-                    content,
-                    cursor_offset: site.offset,
-                    class_loader: &class_loader,
                     backend: Some(self),
                     loaders,
                     resolved_class_cache: Some(&self.resolved_class_cache),
-                    enclosing_return_type: None,
-                    branch_aware: false,
-                    match_arm_narrowing: HashMap::new(),
-                    scope_var_resolver: None,
-                    scope_proofs: None,
+                    ..VarResolutionCtx::new(
+                        "",
+                        current_class,
+                        &file_ctx.classes,
+                        content,
+                        site.offset,
+                        class_loader,
+                    )
                 };
 
                 let mut vars: Vec<PassedVar> = Vec::new();
@@ -1073,7 +1095,7 @@ impl Backend {
                                     site.offset,
                                     Some(current_class),
                                     &file_ctx.classes,
-                                    &class_loader,
+                                    class_loader,
                                     Some(self),
                                     Loaders::with_function(Some(&function_loader_cl)),
                                 ),
@@ -1092,7 +1114,7 @@ impl Backend {
                                 site.offset,
                                 Some(current_class),
                                 &file_ctx.classes,
-                                &class_loader,
+                                class_loader,
                                 Some(self),
                                 loaders,
                             )
@@ -1119,7 +1141,7 @@ impl Backend {
                                 Some(entries) => {
                                     vars.extend(entries.into_iter().map(|(name, ty)| PassedVar {
                                         name,
-                                        ty: qualify_class_names(ty, &class_loader),
+                                        ty: qualify_class_names(ty, class_loader),
                                         key_range: range,
                                         value_range: range,
                                         framework_bound: false,
@@ -1132,12 +1154,13 @@ impl Backend {
                     };
                     vars.push(PassedVar {
                         name,
-                        ty: qualify_class_names(ty, &class_loader),
+                        ty: qualify_class_names(ty, class_loader),
                         key_range,
                         value_range,
                         framework_bound,
                     });
                 }
+                keep_last_writes(&mut vars);
                 result.push(ResolvedViewCall {
                     name_range: site.name_range,
                     vars,
@@ -1204,6 +1227,7 @@ impl Backend {
         virtual_php: &str,
         occurrences: Vec<crate::blade::component_tags::ComponentTagCall>,
     ) -> Vec<InferredVars> {
+        let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);
@@ -1235,21 +1259,17 @@ impl Backend {
                         let current_class = enclosing.unwrap_or(&default_class);
                         let loaders = Loaders::with_function(Some(&function_loader_cl));
                         let var_ctx = VarResolutionCtx {
-                            var_name: "",
-                            top_level_scope: None,
-                            current_class,
-                            all_classes: &file_ctx.classes,
-                            content,
-                            cursor_offset: offset,
-                            class_loader: &class_loader,
                             backend: Some(self),
                             loaders,
                             resolved_class_cache: Some(&self.resolved_class_cache),
-                            enclosing_return_type: None,
-                            branch_aware: false,
-                            match_arm_narrowing: HashMap::new(),
-                            scope_var_resolver: None,
-                            scope_proofs: None,
+                            ..VarResolutionCtx::new(
+                                "",
+                                current_class,
+                                &file_ctx.classes,
+                                content,
+                                offset,
+                                &class_loader,
+                            )
                         };
                         let ty = crate::type_engine::variable::foreach_resolution::resolve_expression_type(
                         expr, &var_ctx,

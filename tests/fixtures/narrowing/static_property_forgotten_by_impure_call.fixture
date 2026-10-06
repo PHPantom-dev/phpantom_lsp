@@ -1,0 +1,27 @@
+// test: an impure call forgets what the scope knew about a static property
+// feature: hover
+// expect_hover: $after => int|float
+// expect_hover: $kept => 1
+---
+<?php
+
+class Counter
+{
+    private static int|float $count;
+
+    public function __construct()
+    {
+        self::$count = 1;
+        $this->pure();
+        $kept = self::$count;
+        $this->impure();
+        $after = self::$count;
+        echo $af<>ter;
+        echo $kept;
+    }
+
+    /** @phpstan-impure */
+    public function impure(): void {}
+
+    public function pure(): int { return 1; }
+}

@@ -79,14 +79,18 @@ use tower_lsp::lsp_types::*;
 use crate::Backend;
 use crate::symbol_map::SymbolKind;
 use crate::type_engine::resolver::{
-    ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
+    CtxLoaders, ResolutionCtx, SubjectOutcome, resolve_subject_outcome, with_chain_resolution_cache,
 };
 use crate::types::{AccessKind, ClassInfo, ClassLikeKind};
 use crate::virtual_members::resolve_class_fully_cached;
 
+use super::existence_guards::{compute_existence_guards, compute_isset_empty_argument_ranges};
 use super::helpers::{
-    FileDiagnosticContext, compute_existence_guards, compute_isset_empty_argument_ranges,
-    find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
+    FileDiagnosticContext, find_innermost_enclosing_class, is_offset_in_ranges, make_diagnostic,
+};
+use super::member_lookup::{
+    display_class_name, has_magic_method_for_access, member_exists, member_exists_relaxed,
+    member_is_public,
 };
 use super::member_visibility::{INVALID_MEMBER_ACCESS_CODE, inaccessible_member_message};
 use super::subject_cache::SubjectCacheKey;
@@ -178,15 +182,15 @@ impl Backend {
         out: &mut Vec<Diagnostic>,
     ) {
         let symbol_map = &ctx.symbol_map;
-        let file_use_map = &ctx.file.use_map;
-        let file_namespace = &ctx.file.namespace;
-        let file_resolved_names = &ctx.file.resolved_names;
+        let Some(source) = symbol_map.source(content) else {
+            return;
+        };
         let local_classes = &ctx.file.classes;
 
-        let class_loader = self.class_loader_with(local_classes, file_use_map, file_namespace);
-        let function_loader =
-            self.function_loader_with(file_resolved_names.as_deref(), file_use_map, file_namespace);
-        let laravel_macro_this_resolver = self.laravel_macro_this_resolver(&class_loader);
+        let class_loaders = self.class_loaders(&ctx.file);
+        let function_loaders = self.function_loaders(&ctx.file);
+        let laravel_macro_this_resolvers =
+            class_loaders.map(|class_loader| self.laravel_macro_this_resolver(class_loader));
         let resolved_cache = &self.resolved_class_cache;
 
         // ── Compute existence guards ────────────────────────────────────
@@ -258,6 +262,9 @@ impl Backend {
                     }
                     _ => continue,
                 };
+            let class_loader = class_loaders.at(span.start);
+            let function_loader = function_loaders.at(span.start);
+            let laravel_macro_this_resolver = laravel_macro_this_resolvers.at(span.start);
 
             // `@see` legally carries URIs, prose, and naming suggestions in
             // addition to FQSENs, so a target that resolves to nothing is
@@ -268,7 +275,7 @@ impl Backend {
                 continue;
             }
 
-            let subject_text = subject_text.as_str(content);
+            let subject_text = subject_text.as_str(source);
             let is_docblock_ref = docblock_ref.is_reference();
 
             // ── Skip the magic `::class` constant ───────────────────
@@ -355,18 +362,18 @@ impl Backend {
                 .entry(cache_key)
                 .or_insert_with(|| {
                     let rctx = ResolutionCtx {
-                        current_class,
-                        all_classes: local_classes,
-                        content,
-                        cursor_offset: span.start,
-                        class_loader: &class_loader,
-                        backend: Some(self),
-                        laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                        resolved_class_cache: Some(resolved_cache),
-                        function_loader: Some(&function_loader),
-                        scope_var_resolver: None,
                         is_in_static_method: symbol_map.is_in_static_method(span.start),
-                        preserve_static: false,
+                        ..self.resolution_ctx_at(
+                            current_class,
+                            local_classes,
+                            content,
+                            span.start,
+                            CtxLoaders::new(
+                                class_loader,
+                                function_loader,
+                                laravel_macro_this_resolver,
+                            ),
+                        )
                     };
                     resolve_subject_outcome(subject_text, access_kind, &rctx)
                 })
@@ -513,7 +520,7 @@ impl Backend {
                         is_docblock_ref,
                         current_class,
                         subject_binds_scope,
-                        &class_loader,
+                        class_loader,
                         resolved_cache,
                         content,
                         span.start,
@@ -532,18 +539,18 @@ impl Backend {
                     let (result, diags) =
                         if result != MemberCheckResult::Ok && is_narrowable_subject {
                             let rctx = ResolutionCtx {
-                                current_class,
-                                all_classes: local_classes,
-                                content,
-                                cursor_offset: span.start,
-                                class_loader: &class_loader,
-                                backend: Some(self),
-                                laravel_macro_this_resolver: Some(&laravel_macro_this_resolver),
-                                resolved_class_cache: Some(resolved_cache),
-                                function_loader: Some(&function_loader),
-                                scope_var_resolver: None,
                                 is_in_static_method: symbol_map.is_in_static_method(span.start),
-                                preserve_static: false,
+                                ..self.resolution_ctx_at(
+                                    current_class,
+                                    local_classes,
+                                    content,
+                                    span.start,
+                                    CtxLoaders::new(
+                                        class_loader,
+                                        function_loader,
+                                        laravel_macro_this_resolver,
+                                    ),
+                                )
                             };
                             let fresh = resolve_subject_outcome(subject_text, access_kind, &rctx);
                             if let SubjectOutcome::Resolved(ref fresh_classes) = fresh {
@@ -557,7 +564,7 @@ impl Backend {
                                     is_docblock_ref,
                                     current_class,
                                     subject_binds_scope,
-                                    &class_loader,
+                                    class_loader,
                                     resolved_cache,
                                     content,
                                     span.start,
@@ -707,7 +714,7 @@ impl Backend {
         // through to the merged classes below.
         if base_classes.iter().any(|c| {
             member_is_public(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
+                || (is_docblock_ref && member_exists_relaxed(c, member_name))
         }) {
             return (MemberCheckResult::Ok, diagnostics);
         }
@@ -745,7 +752,7 @@ impl Backend {
         // ── Check whether the member exists on ANY branch ───────────
         if resolved_classes.iter().any(|c| {
             member_exists(c, member_name, is_static, is_method_call)
-                || (is_docblock_ref && member_exists_relaxed(c, member_name, is_method_call))
+                || (is_docblock_ref && member_exists_relaxed(c, member_name))
         }) {
             self.push_inaccessible_member(
                 uri,
@@ -927,188 +934,4 @@ fn is_downstream_of_broken_chain(subject_text: &str, broken_prefixes: &[String])
             rest.starts_with("->") || rest.starts_with("::") || rest.starts_with('[')
         }
     })
-}
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
-/// Relaxed member check for docblock references (`@see Class::member`).
-///
-/// PHPDoc `@see` uses `::` notation for all members (instance properties,
-/// instance methods, static properties, constants), so we check every
-/// member kind regardless of `is_static` or `is_method_call`.
-fn member_exists_relaxed(class: &ClassInfo, member_name: &str, _is_method_call: bool) -> bool {
-    // Check methods (case-insensitive, like PHP).
-    let lower = member_name.to_ascii_lowercase();
-    if class
-        .methods
-        .iter()
-        .any(|m| m.name.to_ascii_lowercase() == lower)
-    {
-        return true;
-    }
-    // Check instance and static properties.
-    if class.properties.iter().any(|p| p.name == member_name) {
-        return true;
-    }
-    // Check constants.
-    class.constants.iter().any(|c| c.name == member_name)
-}
-
-/// Check whether a member exists on the class *and* is public.
-///
-/// Used by the shortcut that runs before the inheritance merge, where a
-/// non-public member cannot be judged: the class in hand may be missing
-/// the magic handler that would answer for it and the ancestor that
-/// really declares it.  Confirming a public member is safe there, since
-/// nothing further up can make a public member unreachable.
-fn member_is_public(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> bool {
-    use crate::types::Visibility;
-
-    if is_method_call {
-        return class.methods.iter().any(|m| {
-            m.name.eq_ignore_ascii_case(member_name) && m.visibility == Visibility::Public
-        });
-    }
-
-    if is_static {
-        if class
-            .constants
-            .iter()
-            .any(|c| c.name == member_name && c.visibility == Visibility::Public)
-        {
-            return true;
-        }
-        return class.properties.iter().any(|p| {
-            p.is_static
-                && (p.name == member_name || format!("${}", p.name) == member_name)
-                && p.visibility == Visibility::Public
-        });
-    }
-
-    if class
-        .properties
-        .iter()
-        .any(|p| p.name == member_name && p.visibility == Visibility::Public)
-    {
-        return true;
-    }
-
-    // An Eloquent relation reached as a property is synthesized rather
-    // than declared, so it carries no visibility of its own and is
-    // always public in practice.
-    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
-}
-
-/// Check whether a member exists on the fully-resolved class.
-///
-/// For method calls, checks `methods`.  For non-method static access,
-/// checks constants first then static properties.  For instance property
-/// access, checks properties.
-///
-/// Method name matching is case-insensitive (PHP methods are
-/// case-insensitive).  Property and constant matching is case-sensitive.
-pub(crate) fn member_exists(
-    class: &ClassInfo,
-    member_name: &str,
-    is_static: bool,
-    is_method_call: bool,
-) -> bool {
-    if is_method_call {
-        // Method name matching is case-insensitive in PHP.
-        let lower = member_name.to_ascii_lowercase();
-        return class
-            .methods
-            .iter()
-            .any(|m| m.name.to_ascii_lowercase() == lower);
-    }
-
-    if is_static {
-        // Static property or constant. Constants first (most common in
-        // `Class::CONST` usage) — this also matches enum cases, which
-        // are stored as constants.
-        if class.constants.iter().any(|c| c.name == member_name) {
-            return true;
-        }
-        // Static property (e.g. `Class::$prop`).
-        // PHP static properties include the `$` in the access syntax,
-        // but the stored name may or may not include it.  Check both.
-        if class.properties.iter().any(|p| {
-            p.is_static && (p.name == member_name || format!("${}", p.name) == member_name)
-        }) {
-            return true;
-        }
-        return false;
-    }
-
-    // Instance property access (case-sensitive, per PHP semantics).
-    if class.properties.iter().any(|p| p.name == member_name) {
-        return true;
-    }
-
-    // Eloquent relation properties are the exception: `$model->orderProducts`
-    // flows through `__get()` → `isRelation()` → `method_exists()`, all of
-    // which are case-insensitive, so a differently-cased access like
-    // `$model->orderproducts` resolves the same relationship at runtime.
-    crate::virtual_members::laravel::class_has_relation_method_ci(class, member_name)
-}
-
-/// Check whether the class has a magic method that would handle the
-/// member access at runtime, making the "unknown member" diagnostic
-/// a false positive.
-///
-/// For property access, `__get` only suppresses the diagnostic when
-/// the class has no `@property` annotations.  When `@property` tags
-/// exist, they define the expected property surface and unknown
-/// properties should be flagged (matching PHPStan's behaviour with
-/// `reportMagicProperties: true`).
-fn has_magic_method_for_access(
-    class: &ClassInfo,
-    is_static: bool,
-    is_method_call: bool,
-    report_magic_properties: bool,
-) -> bool {
-    if is_method_call {
-        let magic = if is_static { "__callStatic" } else { "__call" };
-        return class
-            .methods
-            .iter()
-            .any(|m| m.name.eq_ignore_ascii_case(magic));
-    }
-
-    if !is_static {
-        // Instance property access — `__get` handles arbitrary property
-        // names.  When `report_magic_properties` is enabled and any
-        // virtual member provider has added properties to the class
-        // (@property docblock tags, Laravel Eloquent column inference,
-        // etc.), do not suppress — let normal member checking flag
-        // unknowns.  When disabled (the default), `__get` always
-        // suppresses.
-        let has_get = class
-            .methods
-            .iter()
-            .any(|m| m.name.eq_ignore_ascii_case("__get"));
-        if has_get {
-            if report_magic_properties {
-                let has_virtual_properties = class.properties.iter().any(|p| p.is_virtual);
-                return !has_virtual_properties;
-            }
-            return true;
-        }
-    }
-
-    false
-}
-
-fn display_class_name(class: &ClassInfo) -> String {
-    if class.name.starts_with("__anonymous@") {
-        return "anonymous class".to_string();
-    }
-
-    // Show the FQN when available for clarity.
-    class.fqn().to_string()
 }

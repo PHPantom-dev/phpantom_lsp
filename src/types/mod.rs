@@ -173,6 +173,24 @@ pub struct NamespaceSpan {
     pub start: u32,
     /// Byte offset of the end of this namespace block (inclusive).
     pub end: u32,
+    /// The `use` imports declared inside this block.
+    ///
+    /// PHP scopes an import to the block that declares it, so a file with
+    /// several blocks needs one table per block.  Left empty when the file
+    /// has a single block, whose imports are the file-wide `file_imports`
+    /// table, so the common case stores them once.
+    pub use_map: HashMap<String, String>,
+}
+
+impl NamespaceSpan {
+    /// The block of `spans` that contains `offset`, or the last block for
+    /// an offset past every block (e.g. code after its closing brace).
+    pub fn containing(spans: &[NamespaceSpan], offset: u32) -> Option<&NamespaceSpan> {
+        spans
+            .iter()
+            .find(|span| offset >= span.start && offset <= span.end)
+            .or_else(|| spans.last())
+    }
 }
 
 /// Members extracted from a class-like body by `Backend::extract_class_like_members`.
@@ -308,6 +326,17 @@ pub struct ParameterInfo {
     /// `\Illuminate\Routing\Route` rather than the lexically enclosing class.
     /// Common in Laravel where closures are rebound via `Closure::bindTo()`.
     pub closure_this_type: Option<PhpType>,
+    /// The type a by-reference parameter holds after the call returns,
+    /// declared via the `@param-out` PHPDoc tag.
+    ///
+    /// Distinct from `type_hint`, which is what the caller may hand in.
+    /// `@param-out` may name a type the declared input type doesn't
+    /// admit at all (`@param A|null $arg` paired with `@param-out
+    /// ($arg is null ? A&I : A) $arg`), so the two are tracked
+    /// separately rather than merged. Read this through
+    /// [`Self::out_type`], which falls back to the plain declared type
+    /// when no `@param-out` tag is present.
+    pub param_out_type: Option<PhpType>,
 }
 
 impl ParameterInfo {
@@ -324,6 +353,7 @@ impl ParameterInfo {
             && self.is_variadic == other.is_variadic
             && self.is_reference == other.is_reference
             && self.closure_this_type == other.closure_this_type
+            && self.param_out_type == other.param_out_type
     }
 
     /// Fold `null` into the effective type when the default value is the
@@ -334,12 +364,25 @@ impl ParameterInfo {
     /// null. Call this after a docblock `@param` merge has (re)computed
     /// `type_hint`, since the merge would otherwise drop the implied null.
     /// The operation is idempotent.
-    pub fn apply_null_default(&mut self) {
-        if self.defaults_to_null()
-            && let Some(t) = self.type_hint.take()
-        {
-            self.type_hint = Some(t.or_null());
+    ///
+    /// A type the default can bind a template in is left alone:
+    /// `@param T $t` with `$t = null` is still `T`, and the `null` is one
+    /// of the values `T` stands for rather than something added to it.
+    /// `is_template` names the templates in scope.
+    pub fn apply_null_default(&mut self, is_template: impl Fn(&str) -> bool) {
+        if !self.defaults_to_null() {
+            return;
         }
+        let Some(t) = self.type_hint.take() else {
+            return;
+        };
+        let names_template =
+            |ty: &PhpType| matches!(ty.kind(), TypeKind::Named(n) if is_template(n));
+        let binds_template = match t.kind() {
+            TypeKind::Union(members) => members.iter().any(names_template),
+            _ => names_template(&t),
+        };
+        self.type_hint = Some(if binds_template { t } else { t.or_null() });
     }
 
     /// Whether the declared default value is the literal `null`.
@@ -362,7 +405,16 @@ impl ParameterInfo {
     ///
     /// Returns `None` when the parameter carries no type at all, and
     /// leaves a hint that is *only* `null` alone rather than erasing it.
+    ///
+    /// An explicit `@param-out` tag is authoritative and returned as-is,
+    /// possibly a [`TypeKind::Conditional`](crate::php_type::TypeKind::Conditional)
+    /// keyed on the parameter's own pre-call type — evaluating it against
+    /// the call site is the caller's job, not this method's, since only
+    /// the caller knows what was actually passed.
     pub fn out_type(&self) -> Option<PhpType> {
+        if let Some(ref param_out) = self.param_out_type {
+            return Some(param_out.clone());
+        }
         let hint = self.type_hint.as_ref()?;
         if !self.is_reference || !self.defaults_to_null() {
             return Some(hint.clone());
@@ -489,6 +541,13 @@ pub struct MethodInfo {
     /// Used by hover to display the constraint when the return type or a
     /// parameter type is a method-level template parameter.
     pub template_param_bounds: AtomMap<PhpType>,
+    /// Defaults for method-level template parameters
+    /// (`@template T of object = \stdClass`), which a call that leaves the
+    /// parameter unbound resolves it to instead of the bound.
+    ///
+    /// A slice rather than a map: most methods declare none, and an empty
+    /// boxed slice costs half an empty map on every `MethodInfo`.
+    pub template_param_defaults: Box<[(Atom, PhpType)]>,
     /// Mappings from method-level template parameter names to the method
     /// parameter names (with `$` prefix) that directly bind them via
     /// `@param` annotations.
@@ -614,6 +673,7 @@ impl MethodInfo {
             && self.deprecated_replacement == other.deprecated_replacement
             && self.template_params == other.template_params
             && self.template_param_bounds == other.template_param_bounds
+            && self.template_param_defaults == other.template_param_defaults
             && self.template_bindings == other.template_bindings
             && self.has_scope_attribute == other.has_scope_attribute
             && self.is_abstract == other.is_abstract
@@ -658,37 +718,7 @@ impl MethodInfo {
     /// }
     /// ```
     pub fn virtual_method(name: &str, return_type: Option<&str>) -> Self {
-        Self {
-            name: crate::atom::atom(name),
-            name_offset: 0,
-            parameters: SharedVec::new(),
-            return_type: return_type.map(PhpType::parse),
-            native_return_type: None,
-            description: None,
-            return_description: None,
-            links: Vec::new(),
-            see_refs: Vec::new(),
-            is_static: false,
-            visibility: Visibility::Public,
-            conditional_return: None,
-            deprecation_message: None,
-            deprecated_replacement: None,
-            template_params: Vec::new(),
-            template_param_bounds: AtomMap::default(),
-            template_bindings: Vec::new(),
-            has_scope_attribute: false,
-            is_abstract: false,
-            is_final: false,
-            is_virtual: true,
-            is_macro: false,
-            is_inferred_return: false,
-            type_assertions: Vec::new(),
-            throws: Vec::new(),
-            if_this_is: None,
-            self_out: None,
-            is_pure: false,
-            is_impure: false,
-        }
+        Self::virtual_method_typed(name, return_type.map(PhpType::parse).as_ref())
     }
 
     /// Like [`virtual_method`], but accepts the return type as a
@@ -713,6 +743,7 @@ impl MethodInfo {
             template_params: Vec::new(),
             template_param_bounds: AtomMap::default(),
             template_bindings: Vec::new(),
+            template_param_defaults: Default::default(),
             has_scope_attribute: false,
             is_abstract: false,
             is_final: false,
@@ -1140,9 +1171,11 @@ pub(crate) struct ResolvedCallableTarget {
     /// through a possibly different resolution path can disagree and
     /// produce a false positive, never a genuine mismatch (e.g.
     /// PHPUnit's `assertSame(ExpectedType $expected, mixed $actual)`).
-    /// The argument-compatibility diagnostic must skip these parameters
-    /// entirely.
-    pub self_bound_params: crate::atom::AtomSet,
+    /// The argument-compatibility diagnostic checks these parameters
+    /// against the mapped type instead: the declared type with those
+    /// templates replaced by their `of` bounds, or nothing at all (`None`)
+    /// when none of them declares a bound.
+    pub self_bound_params: crate::atom::AtomMap<Option<PhpType>>,
 }
 /// Stores extracted information about a standalone PHP function.
 ///
@@ -1269,6 +1302,10 @@ pub struct FunctionInfo {
     /// when no bound exists) so that raw template names never leak
     /// into downstream consumers.
     pub template_param_bounds: AtomMap<PhpType>,
+    /// Defaults for function-level template parameters
+    /// (`@template T = string`), which a call that leaves the parameter
+    /// unbound resolves it to instead of the bound.
+    pub template_param_defaults: Box<[(Atom, PhpType)]>,
     /// Exception types from `@throws` docblock tags.
     ///
     /// Populated during parsing from the function's docblock.  Used by
@@ -1299,6 +1336,10 @@ pub struct FunctionInfo {
     /// Whether the function is declared side-effect free via `@pure`,
     /// `@phpstan-pure` or `@psalm-pure`.  See [`MethodInfo::is_pure`].
     pub is_pure: bool,
+    /// Whether the function is declared to have side effects via
+    /// `@impure`, `@phpstan-impure` or `@psalm-impure`.  See
+    /// [`MethodInfo::is_impure`].
+    pub is_impure: bool,
 }
 
 impl FunctionInfo {
@@ -1340,6 +1381,7 @@ impl FunctionInfo {
             || self.template_params != other.template_params
             || self.template_bindings != other.template_bindings
             || self.template_param_bounds != other.template_param_bounds
+            || self.template_param_defaults != other.template_param_defaults
             || self.type_assertions != other.type_assertions
             || self.throws != other.throws
             || self.namespace != other.namespace
@@ -1532,6 +1574,47 @@ pub mod attribute_target {
     pub const TARGET_ALL: u8 = (1 << 6) - 1; // 63
 }
 
+/// Flags for the list-valued Eloquent model properties a class declares
+/// itself, stored as a bitmask in [`LaravelMetadata::declared`].
+///
+/// A subclass inherits each of these from the nearest ancestor that
+/// declares it, so "declared as `[]`" (which hides the parent's value) has
+/// to be told apart from "not declared" (which inherits it). The
+/// scalar-valued fields carry that distinction in their own `Option`.
+pub mod model_declaration {
+    /// The class declares a `$casts` property.
+    pub const CASTS_PROPERTY: u16 = 1;
+    /// The class declares a `casts()` method.
+    pub const CASTS_METHOD: u16 = 1 << 1;
+    /// The class declares a `$dates` property.
+    pub const DATES: u16 = 1 << 2;
+    /// The class declares an `$attributes` property.
+    pub const ATTRIBUTES: u16 = 1 << 3;
+    /// The class declares a `$fillable` property.
+    pub const FILLABLE: u16 = 1 << 4;
+    /// The class declares a `$guarded` property.
+    pub const GUARDED: u16 = 1 << 5;
+    /// The class declares a `$hidden` property.
+    pub const HIDDEN: u16 = 1 << 6;
+    /// The class declares a `$visible` property.
+    pub const VISIBLE: u16 = 1 << 7;
+    /// The class declares an `$appends` property.
+    pub const APPENDS: u16 = 1 << 8;
+    /// The column-name lists that feed [`LaravelMetadata::column_names`](super::LaravelMetadata::column_names).
+    pub const COLUMN_LISTS: u16 = FILLABLE | GUARDED | HIDDEN | VISIBLE | APPENDS;
+}
+
+/// The `$casts` property and `casts()` method entries of a model, kept
+/// apart so a subclass that redeclares one of them still inherits the
+/// other.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CastSources {
+    /// Entries of the `$casts` property.
+    pub property: Vec<(String, String)>,
+    /// Entries returned by the `casts()` method.
+    pub method: Vec<(String, String)>,
+}
+
 /// Laravel-specific metadata extracted from class declarations.
 ///
 /// Grouped into a sub-struct to keep the core `ClassInfo` focused on
@@ -1539,6 +1622,8 @@ pub mod attribute_target {
 /// classes carry no overhead beyond a single struct value.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct LaravelMetadata {
+    /// Factory selected by a model's `newFactory()`, `$factory`, or `#[UseFactory]`.
+    pub custom_factory: Option<PhpType>,
     /// Model class explicitly configured by a Laravel factory's `$model`
     /// property.
     ///
@@ -1551,11 +1636,9 @@ pub struct LaravelMetadata {
     ///
     /// Detected from three Laravel mechanisms:
     ///
-    /// 1. The `#[CollectedBy(CustomCollection::class)]` attribute on the
-    ///    model class.
-    /// 2. The `/** @use HasCollection<CustomCollection> */` docblock
-    ///    annotation on a `use HasCollection;` trait usage.
-    /// 3. A `newCollection()` method override returning a custom type.
+    /// 1. A `newCollection()` method override returning a custom type.
+    /// 2. The `#[CollectedBy(CustomCollection::class)]` attribute on the model.
+    /// 3. The `/** @use HasCollection<CustomCollection> */` annotation.
     ///
     /// When set, the `LaravelModelProvider` replaces
     /// `\Illuminate\Database\Eloquent\Collection` with this class in
@@ -1571,6 +1654,14 @@ pub struct LaravelMetadata {
     /// properties, mapping cast type strings to PHP types (e.g.
     /// `datetime` to `Carbon\Carbon`, `boolean` to `bool`).
     pub casts_definitions: Vec<(String, String)>,
+    /// The two sources of [`casts_definitions`](Self::casts_definitions),
+    /// recorded only when the model has both a `$casts` property and a
+    /// `casts()` method (its own or inherited). With a single source,
+    /// `casts_definitions` already is that source's list.
+    pub cast_sources: Option<Box<CastSources>>,
+    /// Which list-valued model properties the class declares itself, as
+    /// [`model_declaration`] flags.
+    pub declared: u16,
     /// Column names extracted from the deprecated `$dates` property
     /// array.
     ///
@@ -1599,6 +1690,13 @@ pub struct LaravelMetadata {
     /// properties as a last-resort fallback when a column is not
     /// already covered by `$casts` or `$attributes`.
     pub column_names: Vec<String>,
+    /// The [`model_declaration`] list flags each entry of
+    /// [`column_names`](Self::column_names) comes from, index for index.
+    ///
+    /// Lets a subclass that redeclares `$hidden` still inherit the parent's
+    /// `$fillable`. An entry past the end of this list belongs to every
+    /// declared column list.
+    pub column_sources: Vec<u16>,
     /// Explicit Eloquent `$connection` property.
     pub connection_name: Option<String>,
     /// Explicit Eloquent `$table` property.
@@ -1626,6 +1724,12 @@ pub struct LaravelMetadata {
     /// and cannot be resolved statically, so no implicit primary key
     /// property is synthesized.
     pub has_get_key_name_method: bool,
+    /// Columns returned by the model's own `uniqueIds()` override.
+    ///
+    /// - `None` — not declared, or not a literal list of strings.
+    /// - `Some(["uuid"])` — `HasUuids`/`HasUlids` generate these columns;
+    ///   the primary key is only a string when it is listed.
+    pub unique_ids: Option<Vec<String>>,
     /// Whether `$timestamps` is explicitly set on the model.
     ///
     /// - `None` — not declared (inherits the default, which is `true`
@@ -1648,15 +1752,19 @@ pub struct LaravelMetadata {
     ///   property should be synthesized.
     /// - `Some(Some("modified"))` — custom column name.
     pub updated_at_name: Option<Option<String>>,
+    /// Whether the model uses Eloquent's `SoftDeletes` trait, which casts
+    /// its deletion column to a date.
+    pub soft_deletes: bool,
+    /// Override for the `DELETED_AT` column name constant `SoftDeletes`
+    /// reads. `None` when not declared (the default `"deleted_at"`).
+    pub deleted_at_name: Option<String>,
     /// Custom Eloquent builder class for the model.
     ///
     /// Detected from three Laravel mechanisms:
     ///
-    /// 1. The `#[UseEloquentBuilder(CustomBuilder::class)]` attribute on
-    ///    the model class (Laravel 11+).
-    /// 2. The `/** @use HasBuilder<CustomBuilder> */` docblock
-    ///    annotation on a `use HasBuilder;` trait usage.
-    /// 3. A `newEloquentBuilder()` method override returning a custom type.
+    /// 1. A `newEloquentBuilder()` method override returning a custom type.
+    /// 2. The `#[UseEloquentBuilder(CustomBuilder::class)]` attribute.
+    /// 3. The `/** @use HasBuilder<CustomBuilder> */` annotation.
     ///
     /// When set, the `LaravelModelProvider` uses this class instead of
     /// the standard `Illuminate\Database\Eloquent\Builder` for
@@ -2104,6 +2212,10 @@ pub struct ClassInfo {
 
 // ─── ClassInfo helpers ──────────────────────────────────────────────────────
 
+/// Prefix of the synthetic name the parser gives an anonymous class
+/// (`__anonymous@<offset of its opening brace>`).
+pub const ANONYMOUS_CLASS_PREFIX: &str = "__anonymous@";
+
 impl ClassInfo {
     /// Return the fully-qualified name of this class.
     ///
@@ -2133,6 +2245,30 @@ impl ClassInfo {
     #[inline]
     pub fn cache_fqn(&mut self) {
         self.fqn = Some(self.compute_fqn());
+    }
+
+    /// Populate the cached FQN for a class parsed out of `uri`.
+    ///
+    /// Identical to [`cache_fqn`] for a named class. An anonymous class is
+    /// named after the offset of its opening brace *within its own file* and
+    /// is deliberately kept out of the workspace declaration index, so nothing
+    /// else makes it unique across the workspace. Boilerplate-identical files
+    /// put that brace on the same offset (every Laravel migration is
+    /// `return new class extends Migration {` after the same header), and the
+    /// stores keyed by FQN — the resolved-class cache and the method store —
+    /// would then let whichever file resolved first answer for both. The URI
+    /// goes into the FQN rather than into `name`, which reaches the user
+    /// through hover and the outline.
+    pub fn cache_fqn_in_uri(&mut self, uri: &str) {
+        if self.name.starts_with(ANONYMOUS_CLASS_PREFIX) {
+            self.fqn = Some(crate::atom::atom(&format!(
+                "{}@{}",
+                self.compute_fqn(),
+                uri
+            )));
+        } else {
+            self.cache_fqn();
+        }
     }
 
     /// Rebuild the `method_index` from the current `methods` vec.
@@ -2584,6 +2720,52 @@ pub(crate) struct FileContext {
     pub resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
 }
 
+/// A class loader per `namespace` block of a file (see
+/// [`Backend::class_loaders`](crate::Backend::class_loaders)), as trait
+/// objects so it can be handed through non-generic walkers.
+pub type BlockClassLoaders<'a> = PerBlock<'a, &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a)>;
+
+/// One value per `namespace` block of a file, built by
+/// [`FileContext::per_block`].
+///
+/// PHP scopes both the namespace and the `use` imports to a block, so
+/// anything that resolves a source name (a class loader, above all) has to
+/// be the one built for the block the name is written in.
+pub struct PerBlock<'a, T> {
+    /// The file's blocks, or empty when it has only one.
+    spans: &'a [NamespaceSpan],
+    /// One entry per span, or a single entry when `spans` is empty.
+    items: Vec<T>,
+}
+
+impl<'a, T> PerBlock<'a, T> {
+    /// The value for the block containing `offset`.
+    pub fn at(&self, offset: u32) -> &T {
+        let index = self
+            .spans
+            .iter()
+            .position(|span| offset >= span.start && offset <= span.end)
+            // Past the last block (e.g. code after its closing brace).
+            .unwrap_or(self.items.len() - 1);
+        &self.items[index]
+    }
+
+    /// A value derived from each block's value.
+    pub fn map<'b, U>(&'b self, f: impl FnMut(&'b T) -> U) -> PerBlock<'a, U> {
+        PerBlock {
+            spans: self.spans,
+            items: self.items.iter().map(f).collect(),
+        }
+    }
+}
+
+impl<L: Fn(&str) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
+    /// These loaders as trait objects.
+    pub fn as_dyn(&self) -> BlockClassLoaders<'_> {
+        self.map(|loader| loader as &dyn Fn(&str) -> Option<Arc<ClassInfo>>)
+    }
+}
+
 impl FileContext {
     /// The namespace in effect at `offset`.
     ///
@@ -2592,16 +2774,62 @@ impl FileContext {
     /// span contains `offset`, so a name written in the second block is
     /// not resolved against the first block's namespace.
     pub fn namespace_at(&self, offset: u32) -> &Option<String> {
-        let Some(spans) = self.namespace_spans.as_ref() else {
-            return &self.namespace;
-        };
-        for span in spans {
-            if offset >= span.start && offset <= span.end {
-                return &span.namespace;
-            }
+        self.span_at(offset)
+            .map_or(&self.namespace, |span| &span.namespace)
+    }
+
+    /// The `use` imports in force at `offset`.
+    ///
+    /// Equals [`use_map`](Self::use_map) for single-namespace files.  In a
+    /// file with several `namespace` blocks it is the table of the block
+    /// containing `offset`, so an import declared in one block does not
+    /// apply in another.
+    pub fn use_map_at(&self, offset: u32) -> &HashMap<String, String> {
+        self.span_at(offset)
+            .map_or(&self.use_map, |span| &span.use_map)
+    }
+
+    /// The namespace block containing `offset`, when the file has several.
+    fn span_at(&self, offset: u32) -> Option<&NamespaceSpan> {
+        NamespaceSpan::containing(self.namespace_spans.as_ref()?, offset)
+    }
+
+    /// Build one `T` per `namespace` block from that block's imports and
+    /// namespace, for a consumer that resolves names all over the file.
+    ///
+    /// A single-namespace file builds one value from the file-wide
+    /// [`use_map`](Self::use_map) and [`namespace`](Self::namespace).
+    /// Look a value up with [`PerBlock::at`].
+    pub fn per_block<'a, T>(
+        &'a self,
+        mut build: impl FnMut(&'a HashMap<String, String>, &'a Option<String>) -> T,
+    ) -> PerBlock<'a, T> {
+        match self.namespace_spans.as_deref() {
+            Some(spans) => PerBlock {
+                spans,
+                items: spans
+                    .iter()
+                    .map(|span| build(&span.use_map, &span.namespace))
+                    .collect(),
+            },
+            None => PerBlock {
+                spans: &[],
+                items: vec![build(&self.use_map, &self.namespace)],
+            },
         }
-        // Past the last block (e.g. code after its closing brace).
-        spans.last().map_or(&self.namespace, |s| &s.namespace)
+    }
+
+    /// This context narrowed to the namespace block containing `offset`:
+    /// that block's namespace and imports, for a consumer that resolves
+    /// every name it sees against one block.
+    pub fn at(&self, offset: u32) -> FileContext {
+        FileContext {
+            classes: self.classes.clone(),
+            use_map: self.use_map_at(offset).clone(),
+            namespace: self.namespace_at(offset).clone(),
+            namespace_spans: self.namespace_spans.clone(),
+            resolved_names: self.resolved_names.clone(),
+        }
     }
 
     /// Resolve a name to its FQN using the best available data source.
@@ -2625,21 +2853,23 @@ impl FileContext {
         }
         // Fallback: replicate resolve_to_fqn logic inline to avoid
         // a cross-module dependency on diagnostics::helpers.
+        let use_map = self.use_map_at(offset);
+        let namespace = self.namespace_at(offset);
         if !name.contains('\\') {
-            if let Some(fqn) = self.use_map.get(name) {
+            if let Some(fqn) = use_map.get(name) {
                 return fqn.clone();
             }
-            if let Some(ref ns) = self.namespace {
+            if let Some(ns) = namespace {
                 return format!("{}\\{}", ns, name);
             }
             return name.to_string();
         }
         let first_segment = name.split('\\').next().unwrap_or(name);
-        if let Some(fqn_prefix) = self.use_map.get(first_segment) {
+        if let Some(fqn_prefix) = use_map.get(first_segment) {
             let rest = &name[first_segment.len()..];
             return format!("{}{}", fqn_prefix, rest);
         }
-        if let Some(ref ns) = self.namespace {
+        if let Some(ns) = namespace {
             return format!("{}\\{}", ns, name);
         }
         name.to_string()

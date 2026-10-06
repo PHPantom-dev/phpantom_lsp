@@ -6,7 +6,7 @@
  *
  * These assertions verify that our assumptions about Laravel's runtime
  * behaviour are correct, so the LSP can model them accurately.
- * Uses only reflection (no database or app boot required).
+ * Requires no external database or full application boot.
  */
 
 require_once __DIR__ . '/vendor/autoload.php';
@@ -48,6 +48,16 @@ function assertMethodReturnType(string $class, string $method, string $expected)
     $actual = $type ? (string) $type : 'mixed';
     check("$class::$method() returns $expected (got $actual)", $actual === $expected);
 }
+
+// ─── Model settings inherited from a base model ─────────────────────────────
+
+// Danish declares no $fillable or $casts of its own, so PHP hands it Pastry's.
+$danish = new \App\Models\Danish();
+check('Danish inherits $fillable from Pastry', $danish->getFillable() === ['sku']);
+check(
+    'Danish inherits $casts from Pastry',
+    ($danish->getCasts()['is_vegan'] ?? null) === 'boolean'
+);
 
 // ─── Scope vs Model method shadowing ────────────────────────────────────────
 
@@ -123,6 +133,73 @@ check(
     'Bakery::seasonalRecipes() uses RecipeIngredient as its pivot model',
     $seasonalRecipes->getPivotClass() === \App\Models\RecipeIngredient::class
 );
+
+// ─── Model PHPDoc types (builder-of / collection-of / relation-of) ──────────
+
+// What `Demo::modelDocblockTypes()` and `Demo::relationDocblockTypes()` claim
+// those types resolve to, checked against the classes Eloquent really builds.
+
+check(
+    'builder-of<BlogAuthor> is the Eloquent builder',
+    \App\Models\BlogAuthor::query() instanceof \Illuminate\Database\Eloquent\Builder
+);
+check(
+    'collection-of<BlogAuthor> is AuthorCollection, via #[CollectedBy]',
+    (new \App\Models\BlogAuthor())->newCollection() instanceof \App\Models\AuthorCollection
+);
+
+// relation-of<BlogAuthor, 'posts'> — the relationship itself, not its result.
+$posts = (new \App\Models\BlogAuthor())->posts();
+check(
+    "relation-of<BlogAuthor, 'posts'> is a HasMany",
+    $posts instanceof \Illuminate\Database\Eloquent\Relations\HasMany
+);
+check(
+    "relation-of<BlogAuthor, 'posts'> relates BlogPost",
+    $posts->getRelated() instanceof \App\Models\BlogPost
+);
+check(
+    "relation-of<BlogAuthor, 'posts'> is declared by BlogAuthor",
+    $posts->getParent() instanceof \App\Models\BlogAuthor
+);
+
+// A dotted path follows one relation on to the next: 'posts.author' walks
+// BlogAuthor::posts() to BlogPost, then BlogPost::author() back to BlogAuthor.
+$writer = (new \App\Models\BlogPost())->author();
+check(
+    "relation-of<BlogAuthor, 'posts.author'> is a BelongsTo",
+    $writer instanceof \Illuminate\Database\Eloquent\Relations\BelongsTo
+);
+check(
+    "relation-of<BlogAuthor, 'posts.author'> relates BlogAuthor",
+    $writer->getRelated() instanceof \App\Models\BlogAuthor
+);
+
+// The builder form of the same path ends on the related model instead.
+check(
+    "builder-of<BlogAuthor, 'posts'> queries BlogPost",
+    \App\Models\BlogPost::query()->getModel() instanceof \App\Models\BlogPost
+);
+
+// ─── view-string ────────────────────────────────────────────────────────────
+
+// `view-string` lives only in the docblock: PHP sees the native `string`
+// hint, so `Demo::renderTemplate()` is an ordinary string parameter at
+// runtime and the extra promise costs nothing there.
+$renderTemplate = new ReflectionMethod(\App\Demo::class, 'renderTemplate');
+check(
+    'Demo::renderTemplate() declares a plain string parameter',
+    (string) $renderTemplate->getParameters()[0]->getType() === 'string'
+);
+
+// The promise it does make is that the argument names a template, so the
+// names the demo passes have to be templates this project ships.
+foreach (['welcome' => 'resources/views', 'theme.dashboard' => 'resources/theme/views'] as $view => $root) {
+    check(
+        "view-string argument '$view' names a template under $root",
+        is_file(__DIR__ . '/' . $root . '/' . str_replace('.', '/', $view) . '.blade.php')
+    );
+}
 
 // ─── Accessor methods ───────────────────────────────────────────────────────
 
@@ -232,6 +309,81 @@ check(
     'Administrator is an Authenticatable',
     is_subclass_of(\App\Models\Administrator::class, \Illuminate\Contracts\Auth\Authenticatable::class)
 );
+
+// ─── Config-backed Laravel resource names ──────────────────────────────────
+
+$namedResourceConfigs = [
+    'auth.php' => ['guards', 'admin'],
+    'cache.php' => ['stores', 'memory'],
+    'logging.php' => ['channels', ['daily', 'stderr']],
+    'filesystems.php' => ['disks', 'pantry'],
+    'database.php' => ['connections', 'mysql'],
+    'queue.php' => ['connections', 'redis'],
+    'mail.php' => ['mailers', 'transactional'],
+    'broadcasting.php' => ['connections', 'internal'],
+];
+$previousContainer = \Illuminate\Container\Container::getInstance();
+$configContainer = new class extends \Illuminate\Container\Container {
+    public function storagePath(string $path = ''): string
+    {
+        return __DIR__ . '/storage' . ($path === '' ? '' : "/$path");
+    }
+};
+\Illuminate\Container\Container::setInstance($configContainer);
+foreach ($namedResourceConfigs as $file => [$subtree, $names]) {
+    $config = require __DIR__ . "/config/$file";
+    foreach ((array) $names as $name) {
+        check(
+            "$file declares $subtree.$name",
+            isset($config[$subtree]) && array_key_exists($name, $config[$subtree])
+        );
+    }
+}
+\Illuminate\Container\Container::setInstance($previousContainer);
+
+$databaseManager = (new ReflectionClass(
+    \Illuminate\Database\DatabaseManager::class
+))->newInstanceWithoutConstructor();
+$parseConnectionName = new ReflectionMethod($databaseManager, 'parseConnectionName');
+foreach (['read', 'write', 'direct'] as $role) {
+    check(
+        "database role suffix ::$role selects the mysql config",
+        $parseConnectionName->invoke($databaseManager, "mysql::$role") === ['mysql', $role]
+    );
+}
+
+foreach ([
+    \Illuminate\Cache\CacheManager::class,
+    \Illuminate\Queue\QueueManager::class,
+] as $managerClass) {
+    $manager = (new ReflectionClass($managerClass))->newInstanceWithoutConstructor();
+    $getConfig = new ReflectionMethod($manager, 'getConfig');
+    check(
+        "$managerClass supplies the null driver without config",
+        $getConfig->invoke($manager, 'null') === ['driver' => 'null']
+    );
+}
+
+$injectedResources = new ReflectionMethod(\App\Demo::class, 'injectedNamedResources');
+$attributeCases = [
+    'guard' => [\Illuminate\Container\Attributes\Auth::class, 'guard', 'admin'],
+    'user' => [\Illuminate\Container\Attributes\Authenticated::class, 'guard', 'admin'],
+    'cache' => [\Illuminate\Container\Attributes\Cache::class, 'store', 'memory'],
+    'logger' => [\Illuminate\Container\Attributes\Log::class, 'channel', 'daily'],
+    'disk' => [\Illuminate\Container\Attributes\Storage::class, 'disk', 'pantry'],
+    'database' => [\Illuminate\Container\Attributes\Database::class, 'connection', 'mysql'],
+];
+foreach ($injectedResources->getParameters() as $parameter) {
+    [$attributeClass, $property, $expected] = $attributeCases[$parameter->getName()];
+    $attributes = $parameter->getAttributes($attributeClass);
+    check("{$parameter->getName()} has its contextual attribute", count($attributes) === 1);
+    if ($attributes !== []) {
+        check(
+            "{$parameter->getName()} contextual attribute selects $expected",
+            $attributes[0]->newInstance()->$property === $expected
+        );
+    }
+}
 
 // ─── Paginator element types ─────────────────────────────────────────────────
 
@@ -1487,6 +1639,67 @@ check(
     \App\Models\Review::where('reviewable_type', 'blog_post')->getBindings() === ['blog_post']
 );
 \Illuminate\Database\Eloquent\Relations\Relation::morphMap($previousMorphMap, false);
+
+// ─── UUID and ULID primary keys ─────────────────────────────────────────────
+
+$uuidOrder = new \App\Models\BakeryOrder();
+$ulidDelivery = new \App\Models\Delivery();
+$uuidOrder->setUniqueIds();
+$ulidDelivery->setUniqueIds();
+
+check('HasUuids generates a string id', is_string($uuidOrder->id));
+check('HasUuids generates a valid UUID', \Illuminate\Support\Str::isUuid($uuidOrder->id));
+check('HasUuids overrides the default key type', $uuidOrder->getKeyType() === 'string');
+check('HasUuids disables incrementing', $uuidOrder->getIncrementing() === false);
+check('HasUlids respects a custom primary key', $ulidDelivery->getKeyName() === 'tracking_id');
+check('HasUlids generates a string key', is_string($ulidDelivery->tracking_id));
+check('HasUlids generates a valid ULID', \Illuminate\Support\Str::isUlid($ulidDelivery->tracking_id));
+check('HasUlids overrides the default key type', $ulidDelivery->getKeyType() === 'string');
+check('HasUlids disables incrementing', $ulidDelivery->getIncrementing() === false);
+check(
+    'Unique identifier demo reads both string keys',
+    (new \App\Demo())->uniqueIdentifiers($uuidOrder, $ulidDelivery)
+        === $uuidOrder->id . ':' . $ulidDelivery->tracking_id
+);
+
+// ─── Class-based casts ──────────────────────────────────────────────────────
+
+check(
+    'AsEnumCollection::of stores class:enum',
+    \Illuminate\Database\Eloquent\Casts\AsEnumCollection::of(\App\Models\OrderStatus::class)
+        === \Illuminate\Database\Eloquent\Casts\AsEnumCollection::class . ':' . \App\Models\OrderStatus::class
+);
+check(
+    'AsEnumArrayObject::of stores class:enum',
+    \Illuminate\Database\Eloquent\Casts\AsEnumArrayObject::of(\App\Models\JamFlavor::class)
+        === \Illuminate\Database\Eloquent\Casts\AsEnumArrayObject::class . ':' . \App\Models\JamFlavor::class
+);
+check(
+    'AsCollection::of stores an empty collection class and the item',
+    \Illuminate\Database\Eloquent\Casts\AsCollection::of(\App\Models\Frosting::class)
+        === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
+);
+check(
+    'AsCollection::using stores the collection class and an empty map',
+    \Illuminate\Database\Eloquent\Casts\AsCollection::using(\App\Models\PostCollection::class)
+        === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':' . \App\Models\PostCollection::class . ','
+);
+check(
+    'AsBinary::uuid stores class:uuid',
+    \Illuminate\Database\Eloquent\Casts\AsBinary::uuid()
+        === \Illuminate\Database\Eloquent\Casts\AsBinary::class . ':uuid'
+);
+
+$castSample = new \App\Models\CastSample();
+$castSampleCasts = $castSample->getCasts();
+check(
+    'CastSample::statuses is an AsEnumCollection of OrderStatus',
+    ($castSampleCasts['statuses'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsEnumCollection::class . ':' . \App\Models\OrderStatus::class
+);
+check(
+    'CastSample::toppings is an AsCollection of Frosting',
+    ($castSampleCasts['toppings'] ?? null) === \Illuminate\Database\Eloquent\Casts\AsCollection::class . ':,' . \App\Models\Frosting::class
+);
 
 // ─── Summary ────────────────────────────────────────────────────────────────
 

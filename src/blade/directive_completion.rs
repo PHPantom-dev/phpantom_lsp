@@ -164,6 +164,15 @@ pub fn directive_prefix_at(content: &str, offset: usize) -> Option<&str> {
         // `@@name` is Blade's escape for a literal `@name`, not a directive.
         return None;
     }
+    if before[..at_char_start]
+        .bytes()
+        .next_back()
+        .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+    {
+        // Blade anchors directives with `\B`: an `@` glued to a word
+        // (`foo@fo`, an email address) is text.
+        return None;
+    }
 
     if !is_html_position(content, at_char_start) {
         return None;

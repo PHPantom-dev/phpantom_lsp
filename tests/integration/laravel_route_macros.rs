@@ -5,7 +5,7 @@
 //! calls a second macro for the password group.  A route file that calls the
 //! macro has all of those names, so none of them may be reported as unknown.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_initialized_php};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -103,11 +103,8 @@ fn workspace() -> (phpantom_lsp::Backend, tempfile::TempDir) {
 
 #[tokio::test]
 async fn routes_registered_by_a_router_macro_are_not_reported_as_unknown() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Links.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Links.php").await;
 
     let mut diags = Vec::new();
     backend.collect_slow_diagnostics(uri.as_str(), CONSUMER, &mut diags);
@@ -134,11 +131,8 @@ async fn routes_registered_by_a_router_macro_are_not_reported_as_unknown() {
 
 #[tokio::test]
 async fn goto_definition_reaches_a_route_declared_in_a_macro_body() {
-    let (backend, dir) = workspace();
-    backend.initialized(InitializedParams {}).await;
-
-    let uri = Url::from_file_path(dir.path().join("src/Links.php")).unwrap();
-    open_php(&backend, &uri, CONSUMER).await;
+    let (backend, _dir) = workspace();
+    let uri = open_initialized_php(&backend, "src/Links.php").await;
 
     // Cursor inside 'password.update' on line 6.
     let result = backend

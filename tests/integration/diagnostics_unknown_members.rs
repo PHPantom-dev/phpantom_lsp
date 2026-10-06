@@ -1,7 +1,7 @@
 use crate::common::{
     create_psr4_workspace, create_psr4_workspace_with_stubs, create_test_backend,
     create_test_backend_with_exception_stubs, create_test_backend_with_full_stubs,
-    create_test_backend_with_stubs,
+    create_test_backend_with_stubs, unknown_member_diagnostics_with_scope_cache,
 };
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
@@ -12,27 +12,6 @@ use tower_lsp::lsp_types::*;
 static ITERATOR_STUB: &str = "<?php\ninterface Iterator { public function next(): void; }\n";
 
 // ─── Helpers for scope-cache-enabled diagnostics ────────────────────────────
-
-/// Open a file, run full slow diagnostics (which activates the diagnostic
-/// scope cache and the forward walker), then filter to unknown_member
-/// diagnostics only.  This exercises the forward walker's diagnostic path
-/// instead of the backward scanner.
-fn unknown_member_diagnostics_with_scope_cache(
-    backend: &phpantom_lsp::Backend,
-    uri: &str,
-    text: &str,
-) -> Vec<Diagnostic> {
-    backend.update_ast(uri, text);
-    let mut out = Vec::new();
-    backend.collect_slow_diagnostics(uri, text, &mut out);
-    // Keep only unknown_member diagnostics (the code we're testing).
-    out.retain(|d| {
-        d.code
-            .as_ref()
-            .is_some_and(|c| matches!(c, NumberOrString::String(s) if s == "unknown_member"))
-    });
-    out
-}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -5859,6 +5838,29 @@ class AbstractNode {
     );
 }
 
+/// A ternary's branch narrowing ends with the ternary: the next argument
+/// of the same call sees the subject as it was before the condition, not
+/// as the else branch left it.
+#[test]
+fn ternary_branch_narrowing_does_not_reach_the_next_argument() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+class A { public function a(): int { return 1; } }
+class B { public function b(): int { return 1; } }
+function take(int $x, int $y): void {}
+function run(A|B $x): void {
+    take($x instanceof A ? 1 : 2, $x->a());
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'a'")),
+        "`$x` is still `A|B` after the ternary, got: {:?}",
+        diags
+    );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Same-namespace class wins over a global stub of the same short name
 // ═══════════════════════════════════════════════════════════════════════════
@@ -11657,14 +11659,28 @@ class Svc {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// Unresolvable instanceof target suppression
+// Unresolvable instanceof target
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// When the instanceof target class cannot be resolved (e.g. it lives
-/// in a phar), the ternary then-branch should not produce false-positive
-/// diagnostics for members that only exist on the unresolvable subclass.
+/// Assert that a member read through a subject narrowed to a class that
+/// cannot be loaded gets the "cannot verify" warning an unloadable class
+/// always gets, and never a claim that the member does not exist on the
+/// type the subject had before the check.
+fn assert_only_unverifiable(diags: &[Diagnostic], form: &str) {
+    assert!(
+        !diags.is_empty()
+            && diags.iter().all(|d| d.message
+                == "Cannot verify method 'getTypes' — subject type 'UnionType' could not be resolved"),
+        "expected only the unresolved-class warning ({form}), got: {diags:?}"
+    );
+}
+
+/// When the instanceof target class cannot be resolved (e.g. it lives in
+/// a phar), the ternary then-branch holds that class rather than the
+/// subject's declared type, so a member only the subclass declares is
+/// not reported missing.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_ternary() {
+fn instanceof_target_unresolvable_ternary_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11680,16 +11696,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (ternary), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "ternary");
 }
 
 /// Same scenario but with an if-body instead of a ternary.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_if_body() {
+fn instanceof_target_unresolvable_if_body_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11706,16 +11718,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (if-body), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "if-body");
 }
 
 /// Same scenario but with `assert($var instanceof ...)`.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_assert() {
+fn instanceof_target_unresolvable_assert_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11731,16 +11739,12 @@ class Test {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (assert), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "assert");
 }
 
 /// Same scenario but with inline `&&` narrowing.
 #[test]
-fn no_diagnostic_when_instanceof_target_unresolvable_and_chain() {
+fn instanceof_target_unresolvable_and_chain_reports_only_the_unresolved_class() {
     let backend = create_test_backend();
     let uri = "file:///test.php";
     let text = r#"<?php
@@ -11753,11 +11757,7 @@ function test(Type $t): void {
 }
 "#;
     let diags = unknown_member_diagnostics(&backend, uri, text);
-    assert!(
-        diags.is_empty(),
-        "expected no diagnostics when instanceof target is unresolvable (&& chain), got: {:?}",
-        diags
-    );
+    assert_only_unverifiable(&diags, "&& chain");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -12361,6 +12361,39 @@ async fn self_and_static_in_macro_closure_resolve_to_macro_target() {
         "self::/static:: inside a macro closure should resolve to the macro target, got: {:?}",
         diags
     );
+}
+
+/// A variable assigned from `$this` inside a `@param-closure-this`
+/// closure holds the bound object, so its members are the bound class's.
+#[tokio::test]
+async fn variable_read_from_param_closure_this_uses_bound_class() {
+    let backend = create_test_backend();
+    let text = concat!(
+        "<?php\n",
+        "class Target { public function aim(): void {} }\n",
+        "class Reg {\n",
+        "    /** @param-closure-this Target $cb */\n",
+        "    public static function on(\\Closure $cb): void {}\n",
+        "}\n",
+        "class Service {\n",
+        "    public function run(): void {\n",
+        "        Reg::on(function () {\n",
+        "            $t = $this;\n",
+        "            $t->aim();\n",
+        "        });\n",
+        "        $this->aim();\n",
+        "    }\n",
+        "}\n",
+    );
+
+    let diags = unknown_member_diagnostics(&backend, "file:///test/closure_this_var.php", text);
+    assert_eq!(
+        diags.len(),
+        1,
+        "only the `$this->aim()` outside the closure should be flagged, got: {:?}",
+        diags
+    );
+    assert_eq!(diags[0].range.start.line, 12, "got: {:?}", diags);
 }
 
 /// `self::` outside the macro closure still resolves to the lexically
@@ -13097,6 +13130,90 @@ class WidgetTest {}
     assert!(
         diags.is_empty(),
         "a coverage target that resolves must not be flagged, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
+/// PHPUnit fails a test whose data provider or dependency names no method,
+/// so a dangling one is flagged in every spelling.
+#[test]
+fn flags_a_data_provider_or_dependency_that_names_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///provider_missing.php";
+    let text = r#"<?php
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Depends;
+
+final class Amounts {}
+
+final class ProviderTest
+{
+    #[DataProvider('missingProvider')]
+    public function testA(int $n): void {}
+
+    #[Depends('testMissing')]
+    public function testB(): void {}
+
+    /**
+     * @dataProvider missingAnnotated
+     */
+    public function testC(int $n): void {}
+
+    /**
+     * @dataProvider Amounts::missingExternal
+     */
+    public function testD(int $n): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for name in [
+        "missingProvider",
+        "testMissing",
+        "missingAnnotated",
+        "missingExternal",
+    ] {
+        assert!(
+            diags.iter().any(|d| d.message.contains(name)),
+            "a data provider or dependency naming the missing `{name}` must be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// PHPUnit reaches providers and dependencies through reflection, so neither
+/// a non-public provider nor an instance test method named from `static`
+/// scope is a problem.
+#[test]
+fn no_diagnostic_for_a_data_provider_or_dependency_that_resolves() {
+    let backend = create_test_backend();
+    let uri = "file:///provider_ok.php";
+    let text = r#"<?php
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Depends;
+
+final class ProviderTest
+{
+    #[DataProvider('cases')]
+    #[Depends('testFirst')]
+    public function testIt(int $n): void {}
+
+    public function testFirst(): void {}
+
+    /**
+     * @dataProvider legacyCases
+     * @depends clone testFirst
+     */
+    public function testLegacy(int $n): void {}
+
+    private static function cases(): array { return [[1]]; }
+
+    public function legacyCases(): array { return [[1]]; }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a data provider or dependency that resolves must not be flagged, got: {:?}",
         diags.iter().map(|d| &d.message).collect::<Vec<_>>()
     );
 }
@@ -14298,5 +14415,101 @@ class Registry {
     assert!(
         diags.is_empty(),
         "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
+    );
+}
+
+/// Members of a bounded method template's bound resolve on everything
+/// derived from the parameter: the value itself, a foreach variable over
+/// `iterable<T>`, an element of an inline `@var array<T>`, and what a
+/// template-returning call hands back.
+#[test]
+fn no_unknown_member_on_bounded_method_template_values() {
+    let backend = create_test_backend();
+    let uri = "file:///bounded_method_template_members.php";
+    let text = r#"<?php
+interface Positioned { public function getPosition(): int; }
+class Sorter {
+    /**
+     * @template T of Positioned
+     * @param iterable<T> $items
+     * @param T $first
+     * @return array<T>
+     */
+    public function sort($items, $first) {
+        $first->getPosition();
+        /** @var array<T> $res */
+        $res = [];
+        foreach ($items as $item) {
+            $item->getPosition();
+            $res[$item->getPosition()] = $item;
+            $res[0]->getPosition();
+            $this->keep($item)->getPosition();
+        }
+        return $res;
+    }
+
+    /**
+     * @template S of Positioned
+     * @param S $value
+     * @return S
+     */
+    private function keep($value) { return $value; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Bounded template values should resolve their bound's members, got: {diags:?}"
+    );
+}
+
+/// Two `namespace` blocks importing the same short name from different
+/// namespaces each see their own class: through a parameter type, a `new`
+/// expression, an inherited parent, and a function's return type.
+#[test]
+fn each_namespace_block_resolves_names_through_its_own_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let text = r#"<?php
+namespace X {
+    class Foo { public function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    class ChildA extends Foo {
+        public function run(Foo $f): void {
+            $f->fromX();
+            (new Foo)->fromX();
+            $this->fromX();
+        }
+    }
+    function a(Foo $f): Foo { $f->fromX(); return new Foo(); }
+    a(new Foo())->fromX();
+}
+namespace B {
+    use Y\Foo;
+    class ChildB extends Foo {
+        public function run(Foo $f): void {
+            $f->fromY();
+            (new Foo)->fromY();
+            $this->fromY();
+        }
+    }
+    function b(Foo $f): Foo { $f->fromY(); return new Foo(); }
+    b(new Foo())->fromY();
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "each block should resolve `Foo` through its own import, got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
     );
 }

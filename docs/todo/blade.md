@@ -84,49 +84,26 @@ inside a `@php` / `<?php` block. Re-enable code actions with:
 - Blade-aware code generation (e.g. insert `use` inside `@php`).
 - Filtering out actions that don't make sense in Blade context.
 
+**Current state:** the coordinate translation exists.
+`translate_workspace_edit` (`src/blade/translate.rs`) already runs at the
+end of `handle_code_action` and `resolve_code_action`, moving every edit
+back into the template and dropping the ones that land in the prologue.
+The template-aware `use` insertion exists too: `use_block_for`
+(`src/completion/use_edit.rs`) reads a template's own `@use` directives and
+writes a new import as one, so the "Import class" action already has an
+edit the template can take. "Replace FQCN with import" does not yet:
+`replace_fqcn.rs` calls `analyze_use_block(content)` directly, so its `use`
+edit lands in the virtual prologue and is dropped. Switch it to
+`use_block_for(uri, content)`. The PHPStan-only actions that also call
+`analyze_use_block` (`add_throws.rs`, `add_override.rs`) never fire in a
+template and can simply be filtered out. What remains is the server-side gate in
+`code_action` (`src/server.rs`), which still answers nothing for a
+template; translating the request range and its diagnostics into the
+virtual PHP before the collectors run; and discarding an action whose
+edits were all dropped rather than offering a no-op. The code-action
+suites call `handle_code_action` directly, which skips the gate; the
+gate's tests have to go through the trait method, which
+`code_actions_via_server` in `tests/integration/common/mod.rs` already
+wraps.
+
 **Deliverable:** Code actions are re-enabled for `.blade.php` files.
-
----
-
-## BL18. Format the PHP embedded in a Blade template
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-The built-in Blade formatter (`src/formatting/blade/reindent.rs`)
-changes leading whitespace only, so the PHP inside a template keeps
-whatever spacing the author typed: `{{$name}}` stays `{{$name}}`,
-`@if($a&&$b)` stays as written, and an `@php` block is shifted but not
-formatted. Pint's Blade rule formats those fragments with its PHP fixers
-(`PhpBlockFormatting` over `@php` blocks, `<?php` islands, directive
-arguments, and echoes); the built-in formatter should do the same through
-the embedded `mago` formatter, on isolated snippets, the way diagnostics
-isolate virtual-PHP buffers rather than through the preprocessor's
-lowering.
-
-- `@php … @endphp` bodies and `<?php … ?>` islands are statement lists:
-  format them as a file body and let the reindenter shift the result to
-  the block's level, which it already does for any body.
-- `{{ }}`, `{!! !!}`, and directive arguments are single expressions:
-  format each as an expression statement and drop the trailing `;`. A
-  fragment that spans lines has to keep its line count, or the
-  reindenter's per-line model has to learn to re-derive it.
-- Spacing that is Blade's rather than PHP's belongs to the same pass:
-  `@if(` to `@if (`, `{{$x}}` to `{{ $x }}`, `/>` spacing. The reflow
-  tools all do it, and the directive and echo scanners make it cheap.
-- Opt-in, behind a `[formatting]` key, since it changes line content
-  and the reindenter's contract today is that it never does. It must
-  not run inside `@verbatim`, a comment, a string, `<script>`,
-  `<style>`, or `<pre>`.
-- Never touch an Alpine or Livewire attribute value: it is JavaScript.
-
-### Tests
-
-- `{{$name}}` becomes `{{ $name }}`, `@if($a&&$b)` becomes
-  `@if ($a && $b)`, and an `@php` block is formatted as PHP and lands at
-  the block's indentation.
-- A fragment that does not parse is left as written and the rest of the
-  template still formats.
-- Nothing inside `@verbatim`, `<script>`, `<style>`, or a string
-  changes.
-- Formatting stays idempotent over the corpora the reindenter's tests
-  use.

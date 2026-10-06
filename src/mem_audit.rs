@@ -160,9 +160,9 @@ fn s(o: &Option<String>) -> Sz {
     z
 }
 
-fn vs(v: &Vec<String>) -> Sz {
+fn vs(v: &[String]) -> Sz {
     let mut z = Sz::default();
-    z.add(v.capacity() * size_of::<String>());
+    z.add(v.len() * size_of::<String>());
     for x in v {
         z.add(x.capacity());
     }
@@ -219,6 +219,9 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::Raw(_) => "Raw",
         TypeKind::Benevolent(_) => "Benevolent",
         TypeKind::ListShape(_) => "ListShape",
+        TypeKind::TemplateParam(..) => "TemplateParam",
+        TypeKind::UnsealedShape(_) => "UnsealedShape",
+        TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
     }
 }
 
@@ -255,9 +258,18 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::KeyOf(b)
         | TypeKind::ValueOf(b)
         | TypeKind::Benevolent(b)
-        | TypeKind::ListShape(b) => {
+        | TypeKind::ListShape(b)
+        | TypeKind::TemplateParam(_, b)
+        | TypeKind::ClassNameLiteral(b) => {
             z.slot(1);
             z += ty(b);
+        }
+        TypeKind::UnsealedShape(u) => {
+            z.add(size_of::<crate::php_type::UnsealedShape>());
+            z.slot(4);
+            z += ty(&u.shape);
+            z += ty(&u.key);
+            z += ty(&u.value);
         }
         TypeKind::Union(v) | TypeKind::Intersection(v) => z += ty_vec(v),
         TypeKind::Generic(g) => {
@@ -464,12 +476,23 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     let mut z = Sz::default();
     z.add(size_of::<LaravelMetadata>());
     z += opt_ty(&l.factory_model);
+    z += opt_ty(&l.custom_factory);
     z += opt_ty(&l.custom_collection);
     z += opt_ty(&l.custom_builder);
-    z.add(l.casts_definitions.capacity() * size_of::<(String, String)>());
-    for (a, b) in &l.casts_definitions {
-        z.add(a.capacity());
-        z.add(b.capacity());
+    let cast_sources = l.cast_sources.as_deref();
+    if cast_sources.is_some() {
+        z.add(size_of::<crate::types::CastSources>());
+    }
+    for casts in std::iter::once(&l.casts_definitions).chain(
+        cast_sources
+            .into_iter()
+            .flat_map(|c| [&c.property, &c.method]),
+    ) {
+        z.add(casts.capacity() * size_of::<(String, String)>());
+        for (a, b) in casts {
+            z.add(a.capacity());
+            z.add(b.capacity());
+        }
     }
     z += vs(&l.dates_definitions);
     z.add(l.attributes_definitions.capacity() * size_of::<(String, PhpType)>());
@@ -483,6 +506,10 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
         z.add(b.capacity());
     }
     z += vs(&l.column_names);
+    z.add(l.column_sources.capacity() * size_of::<u16>());
+    if let Some(ids) = &l.unique_ids {
+        z += vs(ids);
+    }
     for o in [
         &l.connection_name,
         &l.table_name,
@@ -497,6 +524,7 @@ fn laravel_meta(l: &LaravelMetadata) -> Sz {
     if let Some(Some(x)) = &l.updated_at_name {
         z.add(x.capacity());
     }
+    z += s(&l.deleted_at_name);
     z.add(l.belongs_to_many_pivots.capacity() * size_of::<crate::types::PivotRelation>());
     for p in &l.belongs_to_many_pivots {
         z.add(p.method.capacity());
@@ -605,14 +633,15 @@ impl Audit {
     fn param_slice(&mut self, params: &[ParameterInfo]) {
         for p in params {
             self.n_params += 1;
-            // type_hint, native_type_hint, closure_this_type
-            self.pt_inline_slots += 3;
+            // type_hint, native_type_hint, closure_this_type, param_out_type
+            self.pt_inline_slots += 4;
             if p.description.is_none() && p.default_value.is_none() {
                 self.par_no_docs += 1;
             }
             self.par_types += opt_ty(&p.type_hint);
             self.par_types += opt_ty(&p.native_type_hint);
             self.par_types += opt_ty(&p.closure_this_type);
+            self.par_types += opt_ty(&p.param_out_type);
             self.par_docs += s(&p.description);
             self.par_defaults += s(&p.default_value);
         }
@@ -1294,6 +1323,13 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
             for sp in &sm.spans {
                 sym.add(sp.kind.audit_heap());
             }
+            sym.add(
+                sm.conditional_laravel_spans.capacity()
+                    * size_of::<crate::symbol_map::ConditionalLaravelStringSpan>(),
+            );
+            for candidate in &sm.conditional_laravel_spans {
+                sym.add(candidate.audit_heap());
+            }
             sym += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
             member_idx += map_buckets::<Atom, Vec<usize>>(sm.member_access_indices.capacity());
             for v in sm.member_access_indices.values() {
@@ -1471,10 +1507,10 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     let mut laravel_keys = Sz::default();
     {
         let c = backend.laravel_string_key_cache.read();
-        for v in [&c.config_keys, &c.view_names, &c.trans_keys]
-            .into_iter()
-            .flatten()
-        {
+        if let Some(keys) = &c.config_keys {
+            laravel_keys += vs(keys);
+        }
+        for v in [&c.view_names, &c.trans_keys].into_iter().flatten() {
             laravel_keys += vs(v);
         }
         if let Some(discovery) = &c.routes {
@@ -1495,7 +1531,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         if let Some(trees) = &c.config_trees {
             // ConfigNode is recursive; count the spine only.
             laravel_keys.add(trees.capacity() * 64);
-            for (k, _) in trees {
+            for (k, _) in trees.iter() {
                 laravel_keys.add(k.capacity());
             }
         }
@@ -1529,7 +1565,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     {
         let m = backend.blade_virtual_content.read();
         n_blade = m.len();
-        misc += map_buckets::<String, String>(m.capacity());
+        misc += map_buckets::<String, Arc<String>>(m.capacity());
         for (k, v) in m.iter() {
             blade.add(k.capacity());
             blade.add(v.capacity());
@@ -1712,7 +1748,8 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         backend.symbols.global_defines.write().clear()
     });
     probe("gti_index", &mut || {
-        backend.symbols.gti_index.write().clear()
+        backend.symbols.gti_index.write().clear();
+        backend.symbols.gti_parents_index.write().clear();
     });
     probe("uri_globals_index", &mut || {
         backend.symbols.uri_globals_index.write().clear()
@@ -1746,7 +1783,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
     });
     probe("parsed_uris", &mut || backend.parsed_uris.write().clear());
     probe("laravel_aliases", &mut || {
-        *backend.laravel_aliases.write() = None
+        backend.laravel_aliases.invalidate()
     });
     probe("laravel seed/mixin/pivot/command sets", &mut || {
         backend.laravel_macro_seeds.write().clear();

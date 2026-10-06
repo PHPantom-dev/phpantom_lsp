@@ -292,6 +292,8 @@ function runDemoAssertions(): void
     assert(count($writers) === 2 && $writers[0] instanceof Scaffolding\Pen, 'array_filter() with an instanceof callback keeps only that class');
     $sparse = array_filter([3, 4, 5], fn($v) => $v > 3);
     assert(array_keys($sparse) === [1, 2], 'array_filter() keeps the key of every entry it keeps, so filtering a list leaves gaps rather than another list');
+    $kit = ['sketcher' => new Scaffolding\Pencil(), ...[new Scaffolding\Pen(), new Scaffolding\Pen()]];
+    assert($kit['sketcher'] instanceof Scaffolding\Pencil && array_keys($kit) === ['sketcher', 0, 1], 'an entry written beside a spread keeps its key and value, and the spread\'s integer keys follow it');
     $collected = [];
     foreach ([['ink'], ['gel']] as $batch) {
         $collected = array_merge($collected, $batch);

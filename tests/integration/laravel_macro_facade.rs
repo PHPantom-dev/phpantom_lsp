@@ -6,7 +6,7 @@
 //! container-binding string (`'view'`), which is looked up in the core
 //! container alias table to find the concrete class. No application booting.
 
-use crate::common::{create_psr4_workspace, open_php};
+use crate::common::{create_psr4_workspace, open_php_str, position_after};
 use tower_lsp::LanguageServer;
 use tower_lsp::lsp_types::*;
 
@@ -111,18 +111,6 @@ fn base_files() -> Vec<(&'static str, &'static str)> {
     ]
 }
 
-async fn open(backend: &phpantom_lsp::Backend, uri: &str, text: &str) {
-    open_php(backend, &Url::parse(uri).unwrap(), text).await;
-}
-
-fn position_after(src: &str, needle: &str) -> Position {
-    let offset = src.find(needle).expect("needle should exist") + needle.len();
-    let prefix = &src[..offset];
-    let line = prefix.bytes().filter(|b| *b == b'\n').count() as u32;
-    let character = prefix.rsplit('\n').next().unwrap_or(prefix).len() as u32;
-    Position { line, character }
-}
-
 #[tokio::test]
 async fn facade_macro_resolves_on_concrete_instance() {
     let consumer = "\
@@ -141,13 +129,13 @@ class Consumer {
 
     // Opening the provider registers the macro (and expands it onto the
     // concrete view factory via the facade accessor).
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/ViewServiceProvider.php",
         PROVIDER_PHP,
     )
     .await;
-    open(&backend, "file:///src/Consumer.php", consumer).await;
+    open_php_str(&backend, "file:///src/Consumer.php", consumer).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -201,7 +189,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/ViewServiceProvider.php",
         PROVIDER_PHP,
@@ -245,7 +233,7 @@ class Consumer {
     let mut files = base_files();
     files.push(("src/Consumer.php", consumer));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
-    open(
+    open_php_str(
         &backend,
         "file:///src/Providers/ViewServiceProvider.php",
         PROVIDER_PHP,
@@ -293,7 +281,7 @@ class ViewServiceProvider
     files.push(("src/Providers/ViewServiceProvider.php", provider));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     let uri = "file:///src/Providers/ViewServiceProvider.php";
-    open(&backend, uri, provider).await;
+    open_php_str(&backend, uri, provider).await;
 
     let result = backend
         .completion(CompletionParams {
@@ -354,7 +342,7 @@ class ViewServiceProvider
     files.push(("src/Providers/ViewServiceProvider.php", provider));
     let (backend, _dir) = create_psr4_workspace(COMPOSER_JSON, &files);
     let uri = "file:///src/Providers/ViewServiceProvider.php";
-    open(&backend, uri, provider).await;
+    open_php_str(&backend, uri, provider).await;
 
     backend.update_ast(uri, provider);
     let mut diagnostics = Vec::new();

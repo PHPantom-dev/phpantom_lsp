@@ -39,7 +39,12 @@ proxies:
   `// phpcs:enable` blocks. The proxy exists; only the suppression
   action is missing.
 - PHPMD (3.0): `#[SuppressWarnings(RuleName::class)]` as a PHP
-  attribute. Blocked on the proxy itself (D10).
+  attribute on the enclosing class or method, importing
+  `PHPMD\Attribute\SuppressWarnings` and the rule class. The proxy
+  (`src/phpmd.rs`, `[phpmd]` config section) carries the rule name as
+  the diagnostic code; only the suppression action is missing. The
+  rule's class is not in the report, so the action has to map the rule
+  name to its `PHPMD\Rule\…` class.
 
 ---
 
@@ -83,37 +88,6 @@ analysis (both if/else branches exit) is a future refinement.
 When our type engine silently resolves a method to a `never` return
 type (e.g. an incorrectly resolved overload), unreachable code after
 the call becomes visible, signalling the bug.
-
----
-
-## D10. PHPMD diagnostic proxy
-
-**Impact: Low · Complexity: Medium**
-
-Proxy PHPMD (PHP Mess Detector) diagnostics into the editor, following
-the same pattern as the existing PHPStan proxy. PHPMD 3.0 (once
-released) is the target version. It will get a `[phpmd]` TOML section
-with `command`, `timeout`, and tool-specific options mirroring the
-`[phpstan]` schema.
-
-### Prerequisites
-
-- PHPMD 3.0 must be released. Current 2.x output formats and rule
-  naming may change.
-- The diagnostic suppression code action (D5) can add PHPMD's
-  `@SuppressWarnings(PHPMD.[RuleName])` syntax once the proxy exists.
-
-### Implementation
-
-1. Add a `[phpmd]` section to the config schema in `src/config.rs`
-   with `command` (default `"vendor/bin/phpmd"`), `timeout`, and
-   an `enabled` flag.
-2. Run PHPMD with XML or JSON output on the current file (or changed
-   files) and parse the results into LSP diagnostics.
-3. Map PHPMD rule names to diagnostic codes so that suppression
-   actions (D5) can insert the correct `@SuppressWarnings` annotation.
-4. Respect the same debounce and queueing logic used by the PHPStan
-   proxy to avoid overwhelming the tool on rapid edits.
 
 ---
 
@@ -400,3 +374,113 @@ member is out of reach.
 it, and let it replace the enclosing class rather than joining it.
 Inferring a binding from the spelling of the subject is guessing at
 something the type engine has already decided.
+
+## D24. A `match` that does not cover every enum case is not reported
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+enum Suit: string { case Hearts = 'H'; case Spades = 'S'; }
+
+function name(Suit $s): string {
+    return match ($s) {          // should be reported: Suit::Hearts throws UnhandledMatchError
+        Suit::Spades => 'spades',
+    };
+}
+
+function describe(Suit $s): string {
+    if ($s->value === 'H') {
+        return 'hearts';
+    }
+    return match ($s) {          // must stay silent: only Spades reaches here
+        Suit::Spades => 'spades',
+    };
+}
+```
+
+A `match` with no `default` arm throws `UnhandledMatchError` for any subject
+value no arm covers. When the subject resolves to a closed set (an enum, a
+union of enum cases, a `bool`, or a union of literals), subtract each arm's
+conditions from it and report what is left. PHPStan (`match.unhandled`),
+Psalm (`UnhandledMatchCondition`), mago and Qodana all do.
+
+The second function is part of the job, not a follow-up. The check can only
+stay quiet there if a comparison on a backed enum's `->value` narrows the
+enum itself, so `$s->value === 'H'` has to remove `Suit::Hearts` from `$s`
+on the fall-through path. Without that narrowing the check would be a new
+false positive. PHPStan and Psalm report the second function too, and the
+suite counts that against them.
+
+Found running the php-typing-conformance suite
+(`regressions_backed_enum_value_narrowing.php`). A quick fix to add the
+missing arms is [H16](phpstan-actions.md#h16-matchunhandled--add-missing-match-arms) (`match.unhandled`), which could
+then attach to this diagnostic instead of only PHPStan's.
+
+## D25. Two traits declaring the same property with different types is not reported
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+trait Left  { public string $prop; }
+trait Right { public int $prop; }
+final class Composed { use Left; use Right; } // fatal: Left and Right define the same property ($prop) in the composition of Composed
+```
+
+PHP only allows the same property from two traits (or from a trait and
+the class) when the declarations are compatible: same visibility, same
+type, same `readonly`ness, and same default. Anything else is a
+compile-time fatal. The inheritance merge already sees both declarations;
+it keeps one and discards the other without comparing them.
+
+Found running the php-typing-conformance suite
+(`regressions_trait_property_type_conflict.php`). mago and Phan report it.
+
+**Where to look:** the trait merge in `src/inheritance/traits.rs`. The
+report could sit beside the missing-method check in
+`src/diagnostics/implementation_errors.rs`.
+
+## D26. Reading a typed property that nothing initialises is not reported
+
+**Impact: Low-Medium · Complexity: Medium-High**
+
+```php
+final class User { public string $name; }
+$user = new User();
+echo $user->name; // Error: must not be accessed before initialization
+```
+
+A typed property without a default starts *uninitialized*, and reading it
+throws. The declaration-side check is the tractable half: flag a typed,
+non-promoted property with no default that no constructor path assigns.
+Psalm's `MissingConstructor` works this way. The read-side check needs
+definite-assignment tracking across the constructor and is the harder half.
+
+Keep it conservative. Frameworks and ORMs hydrate properties by reflection
+(Doctrine entities, serializers, `#[Inject]`), and a diagnostic that flags
+all of them is a false positive on correct code. Consider exempting classes
+whose properties carry an attribute or an ORM mapping docblock, and put the
+check behind a `[diagnostics]` toggle if a safe default can't be found.
+
+Found running the php-typing-conformance suite
+(`properties_uninitialized_read.php`). Psalm and Qodana report it.
+
+## D27. Destructuring offsets an array cannot have is not reported
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @return array<string, int> */
+function stringKeyed(): array { return ['a' => 1]; }
+
+[$a, $b] = stringKeyed(); // should be reported: offsets 0 and 1 cannot exist on array<string, int>
+```
+
+`[$a, $b] = …` reads offsets `0` and `1`. When the right-hand side's key type
+excludes them (string keys only, or a shape without those keys), the
+destructure yields `null` with a warning at runtime. The destructuring
+resolver already reads the key and value types. It could report a
+positional destructure of a string-keyed array, and a keyed one (`['x' => $x]
+= …`) of a shape that lacks the key.
+
+Found running the php-typing-conformance suite
+(`regressions_list_destructure_string_key.php`). PHPStan and mago report it.
