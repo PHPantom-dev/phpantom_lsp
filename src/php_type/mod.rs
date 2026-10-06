@@ -442,12 +442,26 @@ pub struct GenericType {
 /// Payload of [`TypeKind::Callable`].
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CallableType {
-    /// One of `callable`, `Closure`, `pure-callable`, `pure-Closure`.
+    /// `callable` or `Closure`, as written (so possibly `\Closure`).
     pub kind: Atom,
     /// Parameter types.
     pub params: Vec<CallableParam>,
     /// Optional return type.
     pub return_type: Option<PhpType>,
+}
+
+impl CallableType {
+    /// Whether this signature describes a `Closure` (`Closure(int): string`,
+    /// `\Closure(): void`, `pure-closure(): void`) rather than a plain
+    /// `callable`.
+    ///
+    /// A closure signature is still an instance of the `Closure` class, so
+    /// it has that class's members; a `callable` may be a string or an
+    /// array and has none.
+    pub fn is_closure(&self) -> bool {
+        let kind = self.kind.strip_prefix('\\').unwrap_or(&self.kind);
+        kind.eq_ignore_ascii_case("Closure")
+    }
 }
 
 /// Payload of [`TypeKind::Conditional`].
@@ -1279,7 +1293,7 @@ impl PhpType {
             TypeKind::Generic(g) => is_primitive_scalar_name(&g.name),
             TypeKind::Array(_) => true,
             TypeKind::ArrayShape(_) => true,
-            TypeKind::Callable(_) => true,
+            TypeKind::Callable(c) => !c.is_closure(),
             TypeKind::IntRange(_, _) => true,
             TypeKind::Literal(_) => true,
             TypeKind::Raw(_) => false,
@@ -1811,7 +1825,7 @@ impl PhpType {
                 let trimmed = s.strip_prefix('\\').unwrap_or(s);
                 trimmed.eq_ignore_ascii_case("Closure")
             }
-            TypeKind::Callable(c) => c.kind.eq_ignore_ascii_case("Closure"),
+            TypeKind::Callable(c) => c.is_closure(),
             TypeKind::Nullable(inner) => inner.is_closure(),
             _ => false,
         }

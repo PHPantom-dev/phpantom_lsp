@@ -10421,6 +10421,143 @@ function test(?string $s): void {
     );
 }
 
+/// A `Closure(...): T` signature is still an instance of the `Closure`
+/// class, so its real methods (`__invoke`, `bindTo`, `call`, …) resolve
+/// through `?->` and `->` alike instead of being reported as member
+/// access on a scalar.
+#[test]
+fn no_scalar_member_access_on_typed_closure_methods() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ClosureInvoke
+{
+    /** @param (\Closure(): void)|null $then */
+    public function run(?\Closure $then): void
+    {
+        $then?->__invoke();
+    }
+
+    /** @param \Closure(int): string $map */
+    public function map(\Closure $map): string
+    {
+        $map->bindTo(null);
+        $map->call($this, 1);
+        return $map->__invoke(1);
+    }
+
+    public function plain(\Closure $c): void
+    {
+        $c->__invoke();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Closure methods on a typed closure should resolve, got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.code, &d.message))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// A method `Closure` does not declare is still reported on a typed
+/// closure — as an unknown member of `Closure`, not as scalar access.
+#[test]
+fn flags_unknown_method_on_typed_closure() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class ClosureInvoke
+{
+    /** @param \Closure(): void $then */
+    public function run(\Closure $then): void
+    {
+        $then->noSuchMethod();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {:?}", diags);
+    assert_eq!(
+        diags[0].code,
+        Some(NumberOrString::String("unknown_member".to_string())),
+        "expected unknown_member, got: {:?}",
+        diags[0]
+    );
+    assert!(
+        diags[0].message.contains("noSuchMethod") && diags[0].message.contains("Closure"),
+        "expected noSuchMethod on Closure, got: {:?}",
+        diags[0].message
+    );
+}
+
+/// A property or a method typed only by its docblock as a closure
+/// signature reaches the member check through its declared type rather than
+/// a resolved class: that type is the `Closure` class too, not a scalar.
+#[test]
+fn no_scalar_member_access_on_docblock_typed_closure_property_or_return() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class Deferred
+{
+    /** @var \Closure(): void */
+    private $then;
+
+    /** @return \Closure(int): string */
+    private function make()
+    {
+        return static fn (int $n): string => (string) $n;
+    }
+
+    public function run(): void
+    {
+        $this->then->bindTo(null);
+        $this->make()->__invoke(1);
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a docblock closure signature has the Closure methods, got: {:?}",
+        diags
+    );
+}
+
+/// A plain `callable` property may hold a string or an array: it has no
+/// members, and calling one on it is still reported.
+#[test]
+fn flags_member_access_on_docblock_typed_callable_property() {
+    let backend = create_test_backend_with_full_stubs();
+    let uri = "file:///test.php";
+    let text = r#"<?php
+final class Deferred
+{
+    /** @var callable(): void */
+    private $then;
+
+    public function run(): void
+    {
+        $this->then->__invoke();
+    }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert_eq!(diags.len(), 1, "expected one diagnostic, got: {:?}", diags);
+    assert_eq!(
+        diags[0].code,
+        Some(NumberOrString::String("scalar_member_access".to_string())),
+        "expected scalar_member_access, got: {:?}",
+        diags[0]
+    );
+}
+
 /// `$this->unknownMethod()->next()` inside a class — only
 /// `unknownMethod` should be flagged.
 #[test]
