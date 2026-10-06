@@ -54,7 +54,6 @@ contributor even though it's short.
 | E5  | [Extension stub coverage audit](todo/external-stubs.md#e5-extension-stub-selection-stubs-extensions)                                                            | Medium      | Low         |
 | E4  | [Embedded stub override with external stubs](todo/external-stubs.md#e4-embedded-stub-override-with-external-stubs) (depends on E1)                              | Medium      | Low         |
 | E3  | [IDE-provided and `.phpantom.toml` stub paths](todo/external-stubs.md#e3-ide-provided-and-phpantomtoml-stub-paths) (depends on E2)                              | Low-Medium  | Low         |
-| D10 | [PHPMD diagnostic proxy](todo/diagnostics.md#d10-phpmd-diagnostic-proxy)                                              | Low        | Medium |
 | D25  | [Two traits declaring the same property with different types is not reported](todo/diagnostics.md#d25-two-traits-declaring-the-same-property-with-different-types-is-not-reported) | Low | Low-Medium |
 | D24  | [A `match` that does not cover every enum case is not reported](todo/diagnostics.md#d24-a-match-that-does-not-cover-every-enum-case-is-not-reported) | Medium | Medium |
 | D27  | [Destructuring offsets an array cannot have is not reported](todo/diagnostics.md#d27-destructuring-offsets-an-array-cannot-have-is-not-reported) | Low | Medium |

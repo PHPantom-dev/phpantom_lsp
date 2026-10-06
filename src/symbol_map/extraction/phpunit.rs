@@ -1,22 +1,25 @@
-//! Symbol spans for PHPUnit's code-coverage attributes.
+//! Symbol spans for PHPUnit's metadata attributes.
 //!
 //! `#[CoversClass(Calculator::class)]` needs nothing from us: `Calculator`
 //! is an ordinary class reference the expression extractor already sees.
-//! What it cannot see is a coverage target PHPUnit spells as a *string* —
-//! the method name in `#[CoversMethod(Calculator::class, 'add')]`, the
-//! function name in `#[CoversFunction('helper')]`, and the class name when
-//! it is written `#[CoversClass('App\Calculator')]` instead of with
-//! `::class`.  This module turns those literals into navigable spans.
+//! What it cannot see is a code unit PHPUnit spells as a *string* — the
+//! method name in `#[CoversMethod(Calculator::class, 'add')]`, the
+//! function name in `#[CoversFunction('helper')]`, the class name when it
+//! is written `#[CoversClass('App\Calculator')]` instead of with `::class`,
+//! and the method a `#[DataProvider('additions')]` or
+//! `#[Depends('testCreate')]` points at.  This module turns those literals
+//! into navigable spans.
 //!
 //! The annotation form of the same metadata (`@covers`, `@uses`,
-//! `@coversDefaultClass`) is handled in [`super::super::docblock`].
+//! `@coversDefaultClass`, `@dataProvider`, `@depends`) is handled in
+//! [`super::super::docblock`].
 
 use mago_span::{HasSpan, Position, Span};
 use mago_syntax::cst::argument::{PartialArgument, PartialArgumentList};
 
 use super::*;
 
-/// Namespace the coverage attributes live in.
+/// Namespace the PHPUnit attributes live in.
 const PHPUNIT_ATTR_NS: &str = "PHPUnit\\Framework\\Attributes\\";
 /// What importing from that namespace looks like, for the short-name guard.
 const PHPUNIT_ATTR_IMPORT: &str = "use PHPUnit\\Framework\\Attributes\\";
@@ -32,6 +35,13 @@ enum TargetKind {
     Method,
     /// `#[CoversFunction('bar')]` — a global function.
     Function,
+    /// `#[DataProvider('bar')]`, `#[Depends('testBar')]` — a method of the
+    /// test class itself.
+    TestMethod,
+    /// `#[DataProviderExternal(Foo::class, 'bar')]`,
+    /// `#[DependsExternal(FooTest::class, 'testBar')]` — a method of another
+    /// class.
+    ExternalTestMethod,
 }
 
 fn target_kind(short_name: &str) -> Option<TargetKind> {
@@ -46,6 +56,13 @@ fn target_kind(short_name: &str) -> Option<TargetKind> {
         | "UsesClassesThatExtendClass" => Some(TargetKind::ClassLike),
         "CoversMethod" | "UsesMethod" => Some(TargetKind::Method),
         "CoversFunction" | "UsesFunction" => Some(TargetKind::Function),
+        "DataProvider" | "Depends" | "DependsUsingDeepClone" | "DependsUsingShallowClone" => {
+            Some(TargetKind::TestMethod)
+        }
+        "DataProviderExternal"
+        | "DependsExternal"
+        | "DependsExternalUsingDeepClone"
+        | "DependsExternalUsingShallowClone" => Some(TargetKind::ExternalTestMethod),
         _ => None,
     }
 }
@@ -57,7 +74,7 @@ fn target_kind(short_name: &str) -> Option<TargetKind> {
 /// so a project's own `CoversMethod` attribute is left alone.  The result of
 /// that check is cached in `import_cache`, as the Laravel container
 /// attributes do, to avoid rescanning the file per attribute.
-fn coverage_attribute(
+fn phpunit_attribute(
     class_name: &str,
     import_cache: &mut Option<bool>,
     content: &str,
@@ -78,16 +95,16 @@ fn coverage_attribute(
     }
 }
 
-/// Emit the spans for coverage targets of `arg_list` that are written as
-/// string literals, if `class_name` is one of PHPUnit's coverage attributes.
-pub(super) fn try_emit_coverage_attribute_spans(
+/// Emit the spans for code units of `arg_list` that are written as string
+/// literals, if `class_name` is one of PHPUnit's metadata attributes.
+pub(super) fn try_emit_phpunit_attribute_spans(
     class_name: &str,
     arg_list: &PartialArgumentList<'_>,
     import_cache: &mut Option<bool>,
     content: &str,
     spans: &mut Vec<SymbolSpan>,
 ) {
-    let Some(kind) = coverage_attribute(class_name, import_cache, content) else {
+    let Some(kind) = phpunit_attribute(class_name, import_cache, content) else {
         return;
     };
 
@@ -96,23 +113,40 @@ pub(super) fn try_emit_coverage_attribute_spans(
         return;
     };
 
-    if kind == TargetKind::Function {
-        // PHPUnit wants the fully-qualified function name, written without a
-        // leading separator.
-        if let Some((name, span)) = string_argument(first, content)
-            && is_qualified_identifier(name)
-        {
-            spans.push(SymbolSpan {
-                start: span.start.offset,
-                end: span.end.offset,
-                kind: SymbolKind::FunctionCall {
-                    name: crate::atom::atom(name.trim_start_matches('\\')),
-                    is_definition: false,
-                    is_docblock_reference: false,
-                },
-            });
+    match kind {
+        TargetKind::Function => {
+            // PHPUnit wants the fully-qualified function name, written without
+            // a leading separator.
+            if let Some((name, span)) = string_argument(first, content)
+                && is_qualified_identifier(name)
+            {
+                spans.push(SymbolSpan {
+                    start: span.start.offset,
+                    end: span.end.offset,
+                    kind: SymbolKind::FunctionCall {
+                        name: crate::atom::atom(name.trim_start_matches('\\')),
+                        is_definition: false,
+                        is_docblock_reference: false,
+                    },
+                });
+            }
+            return;
         }
-        return;
+        TargetKind::TestMethod => {
+            // PHPUnit looks the method up on the test class, which is what
+            // `static` names at the attribute's position.
+            if let Some((name, span)) = string_argument(first, content)
+                && is_identifier(name)
+            {
+                spans.push(named_method_span(
+                    SubjectText::owned("static".to_owned()),
+                    name,
+                    span,
+                ));
+            }
+            return;
+        }
+        TargetKind::ClassLike | TargetKind::Method | TargetKind::ExternalTestMethod => {}
     }
 
     // The class-like name is either `Foo::class` or a string holding its FQN.
@@ -122,20 +156,22 @@ pub(super) fn try_emit_coverage_attribute_spans(
         if !is_qualified_identifier(name) {
             return;
         }
+        // PHPUnit always reads the name as fully qualified, whether or not
+        // the string was written with a leading separator.
         spans.push(class_ref_span(
             span.start.offset,
             span.end.offset,
-            // A coverage target is always fully qualified, whether or not
-            // the string was written with a leading separator.
             &format!("\\{}", name.trim_start_matches('\\')),
         ));
     }
 
-    // Mark the target as coverage metadata, for both spellings: the string
-    // reference pushed just above, and the `Foo::class` one the expression
-    // extractor recorded before this ran (`extract_from_attribute_lists`
-    // walks the argument list first).
-    retag_covers_target_in_range(spans, first.span());
+    if kind != TargetKind::ExternalTestMethod {
+        // Mark the target as coverage metadata, for both spellings: the
+        // string reference pushed just above, and the `Foo::class` one the
+        // expression extractor recorded before this ran
+        // (`extract_from_attribute_lists` walks the argument list first).
+        retag_covers_target_in_range(spans, first.span());
+    }
 
     if kind == TargetKind::ClassLike {
         return;
@@ -153,28 +189,58 @@ pub(super) fn try_emit_coverage_attribute_spans(
     let Some((subject_text, subject_span)) = class_like_argument(first, content) else {
         return;
     };
+    let subject_text = SubjectText::new(
+        subject_text,
+        subject_span.start.offset,
+        subject_span.end.offset,
+        content,
+    );
+
+    if kind == TargetKind::ExternalTestMethod {
+        spans.push(named_method_span(subject_text, member_name, member_span));
+        return;
+    }
 
     spans.push(SymbolSpan {
         start: member_span.start.offset,
         end: member_span.end.offset,
         kind: SymbolKind::MemberAccess {
-            subject_text: SubjectText::new(
-                subject_text,
-                subject_span.start.offset,
-                subject_span.end.offset,
-                content,
-            ),
+            subject_text,
             member_name: crate::atom::atom(member_name),
             is_static: true,
             // Coverage metadata names a code unit rather than calling it, so
             // the relaxed lookup a docblock reference gets is the right one:
             // `#[CoversMethod]` is also how a property hook is targeted.
             is_method_call: false,
-            docblock_ref: DocblockMemberRef::Coverage,
+            docblock_ref: DocblockMemberRef::PhpUnit,
             is_array_callable: false,
             is_nullsafe: false,
         },
     });
+}
+
+/// A reference to the method a data provider or test dependency names.
+///
+/// Unlike a coverage target, which may be a property hook, these can only
+/// ever be methods, so the span is marked as one: hover, rename and
+/// find-references then treat the name as the method it is.  It stays a
+/// named reference rather than a call, so neither the static-ness of the
+/// `::` it is modelled with nor the method's visibility is held against it
+/// (PHPUnit reaches both through reflection).
+fn named_method_span(subject_text: SubjectText, name: &str, span: Span) -> SymbolSpan {
+    SymbolSpan {
+        start: span.start.offset,
+        end: span.end.offset,
+        kind: SymbolKind::MemberAccess {
+            subject_text,
+            member_name: crate::atom::atom(name),
+            is_static: true,
+            is_method_call: true,
+            docblock_ref: DocblockMemberRef::PhpUnit,
+            is_array_callable: false,
+            is_nullsafe: false,
+        },
+    }
 }
 
 /// Mark every class reference inside `range` as PHPUnit coverage metadata.
@@ -197,9 +263,14 @@ fn retag_covers_target_in_range(spans: &mut [SymbolSpan], range: Span) {
 
 /// The subject text and span of an argument that names a class, written
 /// either `Foo::class` or as a string holding the name.
+///
+/// PHPUnit reads the string form as fully qualified, so it comes back with
+/// a leading separator: the file's namespace must not be prefixed to it.
 fn class_like_argument(arg: &PartialArgument<'_>, content: &str) -> Option<(String, Span)> {
-    class_constant_argument(arg)
-        .or_else(|| string_argument(arg, content).map(|(name, span)| (name.to_owned(), span)))
+    class_constant_argument(arg).or_else(|| {
+        string_argument(arg, content)
+            .map(|(name, span)| (format!("\\{}", name.trim_start_matches('\\')), span))
+    })
 }
 
 /// The subject text and span of a `Foo::class` argument.

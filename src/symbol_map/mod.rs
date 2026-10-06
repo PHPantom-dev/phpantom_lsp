@@ -151,14 +151,16 @@ pub(crate) enum DocblockMemberRef {
     /// addition to FQSENs, so a target that resolves to nothing is not an
     /// error.
     See,
-    /// PHPUnit coverage metadata: a `@covers` / `@uses` tag, a `@covers
-    /// ::name` under a `@coversDefaultClass`, or a `#[CoversMethod]` /
-    /// `#[UsesMethod]` attribute.
+    /// PHPUnit metadata naming a member: coverage (a `@covers` / `@uses`
+    /// tag, a `@covers ::name` under a `@coversDefaultClass`, or a
+    /// `#[CoversMethod]` / `#[UsesMethod]` attribute), a data provider
+    /// (`@dataProvider`, `#[DataProvider]`, `#[DataProviderExternal]`), or
+    /// a test dependency (`@depends`, `#[Depends]` and its variants).
     ///
     /// Unlike `@see`, the target names a code unit that has to exist —
-    /// PHPUnit errors out on coverage metadata that names nothing — so it
-    /// is still checked.
-    Coverage,
+    /// PHPUnit errors out on metadata that names nothing — so it is still
+    /// checked.
+    PhpUnit,
 }
 
 impl DocblockMemberRef {

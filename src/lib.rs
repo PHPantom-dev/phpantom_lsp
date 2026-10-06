@@ -283,6 +283,7 @@ mod parser;
 pub(crate) mod phar;
 pub mod php_type;
 mod phpcs;
+mod phpmd;
 mod phpstan;
 pub(crate) mod phpstan_ignore;
 pub(crate) mod process;
@@ -506,7 +507,7 @@ impl LaravelStringKeyCache {
 }
 
 /// Shared state for one external diagnostic tool's dedicated background
-/// worker (PHPStan, PHPCS, Mago lint, Mago analyze).
+/// worker (PHPStan, PHPCS, PHPMD, Mago lint, Mago analyze).
 ///
 /// Each worker runs as its own task so that a slow external process never
 /// blocks native diagnostics or the other external tools. At most one
@@ -912,6 +913,8 @@ pub struct Backend {
     pub(crate) phpstan_tool: ExternalToolWorker,
     /// PHPCS's dedicated background worker state.
     pub(crate) phpcs_tool: ExternalToolWorker,
+    /// PHPMD's dedicated background worker state.
+    pub(crate) phpmd_tool: ExternalToolWorker,
     /// Mago lint's dedicated background worker state.
     pub(crate) mago_lint_tool: ExternalToolWorker,
     /// Mago analyze's dedicated background worker state.
@@ -1296,6 +1299,7 @@ impl Backend {
             diag: crate::diagnostics::state::DiagnosticState::new(),
             phpstan_tool: ExternalToolWorker::new(),
             phpcs_tool: ExternalToolWorker::new(),
+            phpmd_tool: ExternalToolWorker::new(),
             mago_lint_tool: ExternalToolWorker::new(),
             mago_analyze_tool: ExternalToolWorker::new(),
 
@@ -2083,6 +2087,7 @@ impl Backend {
             workspace: self.workspace.clone(),
             phpstan_tool: self.phpstan_tool.clone(),
             phpcs_tool: self.phpcs_tool.clone(),
+            phpmd_tool: self.phpmd_tool.clone(),
             mago_lint_tool: self.mago_lint_tool.clone(),
             mago_analyze_tool: self.mago_analyze_tool.clone(),
             supports_pull_diagnostics: Arc::clone(&self.supports_pull_diagnostics),

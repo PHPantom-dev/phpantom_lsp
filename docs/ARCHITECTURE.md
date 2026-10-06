@@ -107,13 +107,13 @@ src/
 │   # Diagnostics
 ├── diagnostics/
 │   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
 │   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
 │   └── <collector>.rs      # One module per diagnostic (unknown_classes, unknown_functions,
 │                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
 │
 │   # External tools & CLI subcommands
-├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 ├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 ├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
 ├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
@@ -1158,6 +1158,7 @@ Diagnostics run in three independent background `tokio::spawn` tasks so they nev
 1. **Native diagnostic worker** — collects fast (syntax errors, unused imports, deprecated usage) and slow (unknown classes/members/functions, argument count, implementation errors) diagnostics. Debounces at 500 ms.
 2. **PHPStan worker** — runs PHPStan in editor mode (`--tmp-file` / `--instead-of`). Debounces at 2 000 ms.
 3. **PHPCS worker** — runs PHP_CodeSniffer via `phpcs --report=json` with stdin piping. Debounces at 2 000 ms.
+4. **PHPMD worker** — runs PHP Mess Detector 3 via `phpmd analyze --format=json -` with stdin piping.
 
 ### Native transport choice
 

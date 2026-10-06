@@ -28,10 +28,10 @@
 //!    it wedged is replaced so the pool keeps its throughput; the pass
 //!    is driven by `drive_native_pass`, which is where that happens.
 //! 2. **External tools** — after the native pass, each configured
-//!    external tool (PHPStan, PHPCS, Mago lint/analyze) runs once over
-//!    the whole project.  A tool only runs when it is enabled,
+//!    external tool (PHPStan, PHPCS, PHPMD, Mago lint/analyze) runs once
+//!    over the whole project.  A tool only runs when it is enabled,
 //!    resolvable, and has its own project-level configuration file
-//!    (`phpstan.neon`, `phpcs.xml`, `mago.toml`) so the tool itself
+//!    (`phpstan.neon`, `phpcs.xml`, `phpmd.yml`, `mago.toml`) so the tool itself
 //!    decides which paths to analyse.  Tools run sequentially to avoid
 //!    saturating the machine.
 //!
@@ -1239,6 +1239,31 @@ impl Backend {
             return;
         }
 
+        // ── PHPMD ───────────────────────────────────────────────────
+        if !config.phpmd.is_disabled()
+            && crate::phpmd::has_project_config(&root)
+            && let Some(resolved) =
+                crate::phpmd::resolve_phpmd(Some(&root), &config.phpmd, bin_dir.as_deref())
+        {
+            progress.set_percentage(87, "Running PHPMD (project-wide)");
+            let phpmd_config = config.phpmd.clone();
+            let shutdown = Arc::clone(&self.shutdown_flag);
+            let root_clone = root.clone();
+            let generations = self.phpmd_tool.generation_snapshot();
+            let result = crate::server::run_blocking_cancel_safe("workspace phpmd", move || {
+                crate::phpmd::run_phpmd_workspace(&resolved, &root_clone, &phpmd_config, &shutdown)
+            })
+            .await;
+            if let Some(Ok(map)) = result {
+                self.store_workspace_external_results("phpmd", map, generations)
+                    .await;
+            }
+        }
+
+        if self.workspace_pass_stopping() {
+            return;
+        }
+
         // ── Mago lint + analyze ─────────────────────────────────────
         let laravel = composer_pkg
             .as_ref()
@@ -1308,6 +1333,7 @@ impl Backend {
         Some(match source {
             "phpstan" => &self.phpstan_tool,
             "phpcs" => &self.phpcs_tool,
+            "phpmd" => &self.phpmd_tool,
             "mago-lint" => &self.mago_lint_tool,
             "mago-analyze" => &self.mago_analyze_tool,
             _ => return None,

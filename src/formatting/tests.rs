@@ -659,7 +659,7 @@ fn write_sibling_temp_file_in_same_dir() {
 
     assert_eq!(temp.path().parent(), original.parent());
     let name = temp.path().file_name().unwrap().to_str().unwrap();
-    assert!(name.starts_with(".phpantom-fmt-"));
+    assert!(name.starts_with("phpantom-fmt-"));
     assert!(name.ends_with(".php"));
 
     let read_back = std::fs::read_to_string(temp.path()).unwrap();

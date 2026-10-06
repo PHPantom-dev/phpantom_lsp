@@ -458,6 +458,12 @@ impl Backend {
             phpcs_backend.phpcs_worker().await;
         });
 
+        // Spawn the PHPMD worker.  Same pattern as PHPCS.
+        let phpmd_backend = self.clone_for_diagnostic_worker();
+        tokio::spawn(async move {
+            phpmd_backend.phpmd_worker().await;
+        });
+
         // Spawn the Mago lint worker.  Same pattern as PHPCS: dedicated
         // task, own debounce timer, single pending-URI slot.  Mago lint
         // is fast (AST-level rules) so it uses the same debounce as PHPCS.

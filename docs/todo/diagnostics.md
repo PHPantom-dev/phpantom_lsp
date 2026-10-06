@@ -39,7 +39,12 @@ proxies:
   `// phpcs:enable` blocks. The proxy exists; only the suppression
   action is missing.
 - PHPMD (3.0): `#[SuppressWarnings(RuleName::class)]` as a PHP
-  attribute. Blocked on the proxy itself (D10).
+  attribute on the enclosing class or method, importing
+  `PHPMD\Attribute\SuppressWarnings` and the rule class. The proxy
+  (`src/phpmd.rs`, `[phpmd]` config section) carries the rule name as
+  the diagnostic code; only the suppression action is missing. The
+  rule's class is not in the report, so the action has to map the rule
+  name to its `PHPMD\Rule\…` class.
 
 ---
 
@@ -83,37 +88,6 @@ analysis (both if/else branches exit) is a future refinement.
 When our type engine silently resolves a method to a `never` return
 type (e.g. an incorrectly resolved overload), unreachable code after
 the call becomes visible, signalling the bug.
-
----
-
-## D10. PHPMD diagnostic proxy
-
-**Impact: Low · Complexity: Medium**
-
-Proxy PHPMD (PHP Mess Detector) diagnostics into the editor, following
-the same pattern as the existing PHPStan proxy. PHPMD 3.0 (once
-released) is the target version. It will get a `[phpmd]` TOML section
-with `command`, `timeout`, and tool-specific options mirroring the
-`[phpstan]` schema.
-
-### Prerequisites
-
-- PHPMD 3.0 must be released. Current 2.x output formats and rule
-  naming may change.
-- The diagnostic suppression code action (D5) can add PHPMD's
-  `@SuppressWarnings(PHPMD.[RuleName])` syntax once the proxy exists.
-
-### Implementation
-
-1. Add a `[phpmd]` section to the config schema in `src/config.rs`
-   with `command` (default `"vendor/bin/phpmd"`), `timeout`, and
-   an `enabled` flag.
-2. Run PHPMD with XML or JSON output on the current file (or changed
-   files) and parse the results into LSP diagnostics.
-3. Map PHPMD rule names to diagnostic codes so that suppression
-   actions (D5) can insert the correct `@SuppressWarnings` annotation.
-4. Respect the same debounce and queueing logic used by the PHPStan
-   proxy to avoid overwhelming the tool on rapid edits.
 
 ---
 

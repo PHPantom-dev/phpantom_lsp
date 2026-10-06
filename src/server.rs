@@ -147,6 +147,7 @@ impl LanguageServer for Backend {
         self.diag.workspace_pull_notify.notify_one();
         self.phpstan_tool.notify.notify_one();
         self.phpcs_tool.notify.notify_one();
+        self.phpmd_tool.notify.notify_one();
         self.mago_lint_tool.notify.notify_one();
         self.mago_analyze_tool.notify.notify_one();
         Ok(())

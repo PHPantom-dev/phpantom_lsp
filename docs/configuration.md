@@ -70,7 +70,7 @@ The full schema is at [`config-schema.json`](https://github.com/PHPantom-dev/php
 | `report-magic-properties`  | bool   | `false` | Report unknown property access on classes with `__get` when virtual properties are defined. Matches PHPStan's `reportMagicProperties`. |
 | `downgrade-nullable-argument-mismatch` | bool | `false` | Downgrade `type_mismatch_argument` to a warning when the only reason an argument fails to satisfy the parameter is a stray `null` (every non-null member of the argument's type is already compatible). |
 | `workspace`                | bool   | `false` | Compute diagnostics for the whole workspace in the background after startup, so problems appear for files you have not opened. Costs a project-wide sweep every session. Requires the default `full` indexing strategy. |
-| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
+| `workspace-external`       | bool   | `true`  | Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when `workspace` is enabled. |
 
 #### `[[diagnostics.ignore]]`
 
@@ -144,6 +144,16 @@ highlighting remains in charge of ordinary PHP syntax.
 | `command`  | string  | unset   | Command or path for PHPCS. Unset: auto-detect via `vendor/bin/phpcs` then `$PATH`. `""`: disable. |
 | `standard` | string  | unset   | Coding standard to enforce (e.g. `"PSR12"`). Unset: PHPCS uses its own default detection. |
 | `timeout`  | integer | `30000` | Max runtime in milliseconds before PHPCS is killed. |
+
+### `[phpmd]`
+
+PHPMD 3 is required. Earlier versions have a different command line.
+
+| Key       | Type    | Default | Description |
+| --------- | ------- | ------- | ----------- |
+| `command` | string  | unset   | Command or path for PHPMD. Unset: auto-detect via `vendor/bin/phpmd` then `$PATH`, only when the project has a PHPMD config file (`phpmd.yml`, `phpmd.xml`, `.phpmd.yml`, `phpmd.xml.dist`, and the other names PHPMD looks for) or `ruleset` is set. `""`: disable. |
+| `ruleset` | string  | unset   | Ruleset name or file passed via `--ruleset` (e.g. `"cleancode"`). Unset: PHPMD uses the config file it finds in the project root. |
+| `timeout` | integer | `30000` | Max runtime in milliseconds before PHPMD is killed. |
 
 ### `[mago]`
 

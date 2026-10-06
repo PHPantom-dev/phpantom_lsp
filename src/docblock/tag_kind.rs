@@ -88,6 +88,11 @@ pub enum TagKind {
     /// PHPUnit's `@uses` — names a code unit a test executes but does not
     /// measure coverage for.
     Uses,
+    /// PHPUnit's `@dataProvider` — names the method that supplies a test's
+    /// arguments.
+    DataProvider,
+    /// PHPUnit's `@depends` — names a test whose result this one consumes.
+    Depends,
     /// Any other tag; match on [`super::parser::TagInfo::name`].
     Other,
 }
@@ -197,6 +202,8 @@ fn tag_kind_from_name(name: &[u8]) -> TagKind {
         b"covers" => TagKind::Covers,
         b"coversdefaultclass" => TagKind::CoversDefaultClass,
         b"uses" => TagKind::Uses,
+        b"dataprovider" => TagKind::DataProvider,
+        b"depends" => TagKind::Depends,
         _ => TagKind::Other,
     }
 }

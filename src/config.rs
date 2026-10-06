@@ -36,6 +36,8 @@ pub struct Config {
     pub phpstan: PhpStanConfig,
     /// PHPCS (PHP_CodeSniffer) proxy settings.
     pub phpcs: PhpcsConfig,
+    /// PHPMD (PHP Mess Detector) proxy settings.
+    pub phpmd: PhpmdConfig,
     /// Mago proxy settings.
     pub mago: MagoConfig,
     /// Laravel-specific analysis settings.
@@ -199,14 +201,14 @@ pub struct DiagnosticsConfig {
     /// files are diagnosed.
     pub workspace: Option<bool>,
 
-    /// Run configured external tools (PHPStan, PHPCS, Mago) once over
-    /// the whole project after workspace diagnostics finish.
+    /// Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once
+    /// over the whole project after workspace diagnostics finish.
     ///
     /// On by default, but it only takes effect when `workspace` is
     /// enabled, since the project-wide run is chained onto that pass.
     /// Each tool only runs when it is enabled, resolvable, and has its
     /// own project-level configuration file (`phpstan.neon`,
-    /// `phpcs.xml`, `mago.toml`) so the tool itself decides which paths
+    /// `phpcs.xml`, `phpmd.yml`, `mago.toml`) so the tool itself decides which paths
     /// to analyse. Set to `false` to keep external tools per-file only.
     #[serde(rename = "workspace-external")]
     pub workspace_external: Option<bool>,
@@ -523,6 +525,47 @@ impl PhpcsConfig {
     }
 
     /// Whether PHPCS is explicitly disabled (command set to empty
+    /// string).
+    pub fn is_disabled(&self) -> bool {
+        self.command.as_deref() == Some("")
+    }
+}
+
+/// `[phpmd]` section — PHP Mess Detector proxy settings.
+///
+/// When `command` is unset (`None`), PHPantom auto-detects via
+/// `vendor/bin/phpmd` then `$PATH`, but only for a project with a PHPMD
+/// config file or a configured `ruleset`.  Set to `""` (empty string)
+/// to explicitly disable PHPMD integration.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default)]
+pub struct PhpmdConfig {
+    /// Command (path or name) to run PHPMD.
+    ///
+    /// - `None` (default) — auto-detect `vendor/bin/phpmd`,
+    ///   then `phpmd` on `$PATH`.
+    /// - `""` — disable PHPMD.
+    /// - Any other value — use as the command (e.g.
+    ///   `"vendor/bin/phpmd"` or `"phpmd"`).
+    pub command: Option<String>,
+    /// Ruleset name or file passed via `--ruleset` (e.g. `"cleancode"`).
+    ///
+    /// When unset, PHPMD uses the config file it auto-detects in the
+    /// project root (`phpmd.yml`, `phpmd.xml`, ...).
+    pub ruleset: Option<String>,
+    /// Maximum runtime in milliseconds before PHPMD is killed.
+    /// Defaults to 30 000 ms (30 seconds).
+    pub timeout: Option<u64>,
+}
+
+impl PhpmdConfig {
+    /// Return the configured timeout in milliseconds, falling back to
+    /// 30 000 ms when unset.
+    pub fn timeout_ms(&self) -> u64 {
+        self.timeout.unwrap_or(30_000)
+    }
+
+    /// Whether PHPMD is explicitly disabled (command set to empty
     /// string).
     pub fn is_disabled(&self) -> bool {
         self.command.as_deref() == Some("")
@@ -985,6 +1028,10 @@ mod tests {
         assert!(config.phpcs.standard.is_none());
         assert!(config.phpcs.timeout.is_none());
         assert_eq!(config.phpcs.timeout_ms(), 30_000);
+        assert!(config.phpmd.command.is_none());
+        assert!(config.phpmd.ruleset.is_none());
+        assert_eq!(config.phpmd.timeout_ms(), 30_000);
+        assert!(!config.phpmd.is_disabled());
         assert!(config.mago.command.is_none());
         // Unset means "follow mago.toml", not on or off.
         assert!(config.mago.lint.is_none());
@@ -1326,6 +1373,11 @@ command = "/usr/local/bin/phpcs"
 standard = "PSR12"
 timeout = 15000
 
+[phpmd]
+command = ""
+ruleset = "phpmd.xml"
+timeout = 12000
+
 [mago]
 command = "/usr/local/bin/mago"
 lint = true
@@ -1380,6 +1432,9 @@ analyze-timeout = 45000
         );
         assert_eq!(config.phpcs.standard.as_deref(), Some("PSR12"));
         assert_eq!(config.phpcs.timeout_ms(), 15_000);
+        assert!(config.phpmd.is_disabled());
+        assert_eq!(config.phpmd.ruleset.as_deref(), Some("phpmd.xml"));
+        assert_eq!(config.phpmd.timeout_ms(), 12_000);
         assert_eq!(config.mago.command.as_deref(), Some("/usr/local/bin/mago"));
         assert_eq!(config.mago.lint, Some(true));
         assert_eq!(config.mago.analyze, Some(false));

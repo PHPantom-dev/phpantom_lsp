@@ -13134,6 +13134,90 @@ class WidgetTest {}
     );
 }
 
+/// PHPUnit fails a test whose data provider or dependency names no method,
+/// so a dangling one is flagged in every spelling.
+#[test]
+fn flags_a_data_provider_or_dependency_that_names_nothing() {
+    let backend = create_test_backend();
+    let uri = "file:///provider_missing.php";
+    let text = r#"<?php
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Depends;
+
+final class Amounts {}
+
+final class ProviderTest
+{
+    #[DataProvider('missingProvider')]
+    public function testA(int $n): void {}
+
+    #[Depends('testMissing')]
+    public function testB(): void {}
+
+    /**
+     * @dataProvider missingAnnotated
+     */
+    public function testC(int $n): void {}
+
+    /**
+     * @dataProvider Amounts::missingExternal
+     */
+    public function testD(int $n): void {}
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    for name in [
+        "missingProvider",
+        "testMissing",
+        "missingAnnotated",
+        "missingExternal",
+    ] {
+        assert!(
+            diags.iter().any(|d| d.message.contains(name)),
+            "a data provider or dependency naming the missing `{name}` must be flagged, got: {:?}",
+            diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+        );
+    }
+}
+
+/// PHPUnit reaches providers and dependencies through reflection, so neither
+/// a non-public provider nor an instance test method named from `static`
+/// scope is a problem.
+#[test]
+fn no_diagnostic_for_a_data_provider_or_dependency_that_resolves() {
+    let backend = create_test_backend();
+    let uri = "file:///provider_ok.php";
+    let text = r#"<?php
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\Attributes\Depends;
+
+final class ProviderTest
+{
+    #[DataProvider('cases')]
+    #[Depends('testFirst')]
+    public function testIt(int $n): void {}
+
+    public function testFirst(): void {}
+
+    /**
+     * @dataProvider legacyCases
+     * @depends clone testFirst
+     */
+    public function testLegacy(int $n): void {}
+
+    private static function cases(): array { return [[1]]; }
+
+    public function legacyCases(): array { return [[1]]; }
+}
+"#;
+    let diags = unknown_member_diagnostics(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "a data provider or dependency that resolves must not be flagged, got: {:?}",
+        diags.iter().map(|d| &d.message).collect::<Vec<_>>()
+    );
+}
+
 /// A member read off a class constant must resolve against the type the
 /// constant holds, not the class that declares the constant: an enum case
 /// stashed in a `const` still exposes `->value`, whether the constant is

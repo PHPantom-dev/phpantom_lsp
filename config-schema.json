@@ -47,7 +47,7 @@
         },
         "workspace-external": {
           "type": "boolean",
-          "description": "Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when \"workspace\" is enabled. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, mago.toml).",
+          "description": "Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when \"workspace\" is enabled. Each tool only runs when it is enabled and has its own project-level configuration file (phpstan.neon, phpcs.xml, phpmd.yml, mago.toml).",
           "default": true
         },
         "ignore": {
@@ -228,6 +228,26 @@
         "timeout": {
           "type": "integer",
           "description": "Maximum runtime in milliseconds before PHPCS is killed.",
+          "default": 30000,
+          "minimum": 0
+        }
+      }
+    },
+    "phpmd": {
+      "type": "object",
+      "description": "PHP Mess Detector proxy settings. PHPantom can run PHPMD 3 on each file save and surface its findings as LSP diagnostics.",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "Command or path to run PHPMD. Unset: auto-detect via vendor/bin/phpmd then $PATH, only when the project has a PHPMD config file (phpmd.yml, phpmd.xml, ...) or ruleset is set. Empty string: disable PHPMD integration. Any other value: use as the command."
+        },
+        "ruleset": {
+          "type": "string",
+          "description": "Ruleset name or file passed via --ruleset (e.g. \"cleancode\"). Unset: PHPMD uses the config file it finds in the project root."
+        },
+        "timeout": {
+          "type": "integer",
+          "description": "Maximum runtime in milliseconds before PHPMD is killed.",
           "default": 30000,
           "minimum": 0
         }

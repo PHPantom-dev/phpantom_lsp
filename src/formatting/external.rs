@@ -242,7 +242,7 @@ pub(super) fn write_sibling_temp_file(
         .ok_or_else(|| "Cannot determine parent directory of file".to_string())?;
 
     let mut temp = tempfile::Builder::new()
-        .prefix(".phpantom-fmt-")
+        .prefix("phpantom-fmt-")
         .suffix(".php")
         .tempfile_in(parent)
         .map_err(|e| format!("Failed to create temp file in {}: {}", parent.display(), e))?;

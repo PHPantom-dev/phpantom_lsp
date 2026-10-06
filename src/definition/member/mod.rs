@@ -936,7 +936,7 @@ impl Backend {
         let model_name = scope_method
             .return_type
             .as_ref()
-            .and_then(&extract_model_from_builder_ret)
+            .and_then(extract_model_from_builder_ret)
             .or_else(|| {
                 resolved_candidate.methods.iter().find_map(|m| {
                     if m.is_static {
@@ -944,7 +944,7 @@ impl Backend {
                     }
                     m.return_type
                         .as_ref()
-                        .and_then(&extract_model_from_builder_ret)
+                        .and_then(extract_model_from_builder_ret)
                 })
             })?;
 

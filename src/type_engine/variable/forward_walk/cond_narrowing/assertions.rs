@@ -141,7 +141,7 @@ pub(crate) fn write_offset_key_into_shapes(key: &str, scope: &mut ScopeState) {
         rt.type_string
             .union_members()
             .into_iter()
-            .any(|shape| shape_entry_at(shape, literal).is_some_and(&is_refinement))
+            .any(|shape| shape_entry_at(shape, literal).is_some_and(is_refinement))
     });
     if !refines_an_entry {
         return;
