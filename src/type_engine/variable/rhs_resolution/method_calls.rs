@@ -15,7 +15,7 @@ use crate::virtual_members::laravel::validated_shape;
 use crate::type_engine::resolver::VarResolutionCtx;
 
 use super::calls::any_argument_is_never;
-use super::function_calls::closure_call_return;
+use super::function_calls::{callable_return_resolution, closure_call_return};
 use super::laravel_calls::{
     try_resolve_command_accessor_type, try_resolve_config_method_type,
     try_resolve_request_accessor_type, try_resolve_trans_method_type, try_resolve_validated_shape,
@@ -163,6 +163,15 @@ pub(super) fn resolve_member_call_on_receiver<'b>(
     // generic substitutions applied.
     let (owner_classes, receiver_resolved) =
         expand_union_generic_owners(owner_classes, receiver_resolved, ctx);
+
+    // `->__invoke()` / `->call()` on a closure signature returns what the
+    // signature says, which the `Closure` class it resolves on cannot know.
+    if crate::type_engine::call_resolution::is_closure_invoke_call(&method_name)
+        && let Some(ret_type) =
+            crate::type_engine::call_resolution::closure_invoke_return(&receiver_resolved)
+    {
+        return callable_return_resolution(&ret_type, ctx);
+    }
 
     // A property read through the Reflection API: the name handed to
     // `getProperty()` decides the type, so the stub's `ReflectionProperty`

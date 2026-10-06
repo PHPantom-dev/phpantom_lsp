@@ -67,10 +67,13 @@
 //!   body assigns.
 //! - [`reflection`]: typing a property read through the Reflection API,
 //!   whose result depends on the property name passed at the call site.
+//! - [`closure_invoke`]: what `->__invoke()` and `->call()` return on a
+//!   value typed with a closure signature.
 mod arg_text_types;
 mod arg_type_resolution;
 mod array_callable;
 mod callable_target;
+mod closure_invoke;
 mod closure_returns;
 mod constant_operands;
 mod facade_owner;
@@ -87,6 +90,7 @@ pub(crate) use out_param::{OutParamCallee, effective_out_type, resolve_out_type_
 pub(crate) use arg_text_types::array_literal_shape_type_with;
 pub(crate) use array_callable::array_callable_return_type;
 pub(crate) use callable_target::invoked_value_types;
+pub(crate) use closure_invoke::{closure_invoke_return, is_closure_invoke_call};
 pub(crate) use constant_operands::evaluate_constant_operands;
 pub(crate) use facade_owner::facade_concrete_owner;
 pub(crate) use reflection::{
