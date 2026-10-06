@@ -348,7 +348,19 @@ pub(crate) fn walk_closures_in_expr<'b>(
         }
         Expression::Binary(bin) => {
             walk_closures_in_expr(bin.lhs, outer_scope, ctx, None);
-            walk_closures_in_expr(bin.rhs, outer_scope, ctx, None);
+            // The right operand of `&&` runs only when the left one was
+            // truthy, and that of `||` only when it was falsy.
+            let polarity = match bin.operator {
+                BinaryOperator::And(_) | BinaryOperator::LowAnd(_) => Some(true),
+                BinaryOperator::Or(_) | BinaryOperator::LowOr(_) => Some(false),
+                _ => None,
+            };
+            match polarity {
+                Some(truthy) => walk_closures_in_branch(bin.rhs, outer_scope, ctx, |scope| {
+                    narrow_by_condition(bin.lhs, truthy, scope, ctx);
+                }),
+                None => walk_closures_in_expr(bin.rhs, outer_scope, ctx, None),
+            }
         }
         Expression::UnaryPrefix(prefix) => {
             walk_closures_in_expr(prefix.operand, outer_scope, ctx, None);
@@ -361,17 +373,41 @@ pub(crate) fn walk_closures_in_expr<'b>(
             walk_closures_in_expr(aa.array, outer_scope, ctx, None);
             walk_closures_in_expr(aa.index, outer_scope, ctx, None);
         }
+        // Each branch of a ternary and each arm of a `match` runs under
+        // what its condition proved, the way an `if` body does.
         Expression::Conditional(cond) => {
             walk_closures_in_expr(cond.condition, outer_scope, ctx, None);
             if let Some(then_expr) = cond.then {
-                walk_closures_in_expr(then_expr, outer_scope, ctx, None);
+                walk_closures_in_branch(then_expr, outer_scope, ctx, |scope| {
+                    narrow_by_condition(cond.condition, true, scope, ctx);
+                });
             }
-            walk_closures_in_expr(cond.r#else, outer_scope, ctx, None);
+            walk_closures_in_branch(cond.r#else, outer_scope, ctx, |scope| {
+                narrow_by_condition(cond.condition, false, scope, ctx);
+            });
         }
         Expression::Match(m) => {
             walk_closures_in_expr(m.expression, outer_scope, ctx, None);
+            let class_subject =
+                crate::type_engine::types::narrowing::match_class_subject_var(m.expression);
             for arm in m.arms.iter() {
-                walk_closures_in_expr(arm.expression(), outer_scope, ctx, None);
+                let MatchArm::Expression(expr_arm) = arm else {
+                    walk_closures_in_expr(arm.expression(), outer_scope, ctx, None);
+                    continue;
+                };
+                if m.expression.is_true() {
+                    walk_closures_in_branch(expr_arm.expression, outer_scope, ctx, |scope| {
+                        for condition in expr_arm.conditions.iter() {
+                            apply_condition_narrowing(condition, scope, ctx);
+                        }
+                    });
+                } else if let Some(var) = class_subject {
+                    walk_closures_in_branch(expr_arm.expression, outer_scope, ctx, |scope| {
+                        apply_class_match_arm_narrowing(var, expr_arm, scope, ctx);
+                    });
+                } else {
+                    walk_closures_in_expr(expr_arm.expression, outer_scope, ctx, None);
+                }
             }
         }
         Expression::Instantiation(inst) => {
@@ -423,6 +459,59 @@ pub(crate) fn walk_closures_in_expr<'b>(
             walk_closures_in_expr(p.callable, outer_scope, ctx, None);
         }
         _ => {}
+    }
+}
+
+/// Walk the closures in a branch that runs only under some narrowing of
+/// `outer_scope`, which `narrow` applies.
+///
+/// A closure captures the variables it uses when it is created, so one
+/// written in the right operand of `$c && …`, in a ternary branch or in a
+/// `match` arm sees them as that branch's condition left them, exactly as
+/// a closure written inside an `if ($c)` block does.  The scope is only
+/// copied and narrowed when the branch holds a closure at all.
+fn walk_closures_in_branch<'b>(
+    branch: &'b Expression<'b>,
+    outer_scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    narrow: impl FnOnce(&mut ScopeState),
+) {
+    let mut holds_closure = false;
+    mago_syntax::walker::Walker::walk_expression(&ClosureFinder, branch, &mut holds_closure);
+    if !holds_closure {
+        return;
+    }
+    let mut branch_scope = outer_scope.clone();
+    narrow(&mut branch_scope);
+    walk_closures_in_expr(branch, &branch_scope, ctx, None);
+}
+
+/// Narrow `scope` by what `condition` proves when it is truthy, or by
+/// what it proves when it is falsy.
+fn narrow_by_condition<'b>(
+    condition: &'b Expression<'b>,
+    truthy: bool,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if truthy {
+        apply_condition_narrowing(condition, scope, ctx);
+    } else {
+        apply_condition_narrowing_inverse(condition, scope, ctx);
+    }
+}
+
+/// Sets its flag on reaching a closure or arrow function, without
+/// descending into one.
+struct ClosureFinder;
+
+impl<'ast, 'arena> mago_syntax::walker::Walker<'ast, 'arena, bool> for ClosureFinder {
+    fn walk_closure(&self, _: &'ast Closure<'arena>, found: &mut bool) {
+        *found = true;
+    }
+
+    fn walk_arrow_function(&self, _: &'ast ArrowFunction<'arena>, found: &mut bool) {
+        *found = true;
     }
 }
 
