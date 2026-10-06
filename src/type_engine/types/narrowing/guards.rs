@@ -806,6 +806,32 @@ pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
     })
 }
 
+/// Whether a call to the function `name` is a check that narrows the
+/// subject passed as its first argument.
+///
+/// A local variable is narrowed by offering every in-scope name to the
+/// extractors, but a property path (`$this->stream`) only exists in scope
+/// once the condition scan has seeded it, and that scan asks this. So it
+/// must name every function an extractor reads a first-argument subject
+/// from: [`type_guard_kind_from_name`], `is_a()` (both the instanceof and
+/// the class-string form), `try_extract_class_string_guard`,
+/// `try_extract_member_exists_guard`, and `try_extract_in_array`.
+pub(crate) fn narrows_first_argument(name: &str) -> bool {
+    let name = name.trim_start_matches('\\');
+    type_guard_kind_from_name(name).is_some()
+        || matches!(
+            name,
+            "is_a"
+                | "class_exists"
+                | "interface_exists"
+                | "enum_exists"
+                | "trait_exists"
+                | "property_exists"
+                | "method_exists"
+                | "in_array"
+        )
+}
+
 /// Narrow `ty` to the values the `is_*()` builtin named by `name`
 /// accepts.
 ///

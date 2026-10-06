@@ -37,7 +37,19 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B550. Type-check functions only narrow when written in lowercase
+
+**Impact: Low · Complexity: Low**
+
+PHP function names are case-insensitive, so `Is_String($x)` and
+`IS_RESOURCE($this->stream)` are the same checks as their lowercase
+spellings. The guard table (`type_guard_kind_from_name` in
+`type_engine/types/narrowing/guards.rs`), `narrows_first_argument`, and
+the class-string and member-existence extractors match the name
+case-sensitively, so a mixed-case guard narrows nothing and the branch
+keeps the wide type. The `is_a()` and `in_array()` extractors already
+compare case-insensitively. Fold the name to lowercase once where these
+helpers read it (without allocating on the common lowercase path).
 
 ## Arithmetic
 

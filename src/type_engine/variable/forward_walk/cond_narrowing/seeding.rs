@@ -277,26 +277,11 @@ pub(crate) fn collect_condition_property_keys_inner(expr: &Expression<'_>, keys:
             collect_condition_property_keys_inner(bin.lhs, keys);
             collect_condition_property_keys_inner(bin.rhs, keys);
         }
-        // Type guard functions: `is_string($a->foo)`, `is_resource($a->foo)`,
-        // and every other `is_*()` the narrowing pass reads, plus the
-        // class-string and `in_array` checks.
+        // Checks on their first argument: `is_string($a->foo)`,
+        // `is_a($a->foo, Foo::class)`, `in_array($a->foo, $list, true)`.
         Expression::Call(Call::Function(func_call)) => {
             if let Expression::Identifier(ident) = func_call.function {
-                // `\is_string(...)` names the same function as `is_string(...)`.
-                let func_name = bytes_to_str(ident.value()).trim_start_matches('\\');
-                let is_type_guard = narrowing::type_guard_kind_from_name(func_name).is_some()
-                    || matches!(
-                        func_name,
-                        "is_a"
-                        | "class_exists"
-                        | "interface_exists"
-                        | "enum_exists"
-                        | "trait_exists"
-                        // A strict `in_array` proves its needle is one of
-                        // the haystack's elements, so the needle is a
-                        // subject the branch narrows like any other.
-                        | "in_array"
-                    );
+                let is_type_guard = narrowing::narrows_first_argument(bytes_to_str(ident.value()));
                 if is_type_guard && let Some(first_arg) = func_call.argument_list.arguments.first()
                 {
                     let arg_expr = match first_arg {

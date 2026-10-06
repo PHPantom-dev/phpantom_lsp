@@ -13136,3 +13136,28 @@ final class Named
         messages_with_code(&diags, "type_mismatch_argument")
     );
 }
+
+#[test]
+fn property_exists_narrows_property_path() {
+    let php = r#"<?php
+declare(strict_types=1);
+namespace Repro;
+class Foo {}
+final class Holder
+{
+    private Foo $obj;
+    public function __construct() { $this->obj = new Foo(); }
+    public function read(): void
+    {
+        if (\property_exists($this->obj, 'bar')) {
+            echo $this->obj->bar;
+        }
+    }
+}
+"#;
+    let diags = collect_slow_with_full_stubs(php);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'bar' not found")),
+        "property_exists() should prove $this->obj->bar exists: {diags:?}"
+    );
+}

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
 - **Type checks narrow properties the way they narrow variables.** `if (\is_resource($this->stream)) { fclose($this->stream); }` on a `resource|null` property no longer reports "expects resource, got resource|null". Every type-check function now narrows a property, with or without a leading backslash. Contributed by @phcorp. Closes #466.
+- **`\extract()` and `\compact()` are recognised with a leading backslash.** Variables they define or read are no longer reported as undefined or unused.
 
 ## [0.11.0] - 2026-10-05
 

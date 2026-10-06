@@ -228,8 +228,9 @@ impl<'ast, 'arena> Walker<'ast, 'arena, Vec<u32>> for ImportWalker {
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
-/// Returns `true` if `call` is an unqualified call to a global function
-/// whose name matches `name` (case-insensitively).
+/// Returns `true` if `call` calls the global function `name`
+/// (case-insensitively), written with or without a leading backslash.
 fn is_named_call(call: &FunctionCall<'_>, name: &[u8]) -> bool {
-    matches!(call.function, Expression::Identifier(ident) if ident.value().eq_ignore_ascii_case(name))
+    matches!(call.function, Expression::Identifier(ident)
+        if ident.value().strip_prefix(b"\\").unwrap_or(ident.value()).eq_ignore_ascii_case(name))
 }
