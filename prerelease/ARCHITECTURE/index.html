@@ -3331,13 +3331,13 @@ sit next to.</p>
 <a id="__codelineno-0-62" name="__codelineno-0-62" href="#__codelineno-0-62"></a>│   # Diagnostics
 <a id="__codelineno-0-63" name="__codelineno-0-63" href="#__codelineno-0-63"></a>├── diagnostics/
 <a id="__codelineno-0-64" name="__codelineno-0-64" href="#__codelineno-0-64"></a>│   ├── mod.rs              # Native collection/publishing orchestration + scheduling
-<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── external/           # PHPStan / PHPCS / Mago subprocess pipelines
+<a id="__codelineno-0-65" name="__codelineno-0-65" href="#__codelineno-0-65"></a>│   ├── external/           # PHPStan / PHPCS / PHPMD / Mago subprocess pipelines
 <a id="__codelineno-0-66" name="__codelineno-0-66" href="#__codelineno-0-66"></a>│   ├── stale.rs, suppression.rs, helpers.rs, ignore_rules.rs, workspace.rs
 <a id="__codelineno-0-67" name="__codelineno-0-67" href="#__codelineno-0-67"></a>│   └── &lt;collector&gt;.rs      # One module per diagnostic (unknown_classes, unknown_functions,
 <a id="__codelineno-0-68" name="__codelineno-0-68" href="#__codelineno-0-68"></a>│                           #   unknown_members/, undefined_variables/, argument_count, type_errors/, …)
 <a id="__codelineno-0-69" name="__codelineno-0-69" href="#__codelineno-0-69"></a>│
 <a id="__codelineno-0-70" name="__codelineno-0-70" href="#__codelineno-0-70"></a>│   # External tools &amp; CLI subcommands
-<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>├── phpstan.rs, phpcs.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
+<a id="__codelineno-0-71" name="__codelineno-0-71" href="#__codelineno-0-71"></a>├── phpstan.rs, phpcs.rs, phpmd.rs, mago.rs, phpstan_ignore.rs   # External analyzer integrations
 <a id="__codelineno-0-72" name="__codelineno-0-72" href="#__codelineno-0-72"></a>├── analyse/                # `analyze` CLI subcommand (batch diagnostics, output formatting)
 <a id="__codelineno-0-73" name="__codelineno-0-73" href="#__codelineno-0-73"></a>├── fix.rs                  # `fix` CLI subcommand (automated code fixes)
 <a id="__codelineno-0-74" name="__codelineno-0-74" href="#__codelineno-0-74"></a>├── move_cli/               # `move` CLI subcommand (class/namespace refactoring)
@@ -4429,6 +4429,7 @@ intersection members above branch-only members or add an explicit marker.</p>
 <li><strong>Native diagnostic worker</strong> — collects fast (syntax errors, unused imports, deprecated usage) and slow (unknown classes/members/functions, argument count, implementation errors) diagnostics. Debounces at 500 ms.</li>
 <li><strong>PHPStan worker</strong> — runs PHPStan in editor mode (<code>--tmp-file</code> / <code>--instead-of</code>). Debounces at 2 000 ms.</li>
 <li><strong>PHPCS worker</strong> — runs PHP_CodeSniffer via <code>phpcs --report=json</code> with stdin piping. Debounces at 2 000 ms.</li>
+<li><strong>PHPMD worker</strong> — runs PHP Mess Detector 3 via <code>phpmd analyze --format=json -</code> with stdin piping.</li>
 </ol>
 <h3 id="native-transport-choice">Native transport choice<a class="headerlink" href="#native-transport-choice" title="Permanent link">&para;</a></h3>
 <p>For native diagnostics, PHPantom chooses exactly one LSP delivery model per

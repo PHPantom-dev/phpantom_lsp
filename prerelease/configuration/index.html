@@ -630,6 +630,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#phpmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpmd]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#mago" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1643,6 +1654,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#phpmd" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>[phpmd]</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#mago" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1887,7 +1909,7 @@ those still need a restart to fully apply.</p>
 <td><code>workspace-external</code></td>
 <td>bool</td>
 <td><code>true</code></td>
-<td>Run configured external tools (PHPStan, PHPCS, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when <code>workspace</code> is enabled.</td>
+<td>Run configured external tools (PHPStan, PHPCS, PHPMD, Mago) once over the whole project after workspace diagnostics finish. Only takes effect when <code>workspace</code> is enabled.</td>
 </tr>
 </tbody>
 </table>
@@ -2090,6 +2112,38 @@ highlighting remains in charge of ordinary PHP syntax.</p>
 <td>integer</td>
 <td><code>30000</code></td>
 <td>Max runtime in milliseconds before PHPCS is killed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phpmd"><code>[phpmd]</code><a class="headerlink" href="#phpmd" title="Permanent link">&para;</a></h3>
+<p>PHPMD 3 is required. Earlier versions have a different command line.</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>command</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Command or path for PHPMD. Unset: auto-detect via <code>vendor/bin/phpmd</code> then <code>$PATH</code>, only when the project has a PHPMD config file (<code>phpmd.yml</code>, <code>phpmd.xml</code>, <code>.phpmd.yml</code>, <code>phpmd.xml.dist</code>, and the other names PHPMD looks for) or <code>ruleset</code> is set. <code>""</code>: disable.</td>
+</tr>
+<tr>
+<td><code>ruleset</code></td>
+<td>string</td>
+<td>unset</td>
+<td>Ruleset name or file passed via <code>--ruleset</code> (e.g. <code>"cleancode"</code>). Unset: PHPMD uses the config file it finds in the project root.</td>
+</tr>
+<tr>
+<td><code>timeout</code></td>
+<td>integer</td>
+<td><code>30000</code></td>
+<td>Max runtime in milliseconds before PHPMD is killed.</td>
 </tr>
 </tbody>
 </table>

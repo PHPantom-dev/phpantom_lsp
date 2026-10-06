@@ -954,45 +954,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d10-phpmd-diagnostic-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D10. PHPMD diagnostic proxy
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D10. PHPMD diagnostic proxy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Prerequisites
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1649,45 +1610,6 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#d10-phpmd-diagnostic-proxy" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        D10. PHPMD diagnostic proxy
-      </span>
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="D10. PHPMD diagnostic proxy">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Prerequisites
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#implementation_1" class="md-nav__link">
-    <span class="md-ellipsis">
-      <span class="md-typeset">
-        Implementation
-      </span>
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
   <a href="#d15-unused-parameter-diagnostic" class="md-nav__link">
     <span class="md-ellipsis">
       <span class="md-typeset">
@@ -1951,7 +1873,12 @@ proxies:</p>
   <code>// phpcs:enable</code> blocks. The proxy exists; only the suppression
   action is missing.</li>
 <li>PHPMD (3.0): <code>#[SuppressWarnings(RuleName::class)]</code> as a PHP
-  attribute. Blocked on the proxy itself (D10).</li>
+  attribute on the enclosing class or method, importing
+  <code>PHPMD\Attribute\SuppressWarnings</code> and the rule class. The proxy
+  (<code>src/phpmd.rs</code>, <code>[phpmd]</code> config section) carries the rule name as
+  the diagnostic code; only the suppression action is missing. The
+  rule's class is not in the report, so the action has to map the rule
+  name to its <code>PHPMD\Rule\…</code> class.</li>
 </ul>
 <hr />
 <h2 id="d6-unreachable-code-diagnostic">D6. Unreachable code diagnostic<a class="headerlink" href="#d6-unreachable-code-diagnostic" title="Permanent link">&para;</a></h2>
@@ -2007,33 +1934,6 @@ analysis (both if/else branches exit) is a future refinement.</p>
 <p>When our type engine silently resolves a method to a <code>never</code> return
 type (e.g. an incorrectly resolved overload), unreachable code after
 the call becomes visible, signalling the bug.</p>
-<hr />
-<h2 id="d10-phpmd-diagnostic-proxy">D10. PHPMD diagnostic proxy<a class="headerlink" href="#d10-phpmd-diagnostic-proxy" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Low · Complexity: Medium</strong></p>
-<p>Proxy PHPMD (PHP Mess Detector) diagnostics into the editor, following
-the same pattern as the existing PHPStan proxy. PHPMD 3.0 (once
-released) is the target version. It will get a <code>[phpmd]</code> TOML section
-with <code>command</code>, <code>timeout</code>, and tool-specific options mirroring the
-<code>[phpstan]</code> schema.</p>
-<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
-<ul>
-<li>PHPMD 3.0 must be released. Current 2.x output formats and rule
-  naming may change.</li>
-<li>The diagnostic suppression code action (D5) can add PHPMD's
-  <code>@SuppressWarnings(PHPMD.[RuleName])</code> syntax once the proxy exists.</li>
-</ul>
-<h3 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h3>
-<ol>
-<li>Add a <code>[phpmd]</code> section to the config schema in <code>src/config.rs</code>
-   with <code>command</code> (default <code>"vendor/bin/phpmd"</code>), <code>timeout</code>, and
-   an <code>enabled</code> flag.</li>
-<li>Run PHPMD with XML or JSON output on the current file (or changed
-   files) and parse the results into LSP diagnostics.</li>
-<li>Map PHPMD rule names to diagnostic codes so that suppression
-   actions (D5) can insert the correct <code>@SuppressWarnings</code> annotation.</li>
-<li>Respect the same debounce and queueing logic used by the PHPStan
-   proxy to avoid overwhelming the tool on rapid edits.</li>
-</ol>
 <hr />
 <h2 id="d15-unused-parameter-diagnostic">D15. Unused parameter diagnostic<a class="headerlink" href="#d15-unused-parameter-diagnostic" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Low · Complexity: Medium</strong></p>
