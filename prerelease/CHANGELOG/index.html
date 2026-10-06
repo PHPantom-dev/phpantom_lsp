@@ -5005,7 +5005,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <h3 id="changed">Changed<a class="headerlink" href="#changed" title="Permanent link">&para;</a></h3>
 <h4 id="performance-and-memory">Performance and memory<a class="headerlink" href="#performance-and-memory" title="Permanent link">&para;</a></h4>
 <ul>
-<li><strong>Indexing Blade templates with no DocBlock is now much faster.</strong> Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.</li>
+<li><strong>Indexing Blade templates with no DocBlock is now much faster.</strong> Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster. The work is also spread across every core.</li>
 <li><strong>Faster reference counts and hover in untyped code.</strong> Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.</li>
 <li><strong>Code that calls undefined functions is analyzed much faster.</strong> Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.</li>
 <li><strong>Files with many diagnostics are reported much faster.</strong> Large files that produce thousands of diagnostics no longer spend most of their time locating each one.</li>
