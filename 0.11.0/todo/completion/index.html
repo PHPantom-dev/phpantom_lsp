@@ -1,0 +1,2190 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/completion/">
+      
+      
+        <link rel="prev" href="../bugs/">
+      
+      
+        <link rel="next" href="../diagnostics/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Completion - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-completion" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Completion
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#c1-array-functions-needing-new-code-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C1. Array functions needing new code paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c3-go-to-definition-for-array-shape-keys-via-bracket-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C3. Go-to-definition for array shape keys via bracket access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c4-non-array-functions-with-dynamic-return-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C4. Non-array functions with dynamic return types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c5-returntypecontract-parameter-dependent-return-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C6. <code>#[ExpectedValues]</code> parameter value suggestions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c7-class_alias-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C7. <code>class_alias()</code> support
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c8-filesystem-proximity-as-an-affinity-tiebreaker" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C8. Filesystem proximity as an affinity tiebreaker
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C10. Deprecation markers on class-name completions from all sources
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#c1-array-functions-needing-new-code-paths" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C1. Array functions needing new code paths
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c3-go-to-definition-for-array-shape-keys-via-bracket-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C3. Go-to-definition for array shape keys via bracket access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c4-non-array-functions-with-dynamic-return-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C4. Non-array functions with dynamic return types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c5-returntypecontract-parameter-dependent-return-types" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c6-expectedvalues-parameter-value-suggestions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C6. <code>#[ExpectedValues]</code> parameter value suggestions
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c7-class_alias-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C7. <code>class_alias()</code> support
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c8-filesystem-proximity-as-an-affinity-tiebreaker" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C8. Filesystem proximity as an affinity tiebreaker
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C10. Deprecation markers on class-name completions from all sources
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c11-smarter-member-ordering-after-" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/completion.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-completion">PHPantom — Completion<a class="headerlink" href="#phpantom-completion" title="Permanent link">&para;</a></h1>
+<p>Dynamic return type handling for built-in functions, stub attribute
+extraction, and argument-level intelligence. Items that are about
+<em>type resolution infrastructure</em> (generics, narrowing, conditional
+types) live in <a href="../type-inference/">type-inference.md</a>.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="c1-array-functions-needing-new-code-paths">C1. Array functions needing new code paths<a class="headerlink" href="#c1-array-functions-needing-new-code-paths" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>These functions have return type semantics that don't fit into either
+<code>ARRAY_PRESERVING_FUNCS</code> (same array type out) or <code>ARRAY_ELEMENT_FUNCS</code>
+(single element out). Each needs its own mini-resolver.</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Return type logic</th>
+<th>PHPStan extension</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>array_keys</code></td>
+<td>Returns <code>list&lt;TKey&gt;</code> — extracts the <em>key</em> type, not value type</td>
+<td><code>ArrayKeysFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_column</code></td>
+<td>Extracts a column from a 2D array, preserving types</td>
+<td><code>ArrayColumnFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_combine</code></td>
+<td>Keys from first array arg, values from second</td>
+<td><code>ArrayCombineFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_fill</code></td>
+<td><code>array&lt;int, TValue&gt;</code> preserving the fill value type</td>
+<td><code>ArrayFillFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_fill_keys</code></td>
+<td>Preserves key array type + value type</td>
+<td><code>ArrayFillKeysFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_flip</code></td>
+<td>Swaps key↔value types</td>
+<td><code>ArrayFlipFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_pad</code></td>
+<td>Union of existing value type + pad value type</td>
+<td><code>ArrayPadDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_replace</code></td>
+<td>Merge-like, preserving types from all args</td>
+<td><code>ArrayReplaceFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_change_key_case</code></td>
+<td>Preserves value type, transforms key type</td>
+<td><code>ArrayChangeKeyCaseFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_intersect_key</code></td>
+<td>Preserves first array's types (dedicated extension)</td>
+<td><code>ArrayIntersectKeyFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_search</code></td>
+<td>Returns key type of the haystack array</td>
+<td><code>ArraySearchFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_rand</code></td>
+<td>Returns key type of the input array</td>
+<td><code>ArrayRandFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_count_values</code></td>
+<td>Returns <code>array&lt;TValue, int&gt;</code></td>
+<td><code>ArrayCountValuesDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_key_first</code> / <code>array_key_last</code></td>
+<td>Returns key type (usually scalar, low completion value)</td>
+<td><code>ArrayFirstLastDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>key</code></td>
+<td>Returns the key type of the array at the internal pointer</td>
+<td><code>KeyFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>array_find_key</code></td>
+<td>Returns key type (PHP 8.4)</td>
+<td><code>ArrayFindKeyFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>compact</code></td>
+<td>Builds typed array from variable names</td>
+<td><code>CompactFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>count</code> / <code>sizeof</code></td>
+<td>Returns precise int range based on array size</td>
+<td><code>CountFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>min</code> / <code>max</code></td>
+<td>Returns union of argument types</td>
+<td><code>MinMaxFunctionReturnTypeExtension</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="c3-go-to-definition-for-array-shape-keys-via-bracket-access">C3. Go-to-definition for array shape keys via bracket access<a class="headerlink" href="#c3-go-to-definition-for-array-shape-keys-via-bracket-access" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Array shape keys accessed via bracket notation (<code>$status['code']</code>)
+have no go-to-definition support. The type comes from a
+<code>@phpstan-type</code> / <code>@phpstan-import-type</code> alias or a direct
+<code>@var</code> / <code>@return</code> annotation resolved to
+<code>array{code: int, label: string}</code>, but Ctrl+Click on the string
+key inside <code>['code']</code> does nothing.</p>
+<p>Object shape properties (<code>$profile-&gt;name</code> from
+<code>@return object{name: string}</code>) already jump to the property key
+in the docblock. Extending the same approach to bracket-access
+array shapes would require detecting the array key context in the
+GTD path (similar to array shape completion) and searching for the
+key inside the matching <code>array{…}</code> annotation.</p>
+<hr />
+<h2 id="c4-non-array-functions-with-dynamic-return-types">C4. Non-array functions with dynamic return types<a class="headerlink" href="#c4-non-array-functions-with-dynamic-return-types" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: High</strong></p>
+<p>PHPStan also provides dynamic return type extensions for many non-array
+functions. These are lower priority because they mostly refine scalar
+return types (less impactful for class-based completion).</p>
+<table>
+<thead>
+<tr>
+<th>Function</th>
+<th>Return type logic</th>
+<th>PHPStan extension</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>abs</code></td>
+<td>Preserves int/float return type</td>
+<td><code>AbsFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>base64_decode</code></td>
+<td><code>string\|false</code> based on strict param</td>
+<td><code>Base64DecodeDynamicFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>explode</code></td>
+<td><code>list&lt;string&gt;</code> / <code>non-empty-list&lt;string&gt;</code> / <code>false</code></td>
+<td><code>ExplodeFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>filter_var</code></td>
+<td>Return type depends on filter constant</td>
+<td><code>FilterVarDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>filter_input</code></td>
+<td>Same as <code>filter_var</code></td>
+<td><code>FilterInputDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>filter_var_array</code> / <code>filter_input_array</code></td>
+<td>Typed array based on filter definitions</td>
+<td><code>FilterVarArrayDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>get_class</code></td>
+<td>Returns <code>class-string&lt;T&gt;</code></td>
+<td><code>GetClassDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>get_called_class</code></td>
+<td>Returns <code>class-string&lt;static&gt;</code></td>
+<td><code>GetCalledClassDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>get_parent_class</code></td>
+<td>Returns parent class-string</td>
+<td><code>GetParentClassDynamicFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>gettype</code></td>
+<td>Returns specific string literal for known types</td>
+<td><code>GettypeFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>get_debug_type</code></td>
+<td>Returns specific string literal</td>
+<td><code>GetDebugTypeFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>constant</code></td>
+<td>Resolves named constant to its type</td>
+<td><code>ConstantFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>date</code> / <code>date_format</code></td>
+<td>Precise string return types</td>
+<td><code>DateFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>date_create</code> / <code>date_create_immutable</code></td>
+<td><code>DateTime\|false</code></td>
+<td><code>DateTimeCreateDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>hash</code> / <code>hash_file</code> / etc.</td>
+<td>Precise return types</td>
+<td><code>HashFunctionsReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>sprintf</code> / <code>vsprintf</code></td>
+<td>Non-empty-string preservation</td>
+<td><code>SprintfFunctionDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>preg_split</code></td>
+<td><code>list&lt;string&gt;\|false</code> based on flags</td>
+<td><code>PregSplitDynamicReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>str_split</code> / <code>mb_str_split</code></td>
+<td>Non-empty-list</td>
+<td><code>StrSplitFunctionReturnTypeExtension</code></td>
+</tr>
+<tr>
+<td><code>class_implements</code> / <code>class_uses</code> / <code>class_parents</code></td>
+<td><code>array&lt;string, string&gt;\|false</code></td>
+<td><code>ClassImplementsFunctionReturnTypeExtension</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="c5-returntypecontract-parameter-dependent-return-types">C5. <code>#[ReturnTypeContract]</code> parameter-dependent return types<a class="headerlink" href="#c5-returntypecontract-parameter-dependent-return-types" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>phpstorm-stubs use <code>#[ReturnTypeContract]</code> on 4 functions to express
+return type narrowing based on a parameter's value or presence. These
+functions have no <code>@phpstan-return</code> conditional type in their docblocks,
+so the narrowing information is only available through the attribute.</p>
+<p><strong>Attribute FQN:</strong> <code>JetBrains\PhpStorm\Internal\ReturnTypeContract</code>.
+Stub files import it as <code>TypeContract</code> via
+<code>use JetBrains\PhpStorm\Internal\ReturnTypeContract as TypeContract;</code>.
+Match by resolving through the <code>DocblockCtx</code> use-map and comparing the
+last segment of the resolved FQN (<code>ReturnTypeContract</code>).</p>
+<p>The attribute has four named arguments:</p>
+<ul>
+<li><code>true</code> / <code>false</code> — narrows the return type when the annotated boolean
+  parameter is <code>true</code> or <code>false</code>.</li>
+<li><code>exists</code> / <code>notExists</code> — narrows the return type when an optional
+  variadic parameter is passed or omitted.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">// microtime(true) → float, microtime(false) → string</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">function microtime(</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    #[TypeContract(true: &quot;float&quot;, false: &quot;string&quot;)] bool $as_float = false</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">): string|float {}</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">// sscanf with extra args → int|null, without → array|null</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="x">function sscanf(</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="x">    string $string, string $format,</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="x">    #[TypeContract(exists: &quot;int|null&quot;, notExists: &quot;array|null&quot;)] mixed &amp;...$vars</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="x">): array|int|null {}</span>
+</code></pre></div>
+<p>Affected functions: <code>microtime</code>, <code>gettimeofday</code>, <code>sscanf</code>, <code>fscanf</code>.
+Three of the four already carry a hand-written conditional return type in
+<code>stub_patches</code>, which is what makes them resolve today; <code>gettimeofday</code> is
+the one still on its declared union. Reading the attribute would replace
+all four hand-written patches with one rule, and cover any function
+phpstorm-stubs annotates next.</p>
+<p><strong>Implementation:</strong> When resolving a call to one of these functions,
+check whether the annotated parameter was passed (for <code>exists</code>/
+<code>notExists</code>) or matches a literal boolean (for <code>true</code>/<code>false</code>). Use the
+narrowed type from the attribute instead of the declared union return
+type. This integrates into the call return type resolution path.</p>
+<hr />
+<h2 id="c6-expectedvalues-parameter-value-suggestions">C6. <code>#[ExpectedValues]</code> parameter value suggestions<a class="headerlink" href="#c6-expectedvalues-parameter-value-suggestions" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>phpstorm-stubs annotate ~62 parameters and return values with
+<code>#[ExpectedValues]</code> to declare the set of valid constant values or
+flags. This could power smarter completions inside function call
+arguments by suggesting the valid constants.</p>
+<p><strong>Attribute FQN:</strong> <code>JetBrains\PhpStorm\ExpectedValues</code>. Stub files
+import it via <code>use JetBrains\PhpStorm\ExpectedValues;</code>. Two files alias
+it as <code>EV</code> (<code>intl/intl.php</code> and <code>ftp/ftp.php</code>). Match by resolving
+through the <code>DocblockCtx</code> use-map and comparing the last segment of the
+resolved FQN (<code>ExpectedValues</code>).</p>
+<p>The attribute supports several forms:</p>
+<ul>
+<li><code>values: [CONST_A, CONST_B]</code> — one of the listed values is expected.</li>
+<li><code>flags: [FLAG_A, FLAG_B]</code> — a bitmask combination is expected.</li>
+<li><code>valuesFromClass: MyClass::class</code> — one of the class's constants.</li>
+<li><code>flagsFromClass: MyClass::class</code> — bitmask of the class's constants.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">function phpinfo(</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    #[ExpectedValues(flags: [INFO_GENERAL, INFO_CREDITS, INFO_CONFIGURATION,</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">                             INFO_MODULES, INFO_ENVIRONMENT, INFO_VARIABLES,</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">                             INFO_LICENSE, INFO_ALL])]</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">    int $flags = INFO_ALL</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">): bool {}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">function pathinfo(</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">    string $path,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a><span class="x">    #[ExpectedValues(flags: [PATHINFO_DIRNAME, PATHINFO_BASENAME,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">                             PATHINFO_EXTENSION, PATHINFO_FILENAME])]</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">    int $flags = PATHINFO_ALL</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a><span class="x">): string|array {}</span>
+</code></pre></div>
+<p><strong>Implementation:</strong> During parameter extraction, store the expected
+values metadata. When providing completions inside a function call
+argument position, check whether the target parameter has expected
+values and offer the listed constants at the top of the suggestions
+list. Flag-style parameters should also suggest bitwise-OR
+combinations.</p>
+<hr />
+<h2 id="c7-class_alias-support">C7. <code>class_alias()</code> support<a class="headerlink" href="#c7-class_alias-support" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>Resolve <code>class_alias('OriginalClass', 'AliasName')</code> so that the alias
+name works for completion, go-to-definition, and hover. PHP's
+<code>class_alias()</code> creates a runtime alias for a class, and many codebases
+rely on this for backwards compatibility layers and framework internals
+(Laravel's Facade loader uses <code>class_alias</code> to register short names).</p>
+<p>Today, if a file calls <code>class_alias('\App\Services\UserService',
+'UserService')</code>, using <code>UserService</code> elsewhere produces no completions
+and no go-to-definition because PHPantom has no record of the alias.</p>
+<p><strong>Implementation:</strong></p>
+<ol>
+<li>
+<p><strong>Detect <code>class_alias()</code> calls</strong> — during AST extraction (in
+   <code>parser/functions.rs</code> or a new pass), scan for top-level
+   <code>class_alias(string, string)</code> calls where both arguments are string
+   literals.</p>
+</li>
+<li>
+<p><strong>Store aliases in the use map</strong> — treat each alias as an implicit
+   <code>use OriginalClass as AliasName</code> entry. This slots into the existing
+   class resolution pipeline: when resolving <code>AliasName</code>, the use map
+   lookup finds <code>OriginalClass</code>, and all existing resolution, completion,
+   and definition logic works without changes.</p>
+</li>
+<li>
+<p><strong>Cross-file aliases</strong> — for aliases defined in autoloaded files
+   (e.g. a <code>_ide_helper.php</code> or a framework bootstrap file), the alias
+   mapping needs to be stored in <code>fqn_uri_index</code> or a parallel index so
+   that it's available project-wide. This is the main effort: deciding
+   where to persist the alias data and when to scan for it.</p>
+</li>
+<li>
+<p><strong>Edge cases</strong> — <code>class_alias</code> with a variable or concatenated
+   string as an argument is not statically resolvable. Only handle
+   literal string arguments. Conditional <code>class_alias</code> calls (inside
+   <code>if (!class_exists(...))</code> guards) are common and should still be
+   processed since the alias is expected to be available at analysis
+   time.</p>
+</li>
+</ol>
+<hr />
+<h2 id="c8-filesystem-proximity-as-an-affinity-tiebreaker">C8. Filesystem proximity as an affinity tiebreaker<a class="headerlink" href="#c8-filesystem-proximity-as-an-affinity-tiebreaker" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The affinity table is built from the file's <code>use</code> imports and namespace
+declaration, which works well when the file already has imports. In
+cold-start scenarios (new file, few imports), the affinity table is
+sparse and many candidates share the same zero score. Adding a
+secondary proximity signal based on the candidate's source file path
+would improve ranking in these cases.</p>
+<p>The classmap already stores file paths for every autoloaded class.
+When two candidates share the same affinity score, prefer the one
+whose source file is closer in the directory tree to the file being
+edited. This mirrors Phpactor's <code>SimilarityResultPrioritizer</code>, which
+computes path-segment overlap between the source file and the
+candidate file.</p>
+<p><strong>Implementation:</strong></p>
+<ol>
+<li>
+<p><strong>Compute a proximity score</strong> — given the current file's path and a
+   candidate's classmap path, count shared path segments (or use the
+   inverse of the differing-segment count). Normalize to a small
+   integer range (e.g. 0-99).</p>
+</li>
+<li>
+<p><strong>Integrate into <code>class_sort_text</code></strong> — add a new dimension after
+   <code>affinity</code> and before <code>demote</code>. This keeps it as a tiebreaker
+   within the same affinity bracket rather than overriding the
+   namespace-usage signal. Only apply when the affinity score is zero
+   or tied.</p>
+</li>
+<li>
+<p><strong>Pass the current file path</strong> through <code>ClassCompletionParams</code> and
+   into <code>ClassItemCtx</code> so it's available during sort-text construction.</p>
+</li>
+</ol>
+<h2 id="c10-deprecation-markers-on-class-name-completions-from-all-sources">C10. Deprecation markers on class-name completions from all sources<a class="headerlink" href="#c10-deprecation-markers-on-class-name-completions-from-all-sources" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Same-namespace classes (source tier 2) already carry deprecation info
+because <code>ClassInfo</code> is available. Classes from <code>fqn_uri_index</code>
+and stubs (tiers 3-4) don't check for <code>@deprecated</code> because the class
+may not be fully loaded at completion time.</p>
+<p>For classmap entries, a lightweight byte-level scan of the first
+docblock in the file (similar to <code>detect_stub_class_kind</code>) could detect
+<code>@deprecated</code> without a full parse. For stubs, the source is already
+in memory and could be scanned cheaply. For fqn_uri_index entries, the
+deprecation flag could be stored alongside the file path when the class
+is first indexed.</p>
+<p>This is a small quality-of-life improvement: deprecated classes would
+show with a strikethrough in the completion menu across all sources,
+not just same-namespace ones.</p>
+<h2 id="c11-smarter-member-ordering-after-">C11. Smarter member ordering after <code>-&gt;</code> / <code>::</code><a class="headerlink" href="#c11-smarter-member-ordering-after-" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>Members after <code>-&gt;</code> and <code>::</code> are now sorted by kind (constants and
+<code>::class</code> first, then properties, then methods, with implemented magic
+methods pushed below regular methods so <code>__invoke</code>/<code>__toString</code>/etc.
+don't sit at the top of the method list from their leading
+underscores), and alphabetically within each group
+(<code>src/completion/builder.rs</code>, <code>kind_sort_tier</code> / <code>magic_sort_tier</code>).
+That's still not always helpful: large classes (Laravel Eloquent
+models, Symfony form builders, PHPUnit test cases) can have hundreds of
+members, and the method the user most likely wants is buried
+alphabetically among inherited helpers.</p>
+<p>This is a longer-term goal that needs design work before implementation.
+Possible ranking signals still to explore, on top of the kind/magic
+tiering already in place:</p>
+<ul>
+<li><strong>Visibility</strong>: public members above protected when accessed from
+  outside the class hierarchy</li>
+<li><strong>Declaration origin</strong>: own members above inherited, inherited above
+  trait-mixed, trait-mixed above mixin-provided</li>
+<li><strong>Usage frequency</strong>: members used elsewhere in the current file or
+  project rank higher (requires some form of usage tracking)</li>
+<li><strong>Deprecation</strong>: deprecated members demoted to the bottom</li>
+<li><strong>Name prefix match</strong>: when the user has typed a partial member name,
+  apply match-quality tiering (exact &gt; prefix &gt; substring) similar to
+  class-name completion</li>
+</ul>
+<p>The right combination of these signals (and their relative weights)
+needs experimentation. A next step could be adding declaration origin
+on top of the existing kind tiering, which requires no new data and is
+straightforward to implement.</p>
+<h2 id="c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion">C12. The implicit <code>$value</code> of a <code>set</code> hook is not offered by variable completion<a class="headerlink" href="#c12-the-implicit-value-of-a-set-hook-is-not-offered-by-variable-completion" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A <code>set</code> hook that declares no parameter list still receives the assigned
+value as <code>$value</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">class Item {</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">    public Price $label {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">        set {</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">            $this-&gt;stored = $value-&gt;format();  // `$value` resolves</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">        }</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">    }</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>The type engine seeds <code>$value</code> from the property's declared type, so
+hover, go-to-definition, and diagnostics all read it correctly. Typing
+<code>$va</code> inside the hook body does not offer it, though, because variable
+completion is driven by <code>SymbolMap::var_defs</code> and there is no <code>$value</code>
+token in the source to anchor a <code>VarDefSite</code> to. A hook that spells the
+parameter out (<code>set(Price $value)</code>) is offered as usual.</p>
+<p>Anchoring a synthetic def site on the <code>set</code> keyword is not enough on its
+own: <code>var_defs</code> offsets are also read as real source ranges by find
+references, rename, document highlight, and semantic tokens, so a def
+site pointing at a keyword would produce a bogus highlight and a rename
+edit that corrupts the hook. The fix needs a def kind those consumers
+skip (say <code>VarDefKind::ImplicitHookValue</code>) while variable completion
+includes it.</p>
+<h2 id="c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members">C13. <code>self::</code>/<code>static::</code> inside a <code>@require-extends</code> trait does not see the required class's static members<a class="headerlink" href="#c13-selfstatic-inside-a-require-extends-trait-does-not-see-the-required-classs-static-members" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Found while porting Mago's <code>issue_1064.php</code> (Test Porting Phase 4A).
+<code>$this-&gt;</code> completion inside a trait carrying <code>@phpstan-require-extends</code>/
+<code>@psalm-require-extends</code> already offers the required class's instance
+methods and properties (<code>test_completion_require_extends_this_members_*</code>
+in <code>completion_traits.rs</code>), via <code>trait_this_bounds</code>/
+<code>extend_this_with_trait_bounds</code> in <code>type_engine/trait_context.rs</code>. Static
+access does not get the same treatment:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">    const int FOO = 42;</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="x">}</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">/** @psalm-require-extends Foo */</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="x">trait Bar {</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="x">    public function foo(): int {</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="x">        return static::   // completion offers nothing from Foo</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="x">    }</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>Every caller of <code>trait_this_bounds</code>/<code>extend_this_with_trait_bounds</code> is on
+a <code>$this</code>-context resolution path (<code>forward_walk/param_seeding.rs</code>,
+<code>forward_walk/callable_inference.rs</code>, <code>resolver/mod.rs</code>, and
+<code>diagnostics/deprecated.rs</code>) — none of them run for a bare <code>self::</code>/
+<code>static::</code> completion inside a trait body, so the required class's
+constants and static properties/methods never enter the candidate list
+there.</p>
+<p><strong>Fix:</strong> find where <code>self::</code>/<code>static::</code> completion resolves its target
+class for a trait method body (as opposed to <code>$this-&gt;</code>'s path) and feed
+it through the same <code>@require-extends</code>/<code>@require-implements</code> bound the
+<code>$this-&gt;</code> path already consults, rather than adding a second lookup of
+the tag.</p>
+<h2 id="c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch">C14. <code>examples/php</code> has no demo for an assignment inside a <code>match</code> arm or ternary branch<a class="headerlink" href="#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The forward walker now applies an assignment nested in a <code>match</code> arm or
+a ternary branch (each arm/branch walked against its own scope copy,
+then joined), covered by <code>hover_variable_assigned_in_match_arm</code> and
+<code>hover_variable_assigned_in_ternary_branch</code> in <code>tests/integration/hover.rs</code>
+and by the un-skipped half of the ported
+<code>tests/phpstan_data/Analyser/scope-in-enum-match-arm-body.php</code>
+assertion, but <code>examples/php/completion.php</code> — the file where "type
+inference of every kind" is demonstrated — has no example a user can
+open and try this on directly.</p>
+<p>Add a small demo (a function with <code>$r = match ($k) { 1 =&gt; $x = $n,
+default =&gt; null }; $x;</code> and the ternary equivalent, with a "Try:"
+comment showing what <code>$x</code> resolves to) to <code>completion.php</code>, plus a
+matching <code>assert()</code> in <code>scaffolding/assertions.php</code> verifying the
+runtime type the comment claims.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

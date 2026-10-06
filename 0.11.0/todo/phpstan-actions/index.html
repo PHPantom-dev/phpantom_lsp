@@ -1,0 +1,2007 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/phpstan-actions/">
+      
+      
+        <link rel="prev" href="../performance/">
+      
+      
+        <link rel="next" href="../refactor/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPStan Code Actions - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpstan-code-actions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPStan Code Actions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites-infrastructure-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites — Infrastructure improvements
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-1-simple-message-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 1 — Simple message parsing
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 1 — Simple message parsing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h4-assignbyrefforeachexpr-unset-by-reference-foreach-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H4. <code>assign.byRefForeachExpr</code> — Unset by-reference foreach variable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-2-requires-locating-related-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 2 — Requires locating related code
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 2 — Requires locating related code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h13-propertynotfound-same-class-declare-missing-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H13. <code>property.notFound</code> (same-class) — Declare missing property
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h15-template-bound-from-tip-add-template-t-of-x" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H15. Template bound from tip — Add <code>@template T of X</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h16-matchunhandled-add-missing-match-arms" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H16. <code>match.unhandled</code> — Add missing match arms
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-3-unique-to-phpantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 3 — Unique to PHPantom
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 3 — Unique to PHPantom">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggested-implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Suggested implementation order
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation notes
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#message-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Message parsing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tip-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tip extraction
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-diagnostic-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stale diagnostic detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attribute-insertion-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Attribute insertion pattern
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpdoc-type-mismatch-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPDoc type mismatch pattern
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#patterns-from-rector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Patterns from Rector
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#prerequisites-infrastructure-improvements" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites — Infrastructure improvements
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-1-simple-message-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 1 — Simple message parsing
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 1 — Simple message parsing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h4-assignbyrefforeachexpr-unset-by-reference-foreach-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H4. <code>assign.byRefForeachExpr</code> — Unset by-reference foreach variable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-2-requires-locating-related-code" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 2 — Requires locating related code
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 2 — Requires locating related code">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h13-propertynotfound-same-class-declare-missing-property" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H13. <code>property.notFound</code> (same-class) — Declare missing property
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h15-template-bound-from-tip-add-template-t-of-x" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H15. Template bound from tip — Add <code>@template T of X</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#h16-matchunhandled-add-missing-match-arms" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H16. <code>match.unhandled</code> — Add missing match arms
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tier-3-unique-to-phpantom" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tier 3 — Unique to PHPantom
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Tier 3 — Unique to PHPantom">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#suggested-implementation-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Suggested implementation order
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-notes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation notes
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation notes">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#message-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Message parsing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tip-extraction" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tip extraction
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stale-diagnostic-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Stale diagnostic detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#attribute-insertion-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Attribute insertion pattern
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#phpdoc-type-mismatch-pattern" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        PHPDoc type mismatch pattern
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#patterns-from-rector" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Patterns from Rector
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/phpstan-actions.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpstan-code-actions">PHPStan Code Actions<a class="headerlink" href="#phpstan-code-actions" title="Permanent link">&para;</a></h1>
+<p>Code actions that respond to PHPStan diagnostics. Each action parses the PHPStan
+error message, extracts the relevant information, and offers a quickfix that
+modifies the source code to resolve the issue.</p>
+<h2 id="prerequisites-infrastructure-improvements">Prerequisites — Infrastructure improvements<a class="headerlink" href="#prerequisites-infrastructure-improvements" title="Permanent link">&para;</a></h2>
+<p>No outstanding items.</p>
+<hr />
+<h2 id="tier-1-simple-message-parsing">Tier 1 — Simple message parsing<a class="headerlink" href="#tier-1-simple-message-parsing" title="Permanent link">&para;</a></h2>
+<h3 id="h4-assignbyrefforeachexpr-unset-by-reference-foreach-variable">H4. <code>assign.byRefForeachExpr</code> — Unset by-reference foreach variable<a class="headerlink" href="#h4-assignbyrefforeachexpr-unset-by-reference-foreach-variable" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>assign.byRefForeachExpr</code>
+<strong>Tip (in message):</strong> <code>Unset it right after foreach to avoid this problem.</code></p>
+<p>The diagnostic is on a line that uses a variable that was previously bound as a
+by-reference foreach variable. The fix is to insert <code>unset($var);</code> after the
+foreach loop that created the binding.</p>
+<p><strong>Implementation steps:</strong></p>
+<ol>
+<li>The diagnostic line references the variable. Extract the variable name
+   from the diagnostic line by finding the <code>$var</code> on that line (we can look
+   for the first <code>$identifier</code> on the line, or parse the message — but the
+   message doesn't include the variable name, so we must scan the source).</li>
+<li>Search backward from the diagnostic line for a <code>foreach</code> statement
+   containing <code>&amp;$var</code> (the by-reference binding).</li>
+<li>Find the closing <code>}</code> (or <code>endforeach;</code>) of that foreach.</li>
+<li>Insert <code>unset($var);</code> on the line after the closing brace, with matching
+   indentation.</li>
+</ol>
+<p>This is trickier than the other Tier 1/2 items because of the need to locate
+the foreach loop and its closing brace. Brace-matching is fragile without a
+real parser, but a simple nesting-depth counter works for well-formatted code.</p>
+<p><strong>Stale detection:</strong> <code>unset($var)</code> appears between the foreach closing brace
+and the diagnostic line.</p>
+<hr />
+<h2 id="tier-2-requires-locating-related-code">Tier 2 — Requires locating related code<a class="headerlink" href="#tier-2-requires-locating-related-code" title="Permanent link">&para;</a></h2>
+<h3 id="h13-propertynotfound-same-class-declare-missing-property">H13. <code>property.notFound</code> (same-class) — Declare missing property<a class="headerlink" href="#h13-propertynotfound-same-class-declare-missing-property" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>property.notFound</code>
+<strong>Message:</strong> <code>Access to an undefined property Foo::$bar.</code></p>
+<p>Parse class name and property name from the message:
+<code>Access to an undefined property (.+)::\$(.+)\.$</code></p>
+<p>Scope to same-file only: when the diagnostic is on <code>$this-&gt;bar</code>, the fix
+targets the current class. When it references a different class, skip.</p>
+<p>Offer two quickfixes:</p>
+<ol>
+<li><strong>Declare property</strong> — insert a property declaration at the top of the
+   class body, after existing property declarations. Use <code>private</code> visibility
+   and <code>mixed</code> type by default. If the diagnostic is on an assignment like
+   <code>$this-&gt;bar = expr;</code>, we might infer a better type later, but start with
+   <code>mixed</code>.</li>
+<li><strong>Add <code>@property</code> PHPDoc</strong> — add <code>@property mixed $bar</code> to the class
+   docblock. Better for classes that use <code>__get</code>/<code>__set</code>.</li>
+</ol>
+<p><strong>Stale detection:</strong> the class now declares <code>$bar</code> as a property, or the
+class docblock contains <code>@property ... $bar</code>.</p>
+<p><strong>Reference:</strong> https://phpstan.org/blog/solving-phpstan-access-to-undefined-property</p>
+<hr />
+<h3 id="h15-template-bound-from-tip-add-template-t-of-x">H15. Template bound from tip — Add <code>@template T of X</code><a class="headerlink" href="#h15-template-bound-from-tip-add-template-t-of-x" title="Permanent link">&para;</a></h3>
+<p><strong>Identifiers:</strong> various (<code>generics.*</code>, <code>phpDoc.*</code> — needs investigation)
+<strong>Tip (in message):</strong> <code>Write @template T of X to fix this.</code></p>
+<p>Parse the <code>@template</code> declaration from the tip using:
+<code>Write (@template .+ of .+) to fix this\.</code></p>
+<p>Insert the <code>@template</code> tag into the class or function docblock (create one
+if needed). Same docblock insertion pattern as <code>add_throws.rs</code>.</p>
+<p><strong>Stale detection:</strong> the docblock now contains the extracted <code>@template</code> tag.</p>
+<hr />
+<h3 id="h16-matchunhandled-add-missing-match-arms">H16. <code>match.unhandled</code> — Add missing match arms<a class="headerlink" href="#h16-matchunhandled-add-missing-match-arms" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>match.unhandled</code>
+<strong>Message:</strong> <code>Match expression does not handle remaining value(s): {types}</code></p>
+<p>Parse the remaining value(s) from the message:
+<code>does not handle remaining value\(s\): (.+)$</code></p>
+<p>The value list is comma-separated. Each value can be:
+- An enum case: <code>Foo::Bar</code> — generate <code>Foo::Bar =&gt; TODO</code>
+- A string literal: <code>'foo'</code> — generate <code>'foo' =&gt; TODO</code>
+- An int literal: <code>42</code> — generate <code>42 =&gt; TODO</code>
+- A type name: <code>int</code> — generate <code>default =&gt; TODO</code> (catch-all)</p>
+<p>Find the match expression on the diagnostic line. Locate its closing <code>}</code>.
+Insert new arms before the closing <code>}</code> with correct indentation.</p>
+<p>Use <code>throw new \LogicException('Unexpected value')</code> as the arm body, or
+a <code>TODO</code> comment — configurable later.</p>
+<p><strong>Stale detection:</strong> difficult without re-parsing the match. Skip for now.</p>
+<hr />
+<h2 id="tier-3-unique-to-phpantom">Tier 3 — Unique to PHPantom<a class="headerlink" href="#tier-3-unique-to-phpantom" title="Permanent link">&para;</a></h2>
+<h3 id="h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation">H20. <code>generics.callSiteVarianceRedundant</code> — Remove redundant variance annotation<a class="headerlink" href="#h20-genericscallsitevarianceredundant-remove-redundant-variance-annotation" title="Permanent link">&para;</a></h3>
+<p><strong>Identifier:</strong> <code>generics.callSiteVarianceRedundant</code>
+<strong>Tip (in message):</strong> <code>You can safely remove the call-site variance annotation.</code></p>
+<p>Strip <code>covariant</code> or <code>contravariant</code> keywords from generic type arguments
+in the docblock. Requires parsing PHPDoc generic syntax
+(e.g. <code>Collection&lt;covariant Foo&gt;</code> becomes <code>Collection&lt;Foo&gt;</code>).</p>
+<p>No other tool (PHPStorm, Rector, PHP-CS-Fixer) offers a quickfix for this
+PHPStan-specific diagnostic. Users currently have to edit the PHPDoc manually
+or suppress with <code>@phpstan-ignore</code>.</p>
+<p><strong>Stale detection:</strong> no <code>covariant</code>/<code>contravariant</code> in the PHPDoc on the
+diagnostic line.</p>
+<hr />
+<h2 id="suggested-implementation-order">Suggested implementation order<a class="headerlink" href="#suggested-implementation-order" title="Permanent link">&para;</a></h2>
+<p>Based on effort-to-value ratio and shared infrastructure:</p>
+<ol>
+<li><strong>H6</strong> — return type update</li>
+<li><strong>H10</strong> — remove unused union member</li>
+<li><strong>H4</strong> — unset by-ref foreach variable</li>
+<li><strong>H13</strong> — declare missing property</li>
+<li><strong>H16</strong> — add missing match arms</li>
+<li>Everything else based on user demand</li>
+</ol>
+<hr />
+<h2 id="implementation-notes">Implementation notes<a class="headerlink" href="#implementation-notes" title="Permanent link">&para;</a></h2>
+<h3 id="message-parsing">Message parsing<a class="headerlink" href="#message-parsing" title="Permanent link">&para;</a></h3>
+<p>All message parsing should use regex with named capture groups for clarity.
+Create a shared helper module (e.g. <code>code_actions/phpstan_message.rs</code>) for
+common patterns like extracting class names, method names, types, and property
+names from PHPStan messages. Example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="k">use</span><span class="w"> </span><span class="n">regex</span><span class="p">::</span><span class="n">Regex</span><span class="p">;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="sd">/// Extract the &quot;actual&quot; type from a return.type diagnostic message.</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="k">pub</span><span class="w"> </span><span class="k">fn</span><span class="w"> </span><span class="nf">extract_return_type_actual</span><span class="p">(</span><span class="n">message</span><span class="p">:</span><span class="w"> </span><span class="kp">&amp;</span><span class="kt">str</span><span class="p">)</span><span class="w"> </span><span class="p">-&gt;</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;&amp;</span><span class="kt">str</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">re</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Regex</span><span class="p">::</span><span class="n">new</span><span class="p">(</span><span class="s">r&quot;should return .+ but returns (?P&lt;actual&gt;.+)\.$&quot;</span><span class="p">).</span><span class="n">ok</span><span class="p">()</span><span class="o">?</span><span class="p">;</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">    </span><span class="n">re</span><span class="p">.</span><span class="n">captures</span><span class="p">(</span><span class="n">message</span><span class="p">)</span><span class="o">?</span><span class="p">.</span><span class="n">name</span><span class="p">(</span><span class="s">&quot;actual&quot;</span><span class="p">).</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">m</span><span class="o">|</span><span class="w"> </span><span class="n">m</span><span class="p">.</span><span class="n">as_str</span><span class="p">())</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="tip-extraction">Tip extraction<a class="headerlink" href="#tip-extraction" title="Permanent link">&para;</a></h3>
+<p>Tips are appended to <code>Diagnostic.message</code> after a <code>\n</code> by
+<code>parse_phpstan_message()</code> in <code>phpstan.rs</code>. To access the tip:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kd">let</span><span class="w"> </span><span class="p">(</span><span class="n">message</span><span class="p">,</span><span class="w"> </span><span class="n">tip</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">match</span><span class="w"> </span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">split_once</span><span class="p">(</span><span class="sc">&#39;\n&#39;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="w">    </span><span class="nb">Some</span><span class="p">((</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="n">t</span><span class="p">))</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">m</span><span class="p">,</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">t</span><span class="p">)),</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="w">    </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">(</span><span class="n">diag</span><span class="p">.</span><span class="n">message</span><span class="p">.</span><span class="n">as_str</span><span class="p">(),</span><span class="w"> </span><span class="nb">None</span><span class="p">),</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="p">};</span>
+</code></pre></div>
+<p>Actions that depend on tip text (H4, H12, H15, H20) should use this
+pattern. The tip text has ANSI/HTML tags already stripped by <code>strip_ansi_tags</code>.</p>
+<h3 id="stale-diagnostic-detection">Stale diagnostic detection<a class="headerlink" href="#stale-diagnostic-detection" title="Permanent link">&para;</a></h3>
+<p>Each new action should have a corresponding check in
+<code>is_stale_phpstan_diagnostic()</code> in <code>diagnostics/mod.rs</code> so that the diagnostic
+is eagerly cleared after the user applies the fix, without waiting for the
+next PHPStan run.</p>
+<p>The function currently handles:
+- <code>@phpstan-ignore</code> coverage (all identifiers)
+- <code>method.override</code> / <code>property.override</code> / <code>property.overrideAttribute</code>
+- <code>method.tentativeReturnType</code>
+- <code>return.phpDocType</code> / <code>parameter.phpDocType</code> / <code>property.phpDocType</code>
+- <code>new.static</code>
+- <code>class.prefixed</code>
+- <code>function.alreadyNarrowedType</code> (assert-only)
+- <code>return.void</code> / <code>return.empty</code>
+- <code>deadCode.unreachable</code></p>
+<p>Other identifiers (<code>throws.unusedType</code>, <code>throws.notThrowable</code>,
+<code>missingType.checkedException</code>, <code>method.missingOverride</code>) are cleared
+eagerly by <code>codeAction/resolve</code> rather than by content heuristics.</p>
+<p>New actions should add branches to the <code>match identifier { ... }</code> block.</p>
+<h3 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h3>
+<p>Each action needs tests following the existing pattern:
+- Unit tests for pure helper functions (regex extraction, edit building)
+- Integration tests that construct <code>CodeActionParams</code> with mock diagnostics
+  and call <code>collect_*_actions</code> directly
+- Stale detection tests that construct <code>Diagnostic</code> objects and call
+  <code>is_stale_phpstan_diagnostic</code></p>
+<h3 id="attribute-insertion-pattern">Attribute insertion pattern<a class="headerlink" href="#attribute-insertion-pattern" title="Permanent link">&para;</a></h3>
+<p><code>remove_override.rs</code> and <code>add_return_type_will_change.rs</code> each contain
+their own <code>find_method_insertion_point</code> and attribute detection helpers,
+following the same pattern as <code>add_override.rs</code>. Future attribute-related
+actions can reference any of these three modules.</p>
+<h3 id="phpdoc-type-mismatch-pattern">PHPDoc type mismatch pattern<a class="headerlink" href="#phpdoc-type-mismatch-pattern" title="Permanent link">&para;</a></h3>
+<p><code>fix_phpdoc_type.rs</code> provides a shared helper parameterised by tag name
+(<code>@return</code>, <code>@param</code>, <code>@var</code>). Each diagnostic offers two quickfixes:
+update the tag type to match the native type, or remove the tag entirely
+(preferred). Stale detection checks whether the tag still contains the
+original PHPDoc type.</p>
+<h3 id="patterns-from-rector">Patterns from Rector<a class="headerlink" href="#patterns-from-rector" title="Permanent link">&para;</a></h3>
+<p>Several cross-cutting patterns from Rector's rule implementations are relevant
+to all PHPStan code actions:</p>
+<p><strong>Inheritance guard.</strong> Before modifying a method's return type or parameter
+type, check whether the method overrides a parent or interface method. Rector
+uses <code>ClassMethodReturnTypeOverrideGuard</code> and
+<code>ClassMethodReturnVendorLockResolver</code> for this. Modifying a type that is
+constrained by a parent declaration would produce a fatal error. We already
+have class hierarchy information available through <code>inheritance.rs</code>.</p>
+<p><strong>Comment preservation.</strong> When a code action inserts or removes lines near
+existing comments or docblocks, take care not to orphan or lose them. Rector's
+control-flow simplification rules merge comments from removed nodes onto the
+first statement of the replacement.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3135 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/inline-completion/">
+      
+      
+        <link rel="prev" href="../indexing/">
+      
+      
+        <link rel="next" href="../laravel/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Inline Completion - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-inline-completion" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Inline Completion
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Architecture
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sidecar-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sidecar Protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n1-template-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N1. Template Engine
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N1. Template Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How It Works
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-gathering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Context Gathering
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Template Patterns
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#foreach-with-type-aware-iteration-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>foreach</code> with Type-Aware Iteration Variable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#if-with-nullability-awareness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>if</code> with Nullability Awareness
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trycatch-with-thrown-exception-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>try/catch</code> with Thrown Exception Detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#match-with-enum-exhaustiveness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>match</code> with Enum Exhaustiveness
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-with-type-guided-expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>return</code> with Type-Guided Expression
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#functionmethod-body-from-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Function/Method Body from Signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assignment-from-constructor-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Assignment from Constructor Parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catch-variable-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Catch Variable Usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#early-return-guard-clauses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Early Return Guard Clauses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-priority-and-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Template Priority and Confidence
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n2-n-gram-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N2. N-gram Engine
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N2. N-gram Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-php-tokens-not-bpe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why PHP Tokens, Not BPE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#token-vocabulary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Token Vocabulary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Training
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Runtime
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n3-fine-tuned-gguf-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N3. Fine-Tuned GGUF Model
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N3. Fine-Tuned GGUF Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-a-sidecar" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why a Sidecar
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#base-model-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Base Model Selection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Training Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model Distribution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reproducibility
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-window-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Context Window Design
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context Window Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-templates-and-n-grams" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        For Templates and N-grams
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-the-gguf-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        For the GGUF Model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Configuration
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phasing-and-sprint-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phasing and Sprint Placement
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phasing and Sprint Placement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#n1-template-engine-sprint-7-timeframe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N1. Template Engine (Sprint 7 timeframe)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#n2-n-gram-engine-post-sprint-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N2. N-gram Engine (post-Sprint 7)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#n3-gguf-sidecar-when-competing-with-phpstorm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N3. GGUF Sidecar (when competing with PHPStorm)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ongoing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ongoing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Success Criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Architecture
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#sidecar-protocol" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Sidecar Protocol
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n1-template-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N1. Template Engine
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N1. Template Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How It Works
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#context-gathering" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Context Gathering
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Template Patterns
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Template Patterns">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#foreach-with-type-aware-iteration-variable" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>foreach</code> with Type-Aware Iteration Variable
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#if-with-nullability-awareness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>if</code> with Nullability Awareness
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trycatch-with-thrown-exception-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>try/catch</code> with Thrown Exception Detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#match-with-enum-exhaustiveness" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>match</code> with Enum Exhaustiveness
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#return-with-type-guided-expression" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>return</code> with Type-Guided Expression
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#functionmethod-body-from-signature" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Function/Method Body from Signature
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#assignment-from-constructor-parameter" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Assignment from Constructor Parameter
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#catch-variable-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Catch Variable Usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#early-return-guard-clauses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Early Return Guard Clauses
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#template-priority-and-confidence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Template Priority and Confidence
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n2-n-gram-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N2. N-gram Engine
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N2. N-gram Engine">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-php-tokens-not-bpe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why PHP Tokens, Not BPE
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#token-vocabulary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Token Vocabulary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Training
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#runtime" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Runtime
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#n3-fine-tuned-gguf-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N3. Fine-Tuned GGUF Model
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="N3. Fine-Tuned GGUF Model">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-a-sidecar" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why a Sidecar
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#base-model-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Base Model Selection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#training-approach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Training Approach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#model-distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model Distribution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reproducibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reproducibility
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#context-window-design" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Context Window Design
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Context Window Design">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#for-templates-and-n-grams" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        For Templates and N-grams
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#for-the-gguf-model" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        For the GGUF Model
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Configuration
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#phasing-and-sprint-placement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Phasing and Sprint Placement
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Phasing and Sprint Placement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#n1-template-engine-sprint-7-timeframe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N1. Template Engine (Sprint 7 timeframe)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#n2-n-gram-engine-post-sprint-7" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N2. N-gram Engine (post-Sprint 7)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#n3-gguf-sidecar-when-competing-with-phpstorm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        N3. GGUF Sidecar (when competing with PHPStorm)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ongoing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ongoing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#success-criteria" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Success Criteria
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/inline-completion.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-inline-completion">PHPantom — Inline Completion<a class="headerlink" href="#phpantom-inline-completion" title="Permanent link">&para;</a></h1>
+<p>Inline completion provides ghost-text suggestions beyond what traditional
+LSP completion offers. Where LSP completion fills in a symbol name after
+you type <code>$user-&gt;</code>, inline completion fills in entire expressions,
+statements, and blocks before you ask.</p>
+<p>The goal is not to compete with cloud-hosted LLMs on general coding
+ability. The goal is to be so fast and so PHP-accurate that the cloud
+model is still tokenizing your request by the time PHPantom has already
+shown the answer. Every suggestion is grounded in type information the
+LSP already has. No network, no subscription, no GPU required for the
+base experience.</p>
+<h2 id="philosophy">Philosophy<a class="headerlink" href="#philosophy" title="Permanent link">&para;</a></h2>
+<p>Traditional AI coding tools remove the human from the loop. The
+developer describes intent, the model writes code, then the developer
+reviews output they didn't think through. PHPantom's inline completion
+takes the opposite approach: the human is thinking and writing code,
+and the tool removes the mechanical friction. It fills in the parts
+the developer already knows but hasn't typed yet. The developer stays
+in the loop the entire time.</p>
+<p>This also means the entire pipeline (training data, training scripts,
+model weights, context format) must be open and reproducible. A
+company should be able to retrain the model on their own codebase. A
+contributor should be able to improve the n-gram corpus or add
+template patterns without asking permission. A free tool that's been optimized for the specific team using it can bring a strong challange to a propritery tool trained for the general case.</p>
+<p>Everything needed to reproduce the training is published alongside
+the model weights:
+- The corpus collection scripts (which packages, how they're processed)
+- The tokenizer definition
+- The training configuration and scripts
+- The context format specification (so third parties can train
+  compatible models)
+- The evaluation suite (so improvements can be measured)</p>
+<h2 id="architecture">Architecture<a class="headerlink" href="#architecture" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>PHPantom LSP (main process)
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>  │
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>  ├── Template Engine (built-in, zero cost)
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>  │     Pattern matching on AST + type context
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>  │     Responds in &lt;1ms
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>  │
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>  ├── N-gram Engine (built-in, ~2-5MB model file)
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>  │     Token-level predictions from PHP corpus
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>  │     Responds in &lt;5ms
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>  │
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>  └── Sidecar: Fine-tuned GGUF model (optional download)
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>        Fill-in-the-middle with tight PHP context
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>        ~50-150MB, runs on CPU
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>        Responds in ~100-500ms
+</code></pre></div>
+<p>Each layer is independently useful. The template engine ships day one
+with no model files. The n-gram engine adds a small data file. The
+sidecar is an optional download for users who want deeper suggestions.</p>
+<p>All three layers share the same context-gathering pipeline: the LSP
+already knows the current class outline, variable types, method
+signatures, and surrounding code structure. That context is formatted
+once and fed to whichever engine is active.</p>
+<h3 id="protocol">Protocol<a class="headerlink" href="#protocol" title="Permanent link">&para;</a></h3>
+<p>Inline completions use the LSP <code>textDocument/inlineCompletion</code> request
+(proposed in LSP 3.18). For editors that don't support it yet, we can
+fall back to <code>completionItem/resolve</code> with snippet insert text, or a
+custom <code>phpantom/inlineCompletion</code> method.</p>
+<p>The response is simple: a string of text to show as ghost text at the
+cursor, plus an edit range. The editor renders it dimmed and the user
+presses Tab to accept.</p>
+<h3 id="sidecar-protocol">Sidecar Protocol<a class="headerlink" href="#sidecar-protocol" title="Permanent link">&para;</a></h3>
+<p>The sidecar process communicates over stdin/stdout with a minimal
+JSON protocol:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;context&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;cursor&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;max_tokens&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">64</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="p">{</span><span class="w"> </span><span class="nt">&quot;id&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;text&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;return $this-&gt;customer-&gt;fullName;&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;confidence&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.87</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+<p>The LSP spawns the sidecar on first use and keeps it alive. If the
+sidecar is not installed or crashes, the LSP falls back to templates
+and n-grams silently. The sidecar binary is a separate downloadable
+artifact, not bundled in the main LSP binary.</p>
+<hr />
+<h2 id="n1-template-engine">N1. Template Engine<a class="headerlink" href="#n1-template-engine" title="Permanent link">&para;</a></h2>
+<p><strong>Complexity:</strong> Medium (per pattern group)
+<strong>Dependencies:</strong> None beyond existing type resolution</p>
+<p>The template engine is pattern matching on the current AST node and
+cursor position, combined with type information from the existing
+completion resolver. No model, no data files, no latency.</p>
+<h3 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h3>
+<ol>
+<li>On each keystroke (debounced), check if the cursor is at a
+   template trigger point (after a keyword, inside an empty block,
+   at a return statement, etc.)</li>
+<li>Gather context: surrounding variables and their types, the
+   containing function's return type, the class outline, nearby
+   assignments.</li>
+<li>Match against template patterns. Each pattern has a confidence
+   score based on how much context it could use.</li>
+<li>Return the highest-confidence suggestion as ghost text.</li>
+</ol>
+<h3 id="context-gathering">Context Gathering<a class="headerlink" href="#context-gathering" title="Permanent link">&para;</a></h3>
+<p>The template engine reuses existing infrastructure:</p>
+<ul>
+<li><strong>Variable types:</strong> <code>type_engine/variable/resolution.rs</code> already
+  resolves every variable in scope to a type. The template engine
+  calls the same pipeline.</li>
+<li><strong>Containing function:</strong> The AST map already stores <code>MethodInfo</code>
+  and <code>FunctionInfo</code> with return types, parameter lists, and
+  docblocks.</li>
+<li><strong>Class outline:</strong> <code>ClassInfo</code> gives us all properties, methods,
+  constants, and their types for <code>$this-&gt;</code> context.</li>
+<li><strong>Selection range spans:</strong> <code>selection_range.rs</code> already walks the
+  AST to find the containing statement, block, function, and class.
+  We can reuse this to scope the context window.</li>
+</ul>
+<p>A new <code>InlineContext</code> struct bundles all of this:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">InlineContext</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="w">    </span><span class="sd">/// Variables in scope with their resolved types.</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">variables</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="p">(</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="nb">String</span><span class="p">)</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="w">    </span><span class="sd">/// The containing method/function, if any.</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">containing_function</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">FunctionSummary</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="w">    </span><span class="sd">/// The containing class, if any.</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">containing_class</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">ClassSummary</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="w">    </span><span class="sd">/// The AST node immediately before the cursor.</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">preceding_node</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">NodeKind</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="w">    </span><span class="sd">/// The line the cursor is on, trimmed.</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">current_line</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="w">    </span><span class="sd">/// Lines above the cursor within the current block.</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">block_context</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="p">}</span>
+</code></pre></div>
+<p>This struct is built once per request and shared across all engines.</p>
+<h3 id="template-patterns">Template Patterns<a class="headerlink" href="#template-patterns" title="Permanent link">&para;</a></h3>
+<h4 id="foreach-with-type-aware-iteration-variable"><code>foreach</code> with Type-Aware Iteration Variable<a class="headerlink" href="#foreach-with-type-aware-iteration-variable" title="Permanent link">&para;</a></h4>
+<p>Trigger: User types <code>foreach</code> or <code>fore</code> (snippet prefix).</p>
+<p>The engine looks at variables in scope whose types implement
+<code>Traversable</code>, are arrays, or are generic collections. It picks the
+most likely candidate based on:
+- Proximity (closest assignment wins)
+- Naming (plural names like <code>$items</code>, <code>$users</code>)
+- Type (generic collections with known element types)</p>
+<p>For each candidate, it generates the iteration variable name by
+singularizing the collection name and resolves the element type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">// $users is Collection&lt;User&gt; in scope</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">foreach ($users as $user) {</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">    █</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">}</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="x">// $itemsByCategory is array&lt;string, array&lt;Item&gt;&gt; in scope</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="x">foreach ($itemsByCategory as $category =&gt; $items) {</span>
+<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a><span class="x">    █</span>
+<a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a><span class="x">}</span>
+<a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>
+<a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a><span class="x">// $results is QueryBuilder (Traversable&lt;Model&gt;) in scope</span>
+<a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a><span class="x">foreach ($results as $result) {</span>
+<a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a><span class="x">    █</span>
+<a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a><span class="x">}</span>
+</code></pre></div>
+<p>Singularization rules (simple, no NLP needed):
+- <code>$users</code> → <code>$user</code> (drop trailing <code>s</code>)
+- <code>$entries</code> → <code>$entry</code> (<code>ies</code> → <code>y</code>)
+- <code>$addresses</code> → <code>$address</code> (drop <code>es</code>)
+- <code>$data</code> → <code>$datum</code> or <code>$item</code> (known irregulars / fallback)
+- <code>$list</code> → <code>$item</code> (non-plural name, use generic fallback)</p>
+<p>When the element type has a key type (e.g. <code>array&lt;string, User&gt;</code>),
+include <code>$key =&gt; $value</code> form.</p>
+<h4 id="if-with-nullability-awareness"><code>if</code> with Nullability Awareness<a class="headerlink" href="#if-with-nullability-awareness" title="Permanent link">&para;</a></h4>
+<p>Trigger: User types <code>if</code> near a nullable variable.</p>
+<p>The engine checks if any variable in the current block is nullable
+(<code>?Type</code> or <code>Type|null</code>) and has not yet been null-checked. It
+suggests the guard:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">// $user is ?User, not yet checked</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">if ($user === null) {</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    █</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">}</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="x">// Or, if the next line accesses $user-&gt;something,</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">// prefer the positive form:</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">if ($user !== null) {</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">    $user-&gt;█</span>
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a><span class="x">}</span>
+</code></pre></div>
+<p>It can also suggest <code>instanceof</code> checks when a variable is a union
+of class types:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">// $shape is Circle|Square|Triangle</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">if ($shape instanceof Circle) {</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">    █</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">}</span>
+</code></pre></div>
+<h4 id="trycatch-with-thrown-exception-detection"><code>try/catch</code> with Thrown Exception Detection<a class="headerlink" href="#trycatch-with-thrown-exception-detection" title="Permanent link">&para;</a></h4>
+<p>Trigger: User types <code>try</code> or is inside a <code>try</code> block that has no
+<code>catch</code> yet.</p>
+<p>The engine uses the existing throws analysis pipeline
+(<code>completion/source/throws_analysis/</code>) to detect what exceptions the code
+inside the try block can throw:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="x">try {</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="x">    $this-&gt;repository-&gt;save($entity);</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="x">    $this-&gt;mailer-&gt;send($notification);</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="x">} catch (DatabaseException $e) {</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="x">    █</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="x">}</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="x">// If multiple throwable types detected, suggest multi-catch:</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="x">// catch (DatabaseException | MailerException $e)</span>
+</code></pre></div>
+<h4 id="match-with-enum-exhaustiveness"><code>match</code> with Enum Exhaustiveness<a class="headerlink" href="#match-with-enum-exhaustiveness" title="Permanent link">&para;</a></h4>
+<p>Trigger: User types <code>match</code> with an enum variable in scope, or
+starts a match expression on a variable whose type is a backed or
+unit enum.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">// $status is Status enum with Active, Inactive, Pending</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">match ($status) {</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">    Status::Active =&gt; █,</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="x">    Status::Inactive =&gt; ,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">    Status::Pending =&gt; ,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>The engine knows all enum cases from <code>ClassInfo</code> and fills them in.
+If the enum is a <code>BackedEnum</code>, it can also suggest the value form.</p>
+<h4 id="return-with-type-guided-expression"><code>return</code> with Type-Guided Expression<a class="headerlink" href="#return-with-type-guided-expression" title="Permanent link">&para;</a></h4>
+<p>Trigger: User types <code>return</code> inside a function with a known return
+type.</p>
+<p>The engine looks at what's available in scope that matches the return
+type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">/** @return string */</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">public function getCustomerName(): string</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">{</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="x">    // $this-&gt;customer is Customer, Customer has fullName: string</span>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">    return $this-&gt;customer-&gt;fullName;█</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">}</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a><span class="x">/** @return array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="x">public function toArray(): array</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="x">{</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="x">    return [</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a><span class="x">        █</span>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="x">    ];</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="x">}</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="x">/** @return self */</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="x">public function withName(string $name): self</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="x">{</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="x">    return new self(█);</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="x">    // or: return clone $this; if immutable pattern detected</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="x">}</span>
+</code></pre></div>
+<p>The return type matching works by:
+1. If the return type is scalar and exactly one variable/property
+   in scope matches, suggest it.
+2. If the return type is <code>self</code>/<code>static</code>, suggest <code>new self(...)</code> or
+   <code>clone $this</code>.
+3. If the return type is <code>array</code>, suggest an array literal with
+   known shape keys if a <code>@return</code> docblock specifies them.
+4. If a property or method chain reaches the return type in one or
+   two steps, suggest the chain.</p>
+<h4 id="functionmethod-body-from-signature">Function/Method Body from Signature<a class="headerlink" href="#functionmethod-body-from-signature" title="Permanent link">&para;</a></h4>
+<p>Trigger: Cursor is on the first line inside an empty method body.</p>
+<p>For simple accessor patterns, the engine can suggest the entire body:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">public function getName(): string</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">{</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    return $this-&gt;name;█</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">}</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">public function setName(string $name): void</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">{</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">    $this-&gt;name = $name;█</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">}</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">public function isActive(): bool</span>
+<a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a><span class="x">{</span>
+<a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a><span class="x">    return $this-&gt;active;█</span>
+<a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a><span class="x">}</span>
+<a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>
+<a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a><span class="x">public function hasPermission(string $permission): bool</span>
+<a id="__codelineno-10-17" name="__codelineno-10-17" href="#__codelineno-10-17"></a><span class="x">{</span>
+<a id="__codelineno-10-18" name="__codelineno-10-18" href="#__codelineno-10-18"></a><span class="x">    return in_array($permission, $this-&gt;permissions, true);█</span>
+<a id="__codelineno-10-19" name="__codelineno-10-19" href="#__codelineno-10-19"></a><span class="x">}</span>
+</code></pre></div>
+<p>Detection heuristics:
+- <code>getName()</code> with return type matching <code>$this-&gt;name</code> type → getter
+- <code>setName($name)</code> with void return → setter
+- <code>isX()</code> / <code>hasX()</code> with bool return → boolean property accessor
+- <code>with*()</code> returning <code>self</code>/<code>static</code> → immutable setter (clone)</p>
+<h4 id="assignment-from-constructor-parameter">Assignment from Constructor Parameter<a class="headerlink" href="#assignment-from-constructor-parameter" title="Permanent link">&para;</a></h4>
+<p>Trigger: Inside a constructor body, after the parameter list.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">public function __construct(</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">    private readonly string $name,</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">    private readonly int $age,</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a><span class="x">) {</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a><span class="x">    // No suggestion needed — promoted properties handle it.</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="x">}</span>
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a><span class="x">// But for non-promoted:</span>
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a><span class="x">public function __construct(string $name, int $age)</span>
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a><span class="x">{</span>
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a><span class="x">    $this-&gt;name = $name;</span>
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a><span class="x">    $this-&gt;age = $age;█</span>
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a><span class="x">}</span>
+</code></pre></div>
+<p>The engine matches parameter names to property names and suggests
+assignments for any that aren't yet assigned.</p>
+<h4 id="catch-variable-usage">Catch Variable Usage<a class="headerlink" href="#catch-variable-usage" title="Permanent link">&para;</a></h4>
+<p>Trigger: Inside a catch block, cursor on the first line.</p>
+<p>Based on common patterns per exception type:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">catch (ValidationException $e) {</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x">    return response()-&gt;json([&#39;errors&#39; =&gt; $e-&gt;errors()], 422);█</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x">}</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a><span class="x">catch (\Throwable $e) {</span>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">    Log::error($e-&gt;getMessage(), [&#39;exception&#39; =&gt; $e]);█</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>This is more heuristic than type-driven. We match on the exception
+class name and suggest common handling patterns. A small hardcoded
+table of exception → handler patterns covers the most common cases.</p>
+<h4 id="early-return-guard-clauses">Early Return Guard Clauses<a class="headerlink" href="#early-return-guard-clauses" title="Permanent link">&para;</a></h4>
+<p>Trigger: Start of a method body, or after an assignment, when the
+method has validation-like parameters.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">public function process(string $input): Result</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">{</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">    if ($input === &#39;&#39;) {</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="x">        throw new \InvalidArgumentException(&#39;Input cannot be empty&#39;);</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">    }</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">    █</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>This triggers when:
+- The parameter is a string and the method name suggests processing
+- The parameter is nullable and the method doesn't return nullable
+- The method has a <code>@throws</code> tag for an <code>InvalidArgumentException</code></p>
+<h3 id="template-priority-and-confidence">Template Priority and Confidence<a class="headerlink" href="#template-priority-and-confidence" title="Permanent link">&para;</a></h3>
+<p>Each template pattern returns a confidence score (0.0 to 1.0):</p>
+<ul>
+<li><strong>1.0</strong> — Exact type match, single obvious completion (getter body)</li>
+<li><strong>0.8</strong> — Strong type match with minor ambiguity (foreach with
+  typed collection)</li>
+<li><strong>0.6</strong> — Heuristic match (enum match arms, try/catch from throws
+  analysis)</li>
+<li><strong>0.4</strong> — Name-based heuristic (singularization guess, common
+  pattern match)</li>
+<li><strong>0.2</strong> — Fallback suggestion (generic catch block body)</li>
+</ul>
+<p>Only suggestions above a configurable threshold (default 0.4) are
+shown. Below that, showing nothing is better than showing something
+wrong.</p>
+<hr />
+<h2 id="n2-n-gram-engine">N2. N-gram Engine<a class="headerlink" href="#n2-n-gram-engine" title="Permanent link">&para;</a></h2>
+<p><strong>Complexity:</strong> Very High (novel statistical model and training pipeline, no existing pattern to follow)
+<strong>Dependencies:</strong> Training corpus, PHP tokenizer</p>
+<p>The n-gram engine handles the cases where the template engine has no
+pattern match but there's still enough local context to make a useful
+prediction. It predicts the next few PHP tokens based on the
+preceding tokens.</p>
+<h3 id="why-php-tokens-not-bpe">Why PHP Tokens, Not BPE<a class="headerlink" href="#why-php-tokens-not-bpe" title="Permanent link">&para;</a></h3>
+<p>BPE (byte-pair encoding) is designed for natural language and treats
+PHP syntax as opaque byte sequences. A PHP-aware tokenizer means:
+- <code>$this-&gt;</code> is one token, not four
+- <code>::</code> is one token
+- String literals are one token regardless of length
+- Variable names are one token
+- <code>array_map</code> is one token, not fragmented</p>
+<p>This dramatically reduces the sequence length and makes the n-gram
+table smaller and more predictive. A 5-gram over PHP tokens covers
+roughly 2-3 lines of code, versus half a line with BPE tokens.</p>
+<h3 id="token-vocabulary">Token Vocabulary<a class="headerlink" href="#token-vocabulary" title="Permanent link">&para;</a></h3>
+<p>The vocabulary is built from PHP's own token types plus symbols:</p>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th>Examples</th>
+<th>Count</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keywords</td>
+<td><code>function</code>, <code>return</code>, <code>class</code>, <code>if</code>, <code>foreach</code>, ...</td>
+<td>~70</td>
+</tr>
+<tr>
+<td>Operators</td>
+<td><code>-&gt;</code>, <code>=&gt;</code>, <code>??</code>, <code>?-&gt;</code>, <code>::</code>, ...</td>
+<td>~40</td>
+</tr>
+<tr>
+<td>Delimiters</td>
+<td><code>(</code>, <code>)</code>, <code>{</code>, <code>}</code>, <code>[</code>, <code>]</code>, <code>;</code></td>
+<td>~10</td>
+</tr>
+<tr>
+<td>Types</td>
+<td><code>string</code>, <code>int</code>, <code>bool</code>, <code>float</code>, <code>array</code>, <code>void</code>, ...</td>
+<td>~15</td>
+</tr>
+<tr>
+<td>Special</td>
+<td><code>&lt;VAR&gt;</code>, <code>&lt;STRING&gt;</code>, <code>&lt;NUMBER&gt;</code>, <code>&lt;FQCN&gt;</code>, <code>&lt;FUNC&gt;</code></td>
+<td>~10</td>
+</tr>
+<tr>
+<td>Common identifiers</td>
+<td>Top 500 function names from corpus</td>
+<td>~500</td>
+</tr>
+<tr>
+<td>Common methods</td>
+<td>Top 500 method names from corpus</td>
+<td>~500</td>
+</tr>
+<tr>
+<td>Common properties</td>
+<td>Top 200 property names from corpus</td>
+<td>~200</td>
+</tr>
+</tbody>
+</table>
+<p>Total vocabulary: ~1300-1500 tokens. Small enough that the n-gram
+table stays compact.</p>
+<p>Variable names, string literals, and numbers are replaced with their
+category token (<code>&lt;VAR&gt;</code>, <code>&lt;STRING&gt;</code>, <code>&lt;NUMBER&gt;</code>). This means the
+n-gram engine predicts <em>structure</em>, not specific names. The template
+engine and type resolver fill in the actual names.</p>
+<h3 id="training">Training<a class="headerlink" href="#training" title="Permanent link">&para;</a></h3>
+<p><strong>Corpus:</strong> Top 500-1000 PHP packages from Packagist by monthly
+downloads. This covers Laravel, Symfony, PHPStan, Doctrine, PHPUnit,
+Monolog, Guzzle, and the rest of the ecosystem that defines PHP
+idioms.</p>
+<p><strong>Process:</strong>
+1. Clone packages, extract all <code>.php</code> files
+2. Tokenize with the PHP-aware tokenizer
+3. Count all n-grams (3-gram through 7-gram)
+4. Apply Kneser-Ney smoothing for unseen n-grams
+5. Prune n-grams with count &lt; 3
+6. Serialize to a compact binary format</p>
+<p><strong>Hardware:</strong> N-gram training is embarrassingly parallel (count frequencies per file, merge). No GPU needed. Expected training time: minutes, not hours.</p>
+<p><strong>Output:</strong> A single binary file, ~2-5MB compressed, containing:
+- Token vocabulary (string → id mapping)
+- N-gram probability tables (5-gram primary, 3-gram fallback)
+- Top-k predictions precomputed for the most common contexts</p>
+<h3 id="runtime">Runtime<a class="headerlink" href="#runtime" title="Permanent link">&para;</a></h3>
+<p>Given the current cursor position:
+1. Tokenize the preceding ~50 characters into PHP tokens
+2. Look up the 5-gram (or fall back to 3-gram) in the table
+3. Get the top-k predicted next tokens
+4. If the prediction is a structural token (<code>return</code>, <code>-&gt;</code>, <code>(</code>),
+   continue predicting up to ~10 tokens to form a complete fragment
+5. Replace <code>&lt;VAR&gt;</code> placeholders with the most likely variable from
+   the type context (using the same <code>InlineContext</code> the template
+   engine uses)</p>
+<p>The n-gram engine never suggests more than one line. Its role is to
+predict the likely <em>shape</em> of the next expression, then the type
+resolver fills in the actual symbols.</p>
+<h3 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h3>
+<p>User is inside a method, just typed <code>$this-&gt;</code>:</p>
+<ol>
+<li>Preceding tokens: <code>return</code>, <code>$this</code>, <code>-&gt;</code></li>
+<li>N-gram lookup: after <code>return &lt;VAR&gt; -&gt;</code>, the most common next
+   tokens in the PHP corpus are property/method names</li>
+<li>The type resolver narrows this to properties/methods of the
+   current class that match the return type</li>
+<li>Combined suggestion: <code>return $this-&gt;repository-&gt;find($id);</code></li>
+</ol>
+<p>The n-gram engine provides the structural skeleton (<code>&lt;VAR&gt; -&gt; &lt;FUNC&gt;
+( &lt;VAR&gt; )</code>), and the type resolver fills in <code>repository</code>, <code>find</code>,
+and <code>$id</code>.</p>
+<hr />
+<h2 id="n3-fine-tuned-gguf-model">N3. Fine-Tuned GGUF Model<a class="headerlink" href="#n3-fine-tuned-gguf-model" title="Permanent link">&para;</a></h2>
+<p><strong>Complexity:</strong> Very High (model selection, fine-tuning, and a new sidecar architecture, well outside the existing codebase's patterns)
+<strong>Dependencies:</strong> Phase 1 and 2 complete, training infrastructure</p>
+<p>This is the "eventually" phase. A small language model fine-tuned
+exclusively on PHP code with fill-in-the-middle capability. It runs
+as a sidecar process and provides multi-line suggestions that neither
+templates nor n-grams can handle.</p>
+<h3 id="why-a-sidecar">Why a Sidecar<a class="headerlink" href="#why-a-sidecar" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The model is 50-150MB. Embedding it inflates the main binary.</li>
+<li>Model inference takes 100-500ms. It must not block LSP responses.</li>
+<li>Users without the model still get templates and n-grams.</li>
+<li>The model can be updated independently of the LSP.</li>
+<li>Different model sizes can be offered (tiny for laptops, small for
+  desktops).</li>
+</ul>
+<h3 id="base-model-selection">Base Model Selection<a class="headerlink" href="#base-model-selection" title="Permanent link">&para;</a></h3>
+<p>Candidates (as of early 2025, evaluate latest at training time):</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Params</th>
+<th>Quantized Size</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SmolLM2-135M</td>
+<td>135M</td>
+<td>~80MB Q4</td>
+<td>Very fast, limited capacity</td>
+</tr>
+<tr>
+<td>Qwen2.5-Coder-0.5B</td>
+<td>500M</td>
+<td>~300MB Q4</td>
+<td>Good code understanding</td>
+</tr>
+<tr>
+<td>StarCoder2-164M</td>
+<td>164M</td>
+<td>~100MB Q4</td>
+<td>Code-focused from the start</td>
+</tr>
+</tbody>
+</table>
+<p>Start with 135M-164M class. These run on CPU in &lt;500ms for short
+completions. The 0.5B class is better but may be too slow without
+quantization tricks.</p>
+<h3 id="training-approach">Training Approach<a class="headerlink" href="#training-approach" title="Permanent link">&para;</a></h3>
+<p><strong>Fill-in-the-middle (FIM) objective.</strong> The model learns to complete
+code given a prefix and suffix. This is exactly what inline
+completion needs: the user has code above and below the cursor.</p>
+<p><strong>Training data:</strong> Same Packagist corpus as the n-gram engine, but
+processed differently:
+- Split files into function/method bodies
+- Create FIM examples: randomly mask a contiguous span of 1-5 lines
+- Prefix and suffix are the surrounding code
+- Target is the masked span</p>
+<p><strong>Context format.</strong> The model receives a tightly structured prompt
+that mirrors what the LSP knows:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>&lt;|class|&gt;
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>class OrderService
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>  + __construct(OrderRepository $repository, Mailer $mailer)
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>  + process(Order $order): Result
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>  + private validate(Order $order): void
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>&lt;|vars|&gt;
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>  $order: Order { id: int, customer: Customer, total: Money }
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>  $this-&gt;repository: OrderRepository
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>&lt;|method|&gt; process(Order $order): Result
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>&lt;|prefix|&gt;
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>    $this-&gt;validate($order);
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>    $result = $this-&gt;repository-&gt;save($order);
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a>&lt;|suffix|&gt;
+<a id="__codelineno-14-14" name="__codelineno-14-14" href="#__codelineno-14-14"></a>    return $result;
+<a id="__codelineno-14-15" name="__codelineno-14-15" href="#__codelineno-14-15"></a>&lt;|cursor|&gt;
+</code></pre></div>
+<p>The <code>&lt;|class|&gt;</code> section is a compressed class outline (method
+signatures only, no bodies). The <code>&lt;|vars|&gt;</code> section includes resolved
+types for variables in scope, with one level of property expansion
+for types the cursor is likely to chain through. The <code>&lt;|method|&gt;</code>
+line identifies which method we're in.</p>
+<p>The exact shape of this context will evolve as we implement and
+discover what the model actually needs. For example, completing
+<code>$this-&gt;customer-&gt;fullName</code> requires knowing that <code>$this-&gt;customer</code>
+resolves to <code>Customer</code> and that <code>Customer</code> has a <code>fullName</code> property.
+The LSP already does this multi-hop resolution for completion, so the
+context builder can include resolved property types for variables
+that appear in the prefix. How deep to go (one hop? two?) and how
+to format it compactly are details to figure out during
+implementation.</p>
+<p>This format is critical. The model is trained on exactly this
+structured context, not raw PHP files. At inference time, the LSP
+builds the same structure from its type resolver and the AST, so the
+model sees exactly the format it was trained on. This tight coupling
+between the LSP's knowledge and the model's training data is what
+makes a tiny model competitive with a generic 7B model that has to
+figure out the class structure from raw text.</p>
+<p><strong>Fine-tuning approach:</strong> LoRA on a small base model, trained on the
+Packagist PHP corpus processed into the structured context format
+above. Specific hyperparameters, framework choice, and hardware
+requirements depend on the base model selected and what's available
+at training time. The training scripts and configuration will be
+published so anyone can reproduce or adapt the process.</p>
+<h3 id="inference">Inference<a class="headerlink" href="#inference" title="Permanent link">&para;</a></h3>
+<p>The sidecar process loads the GGUF model at startup and keeps it in
+memory. On each request:</p>
+<ol>
+<li>LSP builds the <code>InlineContext</code> (same as template engine)</li>
+<li>LSP formats it into the structured prompt above</li>
+<li>LSP sends it to the sidecar over stdin</li>
+<li>Sidecar generates up to <code>max_tokens</code> (default 64, ~2-3 lines)</li>
+<li>Sidecar returns the completion text</li>
+<li>LSP validates the suggestion (syntax check, type check) and
+   shows it or discards it</li>
+</ol>
+<p><strong>Validation is important.</strong> The model will sometimes hallucinate
+method names or wrong types. The LSP already has the type resolver,
+so it can check if <code>$this-&gt;repository-&gt;find($id)</code> is actually valid
+by resolving the chain. Invalid suggestions are silently dropped.
+This is a massive advantage over generic AI completion tools that
+have no type checker in the loop.</p>
+<h3 id="model-distribution">Model Distribution<a class="headerlink" href="#model-distribution" title="Permanent link">&para;</a></h3>
+<ul>
+<li>The model is not bundled with the LSP binary</li>
+<li>On first use (or via a command), the LSP downloads it from a
+  GitHub release or CDN</li>
+<li>Stored in <code>~/.phpantom/models/</code></li>
+<li>Version-pinned to the LSP version to avoid compatibility issues</li>
+<li>Users can provide their own GGUF model path in config (custom
+  trained, company-internal, or community-contributed models)</li>
+</ul>
+<h3 id="reproducibility">Reproducibility<a class="headerlink" href="#reproducibility" title="Permanent link">&para;</a></h3>
+<p>Everything needed to train a compatible model from scratch is
+published:</p>
+<ul>
+<li><strong>Corpus scripts:</strong> Download and process packages from Packagist</li>
+<li><strong>Tokenizer:</strong> The PHP-aware tokenizer used for n-grams, plus the
+  context formatter that builds the structured prompt</li>
+<li><strong>Training scripts:</strong> End-to-end pipeline from raw PHP to GGUF</li>
+<li><strong>Evaluation suite:</strong> A set of fill-in-the-middle test cases with
+  expected completions, so anyone can measure model quality</li>
+<li><strong>Context format spec:</strong> Documented well enough that someone could
+  train a compatible model without reading the LSP source</li>
+</ul>
+<p>A company can clone the training repo, point it at their private
+codebase, and produce a model that knows their domain objects, their
+naming conventions, and their architectural patterns. The LSP doesn't
+care where the model came from as long as it speaks the same context
+format.</p>
+<hr />
+<h2 id="context-window-design">Context Window Design<a class="headerlink" href="#context-window-design" title="Permanent link">&para;</a></h2>
+<p>All three engines share a common context format. The LSP builds this
+once per request.</p>
+<h3 id="for-templates-and-n-grams">For Templates and N-grams<a class="headerlink" href="#for-templates-and-n-grams" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">InlineContext</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="w">    </span><span class="sd">/// Variables in scope with their resolved types.</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">variables</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="p">(</span><span class="nb">String</span><span class="p">,</span><span class="w"> </span><span class="nb">String</span><span class="p">)</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="sd">/// The containing method/function, if any.</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">containing_function</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">FunctionSummary</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">    </span><span class="sd">/// The containing class, if any.</span>
+<a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">containing_class</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">ClassSummary</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>
+<a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">    </span><span class="sd">/// The AST node immediately before the cursor.</span>
+<a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">preceding_node</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="n">NodeKind</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a>
+<a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a><span class="w">    </span><span class="sd">/// The return type of the containing function, if known.</span>
+<a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">expected_return_type</span><span class="p">:</span><span class="w"> </span><span class="nb">Option</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a>
+<a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a><span class="w">    </span><span class="sd">/// The line the cursor is on, trimmed.</span>
+<a id="__codelineno-15-18" name="__codelineno-15-18" href="#__codelineno-15-18"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">current_line</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-15-19" name="__codelineno-15-19" href="#__codelineno-15-19"></a>
+<a id="__codelineno-15-20" name="__codelineno-15-20" href="#__codelineno-15-20"></a><span class="w">    </span><span class="sd">/// Lines above the cursor within the current block (max ~20).</span>
+<a id="__codelineno-15-21" name="__codelineno-15-21" href="#__codelineno-15-21"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">block_prefix</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-22" name="__codelineno-15-22" href="#__codelineno-15-22"></a>
+<a id="__codelineno-15-23" name="__codelineno-15-23" href="#__codelineno-15-23"></a><span class="w">    </span><span class="sd">/// Lines below the cursor within the current block (max ~10).</span>
+<a id="__codelineno-15-24" name="__codelineno-15-24" href="#__codelineno-15-24"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">block_suffix</span><span class="p">:</span><span class="w"> </span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;</span><span class="p">,</span>
+<a id="__codelineno-15-25" name="__codelineno-15-25" href="#__codelineno-15-25"></a><span class="p">}</span>
+</code></pre></div>
+<h3 id="for-the-gguf-model">For the GGUF Model<a class="headerlink" href="#for-the-gguf-model" title="Permanent link">&para;</a></h3>
+<p>The model context is built from <code>InlineContext</code> plus the class
+outline and resolved types for variables the cursor is likely to
+interact with:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="k">pub</span><span class="w"> </span><span class="k">struct</span><span class="w"> </span><span class="nc">ModelContext</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="w">    </span><span class="sd">/// Compressed class outline: method signatures, no bodies.</span>
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">class_outline</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a><span class="w">    </span><span class="sd">/// Resolved types for variables in scope, with property</span>
+<a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="w">    </span><span class="sd">/// expansion for types that appear in the prefix.</span>
+<a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a><span class="w">    </span><span class="sd">/// E.g. &quot;$this-&gt;customer: Customer { fullName: string, email: string }&quot;</span>
+<a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">resolved_variables</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>
+<a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a><span class="w">    </span><span class="sd">/// The current method signature.</span>
+<a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">method_signature</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a>
+<a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a><span class="w">    </span><span class="sd">/// Code before the cursor (within the current method).</span>
+<a id="__codelineno-16-14" name="__codelineno-16-14" href="#__codelineno-16-14"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">prefix</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-16-15" name="__codelineno-16-15" href="#__codelineno-16-15"></a>
+<a id="__codelineno-16-16" name="__codelineno-16-16" href="#__codelineno-16-16"></a><span class="w">    </span><span class="sd">/// Code after the cursor (within the current method).</span>
+<a id="__codelineno-16-17" name="__codelineno-16-17" href="#__codelineno-16-17"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">suffix</span><span class="p">:</span><span class="w"> </span><span class="nb">String</span><span class="p">,</span>
+<a id="__codelineno-16-18" name="__codelineno-16-18" href="#__codelineno-16-18"></a>
+<a id="__codelineno-16-19" name="__codelineno-16-19" href="#__codelineno-16-19"></a><span class="w">    </span><span class="sd">/// Maximum tokens to generate.</span>
+<a id="__codelineno-16-20" name="__codelineno-16-20" href="#__codelineno-16-20"></a><span class="w">    </span><span class="k">pub</span><span class="w"> </span><span class="n">max_tokens</span><span class="p">:</span><span class="w"> </span><span class="kt">u32</span><span class="p">,</span>
+<a id="__codelineno-16-21" name="__codelineno-16-21" href="#__codelineno-16-21"></a><span class="p">}</span>
+</code></pre></div>
+<p>The prefix and suffix are bounded to the current method body. The
+class outline is bounded to signature lines only (one line per
+member). Resolved variable types include one or two levels of
+property expansion for types that are referenced in the prefix or
+are likely chain targets. The exact depth and format will be refined
+during implementation. The total context should stay compact enough
+for a small model (target: under 512 tokens).</p>
+<hr />
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># .phpantom.toml or editor settings</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="k">[inlineCompletion]</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a><span class="c1"># Enable/disable the entire feature</span>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="n">enabled</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="c1"># Minimum confidence to show a suggestion (0.0 - 1.0)</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="n">minConfidence</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.4</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="c1"># Which engines to use (in priority order)</span>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="n">engines</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">[</span><span class="s2">&quot;template&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;ngram&quot;</span><span class="p">,</span><span class="w"> </span><span class="s2">&quot;model&quot;</span><span class="p">]</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="c1"># Debounce delay in milliseconds</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="n">debounceMs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">50</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="k">[inlineCompletion.model]</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="c1"># Path to a custom GGUF model (overrides default)</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="c1"># path = &quot;~/.phpantom/models/phpantom-completion-v1.gguf&quot;</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a><span class="c1"># Maximum tokens to generate per request</span>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="n">maxTokens</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">64</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a>
+<a id="__codelineno-17-22" name="__codelineno-17-22" href="#__codelineno-17-22"></a><span class="c1"># Temperature (lower = more conservative)</span>
+<a id="__codelineno-17-23" name="__codelineno-17-23" href="#__codelineno-17-23"></a><span class="n">temperature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mf">0.2</span>
+</code></pre></div>
+<hr />
+<h2 id="phasing-and-sprint-placement">Phasing and Sprint Placement<a class="headerlink" href="#phasing-and-sprint-placement" title="Permanent link">&para;</a></h2>
+<h3 id="n1-template-engine-sprint-7-timeframe">N1. Template Engine (Sprint 7 timeframe)<a class="headerlink" href="#n1-template-engine-sprint-7-timeframe" title="Permanent link">&para;</a></h3>
+<p>Implement the <code>InlineContext</code> builder and 3-4 high-value template
+patterns:
+- <code>foreach</code> with collection type awareness
+- <code>return</code> with return-type matching
+- Getter/setter body generation
+- <code>try/catch</code> with throws detection</p>
+<p>This is enough to demo the "how did it know" effect. No external
+dependencies, no model files, ships in the main binary.</p>
+<h3 id="n2-n-gram-engine-post-sprint-7">N2. N-gram Engine (post-Sprint 7)<a class="headerlink" href="#n2-n-gram-engine-post-sprint-7" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Build the PHP tokenizer</li>
+<li>Scrape and process the Packagist corpus</li>
+<li>Train and compress the n-gram model</li>
+<li>Integrate with the <code>InlineContext</code> for variable substitution</li>
+<li>Ship the model file as a separate downloadable asset or embed it
+  if it stays under 5MB</li>
+</ul>
+<h3 id="n3-gguf-sidecar-when-competing-with-phpstorm">N3. GGUF Sidecar (when competing with PHPStorm)<a class="headerlink" href="#n3-gguf-sidecar-when-competing-with-phpstorm" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Select and fine-tune the base model</li>
+<li>Build the sidecar binary (Rust + llama.cpp bindings, or a small
+  C++ binary)</li>
+<li>Implement the sidecar protocol</li>
+<li>Add validation (type-check generated code before showing)</li>
+<li>Distribution and auto-download</li>
+<li>Publish all training scripts, corpus tools, and evaluation suite
+  so anyone can reproduce or retrain</li>
+</ul>
+<h3 id="ongoing">Ongoing<a class="headerlink" href="#ongoing" title="Permanent link">&para;</a></h3>
+<p>Each phase builds on the previous one. Templates keep working even
+after the model is available (they're faster for the patterns they
+cover). The n-gram engine fills gaps between templates and model
+suggestions. The model handles the truly open-ended cases.</p>
+<p>As we add more type intelligence to the LSP (better generics, better
+narrowing, more Laravel magic), every engine automatically benefits
+because they all read from the same <code>InlineContext</code>.</p>
+<hr />
+<h2 id="success-criteria">Success Criteria<a class="headerlink" href="#success-criteria" title="Permanent link">&para;</a></h2>
+<p>A suggestion is good if:
+1. It is <strong>correct</strong> (compiles, type-checks, does what the user
+   intended)
+2. It is <strong>fast</strong> (appears before the user's next keystroke)
+3. It is <strong>non-obvious</strong> (the user couldn't have typed it faster
+   than accepting the suggestion)</p>
+<p>We'd rather show nothing than show something wrong. A 30% hit rate
+with 95% accuracy is far more valuable than an 80% hit rate with 60%
+accuracy. Users learn to trust the suggestions and press Tab without
+reading them carefully. One wrong suggestion breaks that trust.</p>
+<p>Metrics to track (via opt-in telemetry or local dev testing):
+- <strong>Acceptance rate:</strong> % of shown suggestions that the user accepts
+- <strong>Accuracy:</strong> % of accepted suggestions that aren't immediately
+  edited
+- <strong>Latency:</strong> p50 and p95 time from keystroke to suggestion shown
+- <strong>Coverage:</strong> % of cursor positions where we have a suggestion</p>
+<p>Target for Phase 1 (templates only):
+- Acceptance rate: &gt;50%
+- Accuracy: &gt;90%
+- Latency p95: &lt;10ms
+- Coverage: ~5-10% of cursor positions (only where we have a strong
+  pattern match)</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

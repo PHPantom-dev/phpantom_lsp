@@ -1,0 +1,3109 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/laravel/">
+      
+      
+        <link rel="prev" href="../inline-completion/">
+      
+      
+        <link rel="next" href="../lsp-features/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Laravel - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-laravel" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Laravel
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-and-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Out of scope (and why)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy-unchanged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy (unchanged)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#l1-facade-completion-upstream-method-generator-improvement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L1. Facade completion — upstream <code>@method</code> generator improvement
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method generator improvement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-problem-flattened-signatures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The problem: flattened signatures
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-has-to-be-fixed-upstream" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this has to be fixed upstream
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upstream-generator-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Upstream generator changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tooling-support-for-the-richer-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tooling support for the richer syntax
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-property-source-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model property source gaps
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model property source gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-cover" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What we cover
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gaps-ranked-by-impact-effort" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Gaps (ranked by impact ÷ effort)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gaps (ranked by impact ÷ effort)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L45. <code>*_count</code> properties are offered on every relationship
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l47-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L47. Morph aliases in <code>*_type</code> column comparisons
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. Morph alias completion in array positions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-columns-from-committed-schema-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model columns from committed schema artifacts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#laravel-string-context-intelligence-completion-hover-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Laravel string-context intelligence (completion, hover, diagnostics)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Laravel string-context intelligence (completion, hover, diagnostics)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-we-do-this-statically-and-they-boot-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why we do this statically (and they boot the app)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-already-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What already works
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What already works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L17. Additional string contexts without booting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L55. JSON translation key navigation lands on line 0, not the key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l24-translation-depth-locales-placeholders-hover-quick-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L24. Translation depth: locales, placeholders, hover, quick-fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L27. Legacy <code>Controller@method</code> action strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l29-livewire-and-volt-component-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L29. Livewire and Volt component names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l30-eloquent-attribute-array-key-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L30. Eloquent attribute-array key completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l31-string-key-rename-highlight-and-semantic-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L31. String-key rename, highlight, and semantic tokens
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L56. Typed Laravel connection names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L59. Typed controller middleware names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l57-laravel-queue-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L57. Laravel queue names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L58. Laravel rate limiter names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L39. Unused view and translation key detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L44. Sibling resource registrations and degenerate resource names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>-&gt;can()</code> on a user model the receiver does not name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L49. Unguarded Eloquent mass assignment diagnostic
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L51. "Convert facade call to dependency injection" refactor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-scope-and-why" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Out of scope (and why)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#philosophy-unchanged" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Philosophy (unchanged)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#l1-facade-completion-upstream-method-generator-improvement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L1. Facade completion — upstream <code>@method</code> generator improvement
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="L1. Facade completion — upstream @method generator improvement">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-problem-flattened-signatures" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The problem: flattened signatures
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#why-this-has-to-be-fixed-upstream" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why this has to be fixed upstream
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#upstream-generator-changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Upstream generator changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tooling-support-for-the-richer-syntax" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Tooling support for the richer syntax
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-property-source-gaps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model property source gaps
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Model property source gaps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-we-cover" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What we cover
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gaps-ranked-by-impact-effort" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Gaps (ranked by impact ÷ effort)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Gaps (ranked by impact ÷ effort)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L54. Audit custom-builder and relation-closure inference against the PHPStan extensions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l45-_count-properties-are-offered-on-every-relationship" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L45. <code>*_count</code> properties are offered on every relationship
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l47-morph-aliases-in-_type-column-comparisons" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L47. Morph aliases in <code>*_type</code> column comparisons
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l42-morph-alias-completion-in-array-positions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L42. Morph alias completion in array positions
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#model-columns-from-committed-schema-artifacts" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Model columns from committed schema artifacts
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#laravel-string-context-intelligence-completion-hover-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Laravel string-context intelligence (completion, hover, diagnostics)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Laravel string-context intelligence (completion, hover, diagnostics)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-we-do-this-statically-and-they-boot-the-app" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why we do this statically (and they boot the app)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-already-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What already works
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="What already works">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#l17-additional-string-contexts-without-booting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L17. Additional string contexts without booting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L55. JSON translation key navigation lands on line 0, not the key
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l24-translation-depth-locales-placeholders-hover-quick-fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L24. Translation depth: locales, placeholders, hover, quick-fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l27-legacy-controllermethod-action-strings" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L27. Legacy <code>Controller@method</code> action strings
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l29-livewire-and-volt-component-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L29. Livewire and Volt component names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l30-eloquent-attribute-array-key-completion" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L30. Eloquent attribute-array key completion
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l31-string-key-rename-highlight-and-semantic-tokens" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L31. String-key rename, highlight, and semantic tokens
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l56-typed-laravel-connection-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L56. Typed Laravel connection names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l59-typed-controller-middleware-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L59. Typed controller middleware names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l57-laravel-queue-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L57. Laravel queue names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l58-laravel-rate-limiter-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L58. Laravel rate limiter names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l39-unused-view-and-translation-key-detection" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L39. Unused view and translation key detection
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l44-sibling-resource-registrations-and-degenerate-resource-names" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L44. Sibling resource registrations and degenerate resource names
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l46-can-on-a-user-model-the-receiver-does-not-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L46. <code>-&gt;can()</code> on a user model the receiver does not name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l49-unguarded-eloquent-mass-assignment-diagnostic" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L49. Unguarded Eloquent mass assignment diagnostic
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l50-create-route-quick-fix-for-an-unresolved-route-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L50. "Create route" quick-fix for an unresolved route name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#l51-convert-facade-call-to-dependency-injection-refactor" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        L51. "Convert facade call to dependency injection" refactor
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/laravel.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-laravel">PHPantom — Laravel<a class="headerlink" href="#phpantom-laravel" title="Permanent link">&para;</a></h1>
+<p>Known gaps and missing features in PHPantom's Laravel Eloquent support.
+For the general architecture and virtual member provider design, see
+<code>ARCHITECTURE.md</code>.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="out-of-scope-and-why">Out of scope (and why)<a class="headerlink" href="#out-of-scope-and-why" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Reason</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Container bindings registered dynamically or conditionally</td>
+<td>Binding names or targets computed at runtime (variables, environment switches, loops) cannot be recovered statically. Literal <code>bind('name', Target::class)</code>-style registrations in app and package service providers are recovered, as are the <code>$bindings</code> / <code>$singletons</code> arrays. Names in the framework's own <code>registerCoreContainerAliases()</code> and the app's alias config already resolve via parsing.</td>
+</tr>
+<tr>
+<td>Facade <code>getFacadeAccessor()</code> with string aliases</td>
+<td>Requires booting the application. <code>@method static</code> tags provide a workable fallback.</td>
+</tr>
+<tr>
+<td>Blade templates</td>
+<td>Separate project. See <code>blade.md</code> for the implementation plan.</td>
+</tr>
+<tr>
+<td>Model column types from a live database connection</td>
+<td>Requires a reachable, migrated database plus credentials, and answers "true for that database" rather than "true for this code". Committed schema artifacts (migration files, <code>database/schema/*.sql</code> dumps) are now parsed statically (schema dump + migration scanning).</td>
+</tr>
+<tr>
+<td>Legacy Laravel versions</td>
+<td>We target the generic annotation style current Laravel and the PHPStan Laravel extensions use. Older code may degrade gracefully.</td>
+</tr>
+<tr>
+<td>Application provider scanning</td>
+<td>Low-value, high-complexity.</td>
+</tr>
+<tr>
+<td>Macro discovery (<code>Macroable</code> trait)</td>
+<td>Requires booting the application to inspect runtime <code>$macros</code> static property. <code>@method</code> tags provide a workable fallback.</td>
+</tr>
+<tr>
+<td>Facade → concrete resolution via booting</td>
+<td>Requires booting (<code>getFacadeRoot()</code>). When <code>getFacadeAccessor()</code> returns a <code>::class</code> reference, static resolution is possible without booting. See "Facade completion" section below.</td>
+</tr>
+<tr>
+<td>Contract → concrete resolution</td>
+<td>Fully out of scope, including core framework contracts. Calling a concrete-only method on a contract-typed value is unsound per the declared types — the diagnostic is intended, exactly as <code>fn (A $a) =&gt; $a-&gt;bMethod()</code> is not a false positive just because <code>B extends A</code> at every call site. Where the <em>framework's own</em> docblock is needlessly wide, fix the docblock upstream or via stub patches.</td>
+</tr>
+<tr>
+<td>Manager → driver resolution</td>
+<td>Requires instantiating the manager at runtime.</td>
+</tr>
+<tr>
+<td>Narrowing a <code>MorphTo</code> relation to concrete models</td>
+<td><code>$comment-&gt;commentable</code> resolves to the generic <code>Illuminate\Database\Eloquent\Model</code>, which is what the relation declares. The morph map (now indexed, see L47/L42) is global rather than per-relation, so the only type it could supply is a union of <em>every</em> mapped model — a sound upper bound that is far wider than the truth and would report a concrete method as "not found on any of the N possible types". Annotate the relation with <code>@return MorphTo&lt;Post\|Video, $this&gt;</code> where the target set is actually known.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="philosophy-unchanged">Philosophy (unchanged)<a class="headerlink" href="#philosophy-unchanged" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>No application booting.</strong> We never boot a Laravel application to
+  resolve types.</li>
+<li><strong>Declared types are the contract.</strong> A diagnostic is a false
+  positive only if the code is correct <em>per the declared types</em> of
+  what it calls. Code that works because of runtime container state
+  (contract-typed values whose binding happens to be a specific
+  concrete, string aliases from arbitrary providers) is flagged
+  intentionally; the remedy is an assert, a narrower type in the
+  code, or an upstream docblock fix — never a resolver assumption
+  baked into PHPantom. When we do read framework/project facts, we
+  <em>parse</em> the installed source and bail gracefully if the shape is
+  unrecognized; we never ship version-specific baked-in lists.</li>
+<li><strong>Code-declared types win.</strong> Column types declared in code (casts,
+  accessors, <code>@property</code> tags, attribute defaults) are the most accurate
+  source and always take precedence. Committed schema artifacts
+  (migration files, <code>database/schema/*.sql</code> dumps) are now parsed
+  statically via schema dump and migration scanning. A live database
+  connection remains out of scope.</li>
+<li><strong>Generic relationship hints preferred.</strong> We expect relationship methods
+  to carry the generic <code>@return HasMany&lt;Post, $this&gt;</code> annotation that the
+  PHPStan Laravel extensions read. Fallback heuristics are best-effort.</li>
+<li><strong>Facades rely on <code>@method</code> tags.</strong> Laravel's facades ship with
+  comprehensive <code>@method static</code> tags (2,047 across all facades as of
+  Laravel 12.x) generated by a script. Our PHPDoc provider already
+  parses these, and where a tag is too wide because the generator
+  flattened it, a static call falls through to the class the facade's
+  <code>getFacadeAccessor()</code> names. The residual gap is upstream: the
+  generator throws away template parameters, generic arguments and
+  conditional returns that the source method declares. See L1.</li>
+</ul>
+<hr />
+<h2 id="l1-facade-completion-upstream-method-generator-improvement">L1. Facade completion — upstream <code>@method</code> generator improvement<a class="headerlink" href="#l1-facade-completion-upstream-method-generator-improvement" title="Permanent link">&para;</a></h2>
+<p>Facades are the primary way Laravel developers interact with framework
+services (<code>Cache::get(...)</code>, <code>DB::table(...)</code>, <code>Route::get(...)</code>, etc.).
+The facade pattern works by forwarding static calls on the facade class
+to instance methods on a concrete service class via <code>__callStatic()</code>.</p>
+<p>Every facade already ships with comprehensive <code>@method static</code> tags
+(2,047 tags across all facades in Laravel 12.x), generated by
+Laravel's <code>facade-documenter</code> script.</p>
+<h3 id="the-problem-flattened-signatures">The problem: flattened signatures<a class="headerlink" href="#the-problem-flattened-signatures" title="Permanent link">&para;</a></h3>
+<p>The generator throws away everything the source method's docblock says
+beyond a bare type name. The <code>Application</code> class has:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">/**</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x"> * @template T of object</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x"> * @param class-string&lt;T&gt; $abstract</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x"> * @return T</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x"> */</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">public function make($abstract) { ... }</span>
+</code></pre></div>
+<p>But the <code>App</code> facade emits:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">@method static object|mixed make(string $abstract, array $parameters = [])</span>
+</code></pre></div>
+<p>Four separate losses, all in <code>facade.php</code>:</p>
+<ul>
+<li>Template parameters (<code>T of object</code>) are resolved to their bound or to
+  <code>mixed</code>.</li>
+<li>Generic arguments are dropped (<code>Collection&lt;int, User&gt;</code> →
+  <code>Collection</code>).</li>
+<li>Conditional returns are unioned
+  (<code>($id is int ? static : Collection)</code> → <code>static|Collection</code>).</li>
+<li><code>class-string&lt;T&gt;</code> collapses to <code>string</code>, losing the binding that
+  connects the argument to the return.</li>
+</ul>
+<p>Every consumer of the tags — us, PHPStan, Psalm, PhpStorm — is left
+with a signature far wider than the truth.</p>
+<h3 id="why-this-has-to-be-fixed-upstream">Why this has to be fixed upstream<a class="headerlink" href="#why-this-has-to-be-fixed-upstream" title="Permanent link">&para;</a></h3>
+<p>Resolving facades ourselves by parsing <code>getFacadeAccessor()</code> covers
+only part of the problem:</p>
+<ol>
+<li><strong>Half the facades use string aliases.</strong> <code>Auth</code> returns <code>'auth'</code>,
+   <code>Cache</code> returns <code>'cache'</code>, <code>DB</code> returns <code>'db'</code>. We resolve the ones
+   the framework's own <code>registerCoreContainerAliases()</code> and the app's
+   config declare; a binding registered at runtime by an arbitrary
+   provider stays unresolvable without booting.</li>
+<li><strong>The <code>@see</code> annotations are informal.</strong> Facades list multiple
+   <code>@see</code> classes (e.g. <code>Auth</code> references both <code>AuthManager</code> and
+   <code>SessionGuard</code>), and the relationship between them isn't formal
+   (one may be a <code>@mixin</code> of the other). We'd be reverse-engineering
+   an undocumented script's output logic.</li>
+<li><strong>Only PHPantom would benefit.</strong> Any resolution technique we build
+   is specific to our tool. Other IDEs and LSPs face the same problem.</li>
+<li><strong>Manager pattern complicates things.</strong> Many facades delegate to a
+   "manager" class (<code>AuthManager</code>, <code>CacheManager</code>) which in turn
+   delegates to a "driver" (<code>SessionGuard</code>, <code>FileStore</code>). The
+   <code>@method</code> tags are already a flattened merge of both levels. We'd
+   need to replicate that merging logic.</li>
+</ol>
+<h3 id="upstream-generator-changes">Upstream generator changes<a class="headerlink" href="#upstream-generator-changes" title="Permanent link">&para;</a></h3>
+<p><strong>PR target:</strong> <code>laravel/facade-documenter</code>
+(https://github.com/laravel/facade-documenter). The entire generator
+is a single file (<code>facade.php</code>, ~850 lines) that uses PHPStan's own
+phpDoc parser. The functions that flatten:</p>
+<ul>
+<li><code>resolveDocblockTypes()</code> — the <code>GenericTypeNode</code> branch strips
+  generic arguments entirely. Needs to preserve args in the output
+  string.</li>
+<li><code>handleUnknownIdentifierType()</code> — when encountering a template
+  parameter like <code>T</code>, resolves it to its bound (<code>T of object</code> →
+  <code>object</code>) or <code>mixed</code>. Needs to instead emit <code>T</code> as-is and add a
+  <code>&lt;T of object&gt;</code> clause after the method name in the <code>@method</code> tag.</li>
+<li><code>ConditionalTypeForParameterNode</code> handling — unions the if/else
+  branches. Needs to preserve the conditional syntax verbatim.</li>
+<li>The <code>class-string</code> case in <code>IdentifierTypeNode</code> handling — maps
+  <code>class-string</code> to <code>string</code>. Needs to preserve <code>class-string&lt;T&gt;</code>.</li>
+</ul>
+<h3 id="tooling-support-for-the-richer-syntax">Tooling support for the richer syntax<a class="headerlink" href="#tooling-support-for-the-richer-syntax" title="Permanent link">&para;</a></h3>
+<p>Laravel will not emit tags that break the tools their users run, so
+the four changes have very different odds. Support as researched:</p>
+<table>
+<thead>
+<tr>
+<th>Change</th>
+<th>PHPStan</th>
+<th>Psalm</th>
+<th>PhpStorm</th>
+<th>Intelephense</th>
+<th>PHPantom</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Generic args (<code>Collection&lt;int, User&gt;</code>)</td>
+<td>yes</td>
+<td>yes</td>
+<td>yes, since 2022.1 (<a href="https://youtrack.jetbrains.com/issue/WI-62267">WI-62267</a>, Verified)</td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Conditional return (<code>($id is int ? A : B)</code>)</td>
+<td>yes</td>
+<td>yes</td>
+<td>unknown</td>
+<td>yes, since 1.15.0</td>
+<td>yes</td>
+</tr>
+<tr>
+<td><code>class-string&lt;T&gt;</code> preserved</td>
+<td>yes</td>
+<td>yes</td>
+<td>needs the template below</td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+<tr>
+<td>Inline <code>&lt;T of object&gt;</code> after the method name</td>
+<td>yes</td>
+<td><strong>no</strong></td>
+<td><strong>no</strong></td>
+<td>unknown</td>
+<td>yes</td>
+</tr>
+</tbody>
+</table>
+<p>The last row is the blocker. PhpStorm reports a false-positive
+<code>Undefined class 'T'</code> inspection for a template referenced from a
+<code>@method</code> tag (<a href="https://youtrack.jetbrains.com/issue/WI-64921">WI-64921</a>,
+Open since 2022; the inference half is
+<a href="https://youtrack.jetbrains.com/issue/WI-72659">WI-72659</a>, In Progress).
+Psalm parses each <code>@method</code> entry with its own <code>ParseTreeCreator</code> and
+raises <code>InvalidDocblock</code> when the entry does not come out as a method
+tree; its method-name regex requires the name to be followed directly
+by <code>(</code>, so <code>make&lt;T of object&gt;(</code> is not recognised as a method at all
+(<code>Internal/PhpVisitor/Reflector/ClassLikeDocblockParser.php</code>). Neither
+degrades gracefully.</p>
+<p>So split the upstream work:</p>
+<ol>
+<li><strong>Generic arguments, conditional returns, <code>class-string</code> without a
+   template arg.</strong> No known breakage anywhere, immediate benefit in
+   four tools. Submit these first, as separate PRs so one contentious
+   change cannot stall the rest.</li>
+<li><strong>Inline templates.</strong> Hold until PhpStorm ships WI-64921/WI-72659,
+   or propose it as a <code>@phpstan-method</code> line that coexists with the
+   plain <code>@method</code> so tools that choke keep reading the flattened one.</li>
+</ol>
+<p><strong>Impact: High · Complexity: High (upstream PRs)</strong></p>
+<hr />
+<h2 id="model-property-source-gaps">Model property source gaps<a class="headerlink" href="#model-property-source-gaps" title="Permanent link">&para;</a></h2>
+<p>The <code>LaravelModelProvider</code> synthesizes virtual properties from several
+sources on Eloquent models. The table below summarises what we handle
+today and what is still missing.</p>
+<h3 id="what-we-cover">What we cover<a class="headerlink" href="#what-we-cover" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Type info</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>$casts</code> / <code>casts()</code></td>
+<td>Rich (built-in map, framework <code>As*</code> class casts with <code>of()</code> / <code>using()</code> generics, custom cast <code>get()</code> return type, enum, <code>Castable</code>, <code>CastsAttributes&lt;TGet&gt;</code> generics fallback)</td>
+<td></td>
+</tr>
+<tr>
+<td><code>$attributes</code> defaults</td>
+<td>Literal type inference (string, bool, int, float, null, array)</td>
+<td>Fallback when no <code>$casts</code> entry</td>
+</tr>
+<tr>
+<td><code>$fillable</code>, <code>$guarded</code>, <code>$hidden</code>, <code>$visible</code></td>
+<td><code>mixed</code></td>
+<td>Last-resort column name fallback</td>
+</tr>
+<tr>
+<td>Legacy accessors (<code>getXAttribute()</code>)</td>
+<td>Method's return type</td>
+<td></td>
+</tr>
+<tr>
+<td>Modern accessors (returns <code>Attribute</code>)</td>
+<td>First generic arg of <code>Attribute&lt;TGet&gt;</code>, or <code>mixed</code> when unparameterised</td>
+<td></td>
+</tr>
+<tr>
+<td>Relationship methods</td>
+<td>Generic params or body inference</td>
+<td></td>
+</tr>
+<tr>
+<td>Relationship <code>*_count</code> properties</td>
+<td><code>int</code></td>
+<td><code>{snake_name}_count</code> for each relationship method</td>
+</tr>
+</tbody>
+</table>
+<h3 id="gaps-ranked-by-impact-effort">Gaps (ranked by impact ÷ effort)<a class="headerlink" href="#gaps-ranked-by-impact-effort" title="Permanent link">&para;</a></h3>
+<hr />
+<h4 id="l53-collection-key-types-from-the-column-for-keyby-groupby-pluck">L53. Collection key types from the column for <code>keyBy</code> / <code>groupBy</code> / <code>pluck</code><a class="headerlink" href="#l53-collection-key-types-from-the-column-for-keyby-groupby-pluck" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>keyBy</code> and <code>groupBy</code> produce a collection keyed by the column they were
+given, but we type the key <code>array-key</code>
+(<code>virtual_members/laravel/higher_order_proxy.rs</code>, <code>plan_result</code>). The
+column is a literal in the overwhelming majority of calls and the value
+type is already resolved, so the key is recoverable by the same model
+property lookup <code>model-property&lt;Model&gt;</code> validation uses:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">$users-&gt;keyBy(&#39;email&#39;);   // want Collection&lt;string, User&gt;, get Collection&lt;array-key, User&gt;</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$users-&gt;groupBy(&#39;id&#39;);    // want Collection&lt;int, Collection&lt;int, User&gt;&gt;</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">$posts-&gt;keyBy(&#39;user.id&#39;); // dotted path, resolved segment by segment</span>
+</code></pre></div>
+<p><code>pluck</code> is the same lookup applied to the value rather than the key, and
+the higher-order proxy forms (<code>$users-&gt;keyBy-&gt;email</code>) must agree with the
+argument forms or the two spellings of one expression disagree.</p>
+<p>The framework's own annotations widen these to <code>array-key</code>, so there is no
+docblock to read — but <code>calebdw/phpstan-laravel</code> resolves all three, which
+means a project running it currently gets a more precise answer from its
+analyser than from its editor. Worth matching, including <code>groupBy</code>'s
+array-argument nesting (one level per grouper) and <code>preserveKeys</code> affecting
+only the innermost collection.</p>
+<p><strong>Where to change:</strong> <code>plan_result</code> in
+<code>virtual_members/laravel/higher_order_proxy.rs</code> for the proxy forms, and
+the collection return-type patches for the argument forms. The property
+lookup already exists for <code>model-property&lt;Model&gt;</code>; the work is threading
+a resolved key type through the generic substitution.</p>
+<h4 id="l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions">L54. Audit custom-builder and relation-closure inference against the PHPStan extensions<a class="headerlink" href="#l54-audit-custom-builder-and-relation-closure-inference-against-the-phpstan-extensions" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Two areas where the PHPStan Laravel extensions have moved past what we
+mirror, and where we have machinery that has not been checked against
+them:</p>
+<ul>
+<li><strong>A custom builder surviving the chain.</strong> We read
+  <code>newEloquentBuilder()</code> (<code>virtual_members/laravel/model_extraction.rs</code>)
+  and inject the builder, but it is not established that
+  <code>Team::query()-&gt;where(…)-&gt;orderBy(…)</code> stays on <code>TeamBuilder</code> rather than
+  degrading to <code>Builder&lt;Team&gt;</code> at the first inherited call, nor that
+  static calls on the model and instance calls on the builder agree about
+  what comes back.</li>
+<li><strong>Relation-constraint closure parameters.</strong> We type closures for the
+  <code>whereHas</code> family (<code>type_engine/variable/closure_resolution.rs</code>,
+  <code>forward_walk/callable_inference.rs</code>). Unverified: dotted relation paths
+  (<code>whereHas('stocks.warehouse', …)</code> should type the closure for
+  <code>Warehouse</code>'s builder, resolving each segment against the model the
+  previous one named), the <code>*Morph</code> variants' union of candidate builders
+  plus their <code>$type</code> parameter, <code>withWhereHas</code> receiving both a builder
+  and the relation, and closures in non-leading argument positions
+  (<code>has('stocks', '&gt;=', 1, 'and', fn ($q) =&gt; …)</code>).</li>
+</ul>
+<p><strong>Where to change:</strong> Write the assertion cases first — the existing
+<code>tests/integration/completion_laravel.rs</code> conventions cover both areas —
+and file what actually fails. Splitting this into concrete items once the
+gaps are known is preferable to a broad rewrite of either subsystem.</p>
+<h4 id="l45-_count-properties-are-offered-on-every-relationship">L45. <code>*_count</code> properties are offered on every relationship<a class="headerlink" href="#l45-_count-properties-are-offered-on-every-relationship" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<p>For each relationship method we synthesize a <code>{snake_name}_count</code>
+property typed <code>int</code>, unconditionally. At runtime the attribute only
+exists when the query that produced the model called <code>withCount()</code> /
+<code>loadCount()</code>, or when the model lists the relation in <code>$withCount</code>.
+So <code>$post-&gt;comments_count</code> completes and hovers cleanly even where it
+is guaranteed to be <code>null</code>, and a user reading the completion list
+cannot tell which of the two <code>comments</code>-derived entries is real.</p>
+<p>The trade-off is deliberate: <code>withCount()</code> is common enough that
+dropping the properties entirely would cost more than it gains, and
+the alternative needs call-site tracking we do not have. Doing this
+properly means threading "which counts were eager-loaded" from the
+builder chain (<code>Post::withCount('comments')-&gt;first()</code>) into the model
+type, which is the same machinery L8 needs for <code>withSum()</code> and
+friends. <code>$withCount</code> on the model is the easy half and could be read
+declaratively like <code>$casts</code> is today.</p>
+<p>Until then the properties stay, so this is a precision gap rather
+than a missing feature. Reported as a follow-up on
+<a href="https://github.com/PHPantom-dev/phpantom_lsp/issues/312">#312</a>.</p>
+<h4 id="l8-withsum-withavg-withmin-withmax-aggregate-properties">L8. <code>withSum()</code> / <code>withAvg()</code> / <code>withMin()</code> / <code>withMax()</code> aggregate properties<a class="headerlink" href="#l8-withsum-withavg-withmin-withmax-aggregate-properties" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<p>Less common than <code>withCount</code>; only affects codebases using aggregate
+eager-loading. Cannot be inferred declaratively from the model alone;
+requires tracking call-site string arguments.</p>
+<p>Similar to <code>withCount</code>, these aggregate methods produce virtual
+properties named <code>{relation}_{function}</code> (e.g.
+<code>Order::withSum('items', 'price')</code> → <code>$order-&gt;items_sum</code>). The same
+call-site tracking challenge applies, and the type depends on the
+aggregate function (<code>withSum</code>/<code>withAvg</code> → <code>float</code>,
+<code>withMin</code>/<code>withMax</code> → <code>mixed</code>).</p>
+<p>The <code>@property</code> workaround applies here too.</p>
+<h4 id="l10-viewwithx-and-redirectresponsewithx-dynamic-methods">L10. <code>View::withX()</code> and <code>RedirectResponse::withX()</code> dynamic methods<a class="headerlink" href="#l10-viewwithx-and-redirectresponsewithx-dynamic-methods" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Most code uses <code>-&gt;with('key', $value)</code> instead of the dynamic
+<code>-&gt;withKey($value)</code> form. Explicitly declared methods (<code>withErrors</code>,
+<code>withInput</code>, etc.) already work.</p>
+<p>Both <code>Illuminate\View\View</code> and <code>Illuminate\Http\RedirectResponse</code>
+support dynamic <code>with*()</code> calls via <code>__call()</code>.  For example,
+<code>view('home')-&gt;withUser($user)</code> is equivalent to
+<code>-&gt;with('user', $user)</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">view(&#39;home&#39;)-&gt;withUser($user);         // dynamic, no @method annotation</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">redirect(&#39;/&#39;)-&gt;withErrors($errors);    // has explicit withErrors(), but withFoo() is dynamic</span>
+</code></pre></div>
+<p>The framework provides no <code>@method</code> annotations for arbitrary
+<code>with*</code> calls — only specific ones like <code>withErrors()</code>,
+<code>withInput()</code>, <code>withCookies()</code> etc. are declared as real methods.
+Larastan handles the dynamic case in
+<code>ViewWithMethodsClassReflectionExtension</code> and
+<code>RedirectResponseMethodsClassReflectionExtension</code>, which treat any
+<code>with*</code> call as valid and returning <code>$this</code>.</p>
+<p><strong>Where to change:</strong> This could be handled with a lightweight
+virtual member provider that detects classes with a <code>__call</code> method
+whose body checks <code>str_starts_with($method, 'with')</code>, or by
+hard-coding the two known classes.  A simpler approach: add
+<code>@method</code> tags to bundled stubs for the most common dynamic <code>with*</code>
+methods, or document this as a known limitation.</p>
+<hr />
+<h4 id="l47-morph-aliases-in-_type-column-comparisons">L47. Morph aliases in <code>*_type</code> column comparisons<a class="headerlink" href="#l47-morph-aliases-in-_type-column-comparisons" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>The morph-map index (<code>virtual_members/laravel/morph_map.rs</code>) recognizes
+alias strings in the positions Eloquent resolves through the map by
+name: the <code>morphMap()</code> keys themselves, <code>Relation::getMorphedModel()</code>,
+<code>Model::getActualClassNameForMorph()</code>, and the <code>$types</code> argument of the
+<code>whereHasMorph()</code> family. It does <strong>not</strong> recognize an alias compared
+against a morph type <em>column</em>, which is how much real code reads it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$query-&gt;where(&#39;commentable_type&#39;, &#39;post&#39;);</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">if ($comment-&gt;commentable_type === &#39;post&#39;) { … }</span>
+</code></pre></div>
+<p>Both are alias literals, but recognizing them means knowing that the
+column named on the other side is a polymorphic type column. The
+information is available: a <code>morphTo()</code> relation declares its type
+column (defaulting to <code>&lt;relation&gt;_type</code>), and the relation methods of
+the model being queried are already parsed. The work is to collect the
+morph type columns of a model, then match a string literal that appears
+opposite one in a <code>where()</code> / comparison against the alias index.</p>
+<p>Once a literal is recognized it inherits hover, go-to-definition,
+find-references, and the enforced-map diagnostic for free, since those
+dispatch on the <code>LaravelStringKind::MorphAlias</code> span kind.</p>
+<h4 id="l42-morph-alias-completion-in-array-positions">L42. Morph alias completion in array positions<a class="headerlink" href="#l42-morph-alias-completion-in-array-positions" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Morph aliases complete inside <code>Relation::getMorphedModel('|')</code> and
+<code>Model::getActualClassNameForMorph('|')</code>, but not in the two array
+positions where they are most often written:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">Relation::morphMap([&#39;|&#39; =&gt; Post::class]);</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">$query-&gt;whereHasMorph(&#39;commentable&#39;, [&#39;|&#39;]);</span>
+</code></pre></div>
+<p>The blocker is not the alias index but
+<code>detect_laravel_string_key_context</code> in
+<code>completion/laravel_string_keys.rs</code>, which recognizes only a string
+that is the <em>first</em> argument of a call — it scans backwards from the
+cursor and requires <code>(</code> immediately before the opening quote. Neither
+an array key nor an element of a later argument matches that shape.</p>
+<p><strong>Where to change:</strong> teach the detector to walk back past an enclosing
+<code>[</code> (and the argument commas before it) so it can report both the call
+being made and which argument position and array slot the cursor sits
+in. Every string kind benefits: the same limitation is why a config key
+inside <code>Config::set(['a.b' =&gt; …])</code> does not complete either.</p>
+<hr />
+<h2 id="model-columns-from-committed-schema-artifacts">Model columns from committed schema artifacts<a class="headerlink" href="#model-columns-from-committed-schema-artifacts" title="Permanent link">&para;</a></h2>
+<p>Our column inference from code (casts, accessors, <code>@property</code>,
+attribute defaults, fillable) is complete and precise — on annotated
+codebases we beat every snapshot-based tool on accuracy and freshness.
+But on a project with bare models (no casts beyond dates, no
+docblocks), we draw a blank where other tools can still list columns.
+The two items below close that gap using files already committed to
+the repository, consistent with the philosophy above: <strong>schema-derived
+columns are a fallback</strong>, slotted below every code-declared source in
+the model provider's priority order, and they must never override a
+type declared in code.</p>
+<p>Shared infrastructure for both: a per-project table model
+(<code>table name → ordered column list</code>, each column carrying a PHP type,
+nullability, and the declaration site for go-to-definition). Table
+names resolve from the model's <code>$table</code> property or the conventional
+snake-case plural of the class name. The column set feeds the existing
+virtual-property synthesis, <code>where{Column}</code> generation, attribute-array
+key completion (L30), and column-string completion — one new source,
+every existing consumer benefits.</p>
+<hr />
+<h2 id="laravel-string-context-intelligence-completion-hover-diagnostics">Laravel string-context intelligence (completion, hover, diagnostics)<a class="headerlink" href="#laravel-string-context-intelligence-completion-hover-diagnostics" title="Permanent link">&para;</a></h2>
+<p>This is the set of features that live <em>inside string literals</em> passed to
+Laravel helpers and facades: <code>route('...')</code>, <code>config('...')</code>, <code>env('...')</code>,
+<code>__('...')</code>, <code>view('...')</code>, and so on. The official Laravel VS Code
+extension (https://github.com/laravel/vs-code-extension) is built almost
+entirely around this layer, and PhpStorm + Laravel Idea cover it too.</p>
+<h3 id="why-we-do-this-statically-and-they-boot-the-app">Why we do this statically (and they boot the app)<a class="headerlink" href="#why-we-do-this-statically-and-they-boot-the-app" title="Permanent link">&para;</a></h3>
+<p>The PHPStan Laravel extensions gather these facts by <strong>booting the user's
+application</strong> in the background and introspecting the live container
+(<code>app('router')-&gt;getRoutes()</code>, <code>config()-&gt;all()</code>, <code>app()-&gt;getBindings()</code>,
+etc.). The Laravel LSP does the same through <code>php artisan tinker
+--execute</code>: 14 of its 18 data providers (routes, configs, translations,
+views, models, middleware, auth, bindings, Blade components, paths, …)
+run injected PHP inside the booted app; only env vars, public assets,
+the Mix manifest, and controller names (regex-scraped) are gathered
+statically. Its Eloquent column completion even shells out to
+<code>artisan model:show --json</code> per model, which requires a <strong>reachable,
+migrated database</strong>. PhpStorm's Laravel Idea and
+<code>barryvdh/laravel-ide-helper</code> do the same thing differently: they
+generate a snapshot (JSON payload or PHP stubs) that the IDE then reads.</p>
+<p>All three share two problems:</p>
+<ol>
+<li><strong>A snapshot is one environment on one code path.</strong> The booted values
+   reflect whatever bindings, config, and routes are registered under the
+   default boot. A controller that rebinds a service, a config value that
+   differs in production, or a route registered behind a feature flag is
+   either invisible or actively wrong. The answer is "true for that boot,"
+   not "true here."</li>
+<li><strong>Staleness.</strong> A snapshot is only as fresh as its last regeneration
+   (manual for ide-helper, periodic background re-boot for the extension).
+   Static scanning with a file watcher updates the instant the source file
+   changes, not at the next heartbeat.</li>
+<li><strong>Silent total failure.</strong> When the app cannot boot (broken provider,
+   missing <code>.env</code>, no database), the Laravel LSP's tinker call exits
+   nonzero and every boot-dependent feature silently returns empty:
+   completions, hovers, and diagnostics all vanish with no indication
+   why. A static scanner keeps working on a project that doesn't boot —
+   which is exactly when the developer needs tooling most.</li>
+</ol>
+<p>Our position (consistent with the <strong>No application booting</strong> philosophy
+above): the overwhelming majority of these facts live in static files we
+can parse and keep fresh for free — <code>routes/*.php</code> (<code>-&gt;name()</code>),
+<code>config/*.php</code> return arrays, <code>lang/**</code> PHP + JSON, <code>.env</code>, and
+<code>resources/views/**</code>. We recover ~90% of the value with no code execution,
+no stale snapshot, and correct behaviour on a project that doesn't even
+boot. The dynamic tail (routes/config/bindings registered at runtime by a
+closure) is the only part a snapshot wins on, and that is exactly the code
+that is hard to reason about anyway.</p>
+<h3 id="what-already-works">What already works<a class="headerlink" href="#what-already-works" title="Permanent link">&para;</a></h3>
+<p>Go-to-definition is implemented for <strong>route names</strong> (<code>route()</code>), <strong>config
+keys</strong>, <strong>env vars</strong>, <strong>translation keys</strong>, and <strong>view names</strong> via the
+declaration scanners in <code>virtual_members/laravel/{route_names, config_keys,
+env_vars, trans_keys, view_names}.rs</code>. These walk the relevant source files
+and resolve a string key to its declaration site. <code>LaravelStringKey</code> also
+flows through find-references, rename, and document-highlight. <strong>Eloquent
+relation and column name strings</strong> have completion (<code>completion/eloquent_string.rs</code>).</p>
+<p>The scanners already enumerate every valid key for go-to-definition. The
+items below mostly wire that existing enumeration into three more LSP
+endpoints rather than building new analysis.</p>
+<h4 id="l17-additional-string-contexts-without-booting">L17. Additional string contexts without booting<a class="headerlink" href="#l17-additional-string-contexts-without-booting" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Constructs the extension and the Laravel LSP cover that we don't, and
+that are statically recoverable (no booting):</p>
+<ul>
+<li><strong>Middleware aliases</strong> — completion/go-to/diagnostics/hover for
+  <code>-&gt;middleware('auth')</code>, <code>-&gt;withoutMiddleware(...)</code>, and the
+  <code>#[Middleware]</code> controller attribute (string and array arguments).
+  Aliases are declared statically in <code>bootstrap/app.php</code>
+  (<code>$middleware-&gt;alias([...])</code>) on Laravel 11+, or the HTTP Kernel's
+  <code>$middlewareAliases</code>/<code>$routeMiddleware</code> on older versions; the
+  framework's built-in aliases and default groups live in
+  <code>Illuminate\Foundation\Configuration\Middleware</code> and the Kernel base
+  class, parseable from vendor source the same way the container alias
+  table already is. Be <strong>parameter-aware</strong>: <code>auth:web</code> and
+  <code>throttle:60,1</code> validate the alias before the <code>:</code>, and hover can show
+  the middleware's <code>handle()</code> parameter signature. For groups (<code>'web'</code>,
+  <code>'api'</code>), hover lists the member middleware.</li>
+<li><strong>Asset paths</strong> — <code>asset('...')</code> (and <code>UrlGenerator::asset()</code>) against
+  a filesystem walk of <code>public/</code>. Two cheap extensions the Laravel LSP
+  has or lacks: <code>mix('...')</code> against <code>public/mix-manifest.json</code> (static
+  JSON, legacy projects), and — which they do <em>not</em> support — Vite
+  entry-point strings (<code>Vite::asset('resources/js/app.js')</code>, <code>@vite</code>
+  arguments) checked against source-file existence.</li>
+<li><strong>Validation rules</strong> — completion for the rule strings in
+  <code>'field' =&gt; 'required|email'</code>. Rather than hardcoding a rule list
+  (the Laravel LSP ships ~90 rules as LSP snippets, e.g.
+  <code>between:${min},${max}</code>), derive it from the installed framework:
+  the <code>Validator</code> concern declares one <code>validate{Rule}</code> method per
+  rule, so scanning that vendor class yields the exact rule set for
+  the project's Laravel version, plus whether each rule takes
+  parameters. Custom rule classes (implementing <code>ValidationRule</code>) and
+  literal <code>Validator::extend('name', …)</code> registrations extend the set.
+  Trigger contexts to match: <code>$request-&gt;validate()</code> arg 0,
+  <code>Validator::make()</code> arg 1, <code>$validator-&gt;sometimes()</code> arg 1, and array
+  <em>values</em> (never keys — those are field names) inside the <code>rules()</code>
+  method of <code>FormRequest</code> / <code>Livewire\Form</code> subclasses.
+  <strong>Rule parameters are references too:</strong> <code>exists:users,email</code> and
+  <code>unique:users</code> name a table and column (resolve to the model/column
+  via the schema/migration table map or the model's own column sources);
+  <code>same:password</code>, <code>different:</code>, <code>required_with:</code>, <code>gt/gte/lt/lte:</code>,
+  <code>after:</code>/<code>before:</code> name <em>other fields</em> in the same rules array
+  (complete and navigate to the sibling key); <code>in:</code>/<code>Rule::in()</code> values
+  on an enum-cast field can complete from the enum's cases.</li>
+<li><strong>Inertia page paths</strong> — <code>Inertia::render('...')</code> and
+  <code>Inertia::modal()</code> arg 0, <code>Route::inertia()</code> arg 1, and the
+  <code>inertia()</code> helper, against a filesystem walk of <code>resources/js/Pages</code>
+  (page paths/extensions from <code>config/inertia.php</code>, read statically;
+  default <code>resources/js/Pages</code> + <code>.vue</code>). Only relevant to Inertia
+  projects. Pair the unknown-page diagnostic with a "create page" quick
+  fix (the Laravel LSP scaffolds a <code>&lt;script setup&gt;/&lt;template&gt;</code> stub).
+  Its second-argument prop-key completion (regex-parsing <code>defineProps</code>
+  out of the <code>.vue</code> page) is shallow and optional — defer unless asked.</li>
+</ul>
+<p><strong>Explicitly still out of scope</strong> (see the table at the top): container
+binding names (<code>app('...')</code>), facade string aliases, and anything else that
+requires the live container. These genuinely cannot be resolved without
+booting, and a snapshot of them is the "true for one boot" half-truth we are
+choosing not to ship.</p>
+<h4 id="l55-json-translation-key-navigation-lands-on-line-0-not-the-key">L55. JSON translation key navigation lands on line 0, not the key<a class="headerlink" href="#l55-json-translation-key-navigation-lands-on-line-0-not-the-key" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p><code>lang/{locale}.json</code> (the "translation string as key" style) completes
+and resolves go-to-definition, but three related navigation gaps remain:</p>
+<ul>
+<li>The definition always lands on the top of the file rather than the
+  key's actual line, and find-references does not cover JSON keys at
+  all.</li>
+<li><code>Translator::get()</code> consults the JSON catalogue <em>first</em>, even for a
+  dotted key, but go-to-definition and hover list the group file ahead
+  of it.</li>
+<li>A package's <code>loadJsonTranslationsFrom()</code> directory is known to the
+  diagnostic but never navigated to.</li>
+</ul>
+<p>The ignored tests <code>laravel_translation_keys::a_json_phrase_lands_on_its_own_line</code>,
+<code>a_json_line_wins_over_a_group_file_line_for_the_same_key</code>, and
+<code>a_package_json_phrase_reaches_its_catalogue</code> cover all three; un-ignore
+them once this lands.</p>
+<h4 id="l24-translation-depth-locales-placeholders-hover-quick-fix">L24. Translation depth: locales, placeholders, hover, quick-fix<a class="headerlink" href="#l24-translation-depth-locales-placeholders-hover-quick-fix" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Statically recoverable translation features the Laravel LSP has and we
+still partially lack:</p>
+<ul>
+<li><strong>Locale argument completion.</strong> The <code>$locale</code> parameter of <code>__()</code>,
+  <code>trans()</code>, <code>trans_choice()</code>, <code>Lang::get()/choice()/hasForLocale()</code>
+  (positional or named) completes from the locale set derived from
+  <code>lang/*/</code> directories and <code>lang/*.json</code> files.</li>
+<li><strong>Placeholder parameter completion.</strong> The <code>:name</code> placeholders parsed
+  from the translation value complete as keys of the replacement array
+  (<code>__('welcome', ['name' =&gt; …])</code>).</li>
+<li><strong>Multi-locale hover.</strong> Hover already shows a translation key's value
+  for the resolved locale; show the value per locale (with a link to
+  each file) instead of just the one.</li>
+<li><strong>Insert missing key quick-fix.</strong> When the unknown-translation-key
+  diagnostic fires on a <code>group.item</code> key whose <code>lang/{locale}/group.php</code>
+  array file already exists, offer a quick-fix that inserts the missing
+  <code>'item' =&gt; '...'</code> entry (existing keys as siblings for placement,
+  empty string as the value). No fix when the group file itself doesn't
+  exist yet; that case still just diagnoses.</li>
+</ul>
+<h4 id="l27-legacy-controllermethod-action-strings">L27. Legacy <code>Controller@method</code> action strings<a class="headerlink" href="#l27-legacy-controllermethod-action-strings" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>We already complete and resolve the modern <code>[Controller::class,
+'method']</code> array form (which the Laravel LSP does <em>not</em> complete), and
+method-name strings inside <code>Route::controller()</code> groups. The legacy
+<code>'App\Http\Controllers\FooController@method'</code> string form gets nothing.
+Split on <code>@</code>, resolve the class through normal resolution (honoring any
+group namespace prefix), and provide completion, go-to-definition, and
+an unknown-action diagnostic. Low priority: the string form is
+discouraged since Laravel 8.</p>
+<h4 id="l29-livewire-and-volt-component-names">L29. Livewire and Volt component names<a class="headerlink" href="#l29-livewire-and-volt-component-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low (Livewire projects only) · Complexity: Low</strong></p>
+<p>The component index (class components under <code>app/Livewire/</code>, nested
+names, and view-based Volt / Livewire v4 single-file components), the
+<code>&lt;livewire:foo-bar&gt;</code> tag resolution on the Blade side, and hover on a
+Livewire component's public properties via <code>$this</code> in its view are all
+implemented. The remaining gap is the PHP-side triggers: <code>Volt::route(
+'/path', 'component')</code> (arg 1) and <code>Route::livewire()</code> get no
+completion, go-to-definition, or unknown-component diagnostic.</p>
+<h4 id="l30-eloquent-attribute-array-key-completion">L30. Eloquent attribute-array key completion<a class="headerlink" href="#l30-eloquent-attribute-array-key-completion" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Our Eloquent string completion covers where-style column arguments and
+relation names, but not <strong>attribute-array keys</strong>: <code>User::create(['name'
+=&gt; …])</code>, <code>fill()</code>, <code>make()</code>, <code>update()</code>, <code>updateOrCreate()</code>,
+<code>firstOrCreate()</code>, <code>firstOrNew()</code>, <code>createOrFirst()</code> should complete
+array keys from the model's column sources (preferring fillable
+columns, skipping keys already present in the literal). Also extend the
+scalar column list with <code>firstWhere()</code>, <code>whereColumn()</code>, and the
+aggregate methods (<code>min</code>/<code>max</code>/<code>sum</code>/<code>avg</code>), and cover the model-level
+PHP attributes that take column-name arguments where the installed
+framework version has them. The Laravel LSP gets its column list from
+<code>artisan model:show --json</code> (live DB required); ours comes from the
+same static sources the model provider already uses (casts, fillable,
+accessors, <code>@property</code> tags) — no database needed.</p>
+<h4 id="l31-string-key-rename-highlight-and-semantic-tokens">L31. String-key rename, highlight, and semantic tokens<a class="headerlink" href="#l31-string-key-rename-highlight-and-semantic-tokens" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>References and go-to-definition already work for indexed Laravel
+string kinds, but the rename, document-highlight, and semantic-token
+arms are explicit no-ops. Wiring them up exceeds the Laravel LSP (which
+has none of the three): renaming a translation key updates the lang
+files across every locale plus all usages; renaming a route name
+updates the <code>-&gt;name()</code> declaration and all usages; highlight and
+semantic tokens reuse the existing spans. Renaming a view name implies
+moving the Blade file — defer that one until the rest is in place.</p>
+<h4 id="l56-typed-laravel-connection-names">L56. Typed Laravel connection names<a class="headerlink" href="#l56-typed-laravel-connection-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>The method name <code>-&gt;connection()</code> does not identify one config subtree: the
+receiver may select <code>database.connections.*</code>, <code>queue.connections.*</code>, or
+<code>broadcasting.connections.*</code>. Resolve it through the shared type engine, and
+treat <code>-&gt;onConnection()</code> as a queue connection. A model's <code>$connection</code> is a
+database connection, while the same property on a queueable job selects a
+queue connection. Each confirmed literal should receive the same completion,
+hover, navigation, diagnostics, and references as the direct facade spelling.</p>
+<h4 id="l59-typed-controller-middleware-names">L59. Typed controller middleware names<a class="headerlink" href="#l59-typed-controller-middleware-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>$this-&gt;middleware('auth:admin')</code> names middleware only when <code>$this</code> is a
+Laravel controller; an unrelated class may define the same method for a
+different purpose. Confirm the enclosing class through the shared type engine
+before completing or validating embedded authentication guards. Static and
+fluent <code>Route::middleware()</code> calls remain syntactically unambiguous.</p>
+<h4 id="l57-laravel-queue-names">L57. Laravel queue names<a class="headerlink" href="#l57-laravel-queue-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>-&gt;onQueue()</code> names are free-form rather than config-backed. Complete from
+literals seen elsewhere in the project and connect those occurrences for
+navigation and references, but do not diagnose a name merely because the
+static index has not seen it.</p>
+<h4 id="l58-laravel-rate-limiter-names">L58. Laravel rate limiter names<a class="headerlink" href="#l58-laravel-rate-limiter-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Rate limiter names are registered through <code>RateLimiter::for('name', …)</code> in
+service providers. Scan literal registrations using the same provider-aware
+shape as the macro scanner, then complete, navigate, and validate
+<code>throttle:name</code> middleware parameters and <code>new RateLimited('name')</code> against
+the discovered set. Numeric inline limits such as <code>throttle:60,1</code> remain
+values rather than named registrations. Keep the world open when no
+registration source can be read so a partial index does not create false
+diagnostics.</p>
+<h4 id="l39-unused-view-and-translation-key-detection">L39. Unused view and translation key detection<a class="headerlink" href="#l39-unused-view-and-translation-key-detection" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>The reverse of the invalid-key diagnostics: keys that are <em>declared</em>
+but never referenced. The references machinery already finds all
+usages of a view name or translation key; inverting it over the
+declaration sets yields unused views (no
+<code>view()</code>/<code>@include</code>/<code>@extends</code>/mailable reference anywhere) and unused
+translation keys. Surface as an opt-in workspace report
+(CLI <code>analyze</code> flag and/or code lens on the declaration), not as
+always-on diagnostics — dynamic construction (<code>view("emails.$type")</code>)
+makes "unused" inherently a heuristic, so it must read as "no static
+reference found," never as an error.</p>
+<h4 id="l44-sibling-resource-registrations-and-degenerate-resource-names">L44. Sibling resource registrations and degenerate resource names<a class="headerlink" href="#l44-sibling-resource-registrations-and-degenerate-resource-names" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p><code>Route::resource()</code> and <code>Route::apiResource()</code> are recognized, but the
+registrations that generate route names the same way are not, so every
+<code>route()</code> call naming one is reported as an unknown route:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">Route::resources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">Route::apiResources([&#39;photos&#39; =&gt; PhotoController::class]);</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">Route::singleton(&#39;profile&#39;, ProfileController::class);</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="x">Route::apiSingleton(&#39;profile&#39;, ProfileController::class);</span>
+</code></pre></div>
+<p><code>resources()</code> / <code>apiResources()</code> expand to the same seven (or five)
+conventional names per entry. <code>singleton()</code> generates <code>show</code>, <code>edit</code>, and
+<code>update</code> at <code>profile</code>, <code>profile/edit</code>, and <code>profile</code>, with <code>store</code> and
+<code>destroy</code> added by <code>-&gt;creatable()</code> / <code>-&gt;destroyable()</code>.</p>
+<p>Separately, a resource name with a leading or trailing slash is trimmed
+before the name is derived, where Laravel keeps it and produces a
+degenerate-but-real route set: <code>Route::resource('/photos/', …)</code> names its
+routes <code>index</code>/<code>show</code> (no <code>photos.</code> prefix) rather than <code>photos.index</code>.
+The same applies to an empty name and to doubled dots (<code>photos..comments</code>).
+These are absurd inputs that Laravel handles badly too, so the current
+tidying is arguably more useful; the divergence is recorded here rather
+than fixed because it makes the unknown-route diagnostic disagree with the
+framework in both directions.</p>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/route_names.rs</code>, alongside the
+existing <code>resource_registration</code> handling.</p>
+<h4 id="l46-can-on-a-user-model-the-receiver-does-not-name">L46. <code>-&gt;can()</code> on a user model the receiver does not name<a class="headerlink" href="#l46-can-on-a-user-model-the-receiver-does-not-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium-High · Complexity: Medium-High</strong></p>
+<p>Authorization abilities are recognized on <code>Gate::allows()</code>,
+<code>$this-&gt;authorize()</code>, the <code>can:</code> middleware parameter, and Blade's <code>@can</code>,
+but the most common spelling of all, <code>$user-&gt;can('update', $post)</code>, is
+only recognized when the receiver plainly reads as the authenticated user:
+a variable or property whose name ends in <code>user</code>, or any <code>user()</code> call
+(<code>auth()-&gt;user()</code>, <code>Auth::user()</code>, <code>$request-&gt;user()</code>).</p>
+<p>An application whose user model is not called <code>User</code> writes the same check
+and gets nothing. <code>$customer-&gt;can('update', $routine)</code>,
+<code>$member-&gt;canAny([…])</code>, and <code>$account-&gt;cannot(…)</code> are all invisible: no
+completion inside the string, no hover, no go-to-definition, and no
+unknown-ability diagnostic. In a production codebase where every
+authorization call is written that way, the whole feature is inert.</p>
+<p>The receiver's <em>type</em> is what settles this, and <code>can()</code> is far too ordinary
+a method name to claim on the name alone, so the fix is the mechanism main
+already uses for render sites whose receiver only a type settles: emit a
+candidate site during extraction and confirm it in a later, type-aware
+pass, the way <code>ViewReceiverSite</code> /
+<code>Backend::typed_receiver_view_spans</code> does. A receiver that resolves to the
+configured auth model (or to <code>Illuminate\Contracts\Auth\Access\Authorizable</code>)
+makes the call an authorization check; anything else leaves it alone. The
+existing name heuristic stays as the cheap path that needs no type
+resolution at all.</p>
+<p><strong>Where to look:</strong> <code>receiver_is_user_like</code> in
+<code>symbol_map/extraction/laravel.rs</code> and its completion-side twin in
+<code>completion/laravel_string_keys.rs</code>; <code>ViewReceiverSite</code> in
+<code>symbol_map/mod.rs</code> for the confirm-later shape.</p>
+<h4 id="l49-unguarded-eloquent-mass-assignment-diagnostic">L49. Unguarded Eloquent mass assignment diagnostic<a class="headerlink" href="#l49-unguarded-eloquent-mass-assignment-diagnostic" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p><code>Model::create($request-&gt;all())</code> (and <code>fill()</code>/<code>update()</code> with an
+unfiltered array) silently drops every key the model hasn't declared
+<code>$fillable</code> for, or throws <code>MassAssignmentException</code> in strict mode —
+a common first-app footgun with no signal today. Flag a call whose
+attribute-array argument is not a literal (so its keys can't be
+checked individually) and whose target model has neither <code>$fillable</code>
+nor <code>$guarded = []]</code> declared, on <code>create()</code>, <code>fill()</code>, <code>update()</code>,
+<code>updateOrCreate()</code>, <code>firstOrCreate()</code>, and <code>firstOrNew()</code>. The model
+resolution and column-source machinery L30 already needs (and the
+diagnostic's model-argument matching) share the same receiver-typing
+path, so build them together.</p>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/model_extraction.rs</code> for
+existing <code>$fillable</code>/<code>$guarded</code> reads; <code>diagnostics/</code> for the
+call-site diagnostic pattern used by similarly-shaped checks.</p>
+<h4 id="l50-create-route-quick-fix-for-an-unresolved-route-name">L50. "Create route" quick-fix for an unresolved route name<a class="headerlink" href="#l50-create-route-quick-fix-for-an-unresolved-route-name" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The unknown-route-name diagnostic (fed by <code>route_names.rs</code>) has no
+accompanying fix today. Once the diagnostic fires, generate a
+<code>Route::get('{path}', [{Controller}::class, '{method}'])
+-&gt;name('{name}');</code> stub appended to <code>routes/web.php</code> (or <code>api.php</code> if
+the call site is <code>Route::apiResource</code>-shaped context), inferring path
+and controller from the route name's own conventional dashes/dots
+where possible and otherwise leaving placeholders.</p>
+<p><strong>Where to look:</strong> <code>code_actions/</code> for the code-action registration
+pattern used by other "declare the missing thing" fixes;
+<code>virtual_members/laravel/route_names.rs</code> for the existing scanner
+this reuses for the diagnostic and the insertion point.</p>
+<h4 id="l51-convert-facade-call-to-dependency-injection-refactor">L51. "Convert facade call to dependency injection" refactor<a class="headerlink" href="#l51-convert-facade-call-to-dependency-injection-refactor" title="Permanent link">&para;</a></h4>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>A code action on a facade call inside a class method (<code>Cache::get(...)</code>,
+<code>Log::info(...)</code>) that adds a constructor-promoted property typed to
+the facade's underlying contract (resolved the same way <code>app('cache')</code>
+already resolves to a concrete class for member completion) and
+rewrites the call site to <code>$this-&gt;{property}-&gt;{method}(...)</code>. Purely
+mechanical once the facade-to-contract resolution already used
+elsewhere is in hand; skip call sites already inside a closure that
+captures <code>$this</code> differently, and skip static/trait contexts where
+constructor injection doesn't apply.</p>
+<p><strong>Where to look:</strong> <code>code_actions/</code> for the promote-to-constructor
+pattern already used elsewhere; <code>virtual_members/laravel/facade.rs</code>
+for the facade-to-concrete-class resolution to reuse.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

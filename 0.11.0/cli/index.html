@@ -1,0 +1,2850 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/cli/">
+      
+      
+        <link rel="prev" href="../configuration/">
+      
+      
+        <link rel="next" href="../BUILDING/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>CLI Reference - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#cli-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              CLI Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Modes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#move" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>move</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="move">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-move-could-not-reach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What a move could not reach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tcp-transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        TCP Transport
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TCP Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Connecting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analyze" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>analyze</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="analyze">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What it checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reported-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reported diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>fix</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="fix">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Available rules
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dry-run-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Dry-run example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>format</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>init</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CI Integration
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CI Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-use-it-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why use it in CI?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#github-actions-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GitHub Actions example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Common patterns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../todo/type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Modes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#move" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>move</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="move">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-a-move-could-not-reach" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What a move could not reach
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#tcp-transport" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        TCP Transport
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="TCP Transport">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connecting" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Connecting
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#analyze" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>analyze</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="analyze">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-checks" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        What it checks
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Usage
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#options_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#reported-diagnostics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Reported diagnostics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>fix</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="fix">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#available-rules" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Available rules
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#dry-run-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Dry-run example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#format" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>format</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="format">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#options_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Options
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exit-codes_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exit codes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-output_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Example output
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#idempotency_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Idempotency
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#init" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>init</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ci-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        CI Integration
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CI Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#why-use-it-in-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Why use it in CI?
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#github-actions-example" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        GitHub Actions example
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#common-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Common patterns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/cli.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="cli-reference">CLI Reference<a class="headerlink" href="#cli-reference" title="Permanent link">&para;</a></h1>
+<p>PHPantom is a language server, but it also ships CLI tools for batch
+analysis, automated fixing, and formatting. These run the same engine
+that powers the editor, so results are consistent between what you see
+in your editor and what CI reports.</p>
+<h2 id="modes">Modes<a class="headerlink" href="#modes" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>phpantom_lsp</code></td>
+<td>Start the LSP server over stdin/stdout (the default)</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp --tcp 9257</code></td>
+<td>Start the LSP server listening on a TCP port</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp analyze</code></td>
+<td>Report diagnostics across the project</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp fix</code></td>
+<td>Apply automated code fixes across the project</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp format</code></td>
+<td>Format PHP files and Blade templates</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp move</code></td>
+<td>Move classes or namespaces and update references</td>
+</tr>
+<tr>
+<td><code>phpantom_lsp init</code></td>
+<td>Generate a default <code>.phpantom.toml</code> config file</td>
+</tr>
+</tbody>
+</table>
+<p>Running with no subcommand starts the language server. Editors launch
+this automatically.</p>
+<hr />
+<h2 id="move"><code>move</code><a class="headerlink" href="#move" title="Permanent link">&para;</a></h2>
+<p>Moves a class or namespace and updates its declarations, imports, and references
+across the project. Inputs can be fully-qualified names or PSR-4 paths:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span><span class="s1">&#39;App\Old\Widget&#39;</span><span class="w"> </span><span class="s1">&#39;App\Domain\Gadget&#39;</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>src/Old/Widget.php<span class="w"> </span>src/Domain/Gadget.php
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span><span class="s1">&#39;App\Old&#39;</span><span class="w"> </span><span class="s1">&#39;App\Domain&#39;</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>src/Old<span class="w"> </span>src/Domain
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>phpantom_lsp<span class="w"> </span>move<span class="w"> </span>--dry-run<span class="w"> </span>--format<span class="w"> </span>json<span class="w"> </span>src/Old<span class="w"> </span>src/Domain
+</code></pre></div>
+<p><code>FROM</code> decides what is being moved, and <code>TO</code> is read the same way: a class
+moves to a full destination name, so <code>move 'App\Old\Widget' 'App\Domain'</code>
+renames the class to <code>Domain</code>, and moving it into <code>App\Domain</code> under its own
+name is written out as <code>'App\Domain\Widget'</code>.</p>
+<p>Path forms require a Composer PSR-4 mapping. A file identifies one class and a
+directory identifies its namespace prefix. The command refuses occupied class
+destinations and namespace merges with clashing class names before writing any
+files.</p>
+<p>A destination no PSR-4 mapping covers rewrites the declarations and their
+references, but no file can follow them, which leaves the autoloader unable to
+find what moved. That is reported as a warning, so a script can catch it. A
+destination under a <em>different</em> mapping is an ordinary move: the files follow it
+to that mapping's directory.</p>
+<h3 id="what-a-move-could-not-reach">What a move could not reach<a class="headerlink" href="#what-a-move-could-not-reach" title="Permanent link">&para;</a></h3>
+<p>The rewriter only reaches what it can resolve as a symbol. A namespace named in
+a Blade template, a Doctrine or Symfony YAML config, a PHPStan baseline, or a
+plain path string is invisible to it, and so is a directory spelled out inside
+<code>app_path('Elastic/Config/ILM/')</code>. Rewriting those is out of scope: nothing can
+tell whether a string is a path or a label, and the matching key in a deployment
+secret is out of reach entirely.</p>
+<p>So the move reports them instead. Once the plan is built, the project is scanned
+as it will look afterwards, and every leftover mention of the old name or the old
+location becomes a warning with the file and line it sits on:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>Would move namespace `App\Entity` to `App\Domain\Entity` (71 file(s) changed, 1 path(s) moved).
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>Warning: config/packages/doctrine.yaml:26: The old path `src/Entity` still appears here. ...
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>Warning: src/Repository/SeasonRepository.php:65: The old name `App\Entity` still appears here. ...
+</code></pre></div>
+<p><code>files_changed</code> can then be read against a stated list of what was left alone,
+rather than assumed complete. The scan covers every file regardless of extension,
+skipping <code>vendor/</code>, <code>.git/</code>, and anything <code>.gitignore</code> or <code>[indexing] exclude</code>
+rules out.</p>
+<h3 id="options">Options<a class="headerlink" href="#options" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM</code></td>
+<td>Source class, namespace, PHP file, or PSR-4 directory.</td>
+</tr>
+<tr>
+<td><code>TO</code></td>
+<td>Destination name or path, of the same kind as <code>FROM</code>.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>Validate and report the move without changing the project.</td>
+</tr>
+<tr>
+<td><code>--no-colour</code></td>
+<td>Disable coloured output.</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td>Output format: <code>table</code> (default), <code>github</code>, or <code>json</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--format json</code> emits the same <code>{"totals": …, "files": …, "errors": []}</code> shape
+<code>analyze</code> does, with the move's own counters under a <code>move</code> key, so both commands
+can be consumed by the same tooling. <code>--format github</code> emits workflow
+annotations; the default <code>table</code> adds them automatically when <code>GITHUB_ACTIONS</code>
+is set.</p>
+<h3 id="exit-codes">Exit codes<a class="headerlink" href="#exit-codes" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Move applied, or valid dry-run completed</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Invalid input, conflict, or filesystem error</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="tcp-transport">TCP Transport<a class="headerlink" href="#tcp-transport" title="Permanent link">&para;</a></h2>
+<p>By default PHPantom communicates over stdin/stdout, which is what most
+editors expect. The <code>--tcp</code> flag switches to TCP transport instead,
+which is useful when you want to attach a debugger to the server
+process, connect from an IDE plugin that prefers a network socket, or
+just poke at the JSON-RPC stream with <code>nc</code> or <code>socat</code>.</p>
+<p>The server binds to the given address, accepts a single client
+connection, serves it, and exits when the client disconnects.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span><span class="w">                  </span><span class="c1"># listen on 127.0.0.1:9257</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">127</span>.0.0.1:9257<span class="w">       </span><span class="c1"># same, explicit host</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span>.0.0.0:9257<span class="w">         </span><span class="c1"># listen on all interfaces</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">0</span><span class="w">                    </span><span class="c1"># OS picks a free port</span>
+</code></pre></div>
+<p>When the server starts it prints the bound address to stderr:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>PHPantom LSP listening on tcp://127.0.0.1:9257
+</code></pre></div>
+<p>This is especially handy with port <code>0</code>: the OS assigns an available
+port and the server tells you which one it picked.</p>
+<h3 id="connecting">Connecting<a class="headerlink" href="#connecting" title="Permanent link">&para;</a></h3>
+<p>Any LSP client that supports TCP can connect. For quick manual testing:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># In one terminal, start the server:</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>phpantom_lsp<span class="w"> </span>--tcp<span class="w"> </span><span class="m">9257</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># In another terminal, connect and send JSON-RPC:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>nc<span class="w"> </span><span class="m">127</span>.0.0.1<span class="w"> </span><span class="m">9257</span>
+</code></pre></div>
+<h3 id="options_1">Options<a class="headerlink" href="#options_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--tcp &lt;ADDR&gt;</code></td>
+<td>Address to listen on. Full <code>HOST:PORT</code> or just <code>PORT</code> (defaults to <code>127.0.0.1</code>).</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="analyze"><code>analyze</code><a class="headerlink" href="#analyze" title="Permanent link">&para;</a></h2>
+<p>Scans PHP files and reports PHPantom diagnostics in a PHPStan-style
+table format. The goal is full symbol resolution: every class, member,
+and function call in your codebase should be resolvable. When that
+holds, completion and hover work everywhere, and PHPStan gets the type
+information it needs at every level.</p>
+<p>Use it to find and fix the spots where the editor can't resolve a
+symbol, so you can achieve and maintain full type coverage across
+the project.</p>
+<h3 id="what-it-checks">What it checks<a class="headerlink" href="#what-it-checks" title="Permanent link">&para;</a></h3>
+<p>It doesn't try to find every possible bug. Its main focus is symbol
+resolution: every class, member, and function call should point to
+something real. It also catches basic correctness issues like wrong
+argument counts and missing interface implementations. When a codebase
+passes cleanly, completions work everywhere for every developer on the
+team.</p>
+<p>That makes it useful in a few situations:</p>
+<ul>
+<li><strong>Teams that just want completions to work in their editor.</strong> If
+  your goal is "every <code>-&gt;</code> and <code>::</code> resolves to something" rather
+  than "catch every possible runtime error," PHPantom's analysis
+  covers exactly that.</li>
+<li><strong>As a companion to PHPStan at a moderate level.</strong> A team running
+  PHPStan at level 4 (catching dead code and type mismatches) can add
+  PHPantom's analysis to enforce that every class, member, and function
+  is resolvable across the full codebase. PHPStan catches logic errors,
+  PHPantom catches structural gaps. Together they cover a useful quality
+  surface without the effort of configuring PHPStan at max level.</li>
+<li><strong>As a quick sanity check.</strong> Point it at a Composer project and it
+  reports what it finds. No baselines, no ignore files, no level to
+  choose. The only configuration worth knowing about is
+  <code>unresolved-member-access</code>: enable it in <code>.phpantom.toml</code> to also
+  flag member access on variables that are <code>mixed</code>, or whose type could
+  not be worked out (off by default because it is noisy on untyped
+  codebases).</li>
+</ul>
+<blockquote>
+<p>[!NOTE]
+There are still occasional false positives, though they are getting
+fewer with each release. If you hit one, please
+<a href="https://github.com/PHPantom-dev/phpantom_lsp/issues">report it</a>.</p>
+</blockquote>
+<h3 id="usage">Usage<a class="headerlink" href="#usage" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w">                             </span><span class="c1"># scan entire project</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/<span class="w">                        </span><span class="c1"># scan a subdirectory</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>src/Foo.php<span class="w">                 </span><span class="c1"># scan a single file</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>app/<span class="w"> </span>lib/Helper.php<span class="w">         </span><span class="c1"># scan several paths at once</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w">          </span><span class="c1"># errors and warnings only</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>error<span class="w">            </span><span class="c1"># errors only</span>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w"> </span><span class="c1"># explicit project root</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--no-colour<span class="w">                 </span><span class="c1"># plain text output</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--debug<span class="w"> </span>-vv<span class="w">                 </span><span class="c1"># trace file-by-file progress</span>
+</code></pre></div>
+<h3 id="options_2">Options<a class="headerlink" href="#options_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[PATH]...</code></td>
+<td>Files or directories to analyze. Repeatable; the results are the union of every path given. Defaults to the entire project.</td>
+</tr>
+<tr>
+<td><code>--severity &lt;LEVEL&gt;</code></td>
+<td>Minimum severity: <code>all</code> (default), <code>warning</code>, or <code>error</code>.</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--no-colour</code></td>
+<td>Disable ANSI colour output.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td>Output format: <code>table</code> (default), <code>github</code>, or <code>json</code>.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>Print each file path as it is analyzed and disable the progress bar. Also reports files that take unusually long.</td>
+</tr>
+<tr>
+<td><code>-v</code>, <code>-vv</code>, <code>-vvv</code></td>
+<td>Increase verbosity. With <code>--debug</code>: <code>-v</code> adds per-file durations, <code>-vv</code> adds worker ids and parse-phase tracing, <code>-vvv</code> adds memory usage. <code>-vv</code> and above imply <code>--debug</code>. <code>-v</code> alone prints a timing summary for the parse, class-population, and diagnostic phases.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="exit-codes_1">Exit codes<a class="headerlink" href="#exit-codes_1" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>No diagnostics found</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Diagnostics were found</td>
+</tr>
+<tr>
+<td>2</td>
+<td>A <code>PATH</code> argument does not exist</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-output">Example output<a class="headerlink" href="#example-output" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a> ------ -------------------------------------------
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a> ------ -------------------------------------------
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>   15     Unknown class &#39;App\Models\LegacyUser&#39;.
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>          🪪  unknown_class
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>   42     Call to undefined method Post::archive().
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>          🪪  unknown_member
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a> ------ -------------------------------------------
+</code></pre></div>
+<h3 id="reported-diagnostics">Reported diagnostics<a class="headerlink" href="#reported-diagnostics" title="Permanent link">&para;</a></h3>
+<p>The analyze command reports the same diagnostics you see in your editor.
+Each has a rule identifier shown below the message.</p>
+<table>
+<thead>
+<tr>
+<th>Identifier</th>
+<th>Severity</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>syntax_error</code></td>
+<td>Error</td>
+<td>PHP parse errors</td>
+</tr>
+<tr>
+<td><code>unknown_class</code></td>
+<td>Warning</td>
+<td>Class, interface, trait, or enum not resolvable</td>
+</tr>
+<tr>
+<td><code>unknown_member</code></td>
+<td>Warning</td>
+<td>Property or method not found on the resolved class</td>
+</tr>
+<tr>
+<td><code>unknown_function</code></td>
+<td>Error</td>
+<td>Function call not resolvable</td>
+</tr>
+<tr>
+<td><code>argument_count</code></td>
+<td>Error</td>
+<td>Wrong number of arguments to a function or method</td>
+</tr>
+<tr>
+<td><code>implementation_error</code></td>
+<td>Error</td>
+<td>Missing required interface or abstract methods</td>
+</tr>
+<tr>
+<td><code>scalar_member_access</code></td>
+<td>Error</td>
+<td>Member access on a scalar type (int, string, etc.)</td>
+</tr>
+<tr>
+<td><code>invalid_member_access</code></td>
+<td>Error</td>
+<td><code>private</code> or <code>protected</code> member reached from outside</td>
+</tr>
+<tr>
+<td><code>unused_import</code></td>
+<td>Hint</td>
+<td><code>use</code> statement with no references in the file</td>
+</tr>
+<tr>
+<td><code>deprecated</code></td>
+<td>Hint</td>
+<td>Reference to a <code>@deprecated</code> symbol</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="fix"><code>fix</code><a class="headerlink" href="#fix" title="Permanent link">&para;</a></h2>
+<p>Applies code fixes across the project. Specify which rules to run, or
+omit <code>--rule</code> to run all preferred native fixers.</p>
+<p>This is useful for cleaning up an entire codebase in one pass. For
+example, a project with hundreds of unused <code>use</code> statements can be
+cleaned up in seconds rather than file by file.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w">                                  </span><span class="c1"># apply all preferred fixers</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w">             </span><span class="c1"># only remove unused imports</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--rule<span class="w"> </span>deprecated<span class="w">  </span><span class="c1"># multiple rules</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w">                        </span><span class="c1"># preview without writing</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/<span class="w">                             </span><span class="c1"># restrict to a subdirectory</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>src/Foo.php<span class="w">                      </span><span class="c1"># fix a single file</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">      </span><span class="c1"># explicit project root</span>
+</code></pre></div>
+<h3 id="options_3">Options<a class="headerlink" href="#options_3" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[PATH]</code></td>
+<td>File or directory to fix. Defaults to the entire project.</td>
+</tr>
+<tr>
+<td><code>--rule &lt;RULE&gt;</code></td>
+<td>Rule to apply (repeatable). Omit to run all preferred native rules.</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>Report what would change without writing files.</td>
+</tr>
+<tr>
+<td><code>--with-phpstan</code></td>
+<td>Enable PHPStan-based fixers (future feature).</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--no-colour</code></td>
+<td>Disable ANSI colour output.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="exit-codes_2">Exit codes<a class="headerlink" href="#exit-codes_2" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Fixes applied successfully (or nothing to fix)</td>
+</tr>
+<tr>
+<td>1</td>
+<td>Error (bad arguments, write failure, etc.)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Dry-run found fixable issues (nothing written)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="available-rules">Available rules<a class="headerlink" href="#available-rules" title="Permanent link">&para;</a></h3>
+<p>Rules correspond to diagnostic identifiers.</p>
+<table>
+<thead>
+<tr>
+<th>Rule</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>unused_import</code></td>
+<td>Remove unused <code>use</code> statements</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-output_1">Example output<a class="headerlink" href="#example-output_1" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a> ------ -------------------------------------------
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a> ------ -------------------------------------------
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>          🔧  unused_import
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>    6     Unused import &#39;App\Support\OldHelper&#39;
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>          🔧  unused_import
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a> ------ -------------------------------------------
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a> [FIXED] Applied 2 fixes across 1 file
+</code></pre></div>
+<h3 id="dry-run-example">Dry-run example<a class="headerlink" href="#dry-run-example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a> ------ -------------------------------------------
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a>   Line   src/Service/UserService.php
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a> ------ -------------------------------------------
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>    5     Unused import &#39;App\Models\LegacyUser&#39;
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>          🔧  unused_import
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a> ------ -------------------------------------------
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a> [DRY RUN] 1 fix in 1 file (not applied)
+</code></pre></div>
+<h3 id="idempotency">Idempotency<a class="headerlink" href="#idempotency" title="Permanent link">&para;</a></h3>
+<p>Running <code>fix</code> twice produces the same result as running it once. If
+all issues are already resolved, the command exits with code 0 and
+writes nothing.</p>
+<hr />
+<h2 id="format"><code>format</code><a class="headerlink" href="#format" title="Permanent link">&para;</a></h2>
+<p>Formats every PHP file and Blade template in the project with the same
+formatter the editor runs on save, or, with <code>--check</code>, reports the files
+that are not formatted and exits non-zero without writing anything. That
+is the role <code>blade-formatter -c</code>, <code>phpcs</code>, and <code>php-cs-fixer --dry-run</code>
+play in a pipeline, so a CI job can require that a pull request ran the
+formatter.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w">                               </span><span class="c1"># format the whole project</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w">                       </span><span class="c1"># report unformatted files, write nothing</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>resources/views<span class="w">               </span><span class="c1"># restrict to a subdirectory</span>
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>app/Foo.php<span class="w">                   </span><span class="c1"># format a single file</span>
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>--format<span class="w"> </span>github<span class="w">       </span><span class="c1"># annotate a pull request diff</span>
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--project-root<span class="w"> </span>/path/to/app<span class="w">   </span><span class="c1"># explicit project root</span>
+</code></pre></div>
+<p>Each file goes through the strategy PHPantom resolves for the project, so
+a run honours a Laravel Pint, php-cs-fixer, or PHP_CodeSniffer the project
+depends on, and uses the built-in formatter otherwise. Blade templates
+resolve separately: Pint when the project formats Blade with it, the
+built-in reindenter otherwise. See
+<a href="../configuration/#formatting"><code>[formatting]</code></a> for how that is decided and how
+to override it. The run opens with a line on stderr naming what it
+resolved, so a CI log records which formatter enforced the result.</p>
+<p>Templates whose indentation is output rather than layout (Envoy task
+files, Markdown mail templates, Laravel Boost guidelines) are left alone,
+and <code>--check</code> never fails a project for having one. Formatting turned off
+in <code>.phpantom.toml</code> exits 0 with a note rather than reporting every file
+as formatted.</p>
+<h3 id="options_4">Options<a class="headerlink" href="#options_4" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[PATH]...</code></td>
+<td>Files or directories to format. Defaults to the entire project.</td>
+</tr>
+<tr>
+<td><code>--check</code></td>
+<td>List the files that are not formatted and write nothing.</td>
+</tr>
+<tr>
+<td><code>--indent-size &lt;N&gt;</code></td>
+<td>Spaces per indentation level for Blade templates (default 4).</td>
+</tr>
+<tr>
+<td><code>--use-tabs</code></td>
+<td>Indent Blade templates with tabs instead of spaces.</td>
+</tr>
+<tr>
+<td><code>--project-root &lt;DIR&gt;</code></td>
+<td>Project root directory. Defaults to the current working directory.</td>
+</tr>
+<tr>
+<td><code>--no-colour</code></td>
+<td>Disable ANSI colour output.</td>
+</tr>
+<tr>
+<td><code>--format &lt;FORMAT&gt;</code></td>
+<td><code>table</code> (default), <code>github</code>, or <code>json</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>--indent-size</code> and <code>--use-tabs</code> reach the built-in Blade reindenter
+only, which takes indentation from the editor over LSP and has no other
+source for it on the command line. PHP files are formatted to the
+project's own rules either way.</p>
+<h3 id="exit-codes_3">Exit codes<a class="headerlink" href="#exit-codes_3" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0</td>
+<td>Every file is formatted, or every file was written</td>
+</tr>
+<tr>
+<td>1</td>
+<td>A file could not be read, formatted, or written</td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>--check</code> found files that are not formatted</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-output_2">Example output<a class="headerlink" href="#example-output_2" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a> resources/views/home.blade.php
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a> src/Service/UserService.php
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a> [CHECK] 2 files would be reformatted
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>phpantom_lsp<span class="w"> </span>format
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a> resources/views/home.blade.php
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a> src/Service/UserService.php
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a> [FORMATTED] Reformatted 2 files
+</code></pre></div>
+<h3 id="idempotency_1">Idempotency<a class="headerlink" href="#idempotency_1" title="Permanent link">&para;</a></h3>
+<p>Running <code>format</code> twice produces the same result as running it once, and
+<code>--check</code> passes immediately afterwards. That is what makes the pair
+usable as a CI gate: the job runs <code>--check</code>, and a contributor clears it
+by running the command without it.</p>
+<hr />
+<h2 id="init"><code>init</code><a class="headerlink" href="#init" title="Permanent link">&para;</a></h2>
+<p>Creates a <code>.phpantom.toml</code> in the current directory with a JSON schema
+directive and a link to the configuration reference. The file is
+intentionally minimal — add only the settings you want to override.
+Editors with TOML schema support (Zed, VS Code + Even Better TOML,
+Neovim) provide autocomplete and hover documentation for all available
+options via the schema. Safe to run if the file already exists (it will
+not overwrite).</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a>phpantom_lsp<span class="w"> </span>init
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>phpantom_lsp<span class="w"> </span>init<span class="w"> </span>--global<span class="w">   </span><span class="c1"># user-wide defaults, inherited by every project</span>
+</code></pre></div>
+<p><code>--global</code> writes to the platform config directory
+(<code>~/.config/phpantom_lsp/.phpantom.toml</code> on Linux and macOS) instead, creating it
+if needed. Every project reads that file first and merges its own
+<code>.phpantom.toml</code> over it key by key, so put the settings you want
+everywhere in the global file and keep project configs to the
+differences.</p>
+<p>See the <a href="../configuration/">Configuration Reference</a> for details on
+available settings.</p>
+<hr />
+<h2 id="ci-integration">CI Integration<a class="headerlink" href="#ci-integration" title="Permanent link">&para;</a></h2>
+<p>PHPantom works well as a lightweight CI gate. It's a single static
+binary with no runtime dependencies (no PHP, no Composer, no Node). Drop
+it into a pipeline and point it at your project root.</p>
+<h3 id="why-use-it-in-ci">Why use it in CI?<a class="headerlink" href="#why-use-it-in-ci" title="Permanent link">&para;</a></h3>
+<p>Editor diagnostics only help the developer who has the editor open.
+CI analysis protects the whole team: no PR can merge if it introduces
+an unresolvable symbol, regardless of which editor each developer uses.
+Over time this keeps the codebase fully navigable, so completions,
+hover, and go-to-definition work everywhere for everyone.</p>
+<p>It also complements PHPStan rather than replacing it. PHPStan is better
+at catching logical errors, type mismatches, and dead code. PHPantom is
+better at catching structural gaps: unknown classes, unresolvable
+members, missing implementations. Running both gives you broad coverage
+without needing PHPStan at max level to get full symbol resolution.</p>
+<h3 id="github-actions-example">GitHub Actions example<a class="headerlink" href="#github-actions-example" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Type Coverage</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="nt">on</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">push</span><span class="p p-Indicator">,</span><span class="w"> </span><span class="nv">pull_request</span><span class="p p-Indicator">]</span>
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="nt">jobs</span><span class="p">:</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="w">  </span><span class="nt">phpantom</span><span class="p">:</span>
+<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
+<a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a>
+<a id="__codelineno-17-10" name="__codelineno-17-10" href="#__codelineno-17-10"></a><span class="w">      </span><span class="c1"># Use --no-dev to catch production code that depends on dev-only</span>
+<a id="__codelineno-17-11" name="__codelineno-17-11" href="#__codelineno-17-11"></a><span class="w">      </span><span class="c1"># packages (e.g. calling PHPUnit classes from application code).</span>
+<a id="__codelineno-17-12" name="__codelineno-17-12" href="#__codelineno-17-12"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install Composer dependencies</span>
+<a id="__codelineno-17-13" name="__codelineno-17-13" href="#__codelineno-17-13"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">composer install --no-interaction --prefer-dist --no-dev</span>
+<a id="__codelineno-17-14" name="__codelineno-17-14" href="#__codelineno-17-14"></a>
+<a id="__codelineno-17-15" name="__codelineno-17-15" href="#__codelineno-17-15"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Install PHPantom</span>
+<a id="__codelineno-17-16" name="__codelineno-17-16" href="#__codelineno-17-16"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">|</span>
+<a id="__codelineno-17-17" name="__codelineno-17-17" href="#__codelineno-17-17"></a><span class="w">          </span><span class="no">curl -sL https://github.com/PHPantom-dev/phpantom_lsp/releases/download/0.6.0/phpantom_lsp-x86_64-unknown-linux-gnu.tar.gz | tar xz</span>
+<a id="__codelineno-17-18" name="__codelineno-17-18" href="#__codelineno-17-18"></a><span class="w">          </span><span class="no">chmod +x phpantom_lsp</span>
+<a id="__codelineno-17-19" name="__codelineno-17-19" href="#__codelineno-17-19"></a>
+<a id="__codelineno-17-20" name="__codelineno-17-20" href="#__codelineno-17-20"></a><span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Check type coverage</span>
+<a id="__codelineno-17-21" name="__codelineno-17-21" href="#__codelineno-17-21"></a><span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./phpantom_lsp analyze --severity warning --no-colour src/</span>
+</code></pre></div>
+<p>The <code>analyze</code> step fails the build if any class, member, or function
+cannot be resolved (including unused imports). The output is clean and
+readable in the CI log.</p>
+<h3 id="common-patterns">Common patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h3>
+<p><strong>Diagnostics gate.</strong> Fail the build when PHPantom finds unresolvable
+symbols:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--severity<span class="w"> </span>warning<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+</code></pre></div>
+<p><strong>Enforce clean imports.</strong> Fail the build when unused imports exist:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--dry-run<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+</code></pre></div>
+<p><strong>Formatting gate.</strong> Fail the build when a file was committed
+unformatted:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a>phpantom_lsp<span class="w"> </span>format<span class="w"> </span>--check<span class="w"> </span>--project-root<span class="w"> </span>.<span class="w"> </span>--no-colour
+</code></pre></div>
+<p><strong>Pre-commit hook.</strong> Clean up imports before every commit:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--rule<span class="w"> </span>unused_import<span class="w"> </span>--project-root<span class="w"> </span>.
+</code></pre></div>
+<p><strong>Combine analyze and fix.</strong> Run fixes first, then check what remains:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a>phpantom_lsp<span class="w"> </span>fix<span class="w"> </span>--project-root<span class="w"> </span>.
+<a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a>phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>.
+</code></pre></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

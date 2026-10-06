@@ -1,0 +1,2555 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/type-inference/">
+      
+      
+        <link rel="prev" href="../signature-help/">
+      
+      
+        <link rel="next" href="../../benchmarks/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Type Inference - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-type-inference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Type Inference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#t3-property-hooks-php-84" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T3. Property hooks (PHP 8.4)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="T3. Property hooks (PHP 8.4)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asymmetric-visibility-also-php-84-85" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Asymmetric visibility (also PHP 8.4 / 8.5)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t4-non-empty-type-narrowing-and-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T4. Non-empty-* type narrowing and propagation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t5-fiber-type-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T5. Fiber type resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t6-closurebind-closurefromcallable-return-type-preservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T6. <code>Closure::bind()</code> / <code>Closure::fromCallable()</code> return type preservation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t10-ternary-expression-as-rhs-of-list-destructuring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T10. Ternary expression as RHS of list destructuring
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t11-nested-list-destructuring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T11. Nested list destructuring
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t13-closure-variables-lose-callable-signature-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T13. Closure variables lose callable signature detail
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t20-type-narrowing-reconciliation-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T20. Type narrowing reconciliation engine
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t28-template-inference-depth-priority-shallowest-bound-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T28. Template inference depth priority (shallowest bound wins)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t29-definite-vs-possible-variable-existence-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T29. Definite vs possible variable existence tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t30-literal-type-collapse-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T30. Literal type collapse limit
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t31-closure-literal-return-shape-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T31. Closure literal-return shape inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t33-class-constant-on-an-expression-objconst-resolves-to-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T33. Class constant on an expression (<code>$obj::CONST</code>) resolves to nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T34. <code>static::CONST</code> over-narrows to the declaring class's value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t41-param-out-is-parsed-but-never-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T41. <code>@param-out</code> is parsed but never read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T44. A single enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#t3-property-hooks-php-84" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T3. Property hooks (PHP 8.4)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="T3. Property hooks (PHP 8.4)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#asymmetric-visibility-also-php-84-85" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Asymmetric visibility (also PHP 8.4 / 8.5)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t4-non-empty-type-narrowing-and-propagation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T4. Non-empty-* type narrowing and propagation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t5-fiber-type-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T5. Fiber type resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t6-closurebind-closurefromcallable-return-type-preservation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T6. <code>Closure::bind()</code> / <code>Closure::fromCallable()</code> return type preservation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t10-ternary-expression-as-rhs-of-list-destructuring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T10. Ternary expression as RHS of list destructuring
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t11-nested-list-destructuring" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T11. Nested list destructuring
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t13-closure-variables-lose-callable-signature-detail" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T13. Closure variables lose callable signature detail
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t20-type-narrowing-reconciliation-engine" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T20. Type narrowing reconciliation engine
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t28-template-inference-depth-priority-shallowest-bound-wins" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T28. Template inference depth priority (shallowest bound wins)
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t29-definite-vs-possible-variable-existence-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T29. Definite vs possible variable existence tracking
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t30-literal-type-collapse-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T30. Literal type collapse limit
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t31-closure-literal-return-shape-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T31. Closure literal-return shape inference
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t33-class-constant-on-an-expression-objconst-resolves-to-nothing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T33. Class constant on an expression (<code>$obj::CONST</code>) resolves to nothing
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T34. <code>static::CONST</code> over-narrows to the declaring class's value
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t41-param-out-is-parsed-but-never-read" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T41. <code>@param-out</code> is parsed but never read
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#t44-a-single-enum-case-has-no-type" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        T44. A single enum case has no type
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/type-inference.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-type-inference">PHPantom — Type Inference<a class="headerlink" href="#phpantom-type-inference" title="Permanent link">&para;</a></h1>
+<p>Type resolution gaps: generic resolution, conditional return types,
+type narrowing, PHP version features, and stub attribute handling.
+Items that are purely about <em>completion UX</em> or <em>stub metadata
+extraction</em> live in <a href="../completion/">completion.md</a>.</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="t3-property-hooks-php-84">T3. Property hooks (PHP 8.4)<a class="headerlink" href="#t3-property-hooks-php-84" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>PHP 8.4 introduced property hooks (<code>get</code> / <code>set</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">class User {</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">    public string $name {</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">        get =&gt; strtoupper($this-&gt;name);</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">        set =&gt; trim($value);</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="x">    }</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="x">}</span>
+</code></pre></div>
+<p>The mago parser (v1.8) already produces <code>Property::Hooked</code> and
+<code>PropertyHook</code> AST nodes, and the generic <code>.modifiers()</code>, <code>.hint()</code>,
+<code>.variables()</code> methods mean hooked properties are extracted for basic
+completion. However:</p>
+<ul>
+<li><strong>Asymmetric visibility</strong> (<code>public private(set) string $name</code>) is
+  not recognised — the <code>set</code> visibility is ignored, so filtering
+  may incorrectly allow setting a property that should be
+  write-restricted.</li>
+</ul>
+<p><strong>Fix:</strong> Parse the set-visibility modifier into a new
+<code>set_visibility</code> field on <code>PropertyInfo</code>.</p>
+<h3 id="asymmetric-visibility-also-php-84-85">Asymmetric visibility (also PHP 8.4 / 8.5)<a class="headerlink" href="#asymmetric-visibility-also-php-84-85" title="Permanent link">&para;</a></h3>
+<p>Separate from hooks, PHP 8.4 allows asymmetric visibility on plain
+and promoted properties. PHP 8.5 extended this to static properties.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">class Settings {</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">    public private(set) string $name;</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">    public function __construct(</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="x">        public protected(set) int $retries = 3,</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">    ) {}</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">}</span>
+</code></pre></div>
+<p>PHPantom currently extracts a single <code>Visibility</code> per property.
+Completion filtering uses this to decide whether a property should
+appear. A <code>public private(set)</code> property should appear for reading
+from outside the class but not for assignment contexts.</p>
+<p>Add an optional <code>set_visibility: Option&lt;Visibility&gt;</code> to
+<code>PropertyInfo</code>. Populate it from the AST modifier list (the parser
+exposes the set-visibility keyword). Completion filtering does not
+currently distinguish read vs write contexts, so the immediate fix
+is just to store the value; context-aware filtering can follow later.</p>
+<p>This shares the same <code>set_visibility</code> field as the hooked-property
+fix above, so both should be implemented together.</p>
+<hr />
+<h2 id="t4-non-empty-type-narrowing-and-propagation">T4. Non-empty-* type narrowing and propagation<a class="headerlink" href="#t4-non-empty-type-narrowing-and-propagation" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<p>PHPStan tracks <code>non-empty-string</code> and <code>non-empty-array</code> through
+built-in functions. These narrowings don't directly enable
+class-based completion, but they improve hover type display and
+would catch bugs if we add diagnostics. The first three sub-items
+share the same implementation pattern (function-name-triggered type
+narrowing in conditions or return types) and should be implemented
+together.</p>
+<p><strong>String containment narrowing.</strong> When <code>str_contains($haystack,
+$needle)</code> appears in a condition and <code>$needle</code> is known to be a
+non-empty string, narrow <code>$haystack</code> to <code>non-empty-string</code>. Same
+for <code>str_starts_with</code>, <code>str_ends_with</code>, <code>strpos</code>, <code>strrpos</code>,
+<code>stripos</code>, <code>strripos</code>, <code>strstr</code>, and the <code>mb_*</code> equivalents.
+See <code>StrContainingTypeSpecifyingExtension</code> in PHPStan.</p>
+<p><strong>Count narrowing.</strong> <code>if (count($arr) &gt; 0)</code> or
+<code>if (count($arr) &gt;= 1)</code> narrows <code>$arr</code> to <code>non-empty-array</code>.
+PHPStan handles a full matrix of comparison operators and integer
+range types against <code>count()</code> / <code>sizeof()</code> calls. See
+<code>CountFunctionTypeSpecifyingExtension</code>.</p>
+<p><strong>String function propagation.</strong> Passing a <code>non-empty-string</code> to
+<code>addslashes()</code>, <code>urlencode()</code>, <code>htmlspecialchars()</code>,
+<code>escapeshellarg()</code>, <code>escapeshellcmd()</code>, <code>preg_quote()</code>,
+<code>rawurlencode()</code>, or <code>rawurldecode()</code> should return
+<code>non-empty-string</code>. See <code>NonEmptyStringFunctionsReturnTypeExtension</code>.</p>
+<p><strong>Element writes produce a non-empty array.</strong> After <code>$a[$k] = $v</code> or
+<code>$a[] = $v</code> the array holds at least one element, so PHPStan reports
+<code>non-empty-array&lt;K, V&gt;</code> / <code>non-empty-list&lt;V&gt;</code>. We report the
+possibly-empty spellings, which loses the guarantee that <code>reset()</code>,
+<code>array_pop()</code> and friends return a value rather than <code>false</code>.</p>
+<p>Emitting the non-empty spelling from the write helpers
+(<code>merge_push_type</code>, <code>merge_keyed_type</code> in
+<code>type_engine/variable/resolution.rs</code>) is a two-line change, but it is
+only half the work: every place that joins branches has to relax the
+guarantee again when one side never ran. A <code>foreach</code> whose body writes
+a key merges the pre-loop scope back in at exit, and today that join
+either drops the <code>array{}</code> alternative outright (reporting
+<code>non-empty-array</code> after a loop that may not have iterated at all) or
+keeps it as a separate union member (<code>array{}|non-empty-list&lt;string&gt;</code>,
+whose offset reads then carry a spurious <code>null</code>). Both spellings are
+wrong; the join has to widen <code>non-empty-X</code> to <code>X</code> instead. So the work
+is a possibly-empty widening at each join point, not a change to the
+write helpers.</p>
+<hr />
+<h2 id="t5-fiber-type-resolution">T5. Fiber type resolution<a class="headerlink" href="#t5-fiber-type-resolution" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>Generator&lt;TKey, TValue, TSend, TReturn&gt;</code> has dedicated support for
+extracting each type parameter (value type for foreach, send type
+for <code>$var = yield</code>, return type for <code>getReturn()</code>). <code>Fiber</code> has no
+equivalent handling — <code>Fiber::start()</code>, <code>Fiber::resume()</code>, and
+<code>Fiber::getReturn()</code> don't resolve their generic types.</p>
+<p>PHP userland rarely annotates Fiber with generics (unlike Generator),
+so this is low priority. If demand appears, the fix would mirror the
+Generator extraction in <code>docblock/types.rs</code>.</p>
+<hr />
+<h2 id="t6-closurebind-closurefromcallable-return-type-preservation">T6. <code>Closure::bind()</code> / <code>Closure::fromCallable()</code> return type preservation<a class="headerlink" href="#t6-closurebind-closurefromcallable-return-type-preservation" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<p>Variables holding closure literals, arrow functions, and first-class
+callables now resolve to the <code>Closure</code> class, so <code>$fn-&gt;bindTo()</code>,
+<code>$fn-&gt;call()</code>, etc. offer completions.  The remaining gap is
+<em>preserving the closure's callable signature</em> through <code>Closure::bind()</code>
+and resolving <code>Closure::fromCallable('functionName')</code> to the actual
+function's signature as a typed <code>Closure</code>.  This is relevant for DI
+containers and middleware patterns but is a niche use case.</p>
+<p>See <code>ClosureBindDynamicReturnTypeExtension</code> and
+<code>ClosureFromCallableDynamicReturnTypeExtension</code> in PHPStan. A
+<code>Closure::fromCallable($cb)</code> assertion in
+<code>tests/phpstan_data/Analyser/Fiber/fnsr.php</code> is <code>// SKIP</code> on this.</p>
+<hr />
+<h2 id="t10-ternary-expression-as-rhs-of-list-destructuring">T10. Ternary expression as RHS of list destructuring<a class="headerlink" href="#t10-ternary-expression-as-rhs-of-list-destructuring" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>List destructuring (<code>[$a, $b] = expr</code>) resolves element types when
+the RHS is a function call returning an array shape, or a simple
+array literal. When the RHS is a ternary expression whose branches
+are array literals or array-shape-returning calls, the resolver
+doesn't drill into the branches to union the element types.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">[$a, $b] = $cond ? [new Foo(), new Bar()] : [new Bar(), new Foo()];</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">$a-&gt;  // should see Foo|Bar members</span>
+</code></pre></div>
+<p><strong>Fixture to activate:</strong></p>
+<ul>
+<li><code>assignment/list_destructuring_conditional.fixture</code></li>
+</ul>
+<p><strong>phpactor ref:</strong> <code>assignment/list_assignment.test</code></p>
+<hr />
+<h2 id="t11-nested-list-destructuring">T11. Nested list destructuring<a class="headerlink" href="#t11-nested-list-destructuring" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Nested destructuring like <code>[[$one, $two]] = $source</code> is not resolved.
+When the RHS has a type like <code>array{array{Foo, Bar}}</code>, the outer
+destructuring peels the first dimension but the inner destructuring
+doesn't resolve individual elements.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="x">/** @return array{array{Foo, Bar}} */</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="x">function getPair(): array { return [[new Foo(), new Bar()]]; }</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="x">[[$one, $two]] = getPair();</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="x">$one-&gt;  // should see Foo members</span>
+</code></pre></div>
+<p><strong>Fixture to activate:</strong></p>
+<ul>
+<li><code>assignment/nested_list_destructuring.fixture</code></li>
+</ul>
+<p><strong>phpactor ref:</strong> <code>assignment/list_desconstruct_nested.test</code></p>
+<hr />
+<h2 id="t13-closure-variables-lose-callable-signature-detail">T13. Closure variables lose callable signature detail<a class="headerlink" href="#t13-closure-variables-lose-callable-signature-detail" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>When a variable holds a closure or arrow function, the resolution
+pipeline resolves it to the <code>Closure</code> class name. The callable
+signature (parameter types, return type) is lost. This means:</p>
+<ol>
+<li>Passing <code>$fn</code> to an extracted method produces <code>Closure $fn</code> with
+   <code>@param (Closure(): mixed)</code> instead of the concrete signature.</li>
+<li>An explicit <code>/** @var (Closure(int): string) $fn */</code> annotation
+   is recognised by variable resolution (<code>find_var_raw_type_in_source</code>
+   returns the annotated type), but <code>clean_type_for_signature</code> now
+   correctly extracts <code>Closure</code> as the native hint. The raw type is
+   preserved for docblock generation.</li>
+</ol>
+<p>The remaining gap is that <em>unannotated</em> closures like
+<code>$fn = function(int $x): string { ... }</code> resolve to bare <code>Closure</code>
+with no signature detail. <code>infer_closure_literal_type</code> (in
+<code>rhs_resolution.rs</code>) already embeds the inferred return type in a
+<code>TypeKind::Callable</code>, but always leaves <code>params</code> empty, so it does not
+produce a full callable type string for variable-type contexts.</p>
+<p><strong>Example:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="x">$fn = function(int $x): string { return (string)$x; };</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="x">// Extracting code that uses $fn as a parameter produces:</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="x">//   @param (Closure(): mixed) $fn</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="x">// Instead of:</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="x">//   @param (Closure(int): string) $fn</span>
+</code></pre></div>
+<p><strong>What needs to change:</strong></p>
+<ol>
+<li>
+<p>When resolving a variable whose assignment RHS is a closure or
+   arrow function, build a callable type string from the literal's
+   parameter list and return type hint (e.g. <code>(Closure(int): string)</code>).
+   Return this as the variable's type string instead of bare <code>Closure</code>.</p>
+</li>
+<li>
+<p><code>clean_type_for_signature</code> already handles parenthesized callable
+   types by extracting the base name (<code>Closure</code> or <code>callable</code>), so
+   the native hint will be correct.</p>
+</li>
+<li>
+<p><code>enrichment_plain</code> should recognise that a raw type like
+   <code>(Closure(int): string)</code> already carries a full signature and
+   should not be re-enriched to <code>(Closure(): mixed)</code>.</p>
+</li>
+</ol>
+<p><strong>After fixing:</strong> verify that extract function docblock generation
+emits the concrete callable signature in the <code>@param</code> tag, and un-SKIP
+the <code>Closure(): 1</code>-style assertions in
+<code>tests/phpstan_data/Analyser/Fiber/fnsr.php</code> and the closure calls in
+<code>tests/phpstan_data/Rules/Functions/bug-anonymous-function-method-constant.php</code>
+(a closure without a declared return type, whose call reads back as
+<code>mixed</code>).</p>
+<hr />
+<h2 id="t20-type-narrowing-reconciliation-engine">T20. Type narrowing reconciliation engine<a class="headerlink" href="#t20-type-narrowing-reconciliation-engine" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
+<p>PHPantom's type narrowing in <code>type_engine/types/narrowing/</code> handles
+basic patterns (instanceof, is_* calls, null checks) but lacks the
+algebraic framework that PHPStan and Psalm use. Key gaps:</p>
+<ol>
+<li>No separate tracking of "sure types" vs "sure-not types". When
+   <code>$x !== null</code>, PHPantom should remove <code>null</code> from the union
+   (sure-not) rather than trying to intersect with "not-null".</li>
+<li>No proper AND/OR algebra. <code>$a instanceof Foo &amp;&amp; $b instanceof Bar</code>
+   should union the narrowings in true context and intersect them in
+   false context. Currently only simple cases work.</li>
+<li>No truthy/falsey distinction. <code>if ($x)</code> (truthy) vs
+   <code>if ($x === true)</code> (strict true) should produce different
+   narrowings. PHPStan uses a 4-state bitmask context.</li>
+</ol>
+<p><code>@phpstan-assert</code>/<code>@psalm-assert</code> annotations on called functions are
+now applied as narrowings at call sites (<code>extract_call_assertions</code> and
+<code>CallAssertionInfo</code> in <code>type_engine/types/narrowing/assertions.rs</code>,
+consulted from <code>type_engine/types/narrowing/guards.rs</code> and
+<code>type_engine/variable/forward_walk/cond_narrowing.rs</code>), so that gap
+from the original list is closed. It is still ad hoc rather than
+going through a unified <code>reconcile</code> dispatch, so items 1-3 remain.</p>
+<p><strong>Design:</strong> create a
+<code>fn reconcile(existing: PhpType, assertion: Assertion, negated: bool) -&gt; PhpType</code>
+function that dispatches to per-assertion-kind narrowing logic. Start
+with 15 core assertion kinds: IsType, IsNotType, IsNull, IsNotNull,
+Truthy, Falsy, IsIdentical, IsNotIdentical, IsInstanceOf,
+IsNotInstanceOf, HasMethod, HasProperty, IsGreaterThan, IsLessThan,
+NonEmptyCountable.</p>
+<p><strong>Reference:</strong> Psalm has 41 assertion types under
+<code>Psalm/Storage/Assertion/</code>. PHPStan's <code>TypeSpecifier</code> returns
+<code>SpecifiedTypes</code> with dual sure/sureNot maps.</p>
+<p><strong>Psalm's architecture (reference/psalm):</strong></p>
+<p>Psalm converts conditions to <strong>Conjunctive Normal Form</strong> (CNF). Each
+<code>Clause</code> is an OR-disjunction mapping variable string keys to assertion
+sets. The <code>Algebra</code> class provides pure functions:</p>
+<ul>
+<li><code>simplifyCNF</code> — unit propagation (<code>($a) ∧ ($a ∨ $b) → $a</code>)</li>
+<li><code>getTruthsFromFormula</code> — extract definite truths from unit clauses</li>
+<li><code>negateFormula</code> — De Morgan's law for the else-branch (mechanical,
+  no separate logic needed)</li>
+<li><code>combineOredClauses</code> — cartesian product for <code>||</code></li>
+</ul>
+<p>Key design decisions to adopt:</p>
+<ol>
+<li><strong>Clauses are content-addressed</strong> (xxh128 hash for dedup). In Rust,
+   derive <code>Hash + Eq</code> and use <code>FxHashSet</code>.</li>
+<li><strong>Complexity guards</strong> — &gt;65K clauses → bail out. Prevents exponential
+   blowup without depth caps.</li>
+<li><strong>Clauses accumulate in context</strong> — entering an <code>if</code> ANDs new clauses
+   with existing ones, giving compound narrowing for free.</li>
+<li><strong>Variables identified by string keys</strong> (<code>$a</code>, <code>$this-&gt;prop</code>,
+   <code>$a-&gt;b[c]</code>) via an <code>ExpressionIdentifier</code> — maps to our
+   <code>subject_extraction</code> approach.</li>
+<li><strong>Assertions are first-class objects</strong> with <code>getNegation()</code> — makes
+   else-branch derivation trivial.</li>
+<li><strong>Separate extraction from reconciliation</strong> — <code>AssertionFinder</code>
+   (AST → assertions) is purely separate from <code>Reconciler</code>
+   (assertions + types → narrowed types). Each is independently
+   testable.</li>
+</ol>
+<p>See Psalm's <code>Psalm\Internal\Algebra</code>, <code>Psalm\Internal\Clause</code>, and
+<code>Psalm\Internal\Analyzer\Statements\Expression\AssertionFinder</code>.</p>
+<p><strong>Depends on:</strong> The structured type representation (<code>PhpType</code>) has
+landed, which makes reconciliation much simpler than working with
+raw strings.</p>
+<hr />
+<hr />
+<h2 id="t26-class-constants-named-as-docblock-types-foobar-foobar_">T26. Class constants named as docblock types (<code>Foo::BAR</code>, <code>Foo::BAR_*</code>)<a class="headerlink" href="#t26-class-constants-named-as-docblock-types-foobar-foobar_" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A class constant named in a type position is not read at all: <code>@param
+Foo::BAR $x</code>, <code>@param self::FOO|self::BAR $x</code> and <code>@param C::class|D::class
+$x</code> all stay as unresolved text (or fall back to the native hint), where
+PHPStan and Psalm give the constant's value (<code>'bar'</code>, <code>'bar'|'foo'</code>,
+<code>'App\C'|'App\D'</code>). The same constants are read when they are the operand
+of <code>key-of&lt;&gt;</code>/<code>value-of&lt;&gt;</code>, through <code>constant_operand_shape</code>, so the value
+lookup exists; the bare reference just never reaches it. Found porting
+Psalm's <code>ConstValuesTest</code> and <code>ReconcilerTest</code>; the assertions are <code>// SKIP</code>
+in <code>tests/psalm_assertions/const_values.php</code> and
+<code>tests/psalm_assertions/type_reconciliation_reconciler.php</code>.</p>
+<p>The wildcard form resolves a pattern like <code>Foo::BAR_*</code> to the union of all
+matching constant types on the class. PHPStan supports this syntax in
+docblock type strings:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="x">class Status {</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="x">    const STATUS_ACTIVE = 1;</span>
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="x">    const STATUS_INACTIVE = 2;</span>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="x">    const STATUS_PENDING = 3;</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="x">}</span>
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="x">/** @param Status::STATUS_* $status */</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a><span class="x">function setStatus(int $status): void { ... }</span>
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a><span class="x">// $status should resolve to 1|2|3</span>
+</code></pre></div>
+<p>When the type engine encounters a constant pattern containing <code>*</code>,
+it should:</p>
+<ol>
+<li>Resolve the class (<code>Status</code>).</li>
+<li>Enumerate all constants matching the glob pattern (<code>STATUS_*</code>).</li>
+<li>Build a union of their literal types.</li>
+</ol>
+<p><strong>References:</strong>
+- PHPStan: <code>ConstantWildcardType</code> / constant enum resolution.
+- Phpactor: <code>GlobbedConstantUnionType</code>.</p>
+<hr />
+<h2 id="t28-template-inference-depth-priority-shallowest-bound-wins">T28. Template inference depth priority (shallowest bound wins)<a class="headerlink" href="#t28-template-inference-depth-priority-shallowest-bound-wins" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>When a generic type parameter is inferred from multiple argument
+positions at a call site, all inferred types are currently unioned.
+This produces overly broad types when a shallow (direct) inference
+and a deep (nested) inference compete.</p>
+<p><strong>Fix:</strong> Track an <code>appearance_depth</code> on each inferred template bound.
+When the same template param receives bounds from multiple sources,
+the shallowest (most direct) match wins. Only union bounds at the
+same depth level.</p>
+<p>For example, given:
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="x">function wrap(T $value, array&lt;T&gt; $context): T { ... }</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="x">wrap(&quot;hello&quot;, [1, 2, 3]);</span>
+</code></pre></div></p>
+<p>The <code>$value</code> argument gives <code>T = string</code> at depth 0. The <code>$context</code>
+argument gives <code>T = int</code> at depth 1 (inside <code>array&lt;&gt;</code>). The shallow
+bound (<code>string</code>) should win, not produce <code>string|int</code>.</p>
+<p><strong>Design:</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>struct TemplateBound {
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>    ty: PhpType,
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>    depth: u8,        // 0 = direct match, 1 = one generic layer deep, etc.
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>    arg_offset: u8,   // which argument produced this bound
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>}
+</code></pre></div>
+<p>When selecting the final type for a template param:
+1. Group bounds by depth.
+2. Take the shallowest depth group.
+3. Union the types within that group.</p>
+<p><strong>References:</strong>
+- Psalm: <code>TemplateBound</code> with <code>appearance_depth</code> and
+  <code>getMostSpecificTypeFromBounds</code> in <code>Psalm\Internal\Type\TemplateResult</code></p>
+<hr />
+<h2 id="t29-definite-vs-possible-variable-existence-tracking">T29. Definite vs possible variable existence tracking<a class="headerlink" href="#t29-definite-vs-possible-variable-existence-tracking" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>PHPantom currently treats all assigned variables as definitely in
+scope. This causes false negatives: a variable assigned only inside
+one branch of an <code>if</code> (without the other branch) is treated as
+always available after the <code>if</code>.</p>
+<p><strong>Fix:</strong> Split variable tracking into two maps:</p>
+<ol>
+<li><strong><code>vars_in_scope</code></strong> — variables with a definite type (assigned on
+   all code paths reaching this point).</li>
+<li><strong><code>vars_possibly_in_scope</code></strong> — variables that <em>might</em> exist
+   (assigned in only one branch). Accessing these without a guard
+   could be flagged as "possibly undefined."</li>
+</ol>
+<p>Psalm's <code>Context</code> uses exactly this split. The <code>vars_in_scope</code> map
+holds <code>Union</code> types for definitely-typed variables. The
+<code>vars_possibly_in_scope</code> map is a boolean set tracking variables that
+might exist. After an if/else where only one branch assigns <code>$x</code>,
+<code>$x</code> moves from <code>vars_in_scope</code> to <code>vars_possibly_in_scope</code> (or is
+removed from <code>vars_in_scope</code> and added to <code>vars_possibly_in_scope</code>).</p>
+<p>Additionally, contextual flags like <code>inside_isset</code> and
+<code>inside_conditional</code> should suppress diagnostics about undefined
+variables in those positions (accessing <code>$x</code> inside <code>isset($x)</code> is
+intentional).</p>
+<p><strong>Design:</strong></p>
+<ol>
+<li>Add a <code>possibly_defined: HashSet&lt;SmolStr&gt;</code> alongside the existing
+   variable type map in the forward walker state.</li>
+<li>When merging branches (if/else, try/catch), variables assigned in
+   only one path move to <code>possibly_defined</code>.</li>
+<li>Hover shows <code>T|undefined</code> or similar annotation for possibly-defined
+   variables.</li>
+<li>Future diagnostic (D-series) can warn on access of possibly-undefined
+   variables.</li>
+</ol>
+<p>Knowing that a target is definitely set also settles <code>??=</code>: on a target
+that is set and never null (a non-nullable parameter, a required shape
+key) the fallback can never be assigned, so <code>$string ??= 1</code> is still
+<code>string</code>. Today the fallback is always added; the assertions in
+<code>tests/phpstan_nsrt/coalesce-assign.php</code> are <code>// SKIP</code> against this item.</p>
+<p><strong>References:</strong>
+- Psalm: <code>Context::$vars_in_scope</code> and <code>Context::$vars_possibly_in_scope</code>
+  (<code>Psalm\Context</code>)</p>
+<hr />
+<h2 id="t30-literal-type-collapse-limit">T30. Literal type collapse limit<a class="headerlink" href="#t30-literal-type-collapse-limit" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>When combining union types, if the number of literal type variants
+(literal strings, literal ints) exceeds a threshold, collapse them to
+the parent scalar type. Without this, large switch statements, array
+initializers, or enum-like constant groups can produce unbounded union
+types that consume excessive memory and slow down type display.</p>
+<p><strong>Fix:</strong> In <code>PhpType</code> union combining logic, after merging two types:
+if the result contains more than 500 literal string values, replace
+them all with <code>string</code>. Same for literal ints → <code>int</code>.</p>
+<p>Psalm uses exactly this threshold (500 literals → scalar collapse) in
+<code>Type::combineUnionTypes()</code>. The number is chosen to be high enough
+that normal code never hits it, but low enough to prevent pathological
+blowup.</p>
+<p><strong>References:</strong>
+- Psalm: literal limit in <code>Type::combineUnionTypes()</code> (<code>Psalm\Type</code>)</p>
+<h2 id="t31-closure-literal-return-shape-inference">T31. Closure literal-return shape inference<a class="headerlink" href="#t31-closure-literal-return-shape-inference" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>A closure whose native return hint is just <code>array</code> but whose body
+returns a literal array should get the literal shape as its
+inferred return type, so <code>array_map()</code> results carry it:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="x">$declarations = array_map(function (ASTNode $child): array {</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="x">    return [$child-&gt;getType(), $childChildren[1]];</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="x">}, $children);</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="x">[$type, $variable] = $declarations[$index];</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="x">$type-&gt;getImage();   // &quot;type of &#39;$type&#39; could not be resolved&quot;</span>
+</code></pre></div>
+<p>Found in the 2026-07 analyze triage: ~10 pdepend errors
+(<code>tests/.../PHP82/TrueTypeTest.php:89</code>,
+<code>AllowNullAndFalseAsStandAloneTypesTest.php:94</code>,
+<code>PHPParserVersion81Test.php:1191,1480</code>) destructure tuples out of
+<code>array_map</code> results built this way. PHPStan infers the shape from
+the return statements; without it the destructured elements are
+unresolved. Depends on nothing else in this file.</p>
+<p><strong>References:</strong>
+- PHPStan: closure return type inference in
+  <code>ClosureReturnStatementsNode</code> / <code>TypeSpecifyingExtension</code> flow.
+- Psalm: <code>ClosureAnalyzer</code> return-type widening.</p>
+<hr />
+<h2 id="t33-class-constant-on-an-expression-objconst-resolves-to-nothing">T33. Class constant on an expression (<code>$obj::CONST</code>) resolves to nothing<a class="headerlink" href="#t33-class-constant-on-an-expression-objconst-resolves-to-nothing" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>A class constant reached through a variable produces no type at all, so
+hover is blank and anything downstream of it loses the value. The same
+constant reached through a class name or <code>self</code> resolves fine.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="x">    const INTEGER_CONSTANT = 1;</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="x">}</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="x">$foo = new Foo();</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="x">$a = Foo::INTEGER_CONSTANT;    // 1</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="x">$b = $foo::INTEGER_CONSTANT;   // (nothing — PHPStan: 1)</span>
+</code></pre></div>
+<p>The class-constant branch of <code>resolve_rhs_property_access</code> matches only
+<code>Identifier</code>, <code>Self_</code>, <code>Static</code>, and <code>Parent</code> for the left-hand side and
+returns an empty vec for anything else. Resolving the subject expression
+to a class first (the forward walker already does this for <code>$obj-&gt;prop</code>
+in the same function) would cover <code>$obj::CONST</code>, and the constant lookup
+below it needs no change.</p>
+<p><strong>Tests to update once fixed:</strong> upstream's <code>nsrt/deducted-types.php</code> has
+a <code>$foo::INTEGER_CONSTANT</code> block that was dropped when
+<code>tests/phpstan_nsrt/deducted-types.php</code> was ported; port it back. The
+<code>$hw::B</code>/<code>$self::FOO</code> assertions in
+<code>tests/phpstan_data/Rules/Constants/bug-10212.php</code> and
+<code>tests/phpstan_data/Rules/Methods/return-type-class-constant.php</code> are
+<code>// SKIP</code> on this.</p>
+<hr />
+<h2 id="t34-staticconst-over-narrows-to-the-declaring-classs-value">T34. <code>static::CONST</code> over-narrows to the declaring class's value<a class="headerlink" href="#t34-staticconst-over-narrows-to-the-declaring-classs-value" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>Late static binding is ignored for class constants: <code>static::CONST</code>
+resolves to the value declared on the <em>current</em> class, even though a
+subclass may redeclare it. This is unsound in the false-positive
+direction, since the narrowed literal can drive a bogus argument-type
+mismatch or mark a live <code>match</code> arm dead.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="x">class Foo {</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="x">    const NO_TYPE = 1;</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="x">    /** @var string */</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="x">    const TYPE = &#39;foo&#39;;</span>
+<a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a>
+<a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a><span class="x">    public function doFoo(): void {</span>
+<a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a><span class="x">        self::NO_TYPE;      // 1      (correct)</span>
+<a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a><span class="x">        static::NO_TYPE;    // 1      (PHPStan: mixed — a child may redeclare it)</span>
+<a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a><span class="x">        static::TYPE;       // &#39;foo&#39;  (PHPStan: string — a child must respect @var)</span>
+<a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a><span class="x">    }</span>
+<a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a><span class="x">}</span>
+</code></pre></div>
+<p>PHPStan's model: <code>self::</code> always yields the declared value. <code>static::</code>
+(and <code>$this::</code>) yields the value only when it cannot be overridden, i.e.
+the class is <code>final</code> or the constant is <code>final</code>/<code>@final</code>; otherwise it
+widens to the constant's declared type, or <code>mixed</code> when the constant is
+untyped.</p>
+<p><strong>Where to change:</strong> the class-constant branch of
+<code>resolve_rhs_property_access</code>, which currently maps <code>Expression::Static</code>
+to the current class name identically to <code>Expression::Self_</code>.</p>
+<p><strong>Tests to update once fixed:</strong> the <code>static::</code>/<code>$this::</code> assertions in
+upstream's <code>nsrt/class-constant-types.php</code> were dropped when
+<code>tests/phpstan_nsrt/class-constant-types.php</code> was ported (only the
+<code>self::</code> cases survive); port them back. The <code>static::</code>/<code>$this::</code>
+assertions in <code>tests/phpstan_nsrt/class-constant-native-type.php</code> are
+<code>// SKIP</code> against this item.</p>
+<hr />
+<h2 id="t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument">T40. <code>pathinfo()</code> returns a shape or a string depending on the flags argument<a class="headerlink" href="#t40-pathinfo-returns-a-shape-or-a-string-depending-on-the-flags-argument" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="x">$parts = pathinfo($path);                      // array{dirname: …, basename: …, extension?: …, filename: …}</span>
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="x">$name  = pathinfo($path, PATHINFO_FILENAME);   // string</span>
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a><span class="x">needsString($name); // reported: got string|array{…} — a single component is always a string</span>
+</code></pre></div>
+<p><code>pathinfo()</code> hands back an array of every component when its <code>$flags</code>
+argument is left at the default <code>PATHINFO_ALL</code>, and a plain string when
+the caller names one component. phpstorm-stubs declare the flat union, so
+both call shapes carry the branch the other one takes.</p>
+<p>The mechanism this needs already exists, in the shape used for
+<code>json_encode</code>'s <code>JSON_THROW_ON_ERROR</code>
+(<code>type_engine/types/flag_returns.rs</code>): read the flags argument's text at
+the call site and pick a branch from it. A conditional return type in
+<code>stub_patches/</code> cannot express this one, because the deciding value
+arrives as a global constant (<code>PATHINFO_FILENAME</code>) and a condition can
+only name a literal value or a class constant.</p>
+<p><strong>Fix:</strong> add <code>pathinfo</code> to <code>flag_returns.rs</code>: the string branch when the
+flags argument names one of <code>PATHINFO_DIRNAME</code>, <code>PATHINFO_BASENAME</code>,
+<code>PATHINFO_EXTENSION</code> or <code>PATHINFO_FILENAME</code> (or an integer with a single
+bit set), and the array branch when the argument is left out. Anything
+else keeps the declared union. Left over from the work that took the
+<code>preg_replace</code>/<code>str_replace</code> family and <code>json_encode</code>, the two shapes
+that accounted for the bulk of the volume.</p>
+<h2 id="t41-param-out-is-parsed-but-never-read">T41. <code>@param-out</code> is parsed but never read<a class="headerlink" href="#t41-param-out-is-parsed-but-never-read" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="x">/**</span>
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a><span class="x"> * @param-out list&lt;string&gt; $lines</span>
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a><span class="x"> */</span>
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a><span class="x">function readInto(string $path, ?array &amp;$lines = null): int { … }</span>
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a><span class="x">readInto($path, $lines);</span>
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a><span class="x">$lines[0];   // list&lt;string&gt; is what the tag promises; the declared</span>
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a><span class="x">             // `?array` is what the caller gets</span>
+</code></pre></div>
+<p><code>TagKind::ParamOut</code> exists in <code>docblock/tag_kind.rs</code> and nothing
+consumes it, so the only thing describing an argument after a call is
+the parameter's declared type. That type describes what goes <em>in</em>: a
+function that takes <code>array &amp;$buffer</code> and fills it with <code>Token</code> objects
+has no way to say so, and a <code>?array &amp;$out = null</code> says null where the
+callee guarantees an array.</p>
+<p>The null half of that is handled by <code>ParameterInfo::out_type()</code>, which
+drops the null a by-reference parameter's <code>null</code> default implies. That
+is a heuristic standing in for the tag: it is right for the standard
+library's out-parameters and for the ordinary <code>&amp;$out = null</code> idiom, but
+it cannot be argued with by a callee that genuinely may leave the
+argument null, and it says nothing about the <em>element</em> types the callee
+writes.</p>
+<p><strong>Fix:</strong> record the tag on <code>ParameterInfo</code> alongside
+<code>closure_this_type</code>, and have <code>out_type()</code> prefer it over both the
+declared type and the null-default heuristic. Then the two write-back
+paths (<code>seed_pass_by_ref_primitives</code> and
+<code>try_apply_pass_by_reference_type</code>) pick it up with no further change,
+both going through <code>effective_out_type</code> in
+<code>type_engine/call_resolution/out_param.rs</code>. A declared tag is the
+author's word on what the callee writes, so it must also win over the
+reading that helper takes from the body.
+Once it is read, the pcre stub patches can declare <code>preg_match</code>'s and
+<code>preg_match_all</code>'s out types directly rather than inheriting
+phpstorm-stubs' <code>null|string[]</code>.</p>
+<h2 id="t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it">T42. A static factory's own <code>@return self&lt;T&gt;</code> breaks every chained call after it<a class="headerlink" href="#t42-a-static-factorys-own-return-selft-breaks-every-chained-call-after-it" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Unknown (needs investigation)</strong></p>
+<p>Found while porting Mago's <code>issue_362.php</code> (Test Porting Phase 4A): a
+static method that declares its own <code>@template T</code> and returns
+<code>self&lt;T&gt;</code> makes every completion request on a call chained off it come
+back <code>None</code> (not empty — no completion response at all), even when the
+receiving variable's type is separately pinned down by a <code>@var</code>
+annotation that makes the method's own template irrelevant.</p>
+<p>Minimal repro:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="x">class Product {</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="x">    public function getPrice(): float { return 0.0; }</span>
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="x">}</span>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a><span class="x">/** @template T */</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="x">class Box {</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="x">    /**</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a><span class="x">     * @template T</span>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="x">     * @return self&lt;T&gt;</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a><span class="x">     */</span>
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a><span class="x">    public static function make(): self { return new self(); }</span>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a><span class="x">    /** @return T */</span>
+<a id="__codelineno-13-14" name="__codelineno-13-14" href="#__codelineno-13-14"></a><span class="x">    public function get(): mixed {}</span>
+<a id="__codelineno-13-15" name="__codelineno-13-15" href="#__codelineno-13-15"></a><span class="x">}</span>
+<a id="__codelineno-13-16" name="__codelineno-13-16" href="#__codelineno-13-16"></a>
+<a id="__codelineno-13-17" name="__codelineno-13-17" href="#__codelineno-13-17"></a><span class="x">/** @var Box&lt;Product&gt; $box */</span>
+<a id="__codelineno-13-18" name="__codelineno-13-18" href="#__codelineno-13-18"></a><span class="x">$box = Box::make();</span>
+<a id="__codelineno-13-19" name="__codelineno-13-19" href="#__codelineno-13-19"></a><span class="x">$box-&gt;get()-&gt;  // completion() returns None here, not just an empty list</span>
+</code></pre></div>
+<p>Removing either the method-level <code>@template T</code> + <code>@return self&lt;T&gt;</code> on
+<code>make()</code> (letting it return a bare <code>self</code> and relying entirely on the
+<code>@var</code> hint), or making <code>get()</code>'s call chain off a plain <code>new Box()</code>
+instead of <code>Box::make()</code>, makes the same chain resolve <code>getPrice</code>
+correctly. So the break is specific to a <code>self&lt;T&gt;</code>-returning static
+method sitting in the middle of a chain — one hop after it (<code>Box::make()
+-&gt;</code>) still lists <code>Box</code>'s own members fine; it is the <em>second</em> hop
+(<code>-&gt;get()-&gt;</code>, the one that needs <code>T</code> substituted from the instantiated
+type) that comes back empty-handed.</p>
+<p>The same failure reproduces with the original Mago pattern too: two
+independent method-level templates (<code>K</code>, <code>V</code>, both distinct from the
+class-level <code>TKey</code>/<code>TValue</code>) inferred from an <code>array&lt;K, V&gt;</code> argument and
+returned as <code>self&lt;K, V&gt;</code>, chained straight into an instance method
+whose own <code>@return TValue</code> should resolve through it. So this is not
+purely a same-name shadowing edge case between the class-level and
+method-level template — investigate whether both share one underlying
+cause before assuming they are separate bugs.</p>
+<p>Whatever produces the instantiated receiver type for the second hop
+comes back with nothing usable — worth checking whether the generic
+substitution map built for <code>self&lt;T&gt;</code> ends up unable to resolve <code>T</code> (no
+argument binds the method-level template, and the external <code>@var</code>
+override does not appear to reach it), and whether that unresolved-<code>T</code>
+case is handled by returning an error/<code>None</code> instead of falling back to
+the class's own declared (or unsubstituted) member types the way other
+partial-resolution failures in this pipeline do.</p>
+<p><strong>Blocks:</strong> Test Porting Phase 4A pattern 362 (generic class implementing
+<code>ArrayAccess</code>/<code>IteratorAggregate</code> with a <code>self&lt;K, V&gt;</code>-returning static
+factory) cannot be ported until this is fixed — the ported test would
+assert on exactly the completion this bug empties out.</p>
+<h2 id="t43-selftypealias-inside-extendss-generic-argument-is-not-resolved">T43. <code>self::TypeAlias</code> inside <code>@extends</code>'s generic argument is not resolved<a class="headerlink" href="#t43-selftypealias-inside-extendss-generic-argument-is-not-resolved" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Found while porting Mago's <code>issue_870.php</code> (Test Porting Phase 4A). A
+class can declare its own <code>@type</code>/<code>@phpstan-type</code> alias and hand it to
+its own parent's template parameter via <code>self::</code>:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="x">/** @template TData as array&lt;string, mixed&gt; */</span>
+<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a><span class="x">abstract class Car {</span>
+<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a><span class="x">    /** @return TData */</span>
+<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="x">    abstract function getData(): array;</span>
+<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a><span class="x">}</span>
+<a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>
+<a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a><span class="x">/**</span>
+<a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a><span class="x"> * @type DataArray = array{&#39;Gewicht&#39;: int}</span>
+<a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a><span class="x"> * @extends Car&lt;self::DataArray&gt;</span>
+<a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a><span class="x"> */</span>
+<a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a><span class="x">class RedCar extends Car {</span>
+<a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a><span class="x">    public function getData(): array { return [&#39;Gewicht&#39; =&gt; 1000]; }</span>
+<a id="__codelineno-14-13" name="__codelineno-14-13" href="#__codelineno-14-13"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>getData()</code>'s inherited <code>@return TData</code> should resolve to the
+<code>DataArray</code> shape (offering <code>Gewicht</code> for array-key completion), but
+<code>self::DataArray</code> inside the <code>@extends</code> tag's generic argument list is
+not recognised as a reference to the class's own type alias, so <code>TData</code>
+never gets substituted and completion sees only the untyped <code>array</code>
+declared return.</p>
+<p><code>extract_generics_tag</code> (<code>docblock.rs</code>, exercised by
+<code>test_extract_generics_tag_extends_single_param</code> and friends in
+<code>completion_generics.rs</code>) parses <code>@extends Foo&lt;Bar&gt;</code> generic arguments
+as plain type tokens; <code>self::DataArray</code> most likely parses as some
+<code>Named</code>/member-access token rather than being recognised as "look up
+<code>DataArray</code> in this class's own <code>type_aliases</code>, the same alias
+<code>resolve_type_alias_typed</code> already expands everywhere else."</p>
+<p><strong>Fix:</strong> when parsing a generic argument off <code>@extends</code>/<code>@implements</code>/
+<code>@template-implements</code>, recognise a <code>self::Identifier</code> token and resolve
+it against the <em>declaring</em> class's own <code>type_aliases</code> map (via
+<code>resolve_type_alias_typed</code> with that class as <code>owning_class_name</code>)
+before substituting it into the parent's template.</p>
+<p><strong>Blocks:</strong> Test Porting Phase 4A pattern 870.</p>
+<hr />
+<h2 id="t44-a-single-enum-case-has-no-type">T44. A single enum case has no type<a class="headerlink" href="#t44-a-single-enum-case-has-no-type" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="x">enum Suit { case Hearts; case Spades; case Clubs; }</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="x">function f(Suit $s) {</span>
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="x">    if ($s === Suit::Hearts) {</span>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="x">    } elseif ($s === Suit::Spades) {</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="x">    } else {</span>
+<a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a><span class="x">        $s; // PHPStan: Suit::Clubs; PHPantom: Suit</span>
+<a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="x">    }</span>
+<a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="x">}</span>
+</code></pre></div>
+<p><code>Suit::Hearts</code> resolves to the enum class, so narrowing by comparing
+against cases can only ever say "some <code>Suit</code>". PHPStan and Psalm give each
+case its own type, a subtype of the enum: comparing narrows to the cases
+left, a <code>match</code> over the rest is known exhaustive, a <code>readonly</code> property
+assigned one case keeps it, and <code>-&gt;value</code>/<code>-&gt;name</code> on it are the case's
+literal values.</p>
+<p>The type model needs an enum-case variant (or a literal kind for it) that
+is a subtype of its enum in <code>is_subtype_of</code>, prints as <code>Enum::CASE</code>, and
+joins back into the enum when every case is present. Narrowing by <code>===</code>
+and <code>instanceof</code> then subtracts cases the way it subtracts union members,
+and a branch that has compared away every case holds <code>never</code>.</p>
+<p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code> and <code>Rules/Methods/data/return-type-class-constant.php</code>; both its
+case and its <code>never</code> assertion are <code>// SKIP</code> in the ported copy under
+<code>tests/phpstan_data/</code>.</p>
+<p>Found porting PHPStan's <code>Rules/Comparison/data/bug-8485.php</code>; the
+assertion is <code>// SKIP</code> in <code>tests/phpstan_data/</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,2553 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/actions/">
+      
+      
+        <link rel="prev" href="../">
+      
+      
+        <link rel="next" href="../blade/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Code Actions - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-code-actions" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Code Actions
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a34-unified-code-action-handler-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A34. Unified code action handler architecture
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A34. Unified code action handler architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A47. Member actions are missing when the range starts in the indentation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a46-honor-contextonly-in-code-action-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A46. Honor <code>context.only</code> in code action responses
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A46. Honor context.only in code action responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-kindposition-interaction-to-get-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The kind/position interaction to get right
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-second-gap-this-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A second gap this surfaces
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-boundary-codeactionresolve-is-unaffected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope boundary: <code>codeAction/resolve</code> is unaffected
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A16. Snippet Placeholder for Extracted Method Name
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A16. Snippet Placeholder for Extracted Method Name">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ide-expected-code-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        IDE-expected code actions
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IDE-expected code actions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a25-strpos-str_contains-php-80" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A25. <code>strpos</code> → <code>str_contains</code> (PHP 8.0+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a28-explicit-nullable-parameter-type-php-84-deprecation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A28. Explicit nullable parameter type (PHP 8.4 deprecation)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a29-simplify-boolean-return" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A29. Simplify boolean return
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a31-remove-always-else-extract-guard-clause" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A31. Remove always-else (extract guard clause)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a37-simplify-with-nullsafe-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A37. Simplify with <code>?-&gt;</code> (nullsafe operator)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A37. Simplify with ?-&gt; (nullsafe operator)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-conversion-is-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the conversion is safe
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a38-convert-ifelseif-chain-to-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A38. Convert if/elseif chain to switch
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to switch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-conversion-is-safe_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the conversion is safe
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a40-generate-method-from-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A40. Generate method from call
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a41-create-class-from-non-existing-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A41. Create class from non-existing name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a43-update-docblock-generics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A43. Update docblock generics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A45. Simplify with <code>?:</code> (Elvis operator)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../performance/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#a34-unified-code-action-handler-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A34. Unified code action handler architecture
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A34. Unified code action handler architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#changes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Changes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A47. Member actions are missing when the range starts in the indentation
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a46-honor-contextonly-in-code-action-responses" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A46. Honor <code>context.only</code> in code action responses
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A46. Honor context.only in code action responses">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-kindposition-interaction-to-get-right" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        The kind/position interaction to get right
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a-second-gap-this-surfaces" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A second gap this surfaces
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scope-boundary-codeactionresolve-is-unaffected" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scope boundary: <code>codeAction/resolve</code> is unaffected
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#a16-snippet-placeholder-for-extracted-method-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A16. Snippet Placeholder for Extracted Method Name
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A16. Snippet Placeholder for Extracted Method Name">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#behaviour" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Behaviour
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#ide-expected-code-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        IDE-expected code actions
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="IDE-expected code actions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#a25-strpos-str_contains-php-80" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A25. <code>strpos</code> → <code>str_contains</code> (PHP 8.0+)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a28-explicit-nullable-parameter-type-php-84-deprecation" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A28. Explicit nullable parameter type (PHP 8.4 deprecation)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a29-simplify-boolean-return" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A29. Simplify boolean return
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a31-remove-always-else-extract-guard-clause" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A31. Remove always-else (extract guard clause)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a37-simplify-with-nullsafe-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A37. Simplify with <code>?-&gt;</code> (nullsafe operator)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A37. Simplify with ?-&gt; (nullsafe operator)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-conversion-is-safe" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the conversion is safe
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a38-convert-ifelseif-chain-to-switch" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A38. Convert if/elseif chain to switch
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="A38. Convert if&#x2f;elseif chain to switch">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#when-the-conversion-is-safe_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When the conversion is safe
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#implementation_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implementation
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a40-generate-method-from-call" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A40. Generate method from call
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a41-create-class-from-non-existing-name" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A41. Create class from non-existing name
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a43-update-docblock-generics" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A43. Update docblock generics
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#a45-simplify-with-elvis-operator" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        A45. Simplify with <code>?:</code> (Elvis operator)
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/actions.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-code-actions">PHPantom — Code Actions<a class="headerlink" href="#phpantom-code-actions" title="Permanent link">&para;</a></h1>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Refactoring code actions overview:</strong> A2 (Extract Function) depends on
+forward-pass variable usage tracking with byte offsets across function
+scopes.</p>
+<h2 id="a34-unified-code-action-handler-architecture">A34. Unified code action handler architecture<a class="headerlink" href="#a34-unified-code-action-handler-architecture" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
+<p>Refactor the code action system to use a unified handler architecture
+inspired by rust-analyzer's assist system. Currently each code action
+has a separate <code>collect_*</code> method called from a hand-maintained list in
+<code>handle_code_action</code>, and deferred actions have a separate <code>resolve_*</code>
+method dispatched via a string match in <code>resolve_code_action</code>. PHPStan
+quick-fixes and refactoring actions use different code paths.</p>
+<h3 id="changes">Changes<a class="headerlink" href="#changes" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>Unified handler signature.</strong> Each code action becomes a function
+   <code>fn(&amp;mut Actions, &amp;ActionContext) -&gt; Option&lt;()&gt;</code>. Handlers are
+   collected in a static array. <code>handle_code_action</code> iterates the array
+   instead of calling methods one by one.</p>
+</li>
+<li>
+<p><strong>Closure-based lazy resolve.</strong> Handlers call
+   <code>actions.add(id, label, range, |builder| { ... })</code>. The closure
+   only runs when the action is being resolved, eliminating separate
+   <code>collect_*</code> / <code>resolve_*</code> method pairs. The same handler function
+   serves both Phase 1 (applicability check + lightweight stub) and
+   Phase 2 (compute edit).</p>
+</li>
+<li>
+<p><strong>Unified type for actions and diagnostic fixes.</strong> Use the same
+   struct for PHPStan quick-fixes and refactoring actions. The LSP
+   layer gets one conversion path. Diagnostic fixes attach the same
+   type as their quick-fix data.</p>
+</li>
+<li>
+<p><strong>Sort by target range size.</strong> Sort results by <code>target.len()</code> as
+   a tiebreaker. Smaller target = more specific = higher priority.
+   No manual priority numbers needed.</p>
+</li>
+</ol>
+<h3 id="when-to-implement">When to implement<a class="headerlink" href="#when-to-implement" title="Permanent link">&para;</a></h3>
+<p>Do this when the next batch of code actions is added (A25, A28, etc.).
+The refactoring pays for itself by making each subsequent action
+cheaper to add: write one function, append it to an array.</p>
+<hr />
+<h2 id="a47-member-actions-are-missing-when-the-range-starts-in-the-indentation">A47. Member actions are missing when the range starts in the indentation<a class="headerlink" href="#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="x">final class ProbeSubject</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="x">{</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="x">    private Greeter $greeter;   // request range (15,0)-(16,0): no actions</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="x">}                               // request range (15,4)-(16,0): getter/setter, hooks, visibility</span>
+</code></pre></div>
+<p>Every collector that works on the member under the cursor (generate
+getter/setter, property hooks, change visibility, promote constructor
+parameter, and so on) calls <code>find_cursor_context</code> with the single offset
+<code>params.range.start</code>. It matches that offset against the member's span,
+which starts at the first token (<code>private</code>). A range that starts in the
+leading whitespace therefore finds the class body but no member, and every
+member action disappears. This covers a cursor at column 0, a whole-line
+selection, and a selection that starts on the line above. Clients send all
+three routinely. The php-typing-conformance code-action probe asks exactly
+this way and gets an empty answer from PHPantom, where Phpactor and
+DEVSENSE offer their property actions.</p>
+<p>Resolve the position once, in <code>handle_code_action</code>: when the range starts
+in whitespace, advance it to the first non-whitespace byte inside the
+range (or, for a collapsed range, on the same line). All collectors then
+see the member. A selection that spans several members should keep
+matching none, as it does today.</p>
+<p>(The same probe used to get <em>Extract interface</em> from 0.10.0. That action
+is now correctly withheld from clients that don't advertise the <code>create</code>
+resource operation, which the probe client doesn't. Fixing this item
+makes the probe answer again, this time with the property actions.)</p>
+<p><strong>Where to look:</strong> <code>find_cursor_context</code> in
+<code>src/code_actions/cursor_context.rs</code> and its callers in
+<code>src/code_actions/</code>.</p>
+<h2 id="a46-honor-contextonly-in-code-action-responses">A46. Honor <code>context.only</code> in code action responses<a class="headerlink" href="#a46-honor-contextonly-in-code-action-responses" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>We advertise <code>codeActionKinds</code> (<code>quickfix</code>, <code>refactor.extract</code>,
+<code>refactor.inline</code>, <code>source.organizeImports</code>) in <code>code_action_provider</code>
+(<code>src/server.rs</code>), and every collector already tags its <code>CodeAction</code>
+with a <code>kind</code>, but <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
+never reads <code>params.context.only</code> and never filters its result against
+it. A client that asks for only quick-fixes (its Ctrl+.-style menu) or
+only <code>source.organizeImports</code> (an on-save automation like
+<code>editor.codeActionsOnSave</code>) gets every action mixed together instead,
+which breaks the menus that are supposed to be filtered and can make
+an auto-run-on-save hook unable to identify the one action it should
+apply.</p>
+<h3 id="the-kindposition-interaction-to-get-right">The kind/position interaction to get right<a class="headerlink" href="#the-kindposition-interaction-to-get-right" title="Permanent link">&para;</a></h3>
+<p><code>context.only</code> is a pure <strong>kind</strong> filter and must stay orthogonal to
+the <strong>position/selection</strong> validity checks each collector already does
+(a diagnostic overlapping <code>params.range</code> for quickfixes, a real
+non-collapsed selection over a literal for <code>extract_constant</code>, a
+cursor on an inlineable variable for <code>inline_variable</code>, etc.). Two
+failure modes to design against explicitly:</p>
+<ol>
+<li><strong>Don't let a kind mismatch masquerade as a position mismatch, or
+   vice versa.</strong> Implement the kind check as a separate, earlier gate
+   than the position check, never folded into the same conditional —
+   e.g. <code>if kind_requested(&amp;only, KIND) { collect_x(...) }</code>, where
+   <code>collect_x</code> still runs its own unmodified position logic once
+   called. If the two checks get combined, a future edit to one is
+   liable to silently change the other's behavior.</li>
+<li><strong>Filter before running a collector, not just after, where cheap to
+   do so.</strong> Every collector's kind is fixed and known statically (see
+   the table below), so <code>context.only</code> can skip whole collector calls
+   before they touch the AST, rather than computing every action and
+   discarding some after the fact. This isn't just an optimization —
+   <code>handle_code_action</code> runs on effectively every cursor move, so a
+   client that always sends a narrow <code>only</code> (several editors default
+   the automatic lightbulb request to <code>quickfix</code> only) currently pays
+   for every refactor/extract collector on every keystroke for
+   nothing.</li>
+</ol>
+<p><code>only</code> matching must be <strong>hierarchical</strong>, not exact-string: a client
+requesting the bare <code>"refactor"</code> kind must match any of our
+<code>refactor.extract</code>/<code>refactor.inline</code>/<code>refactor.rewrite</code> actions
+(<code>requested == actual || actual.starts_with(&amp;format!("{requested}."))</code>),
+per the LSP spec's kind-hierarchy semantics — an exact-equality check
+would silently return nothing for that request.</p>
+<h3 id="a-second-gap-this-surfaces">A second gap this surfaces<a class="headerlink" href="#a-second-gap-this-surfaces" title="Permanent link">&para;</a></h3>
+<p>Several collectors already emit kinds we don't declare in
+<code>code_action_provider</code>'s <code>code_action_kinds</code> list: <code>refactor.rewrite</code>
+(<code>convert_switch_to_match</code>, <code>convert_to_arrow_function</code>,
+<code>convert_to_closure</code>, <code>convert_to_interpolation</code>,
+<code>promote_constructor_param</code>, <code>simplify_null</code>), <code>refactor.rewrite</code> via
+<code>CodeActionKind::REFACTOR_REWRITE</code> (<code>generate_constructor</code>), and the
+bare <code>CodeActionKind::REFACTOR</code> (<code>generate_getter_setter</code>,
+<code>generate_property_hooks</code>, <code>replace_fqcn</code>). Reconcile these as part of
+the same task: either add the missing kinds to the advertised list, or
+fold each action under an already-declared parent kind — a client
+that trusts our advertised capability list and asks for exactly what
+we declared should not miss actions we're actually capable of
+returning.</p>
+<h3 id="scope-boundary-codeactionresolve-is-unaffected">Scope boundary: <code>codeAction/resolve</code> is unaffected<a class="headerlink" href="#scope-boundary-codeactionresolve-is-unaffected" title="Permanent link">&para;</a></h3>
+<p><code>context.only</code> belongs to the <code>textDocument/codeAction</code> request only.
+<code>codeAction/resolve</code> (<code>resolve_code_action</code>) receives the exact
+<code>CodeAction</code> the client already picked (via its <code>data</code> field) with no
+<code>context</code> to filter against — do not add any kind-filtering logic
+there.</p>
+<p><strong>Where to look:</strong> <code>handle_code_action</code> in <code>src/code_actions/mod.rs</code>
+(the ~30 <code>collect_*_actions</code> call list — each call site is where the
+early kind-gate belongs); <code>code_action_provider</code> in <code>src/server.rs</code>
+for the advertised kind list; A34 above is the natural long-term home
+for a per-handler kind table if that refactor lands first, but this
+doesn't need to wait for it — the gate works fine bolted onto the
+current call list.</p>
+<hr />
+<hr />
+<h2 id="a16-snippet-placeholder-for-extracted-method-name">A16. Snippet Placeholder for Extracted Method Name<a class="headerlink" href="#a16-snippet-placeholder-for-extracted-method-name" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<blockquote>
+<p><strong>Blocked:</strong> Requires <code>SnippetTextEdit</code> support in <code>lsp-types</code>.
+Upstream issue: <a href="https://github.com/gluon-lang/lsp-types/issues/310">gluon-lang/lsp-types#310</a>
+(open). <code>SnippetTextEdit</code> is an LSP 3.18 <code>@proposed</code> feature — it's
+in the spec but not yet implemented in any Rust LSP-types crate,
+including the actively maintained <code>tower-lsp-server</code>/<code>ls-types</code> fork
+that F20 migrates to (checked directly against its <code>main</code> branch;
+<code>ls-types</code> removed its generic 3.18 <code>"proposed"</code> feature flag in
+0.0.4). F20 alone does not resolve this. Revisit once the upstream
+issue is resolved in whichever crate we depend on at the time.</p>
+</blockquote>
+<p>After an Extract Function/Method code action is applied, let the user
+immediately rename the generated name by placing a snippet tab-stop on
+it.  The contextual name (<code>createUsers</code>, <code>validateGuard</code>, …) serves as
+the default, but the cursor lands directly on it so the user can type
+over it without an extra rename step.</p>
+<h3 id="behaviour">Behaviour<a class="headerlink" href="#behaviour" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Trigger:</strong> User applies "Extract method 'createUsers'" (or any
+  extract function/method action).</li>
+<li><strong>Result:</strong> The workspace edit uses a <code>SnippetTextEdit</code> with
+  <code>${1:createUsers}</code> for the method name at both the definition site
+  and every call site.  The editor enters snippet mode and the user
+  can type a new name that updates all locations simultaneously.</li>
+<li><strong>Fallback:</strong> When the client does not advertise
+  <code>workspace.workspaceEdit.snippetEditSupport</code>, emit a regular
+  <code>TextEdit</code> (current behaviour — no snippet, no cursor placement).</li>
+</ul>
+<h3 id="implementation">Implementation<a class="headerlink" href="#implementation" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p><strong>Store client capabilities at initialisation.</strong>  In <code>initialize</code>,
+   save the <code>InitializeParams.capabilities</code> (or at least the snippet
+   edit flag) on the <code>Backend</code> struct.</p>
+</li>
+<li>
+<p><strong>Check the flag in <code>collect_extract_function_actions</code>.</strong>  When
+   the client supports snippet edits, build the workspace edit with
+   <code>DocumentChanges::Operations</code> containing <code>SnippetTextEdit</code> entries
+   instead of plain <code>TextEdit</code>.  The new-text for the method name
+   uses <code>${1:name}</code> syntax.</p>
+</li>
+<li>
+<p><strong>Linked edit ranges (optional enhancement).</strong>  If the client
+   supports <code>workspace.workspaceEdit.changeAnnotationSupport</code> or
+   linked edit groups, use those so that editing the name at the
+   definition also updates the call site in real time.</p>
+</li>
+</ol>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>What it contributes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Client capability storage</td>
+<td>Need to know whether the client supports snippet edits</td>
+</tr>
+<tr>
+<td><code>SnippetTextEdit</code> in tower-lsp</td>
+<td>Verify tower-lsp exposes the snippet edit type</td>
+</tr>
+<tr>
+<td>Extract Function (shipped)</td>
+<td>The code action that this enhances</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="ide-expected-code-actions">IDE-expected code actions<a class="headerlink" href="#ide-expected-code-actions" title="Permanent link">&para;</a></h2>
+<p>The following actions are offered by competing PHP IDEs (PHPStorm,
+Intelephense) and are expected by users. Identified by cross-referencing
+Rector, PHP-CS-Fixer, and Phpactor rule libraries against what major
+IDEs actually surface as on-demand code actions.</p>
+<p>Micro-simplifications (array_push→$arr[], strlen→==='', flip ternary,
+etc.) are intentionally excluded. They are better served by batch tools
+like Rector or PHP-CS-Fixer. An LSP should focus on actions that
+benefit from editor context (cursor position, file state) rather than
+competing with CLI transformers.</p>
+<hr />
+<h3 id="a25-strpos-str_contains-php-80">A25. <code>strpos</code> → <code>str_contains</code> (PHP 8.0+)<a class="headerlink" href="#a25-strpos-str_contains-php-80" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Convert <code>strpos($haystack, $needle) !== false</code> to
+<code>str_contains($haystack, $needle)</code> and the negated form
+<code>strpos($haystack, $needle) === false</code> to
+<code>!str_contains($haystack, $needle)</code>.</p>
+<p>Also handle <code>strstr($haystack, $needle) !== false</code>.</p>
+<p>PHPStorm offers this as an inspection with quick-fix. PHP-CS-Fixer's
+<code>ModernizeStrposFixer</code> is the reference implementation. Edge case:
+must verify exactly 2 arguments to <code>strpos</code> (the 3-argument form with
+offset has different semantics).</p>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.
+<strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
+<hr />
+<h3 id="a28-explicit-nullable-parameter-type-php-84-deprecation">A28. Explicit nullable parameter type (PHP 8.4 deprecation)<a class="headerlink" href="#a28-explicit-nullable-parameter-type-php-84-deprecation" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p>Convert implicit nullable parameters to explicit nullable syntax:
+<code>function foo(string $p = null)</code> → <code>function foo(?string $p = null)</code>.</p>
+<p>PHP 8.4 deprecates the implicit nullable form. PHPStorm flags this.
+PHP-CS-Fixer's <code>NullableTypeDeclarationForDefaultNullValueFixer</code>
+handles union types, intersection types (DNF), and constructor
+property promotion.</p>
+<p>Only offer when the parameter has a type hint, a <code>= null</code> default, and
+the type does not already include <code>null</code> (no <code>?</code> prefix, no <code>|null</code>
+in a union).</p>
+<p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
+<hr />
+<h3 id="a29-simplify-boolean-return">A29. Simplify boolean return<a class="headerlink" href="#a29-simplify-boolean-return" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Convert if-return-boolean patterns to direct boolean returns:</p>
+<ul>
+<li><code>if ($a === $b) { return true; } return false;</code> → <code>return $a === $b;</code></li>
+<li><code>if ($a === $b) { return false; } return true;</code> → <code>return $a !== $b;</code></li>
+</ul>
+<p>PHPStorm offers this. When the condition is not already boolean-typed,
+wrap with <code>(bool)</code>.</p>
+<p>Guard conditions:
+- The if must have exactly one statement (a return of <code>true</code> or <code>false</code>)
+  and no else/elseif.
+- The next sibling statement must be <code>return</code> of the opposite boolean.</p>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+<hr />
+<h3 id="a31-remove-always-else-extract-guard-clause">A31. Remove always-else (extract guard clause)<a class="headerlink" href="#a31-remove-always-else-extract-guard-clause" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>When an if-body ends with a flow-breaking statement (<code>return</code>, <code>throw</code>,
+<code>continue</code>, <code>exit</code>), the <code>else</code> keyword is redundant. Promote the else
+body to the same nesting level.</p>
+<p>PHPStorm marks this as "unnecessary else". PHP-CS-Fixer's
+<code>NoUselessElseFixer</code> is the reference. Edge case: don't remove else
+blocks containing named function or class declarations (PHP evaluates
+these eagerly, removing the else changes semantics).</p>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+<hr />
+<h3 id="a37-simplify-with-nullsafe-operator">A37. Simplify with <code>?-&gt;</code> (nullsafe operator)<a class="headerlink" href="#a37-simplify-with-nullsafe-operator" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>Replace null-checked method/property chains with PHP 8.0's nullsafe
+operator:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="x">// Before</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="x">if ($user !== null) {</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="x">    $name = $user-&gt;getName();</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="x">}</span>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="x">$city = null;</span>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="x">if ($user !== null) {</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="x">    $city = $user-&gt;getAddress()-&gt;getCity();</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a><span class="x">}</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="x">// After</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a><span class="x">$name = $user?-&gt;getName();</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a><span class="x">$city = $user?-&gt;getAddress()?-&gt;getCity();</span>
+</code></pre></div>
+<h4 id="when-the-conversion-is-safe">When the conversion is safe<a class="headerlink" href="#when-the-conversion-is-safe" title="Permanent link">&para;</a></h4>
+<ul>
+<li>The if-body contains exactly one statement: an assignment or a
+  standalone expression statement using the checked variable.</li>
+<li>The null check is <code>$var !== null</code>, <code>$var !== null</code>, <code>!is_null($var)</code>,
+  or <code>isset($var)</code> (for a single variable, not array access).</li>
+<li>There is no <code>else</code> / <code>elseif</code> branch. An else branch means the
+  developer wants to handle the null case explicitly, which <code>?-&gt;</code>
+  cannot express.</li>
+<li>The variable is used only with <code>-&gt;</code> access in the body (not passed
+  to a function, not reassigned, not used in a binary expression).</li>
+<li>For chained access (<code>$a-&gt;b()-&gt;c()</code>), every intermediate <code>-&gt;</code> must
+  also be converted to <code>?-&gt;</code> because the nullsafe operator
+  short-circuits the entire chain.</li>
+<li>If the body assigns to a variable (<code>$x = $var-&gt;foo()</code>), the
+  resulting <code>$x = $var?-&gt;foo()</code> produces <code>null</code> when <code>$var</code> is null,
+  which matches the pre-existing state (the assignment was skipped
+  entirely, so <code>$x</code> was either unset or previously null).</li>
+</ul>
+<h4 id="implementation_1">Implementation<a class="headerlink" href="#implementation_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Walk the AST for <code>Statement::If</code> nodes where the condition is a
+  null check on a single variable.</li>
+<li>Verify the body meets the safety criteria above.</li>
+<li>Replace the entire if-block with the body statement, substituting
+  every <code>-&gt;</code> on the checked variable's access chain with <code>?-&gt;</code>.</li>
+<li>When the if-block only contains a standalone expression (no
+  assignment), emit just the expression with <code>?-&gt;</code>.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.
+<strong>Guard:</strong> <code>php_version &gt;= 8.0</code>.</p>
+<hr />
+<h3 id="a38-convert-ifelseif-chain-to-switch">A38. Convert if/elseif chain to switch<a class="headerlink" href="#a38-convert-ifelseif-chain-to-switch" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium-High</strong></p>
+<p>Convert an if/elseif chain that compares the same variable or
+expression against different values into a <code>switch</code> statement:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="x">// Before</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="x">if ($status === &#39;active&#39;) {</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="x">    doActive();</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="x">} elseif ($status === &#39;inactive&#39;) {</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="x">    doInactive();</span>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="x">} elseif ($status === &#39;pending&#39;) {</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="x">    doPending();</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="x">} else {</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="x">    doDefault();</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="x">}</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="x">// After</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="x">switch ($status) {</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a><span class="x">    case &#39;active&#39;:</span>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="x">        doActive();</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="x">        break;</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="x">    case &#39;inactive&#39;:</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="x">        doInactive();</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a><span class="x">        break;</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a><span class="x">    case &#39;pending&#39;:</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a><span class="x">        doPending();</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a><span class="x">        break;</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a><span class="x">    default:</span>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a><span class="x">        doDefault();</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a><span class="x">        break;</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a><span class="x">}</span>
+</code></pre></div>
+<h4 id="when-the-conversion-is-safe_1">When the conversion is safe<a class="headerlink" href="#when-the-conversion-is-safe_1" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Every condition in the chain compares the same subject expression
+  against a constant value using <code>===</code> or <code>==</code> (all arms must use the
+  same comparison operator).</li>
+<li>The subject expression is a simple expression (variable, property
+  access, method call) that should not have side effects when evaluated
+  once in the switch head instead of repeatedly in each condition.</li>
+<li>With <code>===</code>, the conversion is semantically exact only for scalar
+  values. Switch uses loose comparison internally, so strict-equality
+  chains are converted with a comment noting the semantic difference,
+  or the action is only offered for <code>==</code> chains.</li>
+</ul>
+<h4 id="implementation_2">Implementation<a class="headerlink" href="#implementation_2" title="Permanent link">&para;</a></h4>
+<ul>
+<li>Walk the AST for <code>Statement::If</code> nodes that have at least one
+  <code>elseif</code> branch.</li>
+<li>Extract the subject from the first condition's comparison. Verify
+  all subsequent conditions compare the same subject (by source text
+  or AST structure equality).</li>
+<li>Build a <code>switch</code> statement: each condition value becomes a <code>case</code>,
+  the if/elseif body becomes the case body with <code>break;</code> appended
+  (unless the body ends with <code>return</code>, <code>throw</code>, or <code>continue</code>).</li>
+<li>If the chain has a trailing <code>else</code>, convert it to <code>default:</code>.</li>
+<li>Replace the entire if/elseif/else block with the switch.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+<hr />
+<h3 id="a40-generate-method-from-call">A40. Generate method from call<a class="headerlink" href="#a40-generate-method-from-call" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<p>When invoking an undefined method (e.g. <code>$foo-&gt;newMethod($a, $b)</code>),
+offer a code action to generate a method stub on the target class
+with the correct signature inferred from the call-site arguments.
+High-impact rapid-prototyping workflow. Phpactor has this.</p>
+<ul>
+<li>Resolve the type of the subject to find the target class and file.</li>
+<li>Infer parameter types from the argument expressions at the call
+  site (literal types, variable types, class hints).</li>
+<li>Infer return type as <code>void</code> by default; if the call is used in an
+  assignment or return context, use <code>mixed</code>.</li>
+<li>Insert the generated method at the end of the class body (before
+  the closing <code>}</code>).</li>
+<li>Visibility defaults to <code>public</code>; offer a choice if the call is
+  within the same class (<code>private</code>/<code>protected</code>).</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>quickfix</code>.
+<strong>Trigger:</strong> Unknown-member diagnostic on a method call.</p>
+<hr />
+<h3 id="a41-create-class-from-non-existing-name">A41. Create class from non-existing name<a class="headerlink" href="#a41-create-class-from-non-existing-name" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: High · Complexity: Medium-High</strong></p>
+<p>When a class name cannot be resolved, offer a code action to
+generate a new class file with the correct namespace based on PSR-4
+mapping. Pairs naturally with the unknown-class diagnostic.
+Phpactor has this.</p>
+<ul>
+<li>Use the PSR-4 autoload map from <code>composer.json</code> to determine the
+  file path and namespace for the new class.</li>
+<li>Create the file with a minimal class skeleton (<code>&lt;?php</code> declaration,
+  <code>namespace</code>, empty class body).</li>
+<li>If the unresolved name is used in an <code>extends</code> or <code>implements</code>
+  clause, generate the appropriate <code>class</code> or <code>interface</code> keyword.</li>
+<li>Add a <code>use</code> import at the call site if necessary.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>quickfix</code>.
+<strong>Trigger:</strong> Unknown-class diagnostic.</p>
+<hr />
+<h3 id="a43-update-docblock-generics">A43. Update docblock generics<a class="headerlink" href="#a43-update-docblock-generics" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Medium · Complexity: Medium</strong></p>
+<p>Auto-update or add <code>@extends</code>/<code>@implements</code> tags to match the actual
+class hierarchy when a class extends a generic parent. Phpactor has
+this as a transformer.</p>
+<ul>
+<li>Inspect the <code>extends</code> and <code>implements</code> clauses of the class under
+  the cursor.</li>
+<li>For each parent/interface that declares <code>@template</code> parameters,
+  check whether the current class has a matching <code>@extends</code> or
+  <code>@implements</code> tag.</li>
+<li>If the tag is missing, generate one with placeholder type
+  parameters (e.g. <code>@extends Collection&lt;mixed&gt;</code>).</li>
+<li>If the tag exists but the template parameter count has changed,
+  update it to match.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>quickfix</code>.</p>
+<hr />
+<h3 id="a45-simplify-with-elvis-operator">A45. Simplify with <code>?:</code> (Elvis operator)<a class="headerlink" href="#a45-simplify-with-elvis-operator" title="Permanent link">&para;</a></h3>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>Replace <code>$x ? $x : $y</code> with <code>$x ?: $y</code> (PHP's short ternary / "Elvis"
+operator), the mirror image of the null-coalescing simplifications
+<code>src/code_actions/simplify_null.rs</code> already offers. That module's
+<code>try_simplify_ternary</code> currently handles <code>isset($x) ? $x : $default</code> and
+<code>$x !== null ? $x : $default</code> (both → <code>??</code>) and the nullsafe patterns,
+but not the plain case where the condition and the then-branch are
+literally the same expression — its doc comment even notes short ternary
+is only handled as something to <em>leave alone</em> on the input side, not
+something to produce as output.</p>
+<ul>
+<li>Match a full ternary (<code>Conditional</code> with a <code>then</code> branch) whose
+  condition's source text equals the then-branch's source text exactly,
+  the same string-equality heuristic the existing <code>??</code> patterns use.</li>
+<li>Emit <code>&lt;condition&gt; ?: &lt;else&gt;</code>, dropping the duplicated then-branch.</li>
+<li><code>??</code> already covers the null-specific version of this
+  (<code>$x !== null ? $x : $default</code> → <code>$x ?? $default</code>); this pattern is
+  for the truthiness version (<code>$x ? $x : $default</code> → <code>$x ?: $default</code>),
+  which is a different operator with different semantics (falsy values
+  other than <code>null</code>, like <code>0</code>, <code>''</code>, or <code>false</code>, also take the
+  else-branch) and should not be conflated with it.</li>
+<li>Natural home is alongside the existing patterns in
+  <code>try_simplify_ternary</code>, reusing its cursor-position walk and
+  <code>Simplification</code> enum rather than a new module.</li>
+</ul>
+<p><strong>Code action kind:</strong> <code>refactor.rewrite</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,3504 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://phpantom-dev.github.io/phpantom_lsp/0.11.0/todo/performance/">
+      
+      
+        <link rel="prev" href="../lsp-features/">
+      
+      
+        <link rel="next" href="../phpstan-actions/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../../assets/spookaphant.svg">
+      <meta name="generator" content="zensical-0.0.51">
+    
+    
+      
+        <title>PHPantom — Performance - PHPantom Docs</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../../assets/stylesheets/modern/main.62c9b9cc.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/modern/palette.dfe2e883.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-label="Navigation"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#phpantom-performance" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="PHPantom Docs" class="md-header__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer" aria-label="Navigation">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            PHPantom Docs
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              PHPantom — Performance
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="m14.3 16-.7-2h-3.2l-.7 2H7.8L11 7h2l3.2 9zM20 8.69V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12zm-9.15 3.96h2.3L12 9z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_2" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="deep-purple"  aria-label="Switch to system preference"  type="radio" name="__palette" id="__palette_2">
+    
+      <label class="md-header__button md-icon" title="Switch to system preference" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search" aria-label="Search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="PHPantom Docs" class="md-nav__button md-logo" aria-label="PHPantom Docs" data-md-component="logo">
+      
+  <img src="../../assets/spookaphant.svg" alt="PHPantom Docs">
+
+    </a>
+    PHPantom Docs
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/PHPantom-dev/phpantom_lsp" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.2.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    PHPantom-dev/phpantom_lsp
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Getting Started
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Getting Started
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../editor-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Editor Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../agent-setup/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Agent Setup
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Manual Installation
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Reference
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Reference
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Configuration
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Development
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../BUILDING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Building from Source
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../ARCHITECTURE/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CONTRIBUTING/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Contributing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4_4" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_4_4" id="__nav_4_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Roadmap
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_4_4_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_4_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+  Roadmap
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Overview
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../blade/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Blade
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../bugs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Bugs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../diagnostics/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Diagnostics
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../external-stubs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  External Stubs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../fix-cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Fix CLI
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../indexing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Indexing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../inline-completion/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Inline Completion
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../laravel/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Laravel
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../lsp-features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  LSP Features
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Performance
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#p3-parallel-pre-filter-in-find_implementors" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P3. Parallel pre-filter in <code>find_implementors</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P3. Parallel pre-filter in find_implementors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trade-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Trade-off
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P15. Two-phase stub index construction (eliminate RwLock on stub maps)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-solution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ideal solution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p16-pre-parsed-stub-format-eliminate-raw-php-embedding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P16. Pre-parsed stub format (eliminate raw PHP embedding)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P16. Pre-parsed stub format (eliminate raw PHP embedding)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#indexing-order-stubs-vendor-user" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Indexing order: stubs → vendor → user
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cascade-cost-during-first-file-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Cascade cost during first-file-open
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Solution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#estimated-impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Estimated impact
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p17-mago-names-resolution-on-the-parse-hot-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P17. <code>mago-names</code> resolution on the parse hot path
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P17. mago-names resolution on the parse hot path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p18-subtype-result-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P18. Subtype result caching
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P18. Subtype result caching">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Appendix: Profiling
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Appendix: Profiling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pathological-test-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pathological test file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p20-content-hash-gated-resolution-cache-persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P20. Content-hash gated resolution cache persistence
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P21. Offset-shifting for cached diagnostics on partial edits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P47. The resolved-class cache lock caps concurrent class resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P35. Diagnostic passes reach only a fraction of available cores
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p48-higher-order-collection-proxy-injection-repeats-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P48. Higher-order collection proxy injection repeats work
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P49. A very long method chain costs superlinear time to analyse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p56-folding-array-shapes-across-branches-costs-superlinear-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P56. Folding array shapes across branches costs superlinear time
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P50. Cache the top-level scope for <code>global</code> keyword resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P51. CI-gated scaling and memory invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P52. The diagnostic benchmarks measure a path no consumer takes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P53. The deprecated collector deep-copies a class per member access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. Property narrowing re-walks the whole body once per subject
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../phpstan-actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  PHPStan Actions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../refactor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Refactoring
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../signature-help/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Signature Help
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../type-inference/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Type Inference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../benchmarks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Benchmarks
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../CHANGELOG/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Changelog
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#p3-parallel-pre-filter-in-find_implementors" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P3. Parallel pre-filter in <code>find_implementors</code>
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P3. Parallel pre-filter in find_implementors">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#trade-off" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Trade-off
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P15. Two-phase stub index construction (eliminate RwLock on stub maps)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#ideal-solution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Ideal solution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p16-pre-parsed-stub-format-eliminate-raw-php-embedding" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P16. Pre-parsed stub format (eliminate raw PHP embedding)
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P16. Pre-parsed stub format (eliminate raw PHP embedding)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#indexing-order-stubs-vendor-user" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Indexing order: stubs → vendor → user
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cascade-cost-during-first-file-open" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Cascade cost during first-file-open
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#solution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Solution
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#estimated-impact" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Estimated impact
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Prerequisites
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p17-mago-names-resolution-on-the-parse-hot-path" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P17. <code>mago-names</code> resolution on the parse hot path
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P17. mago-names resolution on the parse hot path">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-to-implement_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        When to implement
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p18-subtype-result-caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P18. Subtype result caching
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="P18. Subtype result caching">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#fix_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Fix
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#appendix-profiling" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Appendix: Profiling
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Appendix: Profiling">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#commands" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Commands
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#pathological-test-file" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Pathological test file
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p20-content-hash-gated-resolution-cache-persistence" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P20. Content-hash gated resolution cache persistence
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P21. Offset-shifting for cached diagnostics on partial edits
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P47. The resolved-class cache lock caps concurrent class resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P35. Diagnostic passes reach only a fraction of available cores
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p48-higher-order-collection-proxy-injection-repeats-work" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P48. Higher-order collection proxy injection repeats work
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P49. A very long method chain costs superlinear time to analyse
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p56-folding-array-shapes-across-branches-costs-superlinear-time" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P56. Folding array shapes across branches costs superlinear time
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P50. Cache the top-level scope for <code>global</code> keyword resolution
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p51-ci-gated-scaling-and-memory-invariants" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P51. CI-gated scaling and memory invariants
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P52. The diagnostic benchmarks measure a path no consumer takes
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P53. The deprecated collector deep-copies a class per member access
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        P54. Property narrowing re-walks the whole body once per subject
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+  
+    <a href="https://github.com/PHPantom-dev/phpantom_lsp/edit/main/docs/todo/performance.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="phpantom-performance">PHPantom — Performance<a class="headerlink" href="#phpantom-performance" title="Permanent link">&para;</a></h1>
+<p>Internal performance improvements that reduce latency, memory usage,
+and lock contention on the hot paths. These items are sequenced so
+that structural fixes land before features that would amplify the
+underlying costs (parallel file processing, full background indexing).</p>
+<p>Items are ordered by <strong>impact</strong> (descending), then <strong>complexity</strong> (ascending)
+within the same impact tier.</p>
+<table>
+<thead>
+<tr>
+<th>Label</th>
+<th>Scale</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Impact</strong></td>
+<td><strong>Critical</strong>, <strong>High</strong>, <strong>Medium-High</strong>, <strong>Medium</strong>, <strong>Low-Medium</strong>, <strong>Low</strong></td>
+</tr>
+<tr>
+<td><strong>Complexity</strong></td>
+<td><strong>Low</strong> (mechanical/boilerplate, no design decisions), <strong>Medium</strong> (self-contained, follows an existing pattern), <strong>Medium-High</strong> (spans modules, some new design), <strong>High</strong> (shared/core subsystem, correctness or performance tradeoffs), <strong>Very High</strong> (cross-cutting architecture, wide blast radius)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="p3-parallel-pre-filter-in-find_implementors">P3. Parallel pre-filter in <code>find_implementors</code><a class="headerlink" href="#p3-parallel-pre-filter-in-find_implementors" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>find_implementors</code> Phase 3 reads every unloaded classmap file
+sequentially: <code>fs::read_to_string</code>, string pre-filter for the target
+name, then <code>parse_and_cache_file</code>. On a project with thousands of
+vendor classes, this loop is dominated by I/O latency. The string
+pre-filter rejects most files (the target name appears in very few),
+so the vast majority of reads are wasted.</p>
+<h3 id="fix">Fix<a class="headerlink" href="#fix" title="Permanent link">&para;</a></h3>
+<p>Split Phase 3 into two sub-phases:</p>
+<ol>
+<li>
+<p><strong>Parallel pre-filter.</strong> Collect the candidate paths into a
+   <code>Vec&lt;PathBuf&gt;</code>, then use <code>std::thread::scope</code> to read files and
+   run the <code>raw.contains(target_short)</code> check in parallel. Return
+   only the paths that pass the filter along with their content.</p>
+</li>
+<li>
+<p><strong>Sequential parse.</strong> For the (few) files that pass, call
+   <code>parse_and_cache_file</code> sequentially. This step mutates <code>uri_classes_index</code>
+   and calls <code>class_loader</code>, which may re-lock shared state.</p>
+</li>
+</ol>
+<p>The same pattern applies to Phase 5 (PSR-4 directory walk for files
+not in the classmap). The pre-filter I/O is the bottleneck; the
+parse step processes very few files and is fast.</p>
+<p>Note that once the full workspace index is ready,
+<code>find_implementors</code> answers from Phase 1 alone — Phases 3 and 5
+only run during the startup window before indexing completes, which
+narrows how often this cost is paid.</p>
+<h3 id="trade-off">Trade-off<a class="headerlink" href="#trade-off" title="Permanent link">&para;</a></h3>
+<p>Thread spawning overhead is only worthwhile when the candidate set
+is large. Skip parallelism when the candidate count is below a
+threshold (e.g. 8 files).</p>
+<hr />
+<h2 id="p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps">P15. Two-phase stub index construction (eliminate <code>RwLock</code> on stub maps)<a class="headerlink" href="#p15-two-phase-stub-index-construction-eliminate-rwlock-on-stub-maps" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium-High</strong></p>
+<p>The three stub indexes (<code>stub_index</code>, <code>stub_function_index</code>,
+<code>stub_constant_index</code>) are write-once-read-many maps. They are
+populated at construction time from the compiled-in phpstorm-stubs
+arrays, then filtered once in <code>set_php_version</code> (called during
+<code>initialized</code>) to evict entries with <code>@removed X.Y</code> tags. After
+that single mutation they are never written again.</p>
+<p>Because the PHP version is not known at construction time (it comes
+from <code>composer.json</code> / <code>.phpantom.toml</code>, read during <code>initialized</code>),
+the maps are currently wrapped in <code>parking_lot::RwLock</code> so that
+<code>set_php_version</code> can call <code>.write().retain(…)</code>. The maps are now
+<code>Arc&lt;RwLock&lt;…&gt;&gt;</code>, shared across worker and request clones instead
+of deep-copied per thread, so only the read-lock cost remains.
+Every read — ~24 call sites across completion, resolution,
+diagnostics, hover, and definition — acquires a shared read lock. On the
+uncontended path this is a single atomic CAS (~1-5 ns), so the
+cost is negligible in practice, but it is architecturally wasteful
+for data that never changes after startup.</p>
+<h3 id="ideal-solution">Ideal solution<a class="headerlink" href="#ideal-solution" title="Permanent link">&para;</a></h3>
+<p>Split <code>Backend</code> construction into two phases so that the stub maps
+are plain <code>HashMap</code>s with zero synchronisation cost on reads:</p>
+<ol>
+<li>
+<p><strong>Phase 1 — skeleton construction.</strong> Create the <code>Backend</code> with
+   empty (or placeholder) stub maps. No <code>RwLock</code> needed because
+   nothing reads them yet.</p>
+</li>
+<li>
+<p><strong>Phase 2 — version-aware population.</strong> In <code>initialized</code>, after
+   detecting the PHP version, build the filtered maps (applying
+   <code>is_stub_function_removed</code> / <code>is_stub_class_removed</code> during
+   construction rather than via <code>retain</code>) and store them on the
+   backend through a one-shot setter that consumes the maps by
+   value.</p>
+</li>
+</ol>
+<p>The setter could use <code>std::sync::OnceLock&lt;HashMap&lt;…&gt;&gt;</code> (or simply
+an <code>UnsafeCell</code> behind a "set-exactly-once" assertion) to make the
+write safe without ongoing read-side cost. Alternatively, the
+fields can stay as plain <code>HashMap</code> if the <code>Backend</code> struct is built
+in <code>initialized</code> rather than <code>initialize</code> — moving construction
+after the version is known.</p>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<p>This interacts with the test helpers (<code>new_test</code>,
+<code>new_test_with_stubs</code>, etc.) which currently call
+<code>set_php_version</code> in the constructor. They would need to accept
+a <code>PhpVersion</code> parameter or build the filtered maps inline.</p>
+<h3 id="when-to-implement">When to implement<a class="headerlink" href="#when-to-implement" title="Permanent link">&para;</a></h3>
+<p>Low priority. The current <code>RwLock</code> overhead is unmeasurable in
+practice (~10-20 ns per completion request). Worth revisiting if
+the stub indexes grow significantly or if <code>Backend</code> construction
+is restructured for other reasons.</p>
+<hr />
+<h2 id="p16-pre-parsed-stub-format-eliminate-raw-php-embedding">P16. Pre-parsed stub format (eliminate raw PHP embedding)<a class="headerlink" href="#p16-pre-parsed-stub-format-eliminate-raw-php-embedding" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Complexity: Very High</strong></p>
+<p>The ~530 phpstorm-stubs PHP files are embedded as raw source via
+<code>include_str!</code> (~9.8 MB in <code>.rodata</code>). This has three costs:</p>
+<ol>
+<li>
+<p><strong>Permanent RSS.</strong> The 9.8 MB is memory-mapped into every
+   process regardless of how many stubs are actually accessed.
+   That is ~17% of the current 59 MB baseline and will become a
+   larger relative share as vendor indexing grows the working set.</p>
+</li>
+<li>
+<p><strong>Parse cost on first access.</strong> Each stub is parsed with the
+   full mago parser on first use (<code>parse_and_cache_content_versioned</code>).
+   Large files like <code>intl.php</code> (296 KB) take several milliseconds.
+   A Symfony project can trigger hundreds of stub parses as vendor
+   classes extend built-in types.</p>
+</li>
+<li>
+<p><strong>Duplicate data.</strong> After parsing, the <code>Arc&lt;ClassInfo&gt;</code> lives in
+   <code>uri_classes_index</code> and <code>fqn_index</code>, but the raw PHP source stays resident
+   in <code>.rodata</code> forever. Both copies exist simultaneously.</p>
+</li>
+</ol>
+<h3 id="indexing-order-stubs-vendor-user">Indexing order: stubs → vendor → user<a class="headerlink" href="#indexing-order-stubs-vendor-user" title="Permanent link">&para;</a></h3>
+<p>Background indexing will load data in dependency order:</p>
+<ol>
+<li><strong>Stubs</strong> (built-in PHP classes, functions, constants)</li>
+<li><strong>Vendor</strong> (Composer dependencies)</li>
+<li><strong>User</strong> (project source)</li>
+</ol>
+<p>This ordering means every layer's parent types are already
+resolved before it starts. Vendor classes that extend <code>ArrayAccess</code>,
+<code>Iterator</code>, <code>JsonSerializable</code>, etc. find pre-populated
+<code>fqn_index</code> entries instead of triggering on-demand stub parses.
+User classes that extend vendor classes find those already indexed
+too.</p>
+<p>With the current raw-PHP stubs, the stubs phase itself involves
+parsing ~530 PHP files through the full mago pipeline. In a
+pre-parsed format, this phase becomes a single deserialization
+step (~5-10 ms), making the stubs layer essentially free and
+letting vendor indexing start immediately.</p>
+<h3 id="cascade-cost-during-first-file-open">Cascade cost during first-file-open<a class="headerlink" href="#cascade-cost-during-first-file-open" title="Permanent link">&para;</a></h3>
+<p>When the user opens a file before background indexing completes,
+the completion/hover path walks type chains synchronously. A
+typical Laravel file triggers a cascade like:</p>
+<ul>
+<li>Model → <code>find_or_load_class</code> → classmap → parse vendor PHP</li>
+<li>Model implements <code>ArrayAccess</code>, <code>JsonSerializable</code>, <code>Countable</code>,
+  uses <code>Traversable</code>, <code>Iterator</code>, <code>Stringable</code>, etc.</li>
+<li>Each of these hits Phase 3 (stub lookup) → full mago parse of
+  the stub file containing it</li>
+<li>Stub files contain multiple classes, so parsing <code>SPL/SPL.php</code>
+  for <code>ArrayAccess</code> also parses <code>Iterator</code>, <code>Countable</code>,
+  <code>SeekableIterator</code>, etc.</li>
+</ul>
+<p>A realistic first-open cascade triggers 20-40 stub file parses,
+costing 40-200 ms of CPU time on the critical path. With
+pre-parsed stubs, each stub lookup becomes a <code>HashMap::get</code>
+returning an <code>Arc&lt;ClassInfo&gt;</code> in nanoseconds, eliminating this
+cost entirely.</p>
+<h3 id="solution">Solution<a class="headerlink" href="#solution" title="Permanent link">&para;</a></h3>
+<p>Parse all stubs at build time in <code>build.rs</code> (mago becomes a build
+dependency) and serialize the extracted <code>ClassInfo</code>, <code>FunctionInfo</code>,
+and constant data into a compact binary blob using postcard (or
+bincode). Embed the blob via <code>include_bytes!</code>. At startup,
+deserialize the blob and populate <code>fqn_index</code> directly.</p>
+<p><strong>Version filtering.</strong> Add <code>since: Option&lt;PhpVersion&gt;</code> and
+<code>until: Option&lt;PhpVersion&gt;</code> fields to <code>MethodInfo</code>, <code>ParameterInfo</code>,
+<code>FunctionInfo</code>, <code>ClassInfo</code>, and <code>ConstantInfo</code>. Embed one
+"maximal" blob containing all version variants. After
+deserialization, filter elements whose version range excludes the
+target PHP version. This replaces both the current byte-level
+<code>@removed</code> scanning at startup and the <code>is_available_for_version</code>
+AST filtering at parse time.</p>
+<p><strong>Serde on the type hierarchy.</strong> Add <code>#[derive(Serialize, Deserialize)]</code>
+to the core structs (<code>ClassInfo</code>, <code>MethodInfo</code>, <code>PropertyInfo</code>,
+<code>ConstantInfo</code>, <code>FunctionInfo</code>, <code>ParameterInfo</code>, and their
+supporting enums). <code>SharedVec&lt;T&gt;</code> needs a custom serde impl that
+serializes as <code>Vec&lt;T&gt;</code> and deserializes into <code>SharedVec::from(vec)</code>.</p>
+<p><strong>What gets removed:</strong></p>
+<ul>
+<li>The <code>STUB_FILES</code> array (raw PHP source embedding)</li>
+<li>The <code>phpantom-stub://</code> URI scheme and associated <code>uri_classes_index</code> entries</li>
+<li>The <code>parse_and_cache_content_versioned</code> path for stubs</li>
+<li>The <code>is_stub_function_removed</code> / <code>is_stub_class_removed</code> byte
+  scanners (replaced by version fields on deserialized structs)</li>
+<li>The <code>set_php_version</code> retain-based eviction (replaced by
+  post-deserialize filtering)</li>
+</ul>
+<p><strong>Go-to-definition.</strong> Stubs are in-memory-only; the IDE cannot
+navigate to them anyway. No raw source needs to be preserved.</p>
+<p><strong>Hover.</strong> The extracted fields (<code>class_docblock</code>, <code>deprecation_message</code>,
+<code>links</code>, <code>see_refs</code>, parameter type hints and names) are all
+carried in the serialized structs. Hover quality is preserved.</p>
+<h3 id="estimated-impact">Estimated impact<a class="headerlink" href="#estimated-impact" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Binary:</strong> −9.8 MB raw PHP, +2-3 MB serialized blob = net −7 MB</li>
+<li><strong>RSS:</strong> 9.8 MB <code>.rodata</code> no longer mapped; stubs loaded as
+  heap-allocated structs filtered to the target PHP version</li>
+<li><strong>First-file-open:</strong> 40-200 ms of stub parse time on the
+  critical path eliminated; stub lookups drop to nanoseconds</li>
+<li><strong>Background indexing:</strong> stubs phase drops from seconds (parsing
+  530 PHP files) to &lt;10 ms (deserializing one blob), letting
+  vendor indexing start immediately</li>
+<li><strong>Vendor indexing cascade:</strong> every vendor class that extends a
+  built-in type no longer triggers a stub parse; the parent
+  <code>ClassInfo</code> is already in <code>fqn_index</code></li>
+<li><strong>Build time:</strong> clean builds gain 10-30 s for the mago parse
+  step; incremental builds unaffected (<code>write_if_changed</code> caching)</li>
+</ul>
+<h3 id="prerequisites_1">Prerequisites<a class="headerlink" href="#prerequisites_1" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>serde</code> derive on the core type hierarchy (already in <code>Cargo.toml</code>)</li>
+<li><code>build.rs</code> already downloads stubs and generates code; extending
+  it to parse PHP is incremental</li>
+<li>Interacts with P15 (stub index <code>RwLock</code> elimination): if stubs
+  are deserialized eagerly, the two-phase construction in P15
+  becomes the natural approach</li>
+</ul>
+<h3 id="when-to-implement_1">When to implement<a class="headerlink" href="#when-to-implement_1" title="Permanent link">&para;</a></h3>
+<p>High priority. This is a prerequisite for efficient stubs → vendor
+→ user indexing. The 9.8 MB static cost is already meaningful and
+will become the dominant fixed overhead once vendor indexing is
+deferred. Implementing this before full vendor indexing lands
+avoids hitting the memory ceiling and ensures the stubs layer is
+essentially free for both eager and deferred indexing paths.</p>
+<hr />
+<h2 id="p17-mago-names-resolution-on-the-parse-hot-path">P17. <code>mago-names</code> resolution on the parse hot path<a class="headerlink" href="#p17-mago-names-resolution-on-the-parse-hot-path" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>The <code>mago-names</code> name resolver runs synchronously inside
+<code>update_ast_inner</code>, adding a full AST walk plus an owned <code>HashMap</code>
+copy on every <code>didChange</code> event. Measured regression from <code>6a0737a</code>
+("Migrate to use mago-names"):</p>
+<table>
+<thead>
+<tr>
+<th>Benchmark</th>
+<th>Before</th>
+<th>After</th>
+<th>Δ</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>with_narrowing</td>
+<td>12 ms</td>
+<td>15 ms</td>
+<td>+25%</td>
+</tr>
+<tr>
+<td>5_methods_chain</td>
+<td>8 ms</td>
+<td>10 ms</td>
+<td>+25%</td>
+</tr>
+<tr>
+<td>carbon_class</td>
+<td>250 ms</td>
+<td>340 ms</td>
+<td>+36%</td>
+</tr>
+<tr>
+<td>large_file</td>
+<td>150 ms</td>
+<td>210 ms</td>
+<td>+40%</td>
+</tr>
+</tbody>
+</table>
+<p>The resolved names are now consumed by many features through
+<code>resolve_name_at()</code> (rename, references, semantic tokens,
+go-to-definition, type hierarchy, highlight) and directly by
+function resolution and deprecated diagnostics — but all of those
+are on-demand request handlers. Nothing on the didChange or
+completion hot path requires this data to be computed eagerly, so
+lazy per-file-version resolution remains viable; it just has more
+consumers to invalidate correctly than when this was filed.</p>
+<h3 id="fix_1">Fix<a class="headerlink" href="#fix_1" title="Permanent link">&para;</a></h3>
+<p>Defer name resolution out of <code>update_ast_inner</code>. Options:</p>
+<ul>
+<li><strong>Lazy resolution:</strong> compute <code>OwnedResolvedNames</code> on first access
+  per file version, invalidate on the next <code>update_ast</code>. Moves the
+  cost off the typing hot path entirely.</li>
+<li><strong>Diagnostic-worker resolution:</strong> run the resolver in the
+  diagnostic worker clone of <code>Backend</code>, since diagnostics are the
+  primary consumer.</li>
+</ul>
+<h3 id="when-to-implement_2">When to implement<a class="headerlink" href="#when-to-implement_2" title="Permanent link">&para;</a></h3>
+<p>Low priority. The <code>mago-names</code> migration is complete, but the
+<code>use_map</code> is still used by several consumers. Further refactoring
+(migrating more consumers to byte-offset lookups, eventually
+removing <code>use_map</code>) will change the access patterns. Optimizing
+now would likely be reworked. Revisit once <code>use_map</code> usage is
+significantly reduced.</p>
+<hr />
+<h2 id="p18-subtype-result-caching">P18. Subtype result caching<a class="headerlink" href="#p18-subtype-result-caching" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: High</strong></p>
+<p>PHPStan caches subtype check results (<code>isSuperTypeOf()</code>) in a static
+<code>HashMap</code> keyed by type description strings. This avoids redundant
+class hierarchy walks when the same type pair is checked multiple
+times during a single request. PHPantom resolves class hierarchies
+repeatedly during completion (checking if a method override is
+covariant, checking if a class implements an interface, etc.). A
+per-request <code>HashMap&lt;(String, String), bool&gt;</code> cache for subtype
+results would reduce redundant hierarchy walks.</p>
+<p>PHPStan also uses a <code>hasTemplateOrLateResolvableType()</code> fast-path
+to skip expensive type traversal when a type has no template
+parameters. PHPantom could add a similar flag to its type
+representations to short-circuit template substitution on simple
+types. Most types in a typical codebase are concrete (no generics),
+so this fast-path would apply to the majority of checks.</p>
+<h3 id="fix_2">Fix<a class="headerlink" href="#fix_2" title="Permanent link">&para;</a></h3>
+<ol>
+<li>
+<p>Add a thread-local or per-request
+   <code>HashMap&lt;(Atom, Atom), bool&gt;</code> that caches the result of
+   "is type A a subtype of type B?" lookups. Clear the map at the
+   start of each completion/hover/diagnostic request. Class names
+   are interned now (<code>TypeKind::Named</code> carries an <code>Atom</code>, <code>ClassInfo</code>
+   caches its FQN as an <code>Atom</code>), so the keys are <code>Copy</code> and
+   identity-hashed. Whole types are interned too, so a <code>(PhpType,
+   PhpType)</code> key would work as well and hash just as cheaply.</p>
+</li>
+<li>
+<p>Add a <code>has_template_params: bool</code> flag (or equivalent) to
+   <code>ClassInfo</code> or type representations. Set it during parsing when
+   <code>@template</code> tags or generic syntax are present. Before running
+   <code>apply_substitution</code>, check the flag and skip the substitution
+   walk entirely when it is <code>false</code>. (Today the equivalent guarding
+   is ad hoc emptiness checks on <code>template_params</code> and on the
+   substitution map.)</p>
+</li>
+</ol>
+<hr />
+<h2 id="appendix-profiling">Appendix: Profiling<a class="headerlink" href="#appendix-profiling" title="Permanent link">&para;</a></h2>
+<h3 id="commands">Commands<a class="headerlink" href="#commands" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Record (Ctrl-C after ~60s):</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>perf<span class="w"> </span>record<span class="w"> </span>-g<span class="w"> </span>--call-graph<span class="w"> </span>dwarf<span class="w"> </span>--<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="w">  </span>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="w">  </span>src/core/Purchase/Services/PurchaseFileService.php
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="c1"># Text report (top functions):</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>perf<span class="w"> </span>report<span class="w"> </span>--stdio<span class="w"> </span>--no-children<span class="w"> </span><span class="p">|</span><span class="w"> </span>head<span class="w"> </span>-80
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="c1"># Flamegraph (requires the `flamegraph` crate or perf-tools):</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>perf<span class="w"> </span>script<span class="w"> </span><span class="p">|</span><span class="w"> </span>flamegraph<span class="w"> </span>&gt;<span class="w"> </span>/tmp/phpantom.svg
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a><span class="c1"># Instantaneous CPU utilisation over a run (% of one core, sampled</span>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># every 0.5 s), for machines where perf is unavailable</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># (kernel.perf_event_paranoid &gt; 2):</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>./target/release/phpantom_lsp<span class="w"> </span>analyze<span class="w"> </span>--project-root<span class="w"> </span>&lt;dir&gt;<span class="w"> </span>--no-colour<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span>&gt;/dev/null<span class="w"> </span><span class="m">2</span>&gt;<span class="p">&amp;</span><span class="m">1</span><span class="w"> </span><span class="p">&amp;</span><span class="w"> </span><span class="nv">PID</span><span class="o">=</span><span class="nv">$!</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="m">0</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="k">while</span><span class="w"> </span><span class="nb">kill</span><span class="w"> </span>-0<span class="w"> </span><span class="nv">$PID</span><span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="p">;</span><span class="w"> </span><span class="k">do</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span><span class="nv">cur</span><span class="o">=</span><span class="k">$(</span>awk<span class="w"> </span><span class="s1">&#39;{print $14+$15}&#39;</span><span class="w"> </span>/proc/<span class="nv">$PID</span>/stat<span class="w"> </span><span class="m">2</span>&gt;/dev/null<span class="k">)</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="k">break</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span><span class="o">[</span><span class="w"> </span>-n<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$cur</span><span class="s2">&quot;</span><span class="w"> </span><span class="o">]</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">echo</span><span class="w"> </span><span class="k">$((</span><span class="w"> </span><span class="o">(</span><span class="nv">cur</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="nv">prev</span><span class="o">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">2</span><span class="w"> </span><span class="k">))</span><span class="p">;</span><span class="w"> </span><span class="nv">prev</span><span class="o">=</span><span class="nv">$cur</span><span class="p">;</span><span class="w"> </span>sleep<span class="w"> </span><span class="m">0</span>.5
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a><span class="k">done</span>
+</code></pre></div>
+<h3 id="pathological-test-file">Pathological test file<a class="headerlink" href="#pathological-test-file" title="Permanent link">&para;</a></h3>
+<p><code>PurchaseFileService.php</code> (~700-line Eloquent-heavy service with
+~55 imports) is the most expensive single file encountered so far.
+The per-collector timing is controlled by a <code>&gt;= 2s</code> threshold in
+<code>src/analyse.rs</code> Phase 2 (search for <code>⏱</code>). It prints a breakdown
+like:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>⏱  63.2s  src/core/Purchase/Services/PurchaseFileService.php
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>  [fast=1ms cls=40ms mem=23696ms fn=12ms unres=16781ms arg=22568ms impl=0ms depr=54ms]
+</code></pre></div>
+<hr />
+<h2 id="p20-content-hash-gated-resolution-cache-persistence">P20. Content-hash gated resolution cache persistence<a class="headerlink" href="#p20-content-hash-gated-resolution-cache-persistence" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
+<p>The resolved-class cache (<code>resolved_class_cache</code>) is ephemeral — it
+lives only for the duration of the process. On LSP restart or cold
+start, all class resolution (inheritance merging, virtual members,
+template substitution) is re-computed from scratch even when files
+haven't changed.</p>
+<p><strong>Fix:</strong> Persist resolved <code>ClassInfo</code> entries to a project-local cache
+directory, keyed by <code>xxh128(file_contents)</code>. On startup, walk the
+project, compare content hashes, and load cached entries for unchanged
+files. Only re-resolve classes whose source files (or dependency files)
+have changed.</p>
+<p>Psalm implements exactly this pattern with three cache layers:
+- Parser cache (serialized AST, keyed by file content hash)
+- File storage cache (classes-in-file, functions, constants)
+- ClassLike storage cache (methods, properties, template types,
+  parent chains — keyed by <code>xxh128(file_contents)</code>)</p>
+<p>Each layer checks the hash on load and discards stale entries. Schema
+versioning (tracking <code>filemtime</code> of the storage struct source files)
+auto-invalidates all caches when internal types change.</p>
+<p><strong>Design:</strong></p>
+<ol>
+<li>Use <code>bincode</code> serialization (already evaluated in X6) for
+   <code>ClassInfo</code> entries.</li>
+<li>Key: <code>(fqn, content_hash)</code> → serialized <code>ClassInfo</code>.</li>
+<li>On startup: load cache entries where content hash matches current
+   file. Skip resolution for those classes entirely.</li>
+<li>On file change: evict entries for the changed file AND entries
+   whose classes depend on changed members (using the existing
+   dependency tracking from ER4).</li>
+<li>Schema version: embed a version constant derived from <code>ClassInfo</code>
+   struct layout. Invalidate entire cache on version mismatch.</li>
+</ol>
+<p><strong>Relationship to X6:</strong> X6 (disk cache) is the broader evaluation of
+whether disk caching is worthwhile. P20 is the specific application
+to resolved-class storage, which is the most expensive thing to
+recompute. P20 can ship independently as a targeted optimization
+even if the broader X6 evaluation concludes that full disk caching
+isn't needed.</p>
+<p><strong>References:</strong>
+- Psalm: <code>ClassLikeStorageCacheProvider</code> in
+  <code>Psalm\Internal\Provider\ClassLikeStorageCacheProvider</code>
+- Psalm: <code>FileStorageCacheProvider</code> for the content-hash invalidation
+  pattern
+- A peer PHP LSP project persists its per-file index cache on disk
+  keyed by <code>blake3(uri || content)</code>. It originally keyed on
+  <code>mtime + size</code> and shipped a cache-staleness bug (a size-preserving
+  edit within the same mtime second was missed) before switching to
+  content hashing. Confirms the content-hash-as-authority choice
+  above; never trust mtime for correctness, at most as a cheap
+  pre-filter to skip hashing unchanged files.</p>
+<hr />
+<h2 id="p21-offset-shifting-for-cached-diagnostics-on-partial-edits">P21. Offset-shifting for cached diagnostics on partial edits<a class="headerlink" href="#p21-offset-shifting-for-cached-diagnostics-on-partial-edits" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
+<p>When a user edits one method in a file, PHPantom currently re-runs
+diagnostics on the entire file. For large files (500+ lines), this
+is wasteful — diagnostics in unchanged regions are still valid, just
+at shifted byte offsets.</p>
+<p><strong>Fix:</strong> After a file edit, compute a line-level diff (Myers algorithm)
+to produce byte-offset shift deltas. Apply the deltas to cached
+diagnostics in unchanged regions. Only re-diagnose methods whose
+byte ranges overlap with the edited region.</p>
+<p>Psalm implements this with:
+1. <code>FileDiffer</code> — Myers line-level diff producing byte-offset ranges
+2. <code>FileStatementsDiffer</code> — AST-level statement diff classifying
+   statements as keep/keep_signature/add_or_delete
+3. <code>shiftFileOffsets()</code> — shifts surviving diagnostics/references by
+   the offset delta, removes those in deleted ranges</p>
+<p><strong>Design:</strong></p>
+<ol>
+<li>On <code>didChange</code>, compute a line diff between old and new content.</li>
+<li>Produce a <code>diff_map: Vec&lt;(old_start, old_end, offset_delta)&gt;</code>.</li>
+<li>Walk cached diagnostics for this file:</li>
+<li>If diagnostic span falls in a deleted range → remove it.</li>
+<li>If diagnostic span is after the edit → shift by delta.</li>
+<li>If diagnostic span is before the edit → keep as-is.</li>
+<li>Re-run diagnostics only for methods/functions whose spans overlap
+   with changed regions (use the member-level AST diff from ER4's
+   incremental repopulation).</li>
+<li>Merge shifted cached diagnostics with freshly-computed ones.</li>
+</ol>
+<p><strong>Prerequisites:</strong> The incremental repopulation (ER4) already
+identifies which members changed. This task extends that to the
+diagnostic layer.</p>
+<p><strong>References:</strong>
+- Psalm: <code>FileDiffer</code> and <code>FileStatementsDiffer</code> in
+  <code>Psalm\Internal\Diff</code>
+- Psalm: <code>Analyzer::shiftFileOffsets()</code> for the offset-shifting logic</p>
+<hr />
+<h2 id="p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir">P30. Evaluate migrating parse/resolve/docblock pipeline to <code>mago-hir</code><a class="headerlink" href="#p30-evaluate-migrating-parseresolvedocblock-pipeline-to-mago-hir" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
+<p><code>mago-hir</code> is an intermediate representation that lowers the CST plus
+PHPDoc comments into a single flat,
+fully-resolved tree in one pass: names are resolved
+(<code>Local</code>/<code>Qualified</code>/<code>FullyQualified</code> + <code>imported</code> flag on every
+identifier), docblock tags are parsed into structured annotations
+(<code>@template</code>, <code>@extends</code>/<code>@implements</code> generics, <code>@mixin</code>,
+<code>@method</code>/<code>@property</code>, <code>@param</code>/<code>@return</code>/<code>@throws</code>,
+<code>@assert</code>/<code>@assert-if-true</code>/<code>@assert-if-false</code>, <code>@param-out</code>,
+<code>@self-out</code>, type aliases), and types are parsed into a full
+PHPStan/Psalm-grade type language (generics with resolved bounds,
+conditional types, <code>key-of</code>/<code>value-of</code>, array/object shapes,
+int-ranges, class-string variants, int-masks). <code>mago-phpdoc-syntax</code>
+already supplies the docblock and type half of that; what <code>mago-hir</code>
+adds on top is the resolved-name and single-tree lowering PHPantom
+hand-rolls across <code>parser/</code> and <code>names.rs</code>.</p>
+<p>The IR threads three generic "hole" parameters
+(<code>IR&lt;'arena, I, S, E&gt;</code>, defaulting to <code>()</code>) through every node so a
+later inference pass can fill in resolved type information at
+item/statement/expression granularity without changing the tree
+shape — this is the "groundwork for the upcoming rule-based checker"
+azjezz described.</p>
+<p>Confirmed by reading the source directly (docs.rs is only
+~1% documented, so don't rely on it): <code>mago-hir</code> depends only on
+crates we already use (<code>mago-syntax</code>, <code>mago-syntax-core</code>,
+<code>mago-phpdoc-syntax</code>, <code>mago-span</code>, <code>mago-database</code>,
+<code>mago-allocator</code>) plus the small <code>mago-flags</code> crate. It does <strong>not</strong>
+pull in <code>mago-codex</code>, <code>mago-analyzer</code>, or <code>mago-reflection</code>, so
+adopting it would not introduce a second type-resolution engine
+alongside our own (see the "no parallel type resolution systems"
+rule in <code>CLAUDE.md</code>) — it would replace the raw-parsing layer that
+currently <em>feeds</em> <code>ClassInfo</code> construction, not <code>ClassInfo</code> itself or
+<code>resolve_rhs_expression</code>/<code>resolve_expression_type</code>.</p>
+<p>Potential payoff if it holds up:</p>
+<ul>
+<li>Deletes a large share of our hand-rolled docblock tag parsing,
+  type-string parsing, and name resolution, replacing it with a
+  single upstream-maintained pass.</li>
+<li>A natural path to Blade support: lowering Blade's compiled-PHP
+  approximation (see <code>examples/laravel</code>/Blade handling) to the same
+  IR would let more code actions and diagnostics work uniformly on
+  Blade files instead of only a subset, as flagged in the Discord
+  discussion with azjezz.</li>
+</ul>
+<p><strong>Do not start this now.</strong> The crate is ~19k LOC of essentially
+undocumented API with no consumers, and was described as under active
+redesign ("final touches... in the next branch" per azjezz).</p>
+<p>Note for anyone re-reading the history here: <code>mago-hir</code> did <strong>not</strong>
+arrive in 1.44.0. It first shipped in 1.40.0 (2026-06-24) and had
+already reached its current size by 1.43.0. The "brand new crate"
+framing in the original writeup was wrong, which matters because it
+means the API-settling clock below started earlier than assumed.</p>
+<p><strong>Triggers to revisit — start only once at least two of these hold:</strong></p>
+<ul>
+<li><code>mago-hir</code> has shipped unchanged (no breaking API changes) across
+  at least 2-3 minor mago releases, indicating the API has settled.</li>
+<li>Upstream's own rule-based checker/analyzer ships on top of
+  <code>mago-hir</code> and is in real use, proving the IR's "holes" mechanism
+  works end-to-end for type inference, not just as a parse target.</li>
+<li>rustdoc coverage for <code>mago-hir</code> is substantially more complete
+  (the 1.44.0 release is ~1% documented), or azjezz confirms the
+  shape is stable enough to build against.</li>
+</ul>
+<p><strong>Re-evaluated at mago 1.45.0 (2026-07-29): one of three triggers
+holds, so this stays parked and the prototype below was not run.</strong></p>
+<ul>
+<li><em>API settled — technically yes, but for the wrong reason.</em> The
+  <code>mago-hir</code> sources are byte-identical across 1.43.0, 1.44.0 and
+  1.45.0 (verified by unpacking the crates and diffing: zero changed
+  lines). That is not an API that settled through use, it is one that
+  has seen no development at all.</li>
+<li><em>Upstream checker builds on it — no, and upstream picked something
+  else.</em> <code>mago-analyzer</code>, <code>mago-linter</code> and <code>mago-codex</code> at 1.45.0
+  all depend on <code>mago-syntax</code> plus <code>mago-phpdoc-syntax</code> directly, and
+  none of them depends on <code>mago-hir</code>. <code>mago-hir</code> has zero reverse
+  dependencies on crates.io. Six releases and a month after it
+  appeared, the rule-based checker it was billed as groundwork for is
+  being built on a different foundation. This is the load-bearing
+  trigger: adopting the IR now would make PHPantom its first and only
+  user, betting the parse layer on an inference "holes" mechanism that
+  nothing has exercised end to end.</li>
+<li><em>rustdoc coverage — no.</em> 84 doc-comment lines against 876 <code>pub</code>
+  items in 1.45.0, still about the ~1% the original writeup found.</li>
+</ul>
+<p>The cheap way to re-check is the second trigger on its own: if
+anything in mago's own workspace starts depending on <code>mago-hir</code>, or
+its crates.io reverse-dependency count moves off zero, that flips the
+one trigger that carries real evidence and this becomes worth another
+look.</p>
+<p><strong>Re-checked at mago 1.46.0 (2026-08-13): unchanged.</strong> <code>mago-hir</code> still
+has zero reverse dependencies on crates.io, and docs.rs coverage is
+still around 1%. Still parked.</p>
+<p><strong>Before committing to a full migration, prototype first:</strong> feed
+<code>symbol_map</code> extraction (or <code>ClassInfo</code> construction) for a single
+file from <code>IR</code> behind a flag, on a branch, and compare output against
+the current extraction plus wall-clock time. Only proceed to a
+broader migration if the prototype reproduces current behavior and
+shows a real win; otherwise record the findings here and keep
+waiting on the triggers above.</p>
+<hr />
+<h2 id="p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution">P47. The resolved-class cache lock caps concurrent class resolution<a class="headerlink" href="#p47-the-resolved-class-cache-lock-caps-concurrent-class-resolution" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Very High</strong></p>
+<p><code>ResolvedClassCache</code> is a single <code>RwLock&lt;ResolvedCacheInner&gt;</code>, and every
+resolution takes its write lock several times: twice per
+<code>resolve_class_fully_inner</code> call to mark and clear the cycle-break
+in-flight marker, once to insert the finished class, and once per
+transformed member that <code>intern_transformed_method</code> /
+<code>intern_transformed_property</code> has to build (the read side of interning
+takes the read lock even on a hit). Member interning dominates the
+volume by far, since a merge produces one lookup per inherited or
+synthesized member.</p>
+<p>Measured with the eager-population worker pool
+(<code>populate_from_sorted</code>) swept from 1 to 32 workers on a 16-core / 32-thread
+SMT machine (Ryzen 9 5950X), release build, large Laravel projects: wall
+time falls steeply to ~8 workers, flattens through 16, and then
+<em>regresses</em> past that. On one project 2.1k classes went 0.62 s
+(1 worker) → 0.16 s (8) → 0.27 s (32), i.e. 32 workers were worse than
+4. Duplicated resolution is not the cause: the count of full resolutions
+rises only 5.9 % from 1 to 32 workers.</p>
+<p>Two confounds on this hardware make the raw sweep numbers hard to read
+at face value. The 16→32 leg is SMT: past 16 threads two workers share
+a physical core's execution resources rather than getting one each,
+which degrades throughput on its own and independently amplifies any
+lock contention (a spinning waiter now trashes the lock-holder's cache
+lines on the same core instead of a separate one). More importantly,
+the 5950X is dual-CCD — cores 0-7 and 8-15 (and their SMT siblings
+16-23/24-31) sit behind two separate L3 caches (<code>lscpu -e=CPU,CORE,CACHE</code>
+shows the split), and cache-line traffic for anything shared, including
+this lock, crosses the Infinity Fabric between them at much higher
+latency than a same-CCD hop. An unpinned process asking for ≤8 threads
+tends to get packed onto one CCD by the scheduler; past 8 it necessarily
+spills onto the second. Confirmed directly with <code>taskset</code>: 8 workers
+pinned to <code>0-7</code> (one CCD, no SMT) averaged 1.79 s wall for the same
+whole-project run that split 4+4 across both CCDs (<code>0,1,2,3,8,9,10,11</code>,
+still 8 distinct physical cores, still no SMT) averaged 2.02-2.17 s —
+15-20 % slower from CCD-crossing alone, with identical core count and
+no hyperthreading involved. So the knee at 8 in the original unpinned
+sweep is at least partly a topology artifact of this machine, not
+solely "how much lock contention exists at that many workers" — the
+same experiment on a single-CCD or single-die machine would likely
+plateau at a different worker count. <code>MAX_POPULATE_WORKERS</code> is pinned
+to 8 regardless: it is the largest value that stayed reliably within
+one CCD's worth of cores in testing, so it also happens to dodge the
+cross-CCD lock-traffic penalty as a side effect, not just diminishing
+per-lock-acquisition returns.</p>
+<p>Implication for the fix: fixing the lock removes the <em>within-CCD</em>
+contention this section measured, and should let population usefully
+raise <code>MAX_POPULATE_WORKERS</code> above 8. But raising it past one CCD's
+core count re-introduces cross-CCD traffic for whatever of the lock
+(sharded or not) is still shared — a plain <code>Vec&lt;Mutex&lt;Shard&gt;&gt;</code> does not
+avoid that on its own. Re-run the <code>taskset</code> same-CCD-vs-split comparison
+above after any lock-splitting change before raising the cap past 8, to
+check how much of the remaining ceiling is the lock versus the CCD
+boundary.</p>
+<p>The same lock is on the diagnostic pass's hot path (see P35), so
+splitting it should also help there. Directions, cheapest first:</p>
+<ol>
+<li><strong>Take the in-flight set off the shared lock.</strong> It is already keyed
+   <code>(ThreadId, FQN)</code> purely to emulate a thread-local, so making it an
+   actual thread-local <code>HashSet&lt;Atom&gt;</code> removes two write locks per
+   resolution with no semantic change. Measured on its own this did
+   <em>not</em> move the sweep, so it is a prerequisite rather than the fix,
+   but it is nearly free.</li>
+<li><strong>Shard the interning tables.</strong> <code>substituted_methods</code> /
+   <code>substituted_properties</code> are keyed by origin pointer and a
+   fingerprint hash, so they shard cleanly (e.g. by low bits of the
+   key) into independent locks without changing what gets shared. This
+   is where the volume is.</li>
+<li><strong>Separate the interning tables from the class map entirely.</strong> The
+   two have different access patterns (interning is
+   write-heavy-then-read-heavy per merge; the class map is one insert
+   per class) and only share a lock for convenience. Note the member
+   sharing they provide is load-bearing for memory, so any change must
+   keep cross-class sharing intact rather than falling back to
+   per-thread tables.</li>
+</ol>
+<p>Before implementing, confirm the attribution by counting lock
+acquisitions per site during a population run: the sweep above proves
+<em>a</em> lock is the ceiling but not which acquirer dominates.</p>
+<hr />
+<h2 id="p35-diagnostic-passes-reach-only-a-fraction-of-available-cores">P35. Diagnostic passes reach only a fraction of available cores<a class="headerlink" href="#p35-diagnostic-passes-reach-only-a-fraction-of-available-cores" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium-High · Complexity: Very High</strong></p>
+<p>Measured on a 32-core machine against large Laravel projects (release
+build): the <code>analyze</code> Phase 2 diagnostic pass spawns one worker per
+core with atomic work-stealing but does not keep them busy. Three
+offenders are fixed. The original one was every worker deep-cloning
+the embedded stub class/function/constant indexes twice per file via
+<code>clone_for_diagnostic_worker</code>; the indexes are Arc-shared now. The
+second was the Laravel string-key enumerations
+(<code>cached_route_names</code>/<code>cached_config_keys</code>/<code>cached_view_names</code>/
+<code>cached_trans_keys</code>/<code>cached_config_trees</code>): each walks the workspace
+from disk, and the plain check-then-fill cache stampeded, so all 32
+workers missed the same empty slot at once and each repeated the same
+gitignore-aware walk. They are guarded by
+<code>LaravelStringKeyBuildLocks</code> now, which took Phase 2 on a large
+Laravel project from 11.6 to 22.6 of 32 cores (1.91 s → 1.31 s) and
+whole-run wall clock down ~15%.</p>
+<p>The third was the name → class loader itself. <code>find_or_load_class_typed</code>
+was called 3.68 M times in a 1.2 s Phase 2 over a few thousand distinct
+types, and every call hashed the name case-insensitively for a read
+lock on <code>class_not_found_cache</code> and another on <code>fqn_class_index</code>. That
+cluster (<code>find_or_load_class_typed</code>, <code>find_class_in_uri_classes_index</code>,
+<code>CiMap::get</code>, <code>sip::Hasher::write</code>, <code>RawRwLock::lock_shared_slow</code>,
+kernel <code>osq_lock</code>) was ~22% of Phase 2 samples, and both lock symbols
+have since dropped out of the profile entirely. <code>class_loader_memo</code>
+memoises the loader per worker on the interned <code>PhpType</code> handle, keyed
+by <code>SymbolIndex::id</code> and stamped with <code>class_lookup_generation</code> so an
+answer is never staler than the two caches it derives from. Phase 2 fell
+~25-32% (1.23 s → 0.93 s and 0.72 s → 0.49 s on the two largest Laravel
+projects benchmarked) at ~26.8 → ~28.6 of 32 cores, with whole-run wall
+clock down 8-12% and user CPU down 17-34% across three large Laravel
+projects. Every smaller project benchmarked improved as well, RSS did
+not move, and diagnostic output was byte-identical on all ten.</p>
+<p>Sampling <code>/proc/&lt;pid&gt;/task/*/stat</code> is the fastest way to see the
+remaining ceiling: workers in <code>S</code> rather than <code>R</code> are blocked, not
+computing. What is left, re-profiled after the memo:</p>
+<ul>
+<li>Type strings are still parsed during the diagnostic pass rather than
+  at index time: <code>TypeTokenStream::fill_buffer_slow</code>, <code>PhpType::parse</code>,
+  <code>LocalArena::alloc_slice_copy</code> and <code>parse_primary_type</code> together are
+  ~6.5% of Phase 2 samples. Class-level <code>@method</code> / <code>@property</code> tags
+  are now parsed at extraction time; the remaining cost is method,
+  parameter and return type strings.</li>
+<li>malloc/free/memmove remains diffuse. <code>is_scalar_name</code> and
+  <code>is_keyword_type</code> (~2.3% between them) allocate a lowercase <code>String</code>
+  per call and are reached from <code>base_name</code>, the subtype checks and the
+  narrowing paths; the ~150 other <code>to_ascii_lowercase()</code> calls in
+  <code>php_type/</code> do the same. A stack buffer plus a length pre-filter
+  would make them allocation-free, but see the reverted attempt below
+  before assuming that wins.</li>
+<li>The <code>PhpType</code> interner (<code>php_type::intern</code> + <code>intern::lookup</code>) is
+  ~4.6% of Phase 2 samples and its 64 shards are now the largest
+  remaining lock, though the memo removed enough traffic that
+  <code>lock_shared_slow</code> no longer registers at all. An earlier count put
+  the interner at ~13 M hits per pass with roughly a quarter falling
+  through the shard read lock to the write path; that has not been
+  re-counted since. A per-thread direct-mapped memo in front of the
+  shard read (the same shape as <code>class_loader_memo</code>) is the obvious
+  next attempt.</li>
+<li><code>ensure_workspace_indexed_with_progress</code> still re-walks the whole
+  workspace on every call, so the four surviving string-key
+  enumerations do four full walks per diagnostic pass (down from ~44).
+  The walk is deliberate — it is how PHP files created outside the
+  editor get discovered — so removing it needs a change to that
+  contract, not just another cache.</li>
+<li><code>class_loader_memo</code>'s own hit rate is bounded by how often
+  <code>note_class_lookup_change</code> fires: 1,169 times in Phase 2, once per
+  lazily parsed vendor file, each retiring every worker's table. A
+  build with invalidation removed (unsound, for sizing only) reached
+  0.80 s against the 0.93 s shipped, so ~14% of the memo's prize is
+  still on the table. Recovering it means either loading fewer vendor
+  classes lazily (the reverted experiment below, whose calculus this
+  changes) or splitting the generation so an additive insert only
+  retires negative answers. The latter is not sound as stated: a
+  positive answer reached through PSR-4 or a stub is matched by short
+  name, so it is not always backed by an <code>fqn_class_index</code> entry under
+  the name that was looked up, and a later first-time insert of that
+  exact name can change it.</li>
+</ul>
+<p>The LSP workspace diagnostics pass uses the same collectors and has the
+same ceiling. Re-measure with <code>perf</code> (frame-pointer build) or the
+CPU-sampling loop in the Appendix after any change.</p>
+<p><strong>Tried and reverted (vendor classes in eager population):</strong> an
+earlier revision of this item claimed that projects keeping
+substantial code in <code>vendor/</code> pay extra because eager population only
+walks the indexed user files, leaving every vendor class to be parsed
+and resolved lazily mid-diagnostic — serialising workers on the load
+path, with cycle-break re-merges that dependency-first ordering would
+have avoided. Seeding eager population with vendor classes was
+implemented in two escalating variants and benchmarked (10-run,
+order-swapped wall/user-CPU averages against the two largest Laravel
+projects benchmarked): (1) expanding the toposort input with the
+transitive inheritance closure of the user classes (parents, traits,
+interfaces, mixins, generic arguments, loaded via
+<code>find_or_load_class</code>), and (2) additionally seeding every <code>use</code>-import
+target found in <code>fqn_uri_index</code>, with parallel frontier loading and
+Kahn-levelled parallel resolution to keep Phase 1.5 off the critical
+path. Neither moved wall clock on any project. Variant 1 cut lazy
+Phase 2 resolutions only ~2% (950 → 931) because vendor ancestors
+were already being resolved as nested resolutions during eager
+population; variant 2 cut them to a third (931 → 276) but cost ~3%
+more user CPU (duplicated nested provider resolutions across level
+workers) and ~10 MB RSS for classes the pass never needed resolved.
+The predicted cycle-break re-merges also failed to reproduce: Phase 2
+hits 0 on one of them and 18 on the other, and all
+18 are genuine dependency cycles (<code>Schedule</code> ↔
+<code>PendingEventAttributes</code>, Spatie <code>Role</code> ↔ <code>Permission</code>) that
+dependency-first ordering cannot avoid — the toposort has to break
+them somewhere too. Conclusion: after the stampede fix, lazy vendor
+class loading no longer serialises the diagnostic pass measurably;
+the remaining ceiling is the clone/interner traffic above. Diagnostic
+output was byte-identical in every configuration.</p>
+<p><strong>Tried and reverted:</strong> a single <code>perf</code> snapshot attributed ~4% of
+Phase 2 time to <code>core::hash::sip::Hasher::write</code>, called from
+<code>CiMap</code>/<code>CiSet</code> (<code>fqn_class_index</code>, <code>class_not_found_cache</code>) inside
+<code>find_or_load_class</code> — the single hottest function in the profile.
+Two independent fixes were tried: swapping <code>CiMap</code>/<code>CiSet</code>'s <code>HashMap</code>
+from <code>std</code>'s default SipHash to a hand-rolled FxHash-style hasher, and
+avoiding <code>fold()</code>'s per-lookup heap allocation with a stack buffer.
+Both looked sound in isolation and passed all tests, but 10-run
+wall-clock/user-CPU averages against a large Laravel project (order-swapped
+to rule out warm-cache bias) showed a small, consistent <em>regression</em>
+(~2% more user CPU) for the hasher swap alone, the allocation-avoidance
+alone, and the two combined. Likely cause: <code>mimalloc</code> already makes
+these transient allocations cheap, and the hand-rolled hasher's
+sequential dependency chain (<code>rotate_left</code> → <code>xor</code> → <code>wrapping_mul</code> per
+word) didn't beat <code>std</code>'s SipHash13 for these short keys on this
+hardware. Lesson for next attempt: a single <code>perf --stdio</code> percentage
+is not sufficient evidence — confirm with repeated, order-controlled
+wall-clock measurement before committing a "hot function" fix; sampling
+noise and inlining attribution can point at the wrong function. The
+re-measurement did surface a more promising lead: <code>RawRwLock::lock_shared_slow</code>
+rose from 3.78% to 4.36% of samples once the hashing/allocation cost
+was removed, suggesting the read lock on <code>fqn_class_index</code> (contended
+by 32 workers doing <code>find_or_load_class</code> concurrently) is closer to the
+real ceiling than the hashing was.</p>
+<hr />
+<h2 id="p48-higher-order-collection-proxy-injection-repeats-work">P48. Higher-order collection proxy injection repeats work<a class="headerlink" href="#p48-higher-order-collection-proxy-injection-repeats-work" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Grafting the item type's members onto a
+<code>HigherOrderCollectionProxy&lt;TKey, TValue, 'method', Collection&gt;</code> runs
+inside <code>resolve_class_fully_with_generics</code>, on the generic-substitution
+path. Two avoidable costs sit there. Neither is a correctness problem
+and both are linear rather than exponential, which is why they were left
+when the feature landed; the outer <code>(FQN, generic_args)</code> cache absorbs
+most of the repetition.</p>
+<ol>
+<li>
+<p><strong>The value type is resolved twice.</strong> The framework annotates the
+   proxy <code>@mixin \Illuminate\Support\Enumerable&lt;TKey, TValue&gt;</code> <em>and</em>
+   <code>@mixin TValue</code>. The second is a template-parameter mixin, so the
+   "Template-param mixin resolution" block in
+   <code>type_engine/types/resolution.rs</code> resolves the value class and merges
+   its members after <code>inject_higher_order_proxy_members</code> has already
+   grafted the same members with their proxied types. The injected
+   members win (<code>merge_virtual_members</code> keeps whichever arrived first),
+   so the second pass is pure waste. Skipping the template-param mixin
+   for a tagged proxy, or letting the injection mark <code>TValue</code> as already
+   consumed, avoids it.</p>
+</li>
+<li>
+<p><strong>Grafted members are not interned.</strong> <code>inject_higher_order_proxy_members</code>
+   builds each <code>MethodInfo</code>/<code>PropertyInfo</code> directly, where every other
+   transform site in the codebase goes through
+   <code>intern_transformed_method</code> / <code>intern_transformed_property</code> so that
+   applying the same transform to the same origin shares one <code>Arc</code>. The
+   proxied members of one item type are byte-identical across every
+   proxy that wraps it with the same result shape, so the same model's
+   members are re-allocated once per distinct <code>(proxied method, owning
+   collection)</code> pair rather than shared.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>virtual_members/laravel/higher_order_proxy.rs</code>,
+<code>virtual_members/resolve.rs</code>, and the template-param mixin block in
+<code>type_engine/types/resolution.rs</code>.</p>
+<h2 id="p49-a-very-long-method-chain-costs-superlinear-time-to-analyse">P49. A very long method chain costs superlinear time to analyse<a class="headerlink" href="#p49-a-very-long-method-chain-costs-superlinear-time-to-analyse" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Resolving a receiver spine no longer recurses per link, so a fluent chain
+of any length parses, hovers, and analyses without overflowing the stack.
+The work is still superlinear in the chain's length, though: a 1000-link
+chain takes roughly eight times as long to run diagnostics over as a
+500-link one on a debug build, so a generated query builder or generated
+API client long enough turns a diagnostic pass into a multi-second stall.</p>
+<p>Two costs compound along the spine, each linear in the prefix and paid
+once per link:</p>
+<ol>
+<li>
+<p><strong>Subject text is rebuilt per link.</strong> <code>extract_call_expr</code> calls
+   <code>expr_to_subject_text(method_call.object)</code> for every link, which
+   renders the whole prefix, so the symbol map spends O(n²) bytes on one
+   chain. Rendering the spine once and handing each link a slice of the
+   result would make it linear.</p>
+</li>
+<li>
+<p><strong>Chain cache keys are rebuilt per link.</strong> <code>chain_cache_key</code> calls
+   <code>SubjectExpr::to_subject_text</code>, which renders the whole prefix. A
+   spine the chain cache answers at its outermost link only pays for one
+   key, but a cold spine, or any resolution running without the cache
+   active, needs a key per link and so renders O(n²) bytes. The keys of a
+   spine are prefixes of one another, so one render plus per-link lengths
+   would do.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>symbol_map/extraction/expressions/calls.rs</code> for the
+first, <code>chain_cache_key</code> in <code>type_engine/resolver/mod.rs</code> for the second.
+Neither is a correctness problem, and hand-written code never reaches the
+lengths where it shows.</p>
+<hr />
+<h2 id="p56-folding-array-shapes-across-branches-costs-superlinear-time">P56. Folding array shapes across branches costs superlinear time<a class="headerlink" href="#p56-folding-array-shapes-across-branches-costs-superlinear-time" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p><code>join_shapes</code> keeps a variable at one tracked shape no matter how many
+branches write to it, which is what stops a merge from having to compare
+a variant per branch pairwise. The fold itself is not free, though:
+<code>join_shape_entries</code> builds a fresh <code>Vec&lt;ShapeEntry&gt;</code> and interns a new
+shape on every merge, so a variable that gains a key per branch pays for
+hashing a shape whose entry count grows with the branch count. The work
+is quadratic in the number of conditional writes.</p>
+<p>Measured on a release build, over a generated function assigning a
+distinct array shape under each of N sequential <code>if</code>s:</p>
+<table>
+<thead>
+<tr>
+<th>N writes</th>
+<th>analyse wall clock</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>400</td>
+<td>0.30s</td>
+</tr>
+<tr>
+<td>800</td>
+<td>0.90s</td>
+</tr>
+<tr>
+<td>1200</td>
+<td>2.10s</td>
+</tr>
+</tbody>
+</table>
+<p>Doubling the writes roughly triples the time, and the same file with the
+shapes left un-merged (each write pushing its own alternative instead)
+runs in half of that, so folding is the more expensive of the two
+strategies at these sizes. It is still the right default: the variant-per-
+branch alternative grows the <em>type</em> without bound, which costs every
+later consumer rather than just the merge. What is missing is the cheap
+exit that would make the fold linear in the common case:</p>
+<ol>
+<li>
+<p><strong>Skip the rebuild when nothing changes.</strong> Most merges join a shape
+   with one whose keys it already covers, and the result is the existing
+   shape. Comparing entry lists before allocating would return the
+   interned handle unchanged rather than rebuilding and re-hashing it.</p>
+</li>
+<li>
+<p><strong>Fold in place along a chain of merges.</strong> A run of merges against the
+   same variable rebuilds the accumulator from scratch each time. Joining
+   into a reusable buffer and interning once at the end of the run would
+   drop the repeated hashing.</p>
+</li>
+</ol>
+<p><strong>Where to look:</strong> <code>join_shapes</code>, <code>join_shape_entries</code>, and <code>join_values</code>
+in <code>php_type/mod.rs</code>, and the shape-folding branch of <code>merge_branch</code> in
+<code>type_engine/variable/forward_walk/scope_state/merge.rs</code>. Hand-written code
+does not reach the sizes where this shows; generated code and long
+procedural report builders do.</p>
+<hr />
+<h2 id="p50-cache-the-top-level-scope-for-global-keyword-resolution">P50. Cache the top-level scope for <code>global</code> keyword resolution<a class="headerlink" href="#p50-cache-the-top-level-scope-for-global-keyword-resolution" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: High</strong></p>
+<p>Every <code>resolve_variable_types</code> call on a file containing <code>global</code>
+rebuilds the top-level scope by forward-walking every top-level
+statement with <code>cursor_offset = u32::MAX</code>. This is done once per
+variable query, so hovering three variables in the same file walks the
+top-level three times.</p>
+<p>Re-entry guards (added to fix #327) prevent the walk from recursing
+unboundedly, but the repeated cost remains. The preferred shape is
+pre-compute-and-cache: build the top-level scope once per file version
+(keyed by content hash or pointer) and reuse it across queries within
+the same request cycle.</p>
+<p><strong>Where to look:</strong> <code>resolve_variable_in_statements</code> in
+<code>type_engine/variable/resolution.rs</code>, the <code>walk_top_level_for_globals</code>
+call. A per-request cache (similar to the chain resolution cache in
+<code>type_engine/resolver/context.rs</code>) would eliminate the redundant walks.</p>
+<hr />
+<h2 id="p51-ci-gated-scaling-and-memory-invariants">P51. CI-gated scaling and memory invariants<a class="headerlink" href="#p51-ci-gated-scaling-and-memory-invariants" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low-Medium</strong></p>
+<p><code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/<code>benchmark-pr</code> jobs only run
+the <code>completion</code> bench and publish it to the tracking dashboard; a
+regression is visible after the fact (someone has to look at the
+dashboard) rather than failing the PR. <code>references.rs</code> and
+<code>laravel_completion.rs</code> under <code>benches/</code> exist but aren't wired into
+CI at all, and none of our benchmarks assert an absolute ceiling —
+only relative-to-history comparison.</p>
+<p>Add CI-gated invariants that fail the build outright when crossed,
+not just recorded for later inspection:</p>
+<ul>
+<li><strong>Per-edit republish scaling.</strong> A synthetic workspace ingested at
+  several sizes (e.g. 100 → 5000 files); assert republish-after-edit
+  wall time stays flat (or sub-linear) as file count grows, catching
+  an accidental O(n) or worse regression on the republish path before
+  it ships.</li>
+<li><strong>Cold/warm start wall time.</strong> Time to <code>indexReady</code> on a pinned
+  fixture workspace (a vendored copy of a real Laravel/Symfony
+  project, or one of the public corpora already used by <code>analyze</code>
+  triage), gated on an absolute ceiling, both cold (no cache) and warm
+  (repeat run).</li>
+<li><strong>Session RSS guard.</strong> <code>benches/memory_usage.py</code> already measures
+  resident memory on two workloads; run it in CI and fail if RSS
+  exceeds a fixed ceiling instead of only exposing the script for
+  manual use.</li>
+</ul>
+<p><strong>Where to look:</strong> <code>.github/workflows/ci.yml</code>'s <code>benchmark</code>/
+<code>benchmark-pr</code> jobs; <code>benches/memory_usage.py</code>; <code>benches/references.rs</code>
+and <code>benches/laravel_completion.rs</code> for benches that exist but aren't
+CI-gated yet.</p>
+<hr />
+<h2 id="p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes">P52. The diagnostic benchmarks measure a path no consumer takes<a class="headerlink" href="#p52-the-diagnostic-benchmarks-measure-a-path-no-consumer-takes" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>bench_diagnostics_phpactor_fixtures</code> in <code>benches/completion.rs</code> calls
+four collectors directly:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="n">backend</span><span class="p">.</span><span class="n">collect_deprecated_diagnostics</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uri</span><span class="p">,</span><span class="w"> </span><span class="n">content</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="n">backend</span><span class="p">.</span><span class="n">collect_unused_import_diagnostics</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uri</span><span class="p">,</span><span class="w"> </span><span class="n">content</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="n">backend</span><span class="p">.</span><span class="n">collect_unknown_class_diagnostics</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uri</span><span class="p">,</span><span class="w"> </span><span class="n">content</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="n">backend</span><span class="p">.</span><span class="n">collect_unknown_member_diagnostics</span><span class="p">(</span><span class="o">&amp;</span><span class="n">uri</span><span class="p">,</span><span class="w"> </span><span class="n">content</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">out</span><span class="p">);</span>
+</code></pre></div>
+<p>No consumer does this. Every real caller goes through
+<code>collect_slow_diagnostics_observed</code>, which first activates the chain
+resolution cache, the type-engine caches, and the forward-walked
+diagnostic scope cache, then runs the collectors in an order chosen so
+later ones read what earlier ones cached. The benchmark activates none
+of them and runs <code>deprecated_usage</code> first, cold, where production runs
+it last against warm caches.</p>
+<p>The result is a tracked number that moves for reasons users never
+experience. On the <code>method_chain</code> fixture the benchmark reports roughly
+twice the time the production pass takes on the same file while running
+a quarter of the collectors, and an optimisation to the cached path
+shows up as a fraction of its real effect: making chain cache keys lazy
+measured -25% on the production pass and -3.7% here, because without an
+active cache the probe never hits early and every key is needed anyway.</p>
+<p>Point the benchmark at <code>collect_slow_diagnostics</code>, so it measures what
+an editor keystroke and an <code>analyze</code> run actually pay for. This resets
+the tracked history for <code>diagnostics/fixture/*</code> once, which is worth it
+for a number that tracks the real path. Keep a separate uncached case
+only if there is a consumer that runs collectors without the guards.</p>
+<p><strong>Where to look:</strong> <code>bench_diagnostics_phpactor_fixtures</code> in
+<code>benches/completion.rs</code>; <code>collect_slow_diagnostics_observed</code> in
+<code>diagnostics/mod.rs</code> for the guards and the collector order.</p>
+<hr />
+<h2 id="p53-the-deprecated-collector-deep-copies-a-class-per-member-access">P53. The deprecated collector deep-copies a class per member access<a class="headerlink" href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Low</strong></p>
+<p><code>collect_deprecated_diagnostics</code> resolves each member access to a class
+and then clones the whole <code>ClassInfo</code> out of the <code>Arc</code> it just got:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="p">.</span><span class="n">and_then</span><span class="p">(</span><span class="o">|</span><span class="n">name</span><span class="o">|</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">find_or_load_class</span><span class="p">(</span><span class="o">&amp;</span><span class="n">name</span><span class="p">))</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="p">.</span><span class="n">map</span><span class="p">(</span><span class="o">|</span><span class="n">arc</span><span class="o">|</span><span class="w"> </span><span class="n">ClassInfo</span><span class="p">::</span><span class="n">clone</span><span class="p">(</span><span class="o">&amp;</span><span class="n">arc</span><span class="p">));</span>
+</code></pre></div>
+<p><code>resolve_variable_subject</code> does the same on its own path, and the
+per-variable cache stores <code>Option&lt;ClassInfo&gt;</code> rather than
+<code>Option&lt;Arc&lt;ClassInfo&gt;&gt;</code>, so its hits clone too. The class is only ever
+read afterwards (<code>get_method</code>, <code>get_property</code>, and a <code>&amp;ClassInfo</code>
+argument to <code>resolve_class_fully_cached</code>), so every one of those copies
+is wasted, and the cost scales with the class's member count: a file
+whose accesses land on a large resolved class (an Eloquent <code>Builder</code>, a
+facade's concrete binding) pays for a full copy of its methods,
+properties, and constants once per access.</p>
+<p>Hold <code>Arc&lt;ClassInfo&gt;</code> through the collector instead. Both producers
+already have one, deref coercion covers the read sites, and the
+<code>enclosing_class</code> clone a few lines below is the same pattern.</p>
+<p><strong>Where to look:</strong> <code>collect_deprecated_diagnostics</code> and
+<code>resolve_variable_subject</code> in <code>diagnostics/deprecated.rs</code>, plus the
+<code>var_type_cache</code> declaration at the top of the collector.</p>
+<h2 id="p54-property-narrowing-re-walks-the-whole-body-once-per-subject">P54. Property narrowing re-walks the whole body once per subject<a class="headerlink" href="#p54-property-narrowing-re-walks-the-whole-body-once-per-subject" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Medium</strong></p>
+<p>Every <code>$this-&gt;prop</code> or <code>$h-&gt;getCall()</code> whose type the engine needs sends
+<code>apply_property_narrowing</code> back over the enclosing body from its first
+statement, looking for a check that refines that subject. Nothing
+remembers the answer, so a body holding n such subjects walks itself n
+times, and each walk resolves the expressions it passes, which resolves
+subjects of their own.</p>
+<p><code>NARROWING_IN_PROGRESS</code> stops that from compounding without bound — a
+walk no longer starts while another is running over the same source —
+but the remaining growth is still superlinear: on the reproducer from</p>
+<h1 id="385-a-release-build-measures-under-005-s-at-20-guardchain-pairs">385 a release build measures under 0.05 s at 20 guard/chain pairs,<a class="headerlink" href="#385-a-release-build-measures-under-005-s-at-20-guardchain-pairs" title="Permanent link">&para;</a></h1>
+<p>0.1 s at 30, and 0.4 s at 60, so roughly quadratic in the number of
+narrowed subjects. Real code stays well under those sizes, which is why
+this is Low rather than a bug, but a generated file or a long legacy
+method can reach them.</p>
+<p>Memoising the walk would collapse it, and blocking nested walks is what
+makes that straightforward: every walk that runs now runs with nothing
+above it on the same source, so its answer no longer depends on which
+other walks happened to be in flight. The result depends on the source,
+the subject key, the cursor offset, and the classes handed in, so a
+per-request map keyed by those four and cleared with the rest of the
+request caches would turn the n walks into n lookups. The awkward part is
+that the walk mutates <code>results</code> in place and reports intersections
+through a separate flag, so the cached value has to carry both.</p>
+<p><strong>Where to look:</strong> <code>apply_property_narrowing</code> in
+<code>type_engine/resolver/property_narrowing.rs</code>, and its three callers in
+<code>type_engine/resolver/mod.rs</code> (<code>SubjectExpr::CallExpr</code> and the property
+path) and <code>narrowed_by_rewalk</code> in
+<code>type_engine/variable/rhs_resolution/mod.rs</code>.</p>
+<hr />
+<h2 id="p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary">P57. Narrowing deep-copies a class every time it crosses the <code>Arc</code> boundary<a class="headerlink" href="#p57-narrowing-deep-copies-a-class-every-time-it-crosses-the-arc-boundary" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p>A <code>ClassInfo</code>'s members are <code>SharedVec</code>s, so the struct is often called
+cheap to clone, but it still owns a <code>method_index</code> with one entry per
+method plus a dozen other <code>Vec</code>/<code>AtomMap</code> fields. For an
+inheritance-merged Eloquent model that is a few hundred entries and a
+dozen-plus allocations per copy.</p>
+<p>The narrowing layer pays that on every crossing, in both directions:</p>
+<ul>
+<li><code>ResolvedType::apply_narrowing</code> collects <code>arc.as_ref().clone()</code> for
+  every candidate on the way in, and pushes survivors back through
+  <code>from_class</code>, which wraps each copy in a <em>fresh</em> <code>Arc</code>. A class that
+  narrowing left untouched has been deep-copied and re-allocated for
+  nothing. Seventeen call sites reach it, covering every <code>instanceof</code>,
+  <code>assert</code>, <code>in_array</code>, and identity guard the forward walk sees.</li>
+<li><code>apply_property_narrowing</code> unwraps the whole vector with
+  <code>Arc::unwrap_or_clone</code> and re-wraps it afterwards, with a comment
+  explaining that it does so because the walk functions take
+  <code>Vec&lt;ClassInfo&gt;</code>. The <code>Arc</code>s come out of the class index, so the
+  refcount is always above one and the clone branch always runs.</li>
+<li><code>resolved_type_with_lookup</code> clones a class out of the index only to
+  hand it to <code>from_both</code>, which allocates a new <code>Arc</code> around the copy.
+  Fifteen call sites, essentially every method-call return type.</li>
+<li><code>narrowing/resolve.rs</code>, <code>narrowing/instanceof.rs</code>, and
+  <code>narrowing/assertions.rs</code> repeat the pattern, the last one deep-copying
+  a <code>MethodInfo</code> out of its <code>Arc</code>.</li>
+</ul>
+<p><code>ResolvedType::from_arc</code> and <code>from_both_arc</code> already exist and are unused
+on these paths. The fix is to change the narrowing contract from
+<code>Vec&lt;ClassInfo&gt;</code> to <code>Vec&lt;Arc&lt;ClassInfo&gt;&gt;</code> — <code>apply_narrowing</code>'s closure,
+the <code>results</code> parameters in <code>narrowing::{instanceof,assertions,guards}</code>,
+<code>resolve_class_names_to_union</code>, and <code>ClassInfo::push_unique</code> — so a class
+is only allocated where one is genuinely constructed.
+<code>apply_property_narrowing</code>'s unwrap/rewrap then disappears.</p>
+<p>This is the same defect as <a href="#p53-the-deprecated-collector-deep-copies-a-class-per-member-access">P53</a>
+on a different path, and it is worth measuring the two together.</p>
+<p><strong>Where to look:</strong> <code>apply_narrowing</code>, <code>from_class</code>, <code>from_arc</code>,
+<code>from_both</code>, and <code>from_both_arc</code> in <code>types/resolved_type.rs</code>;
+<code>apply_property_narrowing</code> in <code>type_engine/resolver/property_narrowing.rs</code>;
+<code>resolved_type_with_lookup</code> in
+<code>type_engine/variable/rhs_resolution/mod.rs</code>;
+<code>type_engine/types/narrowing/{resolve,instanceof,assertions}.rs</code>.</p>
+<h2 id="p58-a-member-completion-cache-hit-copies-the-whole-item-list">P58. A member-completion cache hit copies the whole item list<a class="headerlink" href="#p58-a-member-completion-cache-hit-copies-the-whole-item-list" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low</strong></p>
+<p>The member-completion cache exists so that each keystroke in
+<code>$model-&gt;wh…</code> reuses the unfiltered member list instead of re-resolving
+it. A hit clones the cached <code>Vec&lt;CompletionItem&gt;</code> wholesale, which for an
+Eloquent model is several hundred items each carrying several <code>String</code>s
+and an optional documentation block — and the prefix filter then throws
+most of them away. The cache is capped, so this is CPU rather than a
+leak, but it is paid on the keystroke the cache was added to make fast.</p>
+<p>Store an <code>Arc&lt;Vec&lt;CompletionItem&gt;&gt;</code> and have the filter take a slice,
+cloning only the items that survive.</p>
+<p><strong>Where to look:</strong> <code>member_completion_cache</code> and
+<code>filter_member_completion_items</code> in
+<code>completion/handler/member_access.rs</code>.</p>
+<h2 id="p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file">P63. Every diagnostic converts its offsets by counting from the top of the file<a class="headerlink" href="#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: High · Complexity: Low</strong></p>
+<p><code>offset_range_to_lsp_range</code> (<code>diagnostics/mod.rs</code>) turns a diagnostic's
+byte span into an LSP range through <code>byte_range_to_lsp_range</code>, which
+calls <code>offset_to_position</code> twice, and that walks <code>content.char_indices()</code>
+from byte 0 every time. There are around fifty call sites building
+diagnostic ranges this way, so a file reports each of its diagnostics at
+a cost proportional to how far down the file it sits, and a pass over one
+file costs O(size × diagnostics).</p>
+<p><code>vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php</code> (2,927 lines,
+150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
+there puts 69% of the stacks in <code>byte_range_to_lsp_range</code> alone, ahead of
+the whole type engine.</p>
+<p><code>text_position::LineIndex</code> already exists for exactly this and documents
+the quadratic it avoids; semantic tokens, code lenses, and inlay hints
+were moved onto it. The diagnostic collectors were not, and they produce
+far more positions per file than any of those. Build one index per file
+per pass and answer every collector's range from it.</p>
+<p><strong>Where to look:</strong> the free <code>offset_range_to_lsp_range</code> and
+<code>Backend::offset_range_to_lsp_range</code> in <code>diagnostics/mod.rs</code>,
+<code>offset_to_position</code>/<code>LineIndex</code> in <code>text_position.rs</code>, and the
+collectors under <code>diagnostics/</code> that call them.</p>
+<h2 id="p64-a-file-with-one-very-large-scope-copies-it-at-every-branch">P64. A file with one very large scope copies it at every branch<a class="headerlink" href="#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
+<p><code>ScopeState::merge_branch</code> joins two paths by comparing and then unioning
+their whole locals map, and a branch entered from a scope keeps a copy of
+it to merge back. That is proportional to how many variables the enclosing
+scope holds, which is fine inside a method and not fine at the top level of
+a long procedural file, where every statement so far has left its variable
+behind and each <code>if</code>/<code>foreach</code>/<code>switch</code> therefore copies and compares all
+of them. The cost of walking the file grows with the square of its length.</p>
+<p>A generated model, N repetitions of <code>/** @var … */ $vN = []; foreach ($vN
+as $eN) { $zN = $eN-&gt;prop; }</code> at the top level of one file, measured on a
+release build:</p>
+<table>
+<thead>
+<tr>
+<th>lines</th>
+<th>analyse wall clock</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2,000</td>
+<td>0.45s</td>
+</tr>
+<tr>
+<td>4,000</td>
+<td>1.5s</td>
+</tr>
+<tr>
+<td>8,000</td>
+<td>5.8s</td>
+</tr>
+<tr>
+<td>16,000</td>
+<td>24.8s</td>
+</tr>
+</tbody>
+</table>
+<p>Each doubling costs roughly four times as much. Sampling the 8,000-line
+run puts about 38% of the diagnostic worker's stacks in
+<code>merge_branch</code> and in cloning and dropping the <code>Ustr → Vec&lt;ResolvedType&gt;</code>
+map underneath it, ahead of any single resolution step. The same shape
+inside a method body does not show it, because a method's scope is
+bounded by its own body.</p>
+<p>The generated model is not far-fetched: a legacy procedural script, a
+generated routing or configuration file, and a long report builder all
+have the same shape, one scope holding thousands of live variables.</p>
+<p>A branch reads far fewer variables than the scope holds, so the copy is
+mostly of entries neither path touches. Recording what a branch actually
+wrote and merging only those entries, or sharing the untouched part
+rather than cloning it, would make a merge proportional to the branch
+instead of to the file.</p>
+<p><strong>Where to look:</strong> <code>merge_branch</code>, <code>merge_local</code> and
+<code>describes_same_state_as</code> in
+<code>type_engine/variable/forward_walk/scope_state/merge.rs</code>, the proof joins in
+<code>scope_state/proofs.rs</code>, and the branch forks: <code>fork_if_branches</code> and
+<code>merge_if_branches</code> in <code>forward_walk/if_else.rs</code> (both <code>if</code> spellings go
+through them), the loop bodies in <code>forward_walk/while_for.rs</code> and
+<code>forward_walk/foreach.rs</code>, and <code>process_try</code> / <code>process_switch</code> in
+<code>forward_walk/control_flow.rs</code>. <code>scope_state/tests.rs</code> pins what the join
+does to one variable at a time.</p>
+<p>The branch clones are not the only place the walk pays for the size of
+the scope. Measure these too before deciding what the join has to fix:</p>
+<ul>
+<li><code>record_scope_snapshot</code> (<code>forward_walk/diagnostic_cache.rs</code>) copies the
+  whole locals map at the start and again at the end of every statement
+  in a diagnostic pass (<code>walk_body_forward</code> in <code>forward_walk/mod.rs</code>, which
+  also clones a <code>pre_stmt_scope</code> per statement). That is
+  O(statements × locals) on its own, the same shape as the branch clones.</li>
+<li><code>ScopeState::snapshot_resolver</code> clones the map once per call and is
+  called once per condition narrowing (<code>cond_narrowing/apply.rs</code>,
+  <code>cond_narrowing/instanceof.rs</code>).</li>
+<li>Condition narrowing turns every local into a <code>String</code> per condition
+  (the <code>var_names</code> lists in <code>cond_narrowing/apply.rs</code>) and runs its
+  extractors per local.</li>
+<li><code>forward_walk/by_ref.rs</code> re-resolves every local in scope on every call
+  statement to see whether the call rebinds it by reference.</li>
+<li>The proof joins in <code>scope_state/proofs.rs</code> walk every key of one side,
+  <code>simplify_class_hierarchy_unions</code> runs after every multi-way join, and
+  <code>invalidate_dependent_keys</code> / <code>invalidate_receiver_state</code> in
+  <code>scope_state/mod.rs</code> <code>retain</code> over the whole map on every reassignment
+  or impure call.</li>
+</ul>
+<p>Full-scope clones at fork points, for the join rewrite: the then, per
+<code>elseif</code>, and <code>else</code> copies in <code>fork_if_branches</code> plus the implicit-else
+copy in <code>merge_if_branches</code>; <code>pre_loop_scope</code> and the post-loop join in
+each loop of <code>while_for.rs</code> and <code>foreach.rs</code>; <code>loops.rs</code> once per
+re-walk; <code>process_try</code> per <code>catch</code> and <code>process_switch</code> per arm and at
+the join; <code>closures.rs</code> on the first return; <code>loop_control.rs</code> per
+<code>break</code>/<code>continue</code>; <code>cond_narrowing/apply.rs</code> per <code>&amp;&amp;</code> operand. Narrowing
+writes into branch scopes too, and exit and return edges are recorded at
+arbitrary nesting depth and merged at an outer fork, so a "keys the branch
+wrote" set has to be carried through nested forks.</p>
+<hr />
+<h2 id="p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss">P65. Every call site repeats the full function lookup, hit or miss<a class="headerlink" href="#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low-Medium · Complexity: Medium</strong></p>
+<p>The forward walker asks <code>find_or_load_function</code> about the same call
+several times per statement (by-reference out-parameters, <code>@assert</code>
+narrowing, the return type), and nothing remembers the answer. A hit
+clones the whole <code>FunctionInfo</code> out of <code>global_functions</code>; a miss, which
+is every call to a function the project never declares, walks all four
+phases again, including cloning <code>autoload_file_paths</code> and building a URI
+per path. Every hover re-walks the enclosing body from its first
+statement, so the cost lands once per call site per hover.</p>
+<p>PHPStan's <code>nsrt/if.php</code> (a 545-line closure calling undeclared helpers
+such as <code>foo()</code> and <code>doFoo()</code>) measures about 70 ms per hover near its
+end in a release build, with <code>find_or_load_function</code>,
+<code>resolve_function_name_at</code>, and the <code>CiMap</code> lookups they make taking the
+top of the profile. Real code rarely calls hundreds of undeclared
+functions, but it does call the same declared ones over and over, and
+each of those pays the clone.</p>
+<p>The same file takes 53 s under the assertType runner in a debug build,
+which is why it is not among the ported fixtures in <code>tests/phpstan_nsrt/</code>
+yet; port it once this lands. Re-measured on 2026-09-27 it takes about
+210 s at <code>HEAD</code> (5f6422d3), so the cost has grown since. PHPStan's
+<code>nsrt/filterVar.php</code> (315 <code>filter_var()</code> calls in one function) takes
+about 540 s the same way, and <code>nsrt/array-functions.php</code> about 97 s;
+confirm with a profile that they are this item before counting them in.</p>
+<p>Caching the resolved <code>Arc&lt;FunctionInfo&gt;</code> (and a negative entry) per
+request, keyed by the candidate names, would turn the repeats into
+lookups. Returning an <code>Arc</code> rather than a clone is the larger half of
+the saving on its own.</p>
+<p><strong>Where to look:</strong> <code>find_or_load_function</code> in <code>resolution.rs</code>, and the
+<code>function_loader</code> closures built for <code>VarResolutionCtx</code>.</p>
+<hr />
+<h2 id="p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares">P66. Stub version filtering rescans a stub file once per symbol it declares<a class="headerlink" href="#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares" title="Permanent link">&para;</a></h2>
+<p><strong>Impact: Low · Complexity: Low-Medium</strong></p>
+<p><code>set_php_version</code> drops every stub symbol marked <code>@removed</code> at or before
+the target version. For a file that mentions <code>@removed</code> at all,
+<code>is_stub_function_removed</code> and its class and constant counterparts locate
+each symbol with <code>source.find("function NAME(")</code> from the start of the
+file, so a stub file declaring n symbols is scanned n times. Whether a
+file mentions <code>@removed</code> is now answered once per file, which halved the
+cost, but the per-symbol search remains: building a full-stub backend in
+a debug build still spends about 0.45 s there, and every test that uses
+<code>new_test_with_full_stubs</code> (including each fixture the assertType runner
+checks) pays it. The server pays it once at startup, far less in a
+release build.</p>
+<p>Scanning each such file once for its <code>@removed</code> docblocks and recording
+the name of the declaration that follows each one would give a per-file
+set of removed names, turning the filter into set lookups.</p>
+<p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
+<code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate":null,"base":"../..","features":["content.action.edit","content.code.copy","content.tabs.link","navigation.instant","navigation.top","search.highlight","search.suggest","toc.follow"],"search":"../../assets/javascripts/workers/search.b6b7e04f.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":{"alias":true,"provider":"mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.d7f30b55.min.js"></script>
+      
+    
+  </body>
+</html>
