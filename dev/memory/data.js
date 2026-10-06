@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791250905484,
+  "lastUpdate": 1791280251972,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34611,6 +34611,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_laravel_model",
             "value": 86,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "petr@mediasolution.cz",
+            "name": "petrovo-as",
+            "username": "petrovo-as"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "dd3ab449776777915846ad2b904e5025e279c30b",
+          "message": "Let the compiler hold the invariant a rejected access is not public\n\n`Rejection` carried a `Visibility`, which has three values, but only\never holds one of two: the check settles a public member and returns\nbefore a rejection is built. The third value was therefore reachable\nin the type and not in the program, leaving three `match` arms behind\nfor a state that cannot arise — one of them spelling a message that\nwould have been wrong had it ever run.\n\nGive the struct a `Restriction` of `Private` or `Protected` instead.\nThe single conversion sits where the public early-return already was,\nso the one public path stays and the impossible arms go. No change in\nbehaviour.\n\nCo-Authored-By: Claude Opus 5 <noreply@anthropic.com>",
+          "timestamp": "2026-10-06T11:38:35+02:00",
+          "tree_id": "020147c22d78cf9400a89b1355cd0c9c0e337d49",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/dd3ab449776777915846ad2b904e5025e279c30b"
+        },
+        "date": 1791280231339,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 39.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83,
             "unit": "MiB"
           }
         ]
