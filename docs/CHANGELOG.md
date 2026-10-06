@@ -15,13 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Performance and memory
 
-- **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster: a project that took nearly four minutes to analyze now finishes in under fifteen seconds. Closes #485.
+- **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.
+- **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
+- **Code that calls undefined functions is analyzed much faster.** Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.
+- **Files with many diagnostics are reported much faster.** Large files that produce thousands of diagnostics no longer spend most of their time locating each one.
 
 ### Fixed
 
 - **Global Laravel translation paths are recognised.** Translations registered with `loadTranslationsFrom($path)` now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly `null`. Analysis also finds translation files when `--project-root` is a relative path. Contributed by @shuvroroy.
+- **Alpine and Vue `:attr` bindings in Blade.** A `:name="…"` attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only `<x-…>` component tags evaluate bound attributes.
 - **laravel-ide-helper files are skipped.** `_ide_helper.php` and `_ide_helper_models.php` are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading `!` in `[indexing] exclude` to index them anyway.
-- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
+- **PHP_CodeSniffer only runs on projects that use it.** A `vendor/bin/phpcs` installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need `squizlabs/php_codesniffer` in `require-dev`, a PHPCS ruleset file, or a `[phpcs] standard` in `.phpantom.toml`.
+- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
+- **Import edits and unused-import hints respect each `namespace` block.** In a file with several `namespace` blocks, an import in one block no longer hides the "Import class" action in another, and an import only another block uses is now dimmed as unused. New imports from code actions, completion, PHPStan quick-fixes and class moves go into the block that needs them, and renaming or moving a class updates each block's own import.
+- **`analyze` reports the same Blade diagnostics on every run.** In Laravel projects, the diagnostics reported for Blade templates no longer vary between runs, and they now match what the editor shows.
 
 ## [0.11.0] - 2026-10-05
 

@@ -17,15 +17,13 @@
 //! Phase 2 (`resolve_add_override`) recomputes the workspace edit on
 //! demand when the user picks the action.
 
-use std::collections::HashMap;
-
 use tower_lsp::lsp_types::*;
 
 use super::{InsertionPoint, find_method_insertion_point};
 use crate::Backend;
 use crate::code_actions::phpstan::contains_php_attribute;
 use crate::code_actions::{CodeActionData, make_code_action_data};
-use crate::completion::use_edit::{analyze_use_block, build_use_edit, use_import_conflicts};
+use crate::completion::use_edit::{analyze_use_block_in, build_use_edit, use_import_conflicts};
 use crate::text_position::{offset_to_position, ranges_overlap};
 
 /// The PHPStan identifier we match on.
@@ -129,8 +127,9 @@ impl Backend {
             return None;
         }
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        let block = self.import_block_at(uri, insertion.insert_offset);
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
 
         // Decide whether to use the short form `#[Override]` with a
         // `use Override;` import, or the FQN `#[\Override]`.
@@ -149,7 +148,7 @@ impl Backend {
 
         // Check for import conflicts (e.g. a different class named
         // `Override` is already imported).
-        let use_fqn = needs_import && use_import_conflicts("Override", &file_use_map);
+        let use_fqn = needs_import && use_import_conflicts("Override", file_use_map);
 
         let attr_text = if use_fqn {
             "#[\\Override]"
@@ -174,8 +173,8 @@ impl Backend {
 
         // Add `use Override;` import when needed and possible.
         if needs_import && !use_fqn {
-            let use_block = analyze_use_block(content);
-            if let Some(import_edits) = build_use_edit("Override", &use_block, &file_namespace) {
+            let use_block = analyze_use_block_in(content, block.range);
+            if let Some(import_edits) = build_use_edit("Override", &use_block, file_namespace) {
                 edits.extend(import_edits);
             }
         }

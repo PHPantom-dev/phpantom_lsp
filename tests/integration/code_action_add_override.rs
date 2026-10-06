@@ -983,3 +983,46 @@ class Child extends Base {
         "should use short form #[Override], not FQN"
     );
 }
+
+// ── Several namespace blocks ────────────────────────────────────────────────
+
+/// Each `namespace` block has its own imports, so a block that lacks
+/// `use Override;` gets one in its own `use` list even though another
+/// block already imports it.
+#[test]
+fn adds_import_to_the_methods_own_namespace_block() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+namespace A {
+    use Override;
+}
+namespace B {
+    class Child extends Base {
+        public function foo(): void {}
+    }
+}
+"#;
+    backend.update_ast(uri, content);
+
+    inject_phpstan_diag(
+        &backend,
+        uri,
+        6,
+        "Method B\\Child::foo() overrides method B\\Base::foo() but is missing the #[\\Override] attribute.",
+        "method.missingOverride",
+    );
+
+    let actions = get_code_actions_at(&backend, uri, content, 6, 20);
+    let action = find_action_containing(&actions, "#[Override]")
+        .expect("should offer Add #[Override] action");
+    let resolved = resolve_action(&backend, uri, content, action);
+    let result = apply_edits(content, &extract_edits(&resolved));
+
+    let block_b = &result[result.find("namespace B").unwrap()..];
+    assert!(
+        block_b.starts_with("namespace B {\n\nuse Override;\n"),
+        "block B should get its own import:\n{}",
+        result
+    );
+}

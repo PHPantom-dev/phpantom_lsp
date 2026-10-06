@@ -165,6 +165,7 @@ pub fn preprocess_with_vars(
     let mut in_block_comment = false;
     let mut html = HtmlPos {
         in_tag: false,
+        component_tag: false,
         attr_string: None,
     };
     // Text captured by `Mode::CaptureArgs` from lines before the current

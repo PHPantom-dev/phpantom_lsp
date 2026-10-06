@@ -190,6 +190,8 @@ impl Backend {
         offsets: &[u32],
     ) -> Vec<(u32, String)> {
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _cache_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let function_loader = self.function_loader(&file_ctx);
         let function_loader_cl = |name: &str, offset: u32| function_loader(name, offset);

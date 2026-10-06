@@ -292,21 +292,49 @@ fn extract_use_sort_key(line: &str) -> Option<String> {
 /// namespace-level import from a trait `use` inside a class, enum, or
 /// trait body.
 pub(crate) fn analyze_use_block(content: &str) -> UseBlockInfo {
-    let mut namespace_line: Option<u32> = None;
+    analyze_use_block_in(content, None)
+}
 
-    for (i, line) in content.lines().enumerate() {
-        let trimmed = line.trim();
-        // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
-        // but not `namespace\something` (which is a different construct).
-        if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
-            namespace_line = Some(i as u32);
-        }
-    }
-
+/// [`analyze_use_block`] for one `namespace` block of a file that
+/// declares several, given as its byte range, or for the whole file when
+/// `block` is `None`.
+///
+/// PHP scopes an import to its block, so a new import joins the `use`
+/// statements of the block the code needing it is written in, and goes
+/// after that block's own `namespace` line when it has none.
+pub(crate) fn analyze_use_block_in(content: &str, block: Option<(usize, usize)>) -> UseBlockInfo {
     let index = LineIndex::new(content);
+
+    let namespace_line = match block {
+        // The block's range starts at its `namespace` keyword; its imports
+        // follow the `;` or `{` that ends the declaration.
+        Some((start, end)) => {
+            let declaration_end = content
+                .get(start..end)
+                .and_then(|text| text.find([';', '{']))
+                .map_or(start, |at| start + at);
+            Some(index.position(declaration_end).line)
+        }
+        None => content.lines().enumerate().fold(None, |found, (i, line)| {
+            let trimmed = line.trim();
+            // Match `namespace Foo\Bar;` or `namespace Foo\Bar {`
+            // but not `namespace\something` (which is a different construct).
+            if trimmed.starts_with("namespace ") || trimmed.starts_with("namespace\t") {
+                Some(i as u32)
+            } else {
+                found
+            }
+        }),
+    };
+
     let existing = scan_use_statements(content)
         .into_iter()
         .filter(|statement| statement.top_level)
+        .filter(|statement| {
+            block.is_none_or(|(start, end)| {
+                statement.keyword_start >= start && statement.keyword_start <= end
+            })
+        })
         .filter_map(|statement| {
             let sort_key = extract_use_sort_key(&content[statement.keyword_start..statement.end])?;
             Some((index.position(statement.line_start).line, sort_key))
@@ -424,12 +452,21 @@ impl Backend {
     /// the virtual PHP it lowers to.  A template's imports were hoisted
     /// into the prologue of that text, so the template itself is scanned
     /// instead ([`analyze_template_use_block`]).
-    pub(crate) fn use_block_for(&self, uri: &str, content: &str) -> UseBlockInfo {
+    ///
+    /// `block` is the byte range of the `namespace` block the import is for
+    /// (see [`ImportBlock`](crate::backend::file_access::ImportBlock)), or
+    /// `None` when the file has only one.
+    pub(crate) fn use_block_for(
+        &self,
+        uri: &str,
+        content: &str,
+        block: Option<(usize, usize)>,
+    ) -> UseBlockInfo {
         if !self.is_blade_file(uri) {
-            return analyze_use_block(content);
+            return analyze_use_block_in(content, block);
         }
         let Some(template) = self.get_file_content_arc(uri) else {
-            return analyze_use_block(content);
+            return analyze_use_block_in(content, block);
         };
         let maps = self.blade_source_maps.read();
         analyze_template_use_block(&template, maps.get(uri))

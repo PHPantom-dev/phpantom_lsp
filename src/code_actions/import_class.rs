@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp::lsp_types::*;
 
 use crate::Backend;
+use crate::backend::file_access::ImportBlock;
 use crate::completion::use_edit::{build_use_edit, use_import_conflicts};
 use crate::diagnostics::helpers::is_offset_in_ranges;
 use crate::diagnostics::unknown_classes::UNKNOWN_CLASS_CODE;
@@ -137,28 +138,26 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        // ── Gather file context ─────────────────────────────────────────
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
+        // Convert LSP range to byte offsets for comparison with symbol spans.
+        let request_start =
+            crate::text_position::position_to_byte_offset(content, params.range.start);
+        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
 
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
+        // ── Gather the context of the block the cursor is in ────────────
+        let block = self.import_block_at(uri, request_start);
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
 
         let symbol_map = match self.symbol_maps.read().get(uri) {
             Some(sm) => sm.clone(),
             None => return,
         };
 
-        let local_classes = self.local_class_names(uri);
-
-        // Convert LSP range to byte offsets for comparison with symbol spans.
-        let request_start =
-            crate::text_position::position_to_byte_offset(content, params.range.start);
-        let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
+        let local_classes = self.local_class_names(uri, file_namespace.as_deref());
 
         // ── Find ClassReference spans overlapping the request range ─────
-        let affinity_table = crate::completion::class_completion::build_affinity_table(
-            &file_use_map,
-            &file_namespace,
-        );
+        let affinity_table =
+            crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
         for span in &symbol_map.spans {
             if !span_matches_request(
                 span.start as usize,
@@ -184,12 +183,8 @@ impl Backend {
             }
 
             // Skip names that resolve without an import.
-            if !self.class_name_needs_import(
-                ref_name,
-                &file_use_map,
-                &local_classes,
-                &file_namespace,
-            ) {
+            if !self.class_name_needs_import(ref_name, file_use_map, &local_classes, file_namespace)
+            {
                 continue;
             }
 
@@ -201,7 +196,7 @@ impl Backend {
                 continue;
             }
 
-            let use_block = self.use_block_for(uri, content);
+            let use_block = self.use_block_for(uri, content, block.range);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -228,9 +223,9 @@ impl Backend {
                 out,
                 &doc_uri,
                 &candidates,
-                &file_use_map,
+                file_use_map,
                 &use_block,
-                &file_namespace,
+                file_namespace,
                 Some(&matching_diagnostics),
             );
 
@@ -251,8 +246,7 @@ impl Backend {
             params,
             request_start,
             request_end,
-            &file_use_map,
-            &file_namespace,
+            &block,
             &local_classes,
             &symbol_map,
             out,
@@ -268,12 +262,13 @@ impl Backend {
         _params: &CodeActionParams,
         request_start: usize,
         request_end: usize,
-        file_use_map: &HashMap<String, String>,
-        file_namespace: &Option<String>,
+        block: &ImportBlock,
         local_classes: &HashSet<String>,
         symbol_map: &crate::symbol_map::SymbolMap,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
         let affinity_table =
             crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
         let Some(source) = symbol_map.source(content) else {
@@ -319,7 +314,7 @@ impl Backend {
             // The span covers the whole `Foo::bar` expression. We only
             // want the subject part for the diagnostic range, but for
             // the code action the span range is fine.
-            let use_block = self.use_block_for(uri, content);
+            let use_block = self.use_block_for(uri, content, block.range);
             let doc_uri: Url = match uri.parse() {
                 Ok(u) => u,
                 Err(_) => continue,
@@ -479,7 +474,12 @@ impl Backend {
         }
 
         let unresolved = self.find_all_unresolved_class_names(uri, content);
-        if unresolved.len() < 2 {
+        if unresolved
+            .iter()
+            .map(|(_, names)| names.len())
+            .sum::<usize>()
+            < 2
+        {
             return;
         }
 
@@ -487,24 +487,25 @@ impl Backend {
         // candidate — only those will actually be imported by the
         // resolve step.  Don't show the action if fewer than 2 names
         // are unambiguously importable.
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-        let affinity_table = crate::completion::class_completion::build_affinity_table(
-            &file_use_map,
-            &file_namespace,
-        );
-        let importable_count = unresolved
-            .iter()
-            .filter(|(name, ctx)| {
-                let mut candidates = self.find_import_candidates(name, &affinity_table);
-                self.filter_candidates_by_context(&mut candidates, *ctx);
-                let viable: Vec<_> = candidates
-                    .iter()
-                    .filter(|fqn| !use_import_conflicts(fqn, &file_use_map))
-                    .collect();
-                viable.len() == 1
-            })
-            .count();
+        let mut importable_count = 0;
+        for (block, names) in &unresolved {
+            let affinity_table = crate::completion::class_completion::build_affinity_table(
+                &block.use_map,
+                &block.namespace,
+            );
+            importable_count += names
+                .iter()
+                .filter(|(name, ctx)| {
+                    let mut candidates = self.find_import_candidates(name, &affinity_table);
+                    self.filter_candidates_by_context(&mut candidates, *ctx);
+                    let viable: Vec<_> = candidates
+                        .iter()
+                        .filter(|fqn| !use_import_conflicts(fqn, &block.use_map))
+                        .collect();
+                    viable.len() == 1
+                })
+                .count();
+        }
         if importable_count < 2 {
             return;
         }
@@ -548,19 +549,17 @@ impl Backend {
         content: &str,
         params: &CodeActionParams,
     ) -> bool {
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
         let symbol_map = match self.symbol_maps.read().get(uri) {
             Some(sm) => sm.clone(),
             None => return false,
         };
 
-        let local_classes = self.local_class_names(uri);
-
         let request_start =
             crate::text_position::position_to_byte_offset(content, params.range.start);
         let request_end = crate::text_position::position_to_byte_offset(content, params.range.end);
+
+        let block = self.import_block_at(uri, request_start);
+        let local_classes = self.local_class_names(uri, block.namespace.as_deref());
 
         let Some(source) = symbol_map.source(content) else {
             return false;
@@ -593,9 +592,9 @@ impl Backend {
 
             if !self.class_name_needs_import(
                 ref_name,
-                &file_use_map,
+                &block.use_map,
                 &local_classes,
-                &file_namespace,
+                &block.namespace,
             ) {
                 continue;
             }
@@ -620,16 +619,32 @@ impl Backend {
         let doc_uri: Url = data.uri.parse().ok()?;
 
         let unresolved = self.find_all_unresolved_class_names(&data.uri, content);
-        if unresolved.is_empty() {
+
+        let mut all_edits: Vec<TextEdit> = Vec::new();
+        for (block, names) in &unresolved {
+            all_edits.extend(self.import_all_edits_for_block(&data.uri, content, block, names));
+        }
+
+        if all_edits.is_empty() {
             return None;
         }
 
-        let file_use_map: HashMap<String, String> = self.file_use_map(&data.uri);
-        let file_namespace: Option<String> = self.first_file_namespace(&data.uri);
-        let affinity_table = crate::completion::class_completion::build_affinity_table(
-            &file_use_map,
-            &file_namespace,
-        );
+        Some(crate::code_actions::single_file_edit(doc_uri, all_edits))
+    }
+
+    /// The `use` statements "Import all missing classes" adds to one
+    /// `namespace` block for the unresolved `names` written in it.
+    fn import_all_edits_for_block(
+        &self,
+        uri: &str,
+        content: &str,
+        block: &ImportBlock,
+        names: &[(String, ClassRefContext)],
+    ) -> Vec<TextEdit> {
+        let file_use_map = &block.use_map;
+        let file_namespace = &block.namespace;
+        let affinity_table =
+            crate::completion::class_completion::build_affinity_table(file_use_map, file_namespace);
 
         // Track which short names we've already decided to import so we
         // can detect conflicts between two unresolved names that would
@@ -637,16 +652,16 @@ impl Backend {
         let mut imported_short_names: HashMap<String, String> = HashMap::new();
 
         // Pre-populate with existing imports so we don't conflict with them.
-        for (alias, fqn) in &file_use_map {
+        for (alias, fqn) in file_use_map {
             imported_short_names.insert(alias.to_lowercase(), fqn.clone());
         }
 
-        let use_block = self.use_block_for(&data.uri, content);
+        let use_block = self.use_block_for(uri, content, block.range);
 
         // First pass: decide which FQN to import for each unresolved name.
         let mut chosen_fqns: Vec<String> = Vec::new();
 
-        for (ref_name, ref_context) in &unresolved {
+        for (ref_name, ref_context) in names {
             let mut candidates = self.find_import_candidates(ref_name, &affinity_table);
             self.filter_candidates_by_context(&mut candidates, *ref_context);
             if candidates.is_empty() {
@@ -659,7 +674,7 @@ impl Backend {
                 .iter()
                 .filter(|fqn| {
                     let sn = short_name(fqn).to_lowercase();
-                    if use_import_conflicts(fqn, &file_use_map) {
+                    if use_import_conflicts(fqn, file_use_map) {
                         return false;
                     }
                     if let Some(existing_fqn) = imported_short_names.get(&sn) {
@@ -681,7 +696,7 @@ impl Backend {
             // Verify that build_use_edit would produce an edit for this
             // FQN (e.g. global classes in non-namespaced files don't
             // need importing).
-            if build_use_edit(&fqn, &use_block, &file_namespace).is_none() {
+            if build_use_edit(&fqn, &use_block, file_namespace).is_none() {
                 continue;
             }
 
@@ -704,7 +719,7 @@ impl Backend {
         let mut all_edits: Vec<TextEdit> = Vec::new();
         let mut first = true;
         for fqn in &chosen_fqns {
-            if let Some(mut edits) = build_use_edit(fqn, &use_block, &file_namespace) {
+            if let Some(mut edits) = build_use_edit(fqn, &use_block, file_namespace) {
                 // build_use_edit prepends "\n" when there are no
                 // existing imports and the file has a namespace.  In
                 // a bulk insert every edit sees the same original
@@ -722,34 +737,32 @@ impl Backend {
                 all_edits.extend(edits);
             }
         }
-
-        if all_edits.is_empty() {
-            return None;
-        }
-
-        Some(crate::code_actions::single_file_edit(doc_uri, all_edits))
+        all_edits
     }
 
-    /// Find all unresolved class names in a file.
+    /// Find all unresolved class names in a file, grouped by the
+    /// `namespace` block they are written in.
     ///
-    /// Returns a deduplicated list of `(short_name, context)` pairs that
-    /// cannot be resolved through use-map, namespace, local classes, or
-    /// global scope.  The list is sorted alphabetically by name for
-    /// deterministic ordering.
+    /// Each block lists the deduplicated `(short_name, context)` pairs that
+    /// cannot be resolved through its imports, its namespace, local
+    /// classes, or global scope, sorted alphabetically by name for
+    /// deterministic ordering.  Blocks with no unresolved names are left
+    /// out.
     fn find_all_unresolved_class_names(
         &self,
         uri: &str,
         content: &str,
-    ) -> Vec<(String, ClassRefContext)> {
-        let file_use_map: HashMap<String, String> = self.file_use_map(uri);
-        let file_namespace: Option<String> = self.first_file_namespace(uri);
-
+    ) -> Vec<(ImportBlock, Vec<(String, ClassRefContext)>)> {
         let symbol_map = match self.symbol_maps.read().get(uri) {
             Some(sm) => sm.clone(),
             None => return Vec::new(),
         };
 
-        let local_classes = self.local_class_names(uri);
+        let blocks = self.import_blocks(uri);
+        let local_classes: Vec<HashSet<String>> = blocks
+            .iter()
+            .map(|block| self.local_class_names(uri, block.namespace.as_deref()))
+            .collect();
 
         // Compute byte ranges of `use` statement lines so we skip
         // references that are import declarations themselves.
@@ -759,8 +772,8 @@ impl Backend {
             return Vec::new();
         };
 
-        let mut seen: HashSet<String> = HashSet::new();
-        let mut unresolved: Vec<(String, ClassRefContext)> = Vec::new();
+        let mut seen: HashSet<(usize, String)> = HashSet::new();
+        let mut unresolved: Vec<Vec<(String, ClassRefContext)>> = vec![Vec::new(); blocks.len()];
 
         for span in &symbol_map.spans {
             // Skip spans on `use` statement lines.
@@ -788,25 +801,35 @@ impl Backend {
                 _ => continue,
             };
 
-            // Deduplicate — only process each short name once.
-            if !seen.insert(ref_name.to_lowercase()) {
+            let index = ImportBlock::index_at(&blocks, span.start as usize);
+
+            // Deduplicate — only process each short name once per block.
+            if !seen.insert((index, ref_name.to_lowercase())) {
                 continue;
             }
 
+            let block = &blocks[index];
             if !self.class_name_needs_import(
                 ref_name,
-                &file_use_map,
-                &local_classes,
-                &file_namespace,
+                &block.use_map,
+                &local_classes[index],
+                &block.namespace,
             ) {
                 continue;
             }
 
-            unresolved.push((ref_name.to_string(), ref_context));
+            unresolved[index].push((ref_name.to_string(), ref_context));
         }
 
-        unresolved.sort_by(|a, b| a.0.cmp(&b.0));
-        unresolved
+        blocks
+            .into_iter()
+            .zip(unresolved)
+            .filter(|(_, names)| !names.is_empty())
+            .map(|(block, mut names)| {
+                names.sort_by(|a, b| a.0.cmp(&b.0));
+                (block, names)
+            })
+            .collect()
     }
 }
 

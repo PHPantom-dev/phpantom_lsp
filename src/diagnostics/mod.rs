@@ -307,6 +307,7 @@ impl Backend {
         content: &str,
         out: &mut Vec<Diagnostic>,
     ) {
+        let _lines = crate::text_position::PassLineTable::new(content);
         self.collect_syntax_error_diagnostics(uri_str, content, out);
         self.collect_unused_import_diagnostics(uri_str, content, out);
         self.collect_unused_variable_diagnostics(uri_str, content, out);
@@ -349,6 +350,7 @@ impl Backend {
         // filter below only judges what the collectors add and leaves any
         // fast diagnostics the caller already collected.
         let slow_start = out.len();
+        let _lines = crate::text_position::PassLineTable::new(content);
 
         // ── Phase 2: forward-walked diagnostic scope cache ──────
         // Walk every function/method body in the file once with the

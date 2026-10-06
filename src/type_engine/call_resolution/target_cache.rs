@@ -52,7 +52,8 @@ thread_local! {
 
     /// When `Some`, memoizes completed body return inference results by
     /// `(FQN, method)`.  Cleared when the owning guard drops, so the memo
-    /// lives exactly as long as one request / one file's diagnostic pass.
+    /// lives as long as one request / one file's diagnostic pass, or the
+    /// whole Blade refresh pass (see [`activate_body_infer_memo`]).
     ///
     /// Without this memo, every call site that needs a method's inferred
     /// return type re-walks the entire method body.  On large legacy
@@ -108,6 +109,20 @@ fn with_body_infer_memo() -> BodyInferMemoGuard {
     crate::type_engine::activate_memo(&BODY_INFER_MEMO)
 }
 
+/// Activate only the body-return-inference memo, for a pass that walks
+/// many files and wants the inferences one file paid for to serve the
+/// rest.
+///
+/// Unlike the other request-scoped memos, this one holds nothing tied to
+/// a particular text buffer: its key is the method and the argument
+/// types, and the body is re-read from the declaring file on a miss.  It
+/// can therefore outlive the per-file [`activate_type_engine_caches`]
+/// scopes nested inside the pass, which leave it alone because nested
+/// activation is a no-op.
+pub(crate) fn activate_body_infer_memo() -> impl Drop {
+    with_body_infer_memo()
+}
+
 // ── Call-site argument frames ───────────────────────────────────────────────
 
 /// Pops the frame it pushed, so an inference that unwinds cannot leave a
@@ -157,6 +172,39 @@ pub(crate) fn call_site_param_types(class_fqn: &str, method_name: &str) -> Optio
 /// time a refinement the arguments decide can still reach a caller.
 pub(crate) fn body_inference_in_progress() -> bool {
     BODY_INFER_DEPTH.with(|cell| cell.get()) > 0
+}
+
+/// A hash of everything about the body-return inferences in progress
+/// that can change what an expression inside them resolves to, or `0`
+/// when none is running.
+///
+/// That is the call-site arguments seeding each body, plus the bodies
+/// being inferred: they decide which nested inferences the re-entry
+/// guard turns away, and how many levels the depth cap still allows.
+/// Two lookups made under the same context reach the same answer, so a
+/// memo keyed on it can serve both.
+pub(crate) fn body_inference_context() -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let depth = BODY_INFER_DEPTH.with(Cell::get);
+    if depth == 0 {
+        return 0;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    depth.hash(&mut hasher);
+    // A set has no order to hash in, so fold each member's own hash
+    // with an order-independent sum.
+    let visited = BODY_INFER_VISITED.with(|set| {
+        set.borrow().iter().fold(0u64, |sum, key| {
+            let mut member = std::collections::hash_map::DefaultHasher::new();
+            key.hash(&mut member);
+            sum.wrapping_add(member.finish())
+        })
+    });
+    visited.hash(&mut hasher);
+    BODY_INFER_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
+    // Never `0`, which stands for "no inference running".
+    hasher.finish() | 1
 }
 
 /// Maximum nesting depth for body return inference chains.

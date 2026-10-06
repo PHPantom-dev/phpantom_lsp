@@ -45,52 +45,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B542. Import edits treat a file with several `namespace` blocks as having one `use` list
-
-**Impact: Low · Complexity: Medium**
-
-```php
-namespace A {
-    use X\Foo;
-    function a(): Foo {}
-}
-namespace B {
-    // `B\Foo` is unknown, but block A's import makes `Foo` look
-    // already imported, so no "import class" action is offered.
-    function b(Foo $f) {}
-}
-```
-
-Name resolution is per block (each `NamespaceSpan` carries its own
-`use_map`), but everything that *writes* imports still works on the
-file-wide `file_imports` table and `first_file_namespace`: the import-class
-and qualified-name-to-import code actions, the PHPStan `add_throws` /
-`add_override` / `remove_throws` fixes, and class rename/move rewriting
-(`rename/class/rewrite.rs`). They check for an existing import against every
-block's imports at once, and work out where a new one goes from the first
-block, so an edit in a later block is skipped because another block
-imports the name, or is placed against the wrong block. Fixing it means locating the target block by offset and
-reading, inserting into, and rewriting that block's own `use` statements.
-
-### B543. Unused-import detection pools the imports of every `namespace` block
-
-**Impact: Low · Complexity: Medium**
-
-```php
-namespace A {
-    use X\Foo;              // unused in A, but not reported
-}
-namespace B {
-    use X\Foo;
-    function b(Foo $f) {}
-}
-```
-
-`diagnostics/unused_imports.rs` checks declared imports against the merged
-file-wide import table, so an import used only in another block counts as
-used, and two blocks importing the same alias collapse into one entry.
-It needs to track each block's imports (and their source ranges) and match
-references against the block they are written in.
+No outstanding items.
 
 ## Array types
 
@@ -102,7 +57,31 @@ No outstanding items.
 
 ## Blade
 
-No outstanding items.
+### B544. Blade directives are recognized whether or not the installed Laravel has them
+
+**Impact: Medium · Complexity: Medium**
+
+```blade
+<script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "BreadcrumbList"
+    }
+</script>
+```
+
+On Laravel 8 this is plain text: Blade only compiles an `@name` it has a
+`compileName()` method (or a registered custom directive) for, and
+`@context` arrived with `CompilesContexts` in Laravel 11. The preprocessor
+lowers every name in the fixed list in `blade/directives.rs` regardless of
+version, so `"@context":` opens an `if` block and the rest of the JSON-LD
+reports a cascade of syntax errors (around 200 in one Laravel 8 project,
+from schema.org snippets alone). The recognized set should come from the
+installed compiler, by reading which `compile*` methods
+`Illuminate\View\Compilers\BladeCompiler` and its `Concerns` traits
+actually define, the way the alias tables are read from the installed
+framework, with the fixed list as the fallback when no framework is
+installed.
 
 ## Templates
 

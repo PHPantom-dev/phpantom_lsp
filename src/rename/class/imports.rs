@@ -124,6 +124,9 @@ pub(super) struct RenameTarget<'a> {
 /// list wrapped over several lines are both found, not just a whole
 /// trimmed `use ... ;` line.
 ///
+/// `block` is the byte range of the `namespace` block whose import this
+/// is, or `None` when the file has only one block.
+///
 /// Two shapes are handled:
 /// - A statement with only one item left after the rename (an ordinary
 ///   `use Old\Fqn [as Alias];`, or a group/list with a single member): one
@@ -136,6 +139,7 @@ pub(super) struct RenameTarget<'a> {
 ///   `use` statement.
 pub(super) fn build_use_statement_edit(
     content: &str,
+    block: Option<(usize, usize)>,
     old_fqn: &str,
     target: &RenameTarget,
     info: &ImportInfo,
@@ -157,8 +161,13 @@ pub(super) fn build_use_statement_edit(
         .map(String::as_str)
         .unwrap_or(old_fqn);
 
-    let use_statement_spans =
+    // Only the block's own statements: another block importing the class
+    // has its own statement, rewritten with that block.
+    let mut use_statement_spans =
         crate::diagnostics::use_statements::compute_use_statement_spans(content);
+    if let Some((start, end)) = block {
+        use_statement_spans.retain(|&(s, _)| s >= start && s <= end);
+    }
     let location = crate::diagnostics::use_statements::find_use_statement(
         content,
         &use_statement_spans,
@@ -228,7 +237,7 @@ pub(super) fn build_use_statement_edit(
     } else {
         None
     };
-    let use_block = crate::completion::use_edit::analyze_use_block(content);
+    let use_block = crate::completion::use_edit::analyze_use_block_in(content, block);
     let file_namespace_owned = file_namespace.map(str::to_string);
     if let Some(import_edits) = crate::completion::use_edit::build_aliased_use_edit(
         new_fqn,

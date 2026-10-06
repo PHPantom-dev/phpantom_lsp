@@ -1051,3 +1051,101 @@ async fn rename_exception_class_reaches_catch_and_throws() {
             .replace("catch (UserException", "catch (AccountException"),
     );
 }
+
+// ─── Several namespace blocks ───────────────────────────────────────────────
+
+#[tokio::test]
+async fn rename_class_rewrites_each_namespace_blocks_own_import() {
+    // Each block's import is rewritten against that block's own imports:
+    // the new short name only collides in the block that imports it.
+    let backend = create_test_backend();
+    let uri_a = Url::parse("file:///src/OldName.php").unwrap();
+    let uri_b = Url::parse("file:///src/NewName.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_a = concat!("<?php\n", "namespace Ns\\A;\n", "\n", "class OldName {}\n");
+    let text_b = concat!("<?php\n", "namespace Ns\\B;\n", "\n", "class NewName {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace First {\n",
+        "    use Ns\\A\\OldName;\n",
+        "    function first(OldName $a): void {}\n",
+        "}\n",
+        "namespace Second {\n",
+        "    use Ns\\A\\OldName;\n",
+        "    use Ns\\B\\NewName;\n",
+        "    function second(OldName $a, NewName $b): void {}\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri_a, text_a).await;
+    open_php(&backend, &uri_b, text_b).await;
+    open_php(&backend, &uri_usage, text_usage).await;
+
+    let ws = rename(&backend, &uri_a, 3, 6, "NewName")
+        .await
+        .expect("Expected a workspace edit for the class rename");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace First {\n",
+            "    use Ns\\A\\NewName;\n",
+            "    function first(NewName $a): void {}\n",
+            "}\n",
+            "namespace Second {\n",
+            "    use Ns\\A\\NewName as NewNameAlias;\n",
+            "    use Ns\\B\\NewName;\n",
+            "    function second(NewNameAlias $a, NewName $b): void {}\n",
+            "}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_adds_the_import_to_the_block_that_needs_it() {
+    // The block that reached the class through its own namespace gets the
+    // new import; the block that already imported it has that import
+    // rewritten instead.
+    let backend = create_test_backend();
+    let uri_decl = Url::parse("file:///src/Widget.php").unwrap();
+    let uri_usage = Url::parse("file:///src/Usage.php").unwrap();
+
+    let text_decl = concat!("<?php\n", "namespace Acme;\n", "\n", "class Widget {}\n");
+    let text_usage = concat!(
+        "<?php\n",
+        "namespace Other {\n",
+        "    use Acme\\Widget;\n",
+        "    function other(Widget $w): void {}\n",
+        "}\n",
+        "namespace Acme {\n",
+        "    function acme(Widget $w): void {}\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri_decl, text_decl).await;
+    open_php(&backend, &uri_usage, text_usage).await;
+
+    let ws = rename(&backend, &uri_decl, 3, 6, "Vendor\\Widget")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text_usage, &edits_for_uri(&ws, &uri_usage));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace Other {\n",
+            "    use Vendor\\Widget;\n",
+            "    function other(Widget $w): void {}\n",
+            "}\n",
+            "namespace Acme {\n",
+            "\n",
+            "use Vendor\\Widget;\n",
+            "    function acme(Widget $w): void {}\n",
+            "}\n",
+        )
+    );
+}

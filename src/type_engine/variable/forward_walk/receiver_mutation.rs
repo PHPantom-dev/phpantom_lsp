@@ -451,18 +451,24 @@ fn collect_call_invalidations<'b>(
                 // {…}; call_user_func($cb);`) — either way, what it does
                 // to its captures was already worked out where it was
                 // assigned or is worked out here.
-                if call_invokes_arg_immediately(call, &selector, scope, ctx) {
-                    match arg_expr {
-                        Expression::Closure(closure) => {
+                // Asking the callee is the expensive half, so it is only
+                // asked about an argument that has captures for the answer
+                // to apply.
+                match arg_expr {
+                    Expression::Closure(closure) => {
+                        if call_invokes_arg_immediately(call, &selector, scope, ctx) {
                             collect_closure_invalidations(closure, scope, ctx, out);
                         }
-                        Expression::Variable(Variable::Direct(dv)) => {
-                            apply_stored_closure_effects(scope, bytes_to_str(dv.name), out);
-                        }
-                        _ => collect_call_invalidations(arg_expr, scope, ctx, out),
                     }
-                } else {
-                    collect_call_invalidations(arg_expr, scope, ctx, out);
+                    Expression::Variable(Variable::Direct(dv)) => {
+                        let name = bytes_to_str(dv.name);
+                        if !scope.closure_capture_effects(name).is_empty()
+                            && call_invokes_arg_immediately(call, &selector, scope, ctx)
+                        {
+                            apply_stored_closure_effects(scope, name, out);
+                        }
+                    }
+                    _ => collect_call_invalidations(arg_expr, scope, ctx, out),
                 }
             }
 

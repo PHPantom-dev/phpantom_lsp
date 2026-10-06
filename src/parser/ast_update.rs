@@ -1319,6 +1319,22 @@ impl Backend {
             }
         }
 
+        // A name that failed to resolve before this file declared it must
+        // resolve from now on, so its recorded miss is retired — the same
+        // un-caching the class declarations above get.
+        {
+            let nf_cache = self.symbols.function_not_found_cache.read();
+            if !nf_cache.is_empty() {
+                drop(nf_cache);
+                let mut nf_cache = self.symbols.function_not_found_cache.write();
+                for update in &prepared {
+                    for fqn in &update.new_function_fqns {
+                        nf_cache.remove(fqn);
+                    }
+                }
+            }
+        }
+
         {
             let mut dmap = self.symbols.global_defines.write();
             for update in &mut prepared {

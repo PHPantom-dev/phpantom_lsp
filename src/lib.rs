@@ -1877,6 +1877,7 @@ impl Backend {
         // elsewhere; retire the memoised lookups.
         self.symbols.note_class_lookup_change();
         let mut classes_changed = !dropped_fqns.is_empty() || !promoted_fqns.is_empty();
+        let mut functions_retired = false;
         self.evict_methods_for_fqns(&dropped_fqns);
         self.evict_gti_for_fqns(&dropped_fqns);
         if !promoted_fqns.is_empty() {
@@ -1963,6 +1964,18 @@ impl Backend {
                     decls.note_discovered(&fqn, uri_str.clone());
                 }
             });
+
+            // Unlike the class caches the caller clears only when a class
+            // declaration changed, the function negative cache is retired
+            // for any created or changed file: the byte scan below misses
+            // functions behind `function_exists` guards, which only the
+            // lookup's autoload-file fallback finds, and that fallback
+            // cannot run past a recorded miss.  Refilling the cache costs
+            // one fallback pass per still-missing name.
+            if !functions_retired {
+                self.symbols.function_not_found_cache.write().clear();
+                functions_retired = true;
+            }
 
             let scan = crate::classmap_scanner::scan_file_full(path);
             {

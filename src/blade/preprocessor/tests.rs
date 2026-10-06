@@ -2215,3 +2215,14 @@ fn test_preprocess_props_directive_dynamic_argument_falls_back() {
         php
     );
 }
+
+/// `:name` on a plain HTML tag is client-side markup that Blade emits
+/// verbatim, so it must not be lowered as PHP.
+#[test]
+fn test_preprocess_bound_attribute_on_plain_html_tag_is_not_php() {
+    let (php, _) = preprocess("<span :class=\"{'is-empty': !selected?.text}\"></span>");
+    assert!(
+        !php.contains("blade_bound_attr_directive("),
+        "a bound attribute on a plain tag is not PHP: {php}"
+    );
+}

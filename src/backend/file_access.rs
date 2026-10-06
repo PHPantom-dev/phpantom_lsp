@@ -157,14 +157,28 @@ impl Backend {
         self.symbols.uri_classes_index.read().get(uri).cloned()
     }
 
-    /// The short names of the classes `uri` declares, for asking whether a
-    /// name is one of the file's own classes without cloning their bodies.
-    pub(crate) fn local_class_names(&self, uri: &str) -> HashSet<String> {
+    /// The short names of the classes `uri` declares in `namespace`, for
+    /// asking whether a name written there is one of the file's own
+    /// classes without cloning their bodies.
+    ///
+    /// A file with several `namespace` blocks can declare a class in one
+    /// that a bare name in another does not reach, so the classes are
+    /// filtered to the namespace the name is written in.
+    pub(crate) fn local_class_names(&self, uri: &str, namespace: Option<&str>) -> HashSet<String> {
         self.symbols
             .uri_classes_index
             .read()
             .get(uri)
-            .map(|classes| classes.iter().map(|c| c.name.to_string()).collect())
+            .map(|classes| {
+                classes
+                    .iter()
+                    .filter(|c| match (c.file_namespace.as_deref(), namespace) {
+                        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                        (a, b) => a.is_none() && b.is_none(),
+                    })
+                    .map(|c| c.name.to_string())
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -331,6 +345,54 @@ impl Backend {
             .and_then(|s| s.namespace.clone())
     }
 
+    /// Each `namespace` block of a file with the imports it declares, for
+    /// consumers that read or write a file's `use` statements.
+    ///
+    /// PHP scopes an import to its block, so an edit that adds, checks,
+    /// or rewrites one has to work against the block the code it serves
+    /// is written in.  A file with a single block yields one entry with
+    /// the file-wide import table and no range.
+    pub(crate) fn import_blocks(&self, uri: &str) -> Vec<ImportBlock> {
+        {
+            let nmap = self.file_namespaces.read();
+            if let Some(spans) = nmap.get(uri)
+                && spans.len() > 1
+            {
+                return spans
+                    .iter()
+                    .map(|span| ImportBlock {
+                        namespace: span.namespace.clone(),
+                        use_map: span.use_map.clone(),
+                        range: Some((span.start as usize, span.end as usize)),
+                    })
+                    .collect();
+            }
+        }
+        vec![ImportBlock {
+            namespace: self.first_file_namespace(uri),
+            use_map: self.file_use_map(uri),
+            range: None,
+        }]
+    }
+
+    /// The [`import_blocks`](Self::import_blocks) entry for the block
+    /// containing `offset`.
+    pub(crate) fn import_block_at(&self, uri: &str, offset: usize) -> ImportBlock {
+        let mut blocks = self.import_blocks(uri);
+        let index = ImportBlock::index_at(&blocks, offset);
+        blocks.swap_remove(index)
+    }
+
+    /// The byte range of the block containing `offset`, as
+    /// [`import_block_at`](Self::import_block_at) would report it, without
+    /// copying any import table.
+    pub(crate) fn import_block_range_at(&self, uri: &str, offset: usize) -> Option<(usize, usize)> {
+        let nmap = self.file_namespaces.read();
+        let spans = nmap.get(uri).filter(|spans| spans.len() > 1)?;
+        NamespaceSpan::containing(spans, offset as u32)
+            .map(|span| (span.start as usize, span.end as usize))
+    }
+
     /// Return the import table (short name → FQN) for a file.
     ///
     /// Returns the legacy `use_map` which contains all *declared*
@@ -477,4 +539,26 @@ impl std::ops::Deref for AnalysableContent<'_> {
 /// to the last one.
 pub(crate) fn namespace_in_spans(spans: &[NamespaceSpan], byte_offset: u32) -> Option<&str> {
     NamespaceSpan::containing(spans, byte_offset).and_then(|s| s.namespace.as_deref())
+}
+
+/// One `namespace` block's imports, from [`Backend::import_blocks`].
+pub(crate) struct ImportBlock {
+    /// The block's namespace, or `None` for the global namespace.
+    pub(crate) namespace: Option<String>,
+    /// The imports the block declares (alias → FQN).
+    pub(crate) use_map: HashMap<String, String>,
+    /// The block's byte range, or `None` when the file has only one
+    /// block and its imports apply to the whole file.
+    pub(crate) range: Option<(usize, usize)>,
+}
+
+impl ImportBlock {
+    /// The index of the block containing `offset`, or of the last block
+    /// for an offset past every block (e.g. code after its closing brace).
+    pub(crate) fn index_at(blocks: &[ImportBlock], offset: usize) -> usize {
+        blocks
+            .iter()
+            .position(|block| block.range.is_none_or(|(s, e)| offset >= s && offset <= e))
+            .unwrap_or(blocks.len().saturating_sub(1))
+    }
 }

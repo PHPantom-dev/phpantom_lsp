@@ -35,11 +35,12 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
 | C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| P68  | [Body return-type inference re-parses the declaring file every time](todo/performance.md#p68-body-return-type-inference-re-parses-the-declaring-file-every-time) | Medium | Medium-High |
+| P69  | [The Blade refresh pass runs on a single core](todo/performance.md#p69-the-blade-refresh-pass-runs-on-a-single-core) | Medium | High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions

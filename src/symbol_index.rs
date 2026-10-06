@@ -68,6 +68,15 @@ pub(crate) struct SymbolIndex {
     pub(crate) duplicate_classes: Arc<RwLock<DuplicateDeclarations<Arc<ClassInfo>>>>,
     /// Negative-result cache for `find_or_load_class`.
     pub(crate) class_not_found_cache: Arc<RwLock<CiSet>>,
+    /// Negative-result cache for `find_or_load_function`.
+    ///
+    /// Without it, every lookup of a name no index carries re-runs the
+    /// full fallback chain — including a walk over every known autoload
+    /// file — and the forward walker asks about the same unresolved
+    /// call over and over.  Entries are removed when a parse declares
+    /// the name and cleared wholesale whenever the indexes grow, the
+    /// same lifecycle `class_not_found_cache` follows.
+    pub(crate) function_not_found_cache: Arc<RwLock<CiSet>>,
     /// Global method store: `(class_fqn, method_name)` → `Arc<MethodInfo>`.
     pub(crate) method_store: MethodStore,
     /// Reverse inheritance index: parent FQN → list of child FQNs.
@@ -116,6 +125,7 @@ impl SymbolIndex {
             fqn_class_index: Arc::new(RwLock::new(CiMap::new())),
             duplicate_classes: Arc::new(RwLock::new(CiMap::new())),
             class_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
+            function_not_found_cache: Arc::new(RwLock::new(CiSet::new())),
             method_store: Arc::new(RwLock::new(HashMap::new())),
             gti_index: Arc::new(RwLock::new(HashMap::new())),
             gti_parents_index: Arc::new(RwLock::new(HashMap::new())),

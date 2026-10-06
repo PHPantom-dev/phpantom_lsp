@@ -150,7 +150,7 @@ impl Backend {
         // an earlier resolution may already have built without them.
         if has_bindings {
             self.laravel_aliases.invalidate();
-            self.clear_class_not_found_cache();
+            self.clear_not_found_caches();
             // A binding is followed without a class lookup naming the
             // provider that registered it, so a cached receiver resolution
             // records no dependency on the alias table.

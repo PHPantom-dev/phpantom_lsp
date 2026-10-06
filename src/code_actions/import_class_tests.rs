@@ -4,9 +4,12 @@ use super::*;
 
 // ── find_all_unresolved_class_names ─────────────────────────────────
 
-/// Helper: extract just the names from the `(name, context)` tuples.
-fn unresolved_names(list: &[(String, ClassRefContext)]) -> Vec<&str> {
-    list.iter().map(|(n, _)| n.as_str()).collect()
+/// Helper: extract just the names from every block's `(name, context)`
+/// tuples.
+fn unresolved_names(list: &[(ImportBlock, Vec<(String, ClassRefContext)>)]) -> Vec<&str> {
+    list.iter()
+        .flat_map(|(_, names)| names.iter().map(|(n, _)| n.as_str()))
+        .collect()
 }
 
 #[test]

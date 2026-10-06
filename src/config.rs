@@ -493,15 +493,17 @@ impl MagoConfig {
 /// `[phpcs]` section — PHP_CodeSniffer proxy settings.
 ///
 /// When `command` is unset (`None`), PHPantom auto-detects via
-/// `vendor/bin/phpcs` then `$PATH`.  Set to `""` (empty string)
-/// to explicitly disable PHPCS integration.
+/// `vendor/bin/phpcs` then `$PATH`, for projects that list
+/// `squizlabs/php_codesniffer` in `require-dev`, have a PHPCS ruleset
+/// file, or set `standard`.  Set to `""` (empty string) to explicitly
+/// disable PHPCS integration.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct PhpcsConfig {
     /// Command (path or name) to run PHPCS.
     ///
     /// - `None` (default) — auto-detect `vendor/bin/phpcs`,
-    ///   then `phpcs` on `$PATH`.
+    ///   then `phpcs` on `$PATH`, when the project uses PHPCS.
     /// - `""` — disable PHPCS.
     /// - Any other value — use as the command (e.g.
     ///   `"vendor/bin/phpcs"` or `"phpcs"`).
