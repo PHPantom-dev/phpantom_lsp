@@ -43,9 +43,13 @@ jobs:
       - run: cargo clippy --all-targets --features semantic-export -- -D warnings
       - run: cargo test --features semantic-export semantic_export
 
-  test:
-    name: Test
+  test-shard:
+    name: Test (shard ${{ matrix.shard }}/6)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -54,6 +58,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: coverage
+          # All shards build the same binaries and share one dependency cache.
+          save-if: ${{ matrix.shard == 1 }}
       - name: Set up musl build
         run: |
           sudo apt-get update
@@ -65,11 +71,41 @@ jobs:
         with:
           tool: cargo-llvm-cov,cargo-nextest
       - name: Run tests with coverage
-        run: cargo llvm-cov nextest --lcov --output-path lcov.info
+        run: >-
+          cargo llvm-cov nextest
+          --partition hash:${{ matrix.shard }}/${{ strategy.job-total }}
+          --lcov --output-path lcov-${{ matrix.shard }}.info
+      - name: Save coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.shard }}
+          path: lcov-${{ matrix.shard }}.info
+          if-no-files-found: error
+          retention-days: 1
+
+  # Preserve the required "Test" check and upload only complete coverage.
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: test-shard
+    if: always()
+    steps:
+      - name: Check all test shards passed
+        env:
+          SHARD_RESULT: ${{ needs.test-shard.result }}
+        run: test "$SHARD_RESULT" = success
+      - uses: actions/checkout@v4
+      - name: Download coverage reports
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-*
+          path: coverage
+          merge-multiple: true
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
         with:
-          files: lcov.info
+          files: coverage/lcov-1.info,coverage/lcov-2.info,coverage/lcov-3.info,coverage/lcov-4.info,coverage/lcov-5.info,coverage/lcov-6.info
+          disable_search: true
           fail_ci_if_error: true
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
