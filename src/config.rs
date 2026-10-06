@@ -613,14 +613,16 @@ pub struct IndexingConfig {
     /// Extra files and directories to index, relative to the workspace
     /// root (absolute paths are also accepted).
     ///
-    /// Listing a path here indexes it regardless of both filters.
-    /// Directories are walked recursively; files are scanned directly.
+    /// Listing a path here indexes it even when the workspace walk
+    /// would skip it as hidden or gitignored. Files are scanned
+    /// directly; directories are walked recursively, with
+    /// [`exclude`](Self::exclude) still pruning entries below them.
     ///
     /// ```toml
     /// [indexing]
     /// include = [".lib", ".lib.stub.php"]
     /// ```
-    pub include: Vec<String>,
+    pub include: Option<Vec<String>>,
 }
 
 impl IndexingConfig {
@@ -644,6 +646,7 @@ impl IndexingConfig {
     pub fn include_paths(&self, workspace_root: &Path) -> Vec<PathBuf> {
         self.include
             .iter()
+            .flatten()
             .map(|entry| {
                 let path = Path::new(entry);
                 if path.is_absolute() {
@@ -1581,7 +1584,7 @@ paths = ["database/schema", "extra/schema.sql"]
     fn indexing_include_defaults_to_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = IndexingConfig::default();
-        assert!(config.include.is_empty());
+        assert!(config.include.is_none());
         assert!(config.include_paths(dir.path()).is_empty());
     }
 
@@ -1595,7 +1598,10 @@ paths = ["database/schema", "extra/schema.sql"]
         )
         .unwrap();
         let config = load_config(dir.path()).unwrap();
-        assert_eq!(config.indexing.include, [".castor", ".castor.stub.php"]);
+        assert_eq!(
+            config.indexing.include.as_deref(),
+            Some(&[".castor".to_string(), ".castor.stub.php".to_string()][..])
+        );
     }
 
     #[test]
@@ -1604,7 +1610,7 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::create_dir_all(dir.path().join(".castor")).unwrap();
 
         let config = IndexingConfig {
-            include: vec![".castor".to_string()],
+            include: Some(vec![".castor".to_string()]),
             ..Default::default()
         };
         assert_eq!(
@@ -1620,7 +1626,7 @@ paths = ["database/schema", "extra/schema.sql"]
         std::fs::write(&stub, "<?php\n").unwrap();
 
         let config = IndexingConfig {
-            include: vec![stub.display().to_string()],
+            include: Some(vec![stub.display().to_string()]),
             ..Default::default()
         };
         // Resolved against a *different* root: an absolute entry is
@@ -1635,7 +1641,7 @@ paths = ["database/schema", "extra/schema.sql"]
     fn include_paths_drop_missing_entries() {
         let dir = tempfile::tempdir().unwrap();
         let config = IndexingConfig {
-            include: vec!["does/not/exist".to_string()],
+            include: Some(vec!["does/not/exist".to_string()]),
             ..Default::default()
         };
         assert!(config.include_paths(dir.path()).is_empty());

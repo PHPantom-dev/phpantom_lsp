@@ -852,28 +852,29 @@ pub fn scan_workspace_fallback_full(
     scan_files_parallel_full(&php_files, progress)
 }
 
-/// Scan the files and directories named by `[indexing] include`,
-/// bypassing both the gitignore and the hidden-entry filters.
-//////
-/// Directories are walked recursively; files are scanned directly. A
-/// path the normal walk already covered is simply scanned twice and
-/// loses the first-wins merge, so callers need not deduplicate.
-pub fn scan_include_paths(
+/// List the PHP files the `[indexing] include` paths name, bypassing
+/// the gitignore and hidden-entry filters the workspace walk applies.
+///
+/// A named file is listed whatever its extension, since naming it is
+/// the instruction. A named directory is walked recursively for files
+/// `filters` accepts as PHP, and `[indexing] exclude` still prunes
+/// entries below it (so a dependency tree inside an included directory
+/// can be left out) but never the named path itself. `.git` is always
+/// skipped.
+pub(crate) fn collect_include_files(
     paths: &[PathBuf],
-    filters: &IndexFilters,
-    progress: Option<&ScanProgress>,
-) -> WorkspaceScanResult {
+    filters: &std::sync::Arc<IndexFilters>,
+) -> Vec<PathBuf> {
     use ignore::WalkBuilder;
 
-    let mut php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> = Vec::new();
+    let mut files = Vec::new();
     for path in paths {
         if path.is_file() {
-            if filters.is_php_file(path) {
-                php_files.push((path.clone(), crate::ClassCompletionOrigin::Project));
-            }
+            files.push(path.clone());
             continue;
         }
 
+        let filter_excludes = std::sync::Arc::clone(filters);
         let walker = WalkBuilder::new(path)
             .git_ignore(false)
             .git_global(false)
@@ -881,20 +882,42 @@ pub fn scan_include_paths(
             .ignore(false)
             .parents(false)
             .hidden(false)
+            .filter_entry(move |entry| {
+                if entry.depth() == 0 {
+                    return true;
+                }
+                let is_dir = entry.file_type().is_some_and(|ft| ft.is_dir());
+                if is_dir && entry.file_name() == ".git" {
+                    return false;
+                }
+                !filter_excludes.is_excluded_entry(entry.path(), is_dir)
+            })
             .build();
         for entry in walker.flatten() {
-            let entry_path = entry.path();
-            if filters.is_php_file(entry_path)
-                && (entry.file_type().is_some_and(|ft| ft.is_file()) || entry_path.is_file())
-            {
-                php_files.push((
-                    entry_path.to_path_buf(),
-                    crate::ClassCompletionOrigin::Project,
-                ));
+            if filters.is_php_file(entry.path()) && entry.path().is_file() {
+                files.push(entry.into_path());
             }
         }
     }
+    files
+}
 
+/// Scan the files [`collect_include_files`] lists for symbols, tagging
+/// each with `origin`.
+///
+/// A path the normal walk already covered is scanned twice and loses
+/// the first-wins merge, so callers need not deduplicate.
+pub fn scan_include_paths(
+    paths: &[PathBuf],
+    origin: crate::ClassCompletionOrigin,
+    filters: &std::sync::Arc<IndexFilters>,
+    progress: Option<&ScanProgress>,
+) -> WorkspaceScanResult {
+    let php_files: Vec<(PathBuf, crate::ClassCompletionOrigin)> =
+        collect_include_files(paths, filters)
+            .into_iter()
+            .map(|path| (path, origin))
+            .collect();
     progress_add_total(progress, php_files.len());
     scan_files_parallel_full(&php_files, progress)
 }

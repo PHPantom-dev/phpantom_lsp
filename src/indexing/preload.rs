@@ -276,13 +276,31 @@ impl Backend {
 
             self.report_workspace_index_progress(progress, 3, "Scanning workspace files");
             let walk_start = std::time::Instant::now();
-            let (php_files, resource_files) =
+            let filters = self.index_filters();
+            let (mut php_files, resource_files) =
                 crate::classmap_scanner::collect_workspace_index_files_gitignore(
                     &root,
                     &vendor_dir_paths,
-                    &self.index_filters(),
+                    &filters,
                     Some(self.followed_links()),
                 );
+            // `[indexing] include` names files the walk above skips. A
+            // file declaring only functions (a Castor task file, say) is
+            // in no class index either, so without this its calls never
+            // reach find-references or workspace symbols. An included
+            // path the walk already covered is listed once. One outside
+            // the workspace is library code, which this index leaves out
+            // the way it leaves out vendor.
+            let mut include_paths = self.config().indexing.include_paths(&root);
+            include_paths.retain(|path| path.starts_with(&root));
+            if !include_paths.is_empty() {
+                let mut seen: HashSet<PathBuf> = php_files.iter().cloned().collect();
+                php_files.extend(
+                    crate::classmap_scanner::collect_include_files(&include_paths, &filters)
+                        .into_iter()
+                        .filter(|path| seen.insert(path.clone())),
+                );
+            }
             tracing::info!(
                 "ensure_workspace_indexed: Phase 2 disk walk found {} PHP and {} resource files in {:?}",
                 php_files.len(),

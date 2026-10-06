@@ -218,3 +218,164 @@ async fn include_tolerates_missing_entries() {
         "the stub should still be indexed alongside a stale entry"
     );
 }
+
+/// A Castor task file declares only functions, so no class index points
+/// at it. Find-references still has to search it, or a call made from
+/// one task file to another is missing from the results.
+#[tokio::test]
+async fn include_feeds_find_references_from_function_only_files() {
+    let (backend, dir) = castor_workspace(&[".castor", ".castor.stub.php"]).await;
+    let caller = dir.path().join(".castor/deploy.php");
+    fs::write(
+        &caller,
+        "<?php\n\nnamespace deploy;\n\nfunction release(): void\n{\n    \\docker\\up();\n}\n",
+    )
+    .unwrap();
+
+    let uri = tasks_uri(&dir);
+    let locations = backend
+        .references(ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position {
+                    line: 10,
+                    character: 5,
+                },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+        })
+        .await
+        .unwrap()
+        .unwrap_or_default();
+
+    let caller_uri = Url::from_file_path(&caller).unwrap();
+    assert!(
+        locations.iter().any(|loc| loc.uri == caller_uri),
+        "the call in the included task file should be found, got: {locations:?}"
+    );
+}
+
+/// An included path fills gaps; it must not shadow a declaration the
+/// rest of discovery found. Castor installed as a Composer dependency
+/// declares its functions in an autoload file, and the generated stub
+/// repeats them; the real declaration has to win.
+#[tokio::test]
+async fn include_does_not_shadow_composer_autoload_files() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let root = dir.path();
+    fs::write(root.join("composer.json"), "{}\n").unwrap();
+    let functions = root.join("vendor/jolicode/castor/src/functions.php");
+    fs::create_dir_all(functions.parent().unwrap()).unwrap();
+    fs::write(
+        &functions,
+        "<?php\n\nnamespace Castor;\n\nfunction run(string $command): void {}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(root.join("vendor/composer")).unwrap();
+    fs::write(
+        root.join("vendor/composer/autoload_files.php"),
+        "<?php\n\n$vendorDir = dirname(__DIR__);\n$baseDir = dirname($vendorDir);\n\nreturn array(\n    'abc123' => $vendorDir . '/jolicode/castor/src/functions.php',\n);\n",
+    )
+    .unwrap();
+    fs::write(root.join(".castor.stub.php"), CASTOR_STUB).unwrap();
+    fs::write(root.join("castor.php"), CASTOR_TASKS).unwrap();
+    fs::write(
+        root.join(".phpantom.toml"),
+        "[indexing]\ninclude = [\".castor.stub.php\"]\n",
+    )
+    .unwrap();
+
+    let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+    backend.initialized(InitializedParams {}).await;
+
+    let indexed = backend
+        .autoload_function_index()
+        .read()
+        .get("Castor\\run")
+        .cloned();
+    assert_eq!(
+        indexed.as_deref(),
+        Some(functions.canonicalize().unwrap().as_path())
+    );
+}
+
+/// A path outside the workspace is a library: its declarations resolve,
+/// but nothing in it is the project's to rename.
+#[tokio::test]
+async fn include_outside_the_workspace_is_library_code() {
+    let lib = tempfile::tempdir().expect("failed to create temp dir");
+    fs::write(lib.path().join("docker.php"), DOCKER_TASKS).unwrap();
+    let lib_path = lib.path().display().to_string();
+    let (backend, dir) = castor_workspace(&[&lib_path]).await;
+    let uri = tasks_uri(&dir);
+
+    let location = goto(&backend, &uri, 10, 5)
+        .await
+        .expect("`up` should resolve into the included library");
+    assert_eq!(
+        location.uri,
+        Url::from_file_path(lib.path().join("docker.php")).unwrap()
+    );
+
+    assert!(
+        prepare_rename_up(&backend, uri).await.is_none(),
+        "a function declared in library code must not be renamable"
+    );
+
+    // The same declaration inside the workspace is the project's own.
+    let (backend, dir) = castor_workspace(&[".castor"]).await;
+    assert!(
+        prepare_rename_up(&backend, tasks_uri(&dir)).await.is_some(),
+        "a function declared in an included workspace path is renamable"
+    );
+}
+
+/// Prepare a rename on the `up()` call in `castor.php`.
+async fn prepare_rename_up(backend: &Backend, uri: Url) -> Option<PrepareRenameResponse> {
+    backend
+        .prepare_rename(TextDocumentPositionParams {
+            text_document: TextDocumentIdentifier { uri },
+            position: Position {
+                line: 10,
+                character: 5,
+            },
+        })
+        .await
+        .unwrap()
+}
+
+/// The laravel-ide-helper files are skipped by default, and naming one
+/// under `include` brings it back the way it does a gitignored file.
+#[tokio::test]
+async fn include_lifts_the_default_ide_helper_skip() {
+    let dir = tempfile::tempdir().expect("failed to create temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("_ide_helper.php"),
+        "<?php\n\nnamespace {\n    class IdeHelperOnly {}\n}\n",
+    )
+    .unwrap();
+
+    for (config, expected) in [
+        ("[indexing]\nexclude = [\"!_ide_helper.php\"]\n", false),
+        ("[indexing]\ninclude = [\"_ide_helper.php\"]\n", true),
+    ] {
+        fs::write(root.join(".phpantom.toml"), config).unwrap();
+        let backend = Backend::new_test_with_workspace(root.to_path_buf(), Vec::new());
+        backend.initialized(InitializedParams {}).await;
+
+        assert_eq!(
+            backend
+                .fqn_uri_index()
+                .read()
+                .get("IdeHelperOnly")
+                .is_some(),
+            expected,
+            "with {config:?}"
+        );
+    }
+}

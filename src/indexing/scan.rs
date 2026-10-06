@@ -665,10 +665,16 @@ impl Backend {
 
     /// Index the extra paths named by `[indexing] include`.
     ///
-    /// Runs after the strategy-specific classmap build so the entries it
-    /// adds lose every first-wins merge: an included path fills the gaps
-    /// the workspace scan left, it does not shadow what that scan found.
-    /// A no-op when the option is unset, which is the default.
+    /// Runs last in every discovery pipeline so the entries it adds lose
+    /// every first-wins merge: an included path fills the gaps the
+    /// workspace scan left, it does not shadow what that scan found. An
+    /// origin is recorded only alongside a path that wins, so a symbol's
+    /// origin always describes the file it resolves to. A no-op when the
+    /// option is unset, which is the default.
+    ///
+    /// A path inside the workspace is project code. One outside it is a
+    /// library, registered the way a vendor directory is, so it resolves
+    /// but is never reported on, renamed into, or searched for references.
     pub(crate) fn scan_configured_include_paths(
         &self,
         root: &std::path::Path,
@@ -679,24 +685,94 @@ impl Backend {
             return;
         }
 
-        let scan = classmap_scanner::scan_include_paths(&paths, &self.index_filters(), progress);
-        let class_count = scan.classmap.len();
-        let symbol_count = class_count + scan.function_index.len() + scan.constant_index.len();
-        self.populate_autoload_indices(&scan);
+        let (project, library): (Vec<PathBuf>, Vec<PathBuf>) = paths
+            .iter()
+            .cloned()
+            .partition(|path| path.starts_with(root));
+        for path in &library {
+            self.add_library_path(path);
+        }
+
+        let filters = self.index_filters();
+        let mut symbol_count = 0;
+        for (paths, origin) in [
+            (project, crate::ClassCompletionOrigin::Project),
+            (library, crate::ClassCompletionOrigin::VendorExplicit),
+        ] {
+            if paths.is_empty() {
+                continue;
+            }
+            let scan = classmap_scanner::scan_include_paths(&paths, origin, &filters, progress);
+            symbol_count +=
+                scan.classmap.len() + scan.function_index.len() + scan.constant_index.len();
+            self.merge_include_scan(scan, origin);
+        }
+
+        tracing::info!(
+            "PHPantom: indexing.include, {} symbols from {} configured path(s)",
+            symbol_count,
+            paths.len()
+        );
+    }
+
+    /// Register an `[indexing] include` path outside the workspace as
+    /// library code. A directory is registered exactly like a vendor
+    /// directory; a file gets its own URI as the prefix, since the
+    /// vendor prefixes end in `/`.
+    fn add_library_path(&self, path: &Path) {
+        if !path.is_file() {
+            self.add_vendor_dir(path);
+            return;
+        }
+        let aliases = path_aliases(path);
+        {
+            let mut prefixes = self.workspace.vendor_uri_prefixes.lock();
+            for alias in &aliases {
+                let uri = crate::util::path_to_uri(alias);
+                if !prefixes.contains(&uri) {
+                    prefixes.push(uri);
+                }
+            }
+        }
+        let mut paths = self.workspace.vendor_dir_paths.lock();
+        for alias in aliases {
+            if !paths.contains(&alias) {
+                paths.push(alias);
+            }
+        }
+    }
+
+    /// Add what an include scan found to the symbol indexes, keeping every
+    /// entry an earlier pipeline already made.
+    fn merge_include_scan(&self, scan: WorkspaceScanResult, origin: crate::ClassCompletionOrigin) {
         {
             let mut idx = self.symbols.fqn_uri_index.write();
             let mut origins = self.symbols.fqn_origin_index.write();
             for (fqn, path) in scan.classmap {
-                origins.or_insert_with(fqn.as_str(), || crate::ClassCompletionOrigin::Project);
-                idx.or_insert_with(fqn, || crate::util::path_to_uri(&path));
+                if !idx.contains_key(&fqn) {
+                    origins.insert(fqn.as_str(), origin);
+                    idx.insert(fqn, crate::util::path_to_uri(&path));
+                }
             }
         }
-
-        tracing::info!(
-            "PHPantom: indexing.include — {} symbols from {} configured path(s)",
-            symbol_count,
-            paths.len()
-        );
+        {
+            let mut idx = self.symbols.autoload_function_index.write();
+            let mut origins = self.symbols.autoload_function_origin_index.write();
+            for (fqn, path) in scan.function_index {
+                if !idx.contains_key(&fqn) {
+                    origins.insert(fqn.as_str(), origin);
+                    idx.insert(fqn, path);
+                }
+            }
+        }
+        let mut idx = self.symbols.autoload_constant_index.write();
+        let mut origins = self.symbols.autoload_constant_origin_index.write();
+        for (name, path) in scan.constant_index {
+            if let std::collections::hash_map::Entry::Vacant(e) = idx.entry(name) {
+                origins.insert(e.key().clone(), origin);
+                e.insert(path);
+            }
+        }
     }
 }
 

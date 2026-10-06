@@ -480,7 +480,12 @@ fn scan_include_paths_walks_hidden_directory() {
         "precondition: the workspace walk must not see it"
     );
 
-    let result = scan_include_paths(&[hidden], &IndexFilters::empty(), None);
+    let result = scan_include_paths(
+        &[hidden],
+        crate::ClassCompletionOrigin::Project,
+        &IndexFilters::empty(),
+        None,
+    );
     assert!(
         result.function_index.contains_key("docker\\up"),
         "got: {:?}",
@@ -511,7 +516,12 @@ fn scan_include_paths_reads_hidden_gitignored_file() {
         "precondition: the workspace walk must not see it"
     );
 
-    let result = scan_include_paths(&[stub], &IndexFilters::empty(), None);
+    let result = scan_include_paths(
+        &[stub],
+        crate::ClassCompletionOrigin::Project,
+        &IndexFilters::empty(),
+        None,
+    );
     assert!(result.function_index.contains_key("Castor\\run"));
     assert!(result.function_index.contains_key("Castor\\io"));
 }
@@ -527,7 +537,12 @@ fn scan_include_paths_reports_classes_and_constants() {
     )
     .unwrap();
 
-    let result = scan_include_paths(&[hidden], &IndexFilters::empty(), None);
+    let result = scan_include_paths(
+        &[hidden],
+        crate::ClassCompletionOrigin::Project,
+        &IndexFilters::empty(),
+        None,
+    );
     assert!(result.classmap.contains_key("Helper"));
     assert!(result.constant_index.contains_key("TOOL_VERSION"));
 }
@@ -545,14 +560,65 @@ fn scan_include_paths_ignores_non_php_files() {
     )
     .unwrap();
 
-    let result = scan_include_paths(&[included], &IndexFilters::empty(), None);
+    let result = scan_include_paths(
+        &[included],
+        crate::ClassCompletionOrigin::Project,
+        &IndexFilters::empty(),
+        None,
+    );
     assert!(result.function_index.contains_key("realFunction"));
     assert!(!result.function_index.contains_key("notAFunction"));
 }
 
+/// `[indexing] exclude` still prunes inside an included directory (a
+/// dependency tree under `.castor/vendor`, say) without excluding the
+/// named directory itself, and `[indexing] extensions` still widens
+/// what counts as PHP there.
+#[test]
+fn scan_include_paths_honours_exclude_and_extensions_below_the_root() {
+    let dir = tempfile::tempdir().unwrap();
+    let included = dir.path().join(".castor");
+    std::fs::create_dir_all(included.join("vendor")).unwrap();
+    std::fs::write(
+        included.join("tasks.php"),
+        "<?php\nfunction ownTask(): void {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        included.join("helpers.inc"),
+        "<?php\nfunction incHelper(): void {}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        included.join("vendor/dep.php"),
+        "<?php\nfunction vendoredDep(): void {}\n",
+    )
+    .unwrap();
+
+    let filters = std::sync::Arc::new(IndexFilters::compile(
+        Some(dir.path()),
+        &[".castor".to_string(), ".castor/vendor".to_string()],
+        &["inc".to_string()],
+    ));
+    let result = scan_include_paths(
+        &[included],
+        crate::ClassCompletionOrigin::Project,
+        &filters,
+        None,
+    );
+    assert!(result.function_index.contains_key("ownTask"));
+    assert!(result.function_index.contains_key("incHelper"));
+    assert!(!result.function_index.contains_key("vendoredDep"));
+}
+
 #[test]
 fn scan_include_paths_with_no_paths_is_empty() {
-    let result = scan_include_paths(&[], &IndexFilters::empty(), None);
+    let result = scan_include_paths(
+        &[],
+        crate::ClassCompletionOrigin::Project,
+        &IndexFilters::empty(),
+        None,
+    );
     assert!(result.classmap.is_empty());
     assert!(result.function_index.is_empty());
     assert!(result.constant_index.is_empty());

@@ -94,7 +94,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! re-includes. Applies to background discovery and to the directories analyze walks. A file you open in the editor, or name outright on the analyze command line, is always served.",
+          "description": "Paths the workspace scanners skip, in gitignore syntax relative to the workspace root: a bare name matches at any depth, a pattern containing / anchors to the root, a trailing / restricts to directories, and a leading ! undoes an earlier pattern (use include to bring back a hidden, gitignored, or built-in skipped path). Applies to background discovery and to the directories analyze walks. A file you open in the editor, or name outright on the analyze command line, is always served.",
           "default": []
         },
         "extensions": {
@@ -107,10 +107,10 @@
         },
         "include": {
           "type": "array",
-          "description": "Extra files and directories to index, relative to the workspace root unless absolute. Listing a path here indexes it: directories are walked recursively, files are scanned directly, and entries that do not exist are ignored. Included paths are indexed after the workspace scan, so they fill gaps rather than shadowing symbols the scan already found.",
           "items": {
             "type": "string"
           },
+          "description": "Files and directories to index even though the workspace scan skips them (hidden, gitignored, or the laravel-ide-helper files), relative to the workspace root unless absolute. Directories are walked recursively, files are scanned directly, and entries that do not exist are ignored. Paths inside the workspace are treated as project code; paths outside it as library code, like vendor. Included paths fill gaps and never override a declaration found elsewhere.",
           "default": []
         }
       }

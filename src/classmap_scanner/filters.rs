@@ -274,20 +274,31 @@ impl FollowedLinks {
     }
 }
 
-/// Paths excluded from discovery whatever the project configures.
+/// Paths skipped by discovery whatever `[indexing] exclude` says.
 ///
 /// `barryvdh/laravel-ide-helper` generates these for editors that cannot
 /// follow Laravel's facades and magic on their own. They redeclare real
 /// framework classes as facade stand-ins without return types, so indexing
 /// them competes with the real declarations and sends the type engine into the
 /// stand-ins' bodies, one of which spans tens of thousands of lines.
+///
+/// Compiled into a matcher of their own so a `!` pattern in `exclude`
+/// cannot cancel them: they are a default skip like `.gitignore` and
+/// hidden entries, and naming one under `[indexing] include` is what
+/// brings it back.
 const DEFAULT_EXCLUDES: [&str; 2] = ["_ide_helper.php", "_ide_helper_models.php"];
 
 /// Compiled exclude matcher and extra-extension set for file discovery.
 pub struct IndexFilters {
-    /// Compiled [`DEFAULT_EXCLUDES`] plus `[indexing] exclude` globs,
-    /// `None` without a workspace root to anchor them.
+    /// Compiled `[indexing] exclude` globs, `None` without a workspace
+    /// root to anchor them or when the list is empty.
     excludes: Option<Gitignore>,
+    /// Compiled [`DEFAULT_EXCLUDES`], `None` without a workspace root.
+    default_excludes: Option<Gitignore>,
+    /// The `[indexing] include` paths, resolved to absolute. No exclude
+    /// applies to one of these paths itself, though `excludes` still
+    /// prunes what lies below a named directory.
+    included: Vec<PathBuf>,
     /// The raw patterns `excludes` was compiled from, kept only so
     /// [`may_admit_more_than`](Self::may_admit_more_than) can tell a
     /// widened exclude list from a narrowed one; `Gitignore` does not
@@ -306,15 +317,17 @@ impl IndexFilters {
     /// patterns containing `/`; without a workspace root the exclude
     /// list is ignored (extensions still apply).
     pub fn compile(root: Option<&Path>, exclude: &[String], extensions: &[String]) -> Self {
-        let excludes = root.and_then(|root| {
+        let default_excludes = root.map(|root| {
             let mut builder = GitignoreBuilder::new(root);
-            // Added first so a `!` re-include in the configured list can
-            // still bring one back.
             for pattern in DEFAULT_EXCLUDES {
                 builder
                     .add_line(None, pattern)
                     .expect("built-in exclude patterns are valid");
             }
+            builder.build().expect("built-in exclude patterns compile")
+        });
+        let excludes = root.and_then(|root| {
+            let mut builder = GitignoreBuilder::new(root);
             for pattern in exclude {
                 if let Err(e) = builder.add_line(None, pattern) {
                     eprintln!(
@@ -340,9 +353,19 @@ impl IndexFilters {
 
         Self {
             excludes,
+            default_excludes,
+            included: Vec::new(),
             exclude_patterns: exclude.to_vec(),
             extensions,
         }
+    }
+
+    /// Exempt the `[indexing] include` paths from every exclude, so a
+    /// named path is never pruned, its file-watch events are honoured,
+    /// and it stays indexed after the editor closes it.
+    pub fn with_included(mut self, included: Vec<PathBuf>) -> Self {
+        self.included = included;
+        self
     }
 
     /// A shared no-op filter for callers outside the indexing pipeline
@@ -352,35 +375,69 @@ impl IndexFilters {
         Arc::clone(EMPTY.get_or_init(|| {
             Arc::new(IndexFilters {
                 excludes: None,
+                default_excludes: None,
+                included: Vec::new(),
                 exclude_patterns: Vec::new(),
                 extensions: Vec::new(),
             })
         }))
     }
 
-    /// Whether a walked entry is excluded by `[indexing] exclude`.
+    /// Whether a walked entry is excluded by `[indexing] exclude` or the
+    /// built-in skips.
     ///
     /// Matches the entry's own path only. Directory walkers prune
     /// excluded directories, so files below them are never asked;
     /// for arbitrary paths (file-watch events) use
     /// [`is_excluded_path`](Self::is_excluded_path) instead.
     pub fn is_excluded_entry(&self, path: &Path, is_dir: bool) -> bool {
-        self.excludes
-            .as_ref()
-            .is_some_and(|gi| gi.matched(path, is_dir).is_ignore())
+        if self.included.iter().any(|named| named == path) {
+            return false;
+        }
+        [&self.excludes, &self.default_excludes]
+            .into_iter()
+            .flatten()
+            .any(|gi| gi.matched(path, is_dir).is_ignore())
     }
 
     /// Whether a path is excluded, considering its ancestors.
     ///
     /// A file inside an excluded directory is itself excluded, the way
-    /// git never descends into an ignored directory. The patterns are
-    /// anchored to the workspace root, so a path outside it (an event from
-    /// another folder of the editor's workspace, a file opened from
-    /// elsewhere) is never excluded; the matcher panics on one.
+    /// git never descends into an ignored directory. An `[indexing]
+    /// include` path is not, and for a path below an included directory
+    /// only the ancestors beneath that directory are considered. The
+    /// patterns are anchored to the workspace root, so a path outside it
+    /// (an event from another folder of the editor's workspace, a file
+    /// opened from elsewhere) is never excluded; the matcher panics on
+    /// one.
     pub fn is_excluded_path(&self, path: &Path, is_dir: bool) -> bool {
-        self.excludes.as_ref().is_some_and(|gi| {
-            path.starts_with(gi.path()) && gi.matched_path_or_any_parents(path, is_dir).is_ignore()
-        })
+        if self.included.iter().any(|named| named == path) {
+            return false;
+        }
+        let stop = self
+            .included
+            .iter()
+            .filter(|named| path.starts_with(named))
+            .max_by_key(|named| named.components().count());
+        [&self.excludes, &self.default_excludes]
+            .into_iter()
+            .flatten()
+            .any(|gi| {
+                if !path.starts_with(gi.path()) {
+                    return false;
+                }
+                let Some(stop) = stop else {
+                    return gi.matched_path_or_any_parents(path, is_dir).is_ignore();
+                };
+                // The same first-match-wins climb `matched_path_or_any_parents`
+                // makes, ending before the included directory.
+                std::iter::once((path, is_dir))
+                    .chain(path.ancestors().skip(1).map(|dir| (dir, true)))
+                    .take_while(|(p, _)| *p != stop.as_path())
+                    .map(|(p, dir)| gi.matched(p, dir))
+                    .find(|m| !m.is_none())
+                    .is_some_and(|m| m.is_ignore())
+            })
     }
 
     /// Whether a file's extension marks it as PHP source: `.php` plus
@@ -527,11 +584,32 @@ mod tests {
         assert!(!f.is_excluded_entry(&PathBuf::from("/ws/app/Helper.php"), false));
     }
 
+    /// `!` only undoes the project's own `exclude` patterns. The built-in
+    /// skips come back through `[indexing] include`, like a gitignored or
+    /// hidden path does.
     #[test]
-    fn default_exclude_can_be_re_included() {
-        let f = filters(&["!_ide_helper_models.php"], &[]);
-        assert!(f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper.php"), false));
-        assert!(!f.is_excluded_entry(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+    fn default_exclude_is_lifted_by_include_not_negation() {
+        let negated = filters(&["!_ide_helper_models.php"], &[]);
+        assert!(negated.is_excluded_entry(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+        assert!(negated.is_excluded_path(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+
+        let included =
+            filters(&[], &[]).with_included(vec![PathBuf::from("/ws/_ide_helper_models.php")]);
+        assert!(!included.is_excluded_entry(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+        assert!(!included.is_excluded_path(&PathBuf::from("/ws/_ide_helper_models.php"), false));
+        assert!(included.is_excluded_path(&PathBuf::from("/ws/_ide_helper.php"), false));
+    }
+
+    /// A named directory is never excluded itself, but `exclude` still
+    /// prunes what lies below it.
+    #[test]
+    fn exclude_applies_below_an_included_directory_only() {
+        let f = filters(&["generated", "cache"], &[])
+            .with_included(vec![PathBuf::from("/ws/generated")]);
+        assert!(!f.is_excluded_entry(&PathBuf::from("/ws/generated"), true));
+        assert!(!f.is_excluded_path(&PathBuf::from("/ws/generated/A.php"), false));
+        assert!(f.is_excluded_path(&PathBuf::from("/ws/generated/cache/B.php"), false));
+        assert!(f.is_excluded_path(&PathBuf::from("/ws/other/generated/C.php"), false));
     }
 
     #[test]

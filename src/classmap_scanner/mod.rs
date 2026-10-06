@@ -80,7 +80,7 @@ mod filters;
 mod lexer;
 mod walk;
 
-pub(crate) use discovery::vendor_package_roots;
+pub(crate) use discovery::{collect_include_files, vendor_package_roots};
 pub use discovery::{
     scan_directories, scan_drupal_directories, scan_include_paths, scan_psr4_directories,
     scan_psr4_directories_with_skip, scan_vendor_packages, scan_vendor_packages_with_skip,
