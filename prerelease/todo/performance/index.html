@@ -3414,29 +3414,6 @@ set of removed names, turning the filter into set lookups.</p>
 <p><strong>Where to look:</strong> <code>set_php_version</code> in <code>lib.rs</code> and the
 <code>is_stub_*_removed</code> family in <code>stubs.rs</code>.</p>
 <hr />
-<h2 id="p67-the-blade-refresh-pass-forgets-every-inferred-return-type-between-caller-files">P67. The Blade refresh pass forgets every inferred return type between caller files<a class="headerlink" href="#p67-the-blade-refresh-pass-forgets-every-inferred-return-type-between-caller-files" title="Permanent link">&para;</a></h2>
-<p><strong>Impact: Medium · Complexity: Medium</strong></p>
-<p><code>refresh_blade_injected_vars</code> runs once after workspace indexing (and in
-<code>analyze</code>) to type the variables each template receives from its
-<code>view()</code> call sites. The type-engine memos are scoped to one caller
-file, so a controller that renders many templates is walked again for
-each of them, and every method-body inference it triggers is repeated.
-On a Laravel 8 project with ~600 files and largely untyped controllers,
-one controller rendering 48 templates accounted for a fifth of the
-pass, and the pass as a whole is still about 2.7 s of a 4.2 s release
-<code>analyze</code>, all on one core.</p>
-<p>The body-inference memo is keyed by <code>(class FQN, method, argument
-types)</code> and holds nothing tied to a particular text buffer, so it can
-safely span the whole pass. The variable-type memo cannot: its key
-includes the address of the content it walked, and the pass replaces
-templates' virtual PHP as it goes, so a freed buffer reused at the same
-address would serve stale entries. Activate the body-inference memo
-around the whole pass and keep the per-file guard for the others.</p>
-<p><strong>Where to look:</strong> <code>refresh_blade_injected_vars</code> and
-<code>extract_call_site_vars</code> in <code>blade/call_site_inference.rs</code>;
-<code>activate_type_engine_caches</code> in
-<code>type_engine/call_resolution/target_cache.rs</code>.</p>
-<hr />
 <h2 id="p68-body-return-type-inference-re-parses-the-declaring-file-every-time">P68. Body return-type inference re-parses the declaring file every time<a class="headerlink" href="#p68-body-return-type-inference-re-parses-the-declaring-file-every-time" title="Permanent link">&para;</a></h2>
 <p><strong>Impact: Medium · Complexity: Medium-High</strong></p>
 <p><code>infer_return_type_for_function</code> reads the declaring file's text and
