@@ -1788,6 +1788,27 @@ fn test_preprocess_switch_case_with_class_constant() {
 }
 
 #[test]
+fn test_preprocess_break_and_continue_keep_their_condition() {
+    let content = "@foreach($rows as $row)\n@break($row > 3)\n@continue ($row === 1)\n@continue\n@endforeach\n";
+    let (php, _) = preprocess(content);
+    assert!(
+        php.contains("if ($row > 3) break;"),
+        "@break with a condition should break only when it holds: {}",
+        php
+    );
+    assert!(
+        php.contains("if  ($row === 1) continue;"),
+        "@continue with a condition should continue only when it holds: {}",
+        php
+    );
+    assert!(
+        php.contains(" continue; "),
+        "a bare @continue should emit continue;: {}",
+        php
+    );
+}
+
+#[test]
 fn test_preprocess_session_value_accessible() {
     // $value should be accessible inside @session block
     let content = "@session('status')\n{{ $value }}\n@endsession\n";

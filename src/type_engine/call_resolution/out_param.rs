@@ -368,9 +368,10 @@ fn read_out_type(
         // The walker reads a position no path reaches as the state before
         // the statement that left, so a body whose every path returns
         // would add a stale reading from its closing brace.
-        let falls_through = !body.statements.iter().any(|stmt| {
-            crate::type_engine::types::narrowing::statement_unconditionally_exits(stmt, &exit_ctx)
-        });
+        let falls_through = !crate::type_engine::types::narrowing::statements_unconditionally_exit(
+            body.statements.iter(),
+            &exit_ctx,
+        );
         let exits = returns
             .iter()
             .map(|&(_, _, _, return_keyword)| return_keyword as u32)

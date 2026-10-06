@@ -23,15 +23,15 @@
 //! block or an `if` whose every branch does one of those — an `if` without an
 //! `else` always has a path that falls through, so it never qualifies.
 //!
-//! A call to a function declared `never` leaves too, and is deliberately not
-//! recognised here: knowing that takes the type engine, which would move this
-//! check into the expensive phase to catch a case the reader can already see.
-//! [`crate::type_engine`] has its own answer to this question for narrowing,
-//! where the types are already in hand.
+//! The rules are the ones guard-clause narrowing uses
+//! ([`statement_leaves_block`]).  A call to a function declared `never`
+//! leaves too, and is deliberately not recognised here: knowing that takes the
+//! type engine, which would move this check into the expensive phase to catch
+//! a case the reader can already see.
 //!
 //! ## What is not dead
 //!
-//! A declaration at the top level of a file is hoisted — PHP binds it before
+//! A declaration at the top level of a file is hoisted: PHP binds it before
 //! the script runs, so it exists whether or not control reaches the line it is
 //! written on.  The same declaration nested inside a function body is not
 //! hoisted: it is created by executing that statement, so after a `return` it
@@ -46,6 +46,10 @@
 //! is written in: a jump to a label in the same block leaves the block running,
 //! and without resolving the label the two cannot be told apart.
 //!
+//! A label nested in a block or an `if`, `try` or `declare` body is an entry
+//! point too, since PHP lets a jump land there, so the statement holding it
+//! ends the run as well.
+//!
 //! Since both of those can sit in the middle of otherwise dead code, one block
 //! can hold several separate dead runs, and each is reported on its own.
 
@@ -55,6 +59,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::parser::with_parsed_program;
+use crate::type_engine::types::narrowing::{contains_entry_label, statement_leaves_block};
 
 use super::helpers::make_diagnostic;
 
@@ -108,7 +113,7 @@ impl Backend {
 /// A `return` here ends the script, so the top level has dead runs like any
 /// block — it differs only in that its declarations are hoisted.
 fn collect_from_program(program: &Program<'_>, runs: &mut Vec<DeadRun>) {
-    scan_statements(program.statements.iter(), Scope::TopLevel, runs);
+    scan_statements(program.statements.as_slice(), Scope::TopLevel, runs);
 }
 
 /// Walk the bodies that hang off expressions rather than statements.
@@ -151,23 +156,22 @@ enum Scope {
 
 /// Scan one statement list for dead runs, then descend into every statement
 /// it holds.
-fn scan_statements<'a>(
-    statements: impl Iterator<Item = &'a Statement<'a>>,
-    scope: Scope,
-    runs: &mut Vec<DeadRun>,
-) {
-    let statements: Vec<&Statement<'_>> = statements.collect();
-
+fn scan_statements(statements: &[Statement<'_>], scope: Scope, runs: &mut Vec<DeadRun>) {
     let mut dead_from: Option<usize> = None;
     for (index, statement) in statements.iter().enumerate() {
         match dead_from {
             // Already past a statement that left the block.  A label makes
             // what follows reachable again, so it closes the run it
-            // interrupts rather than joining it.
+            // interrupts rather than joining it.  A label nested in a block
+            // or a branch makes that whole statement an entry point, and
+            // whether what follows it is reachable is its own answer.
             Some(start) => {
-                if matches!(statement, Statement::Label(_)) {
+                if contains_entry_label(statement) {
                     push_run(&statements[start..index], scope, runs);
-                    dead_from = None;
+                    dead_from = (!matches!(statement, Statement::Label(_))
+                        && leaves_block(statement)
+                        && index + 1 < statements.len())
+                    .then_some(index + 1);
                 }
             }
             None => {
@@ -191,7 +195,7 @@ fn scan_statements<'a>(
 /// A hoisted declaration inside the run keeps its own meaning, so the run is
 /// split around it instead of covering it — dimming a class that PHP has
 /// already bound would be a lie about what the code does.
-fn push_run(statements: &[&Statement<'_>], scope: Scope, runs: &mut Vec<DeadRun>) {
+fn push_run(statements: &[Statement<'_>], scope: Scope, runs: &mut Vec<DeadRun>) {
     let mut segment_start: Option<u32> = None;
     let mut segment_end: u32 = 0;
 
@@ -203,6 +207,13 @@ fn push_run(statements: &[&Statement<'_>], scope: Scope, runs: &mut Vec<DeadRun>
                     end: segment_end,
                 });
             }
+            continue;
+        }
+        // Whitespace after a closing `?>` is output nobody reads; dimming
+        // it would report a run with nothing in it.
+        if let Statement::Inline(inline) = statement
+            && inline.value.iter().all(u8::is_ascii_whitespace)
+        {
             continue;
         }
         let span = statement.span();
@@ -227,6 +238,13 @@ fn push_run(statements: &[&Statement<'_>], scope: Scope, runs: &mut Vec<DeadRun>
 /// wherever they sit.  A `function` or `class` is hoisted only at the top
 /// level of a file: nested inside a function body it is created by executing
 /// the statement, so after a `return` it never comes into being at all.
+///
+/// A top-level class is only bound early when PHP can link it at compile
+/// time (one that implements an interface or uses a trait is declared when
+/// its statement runs), so treating every class-like as hoisted leaves some
+/// dead ones undimmed rather than dimming a live one.  An `enum` always
+/// implements `UnitEnum` and a top-level `const` is an ordinary runtime
+/// statement, so neither is hoisted.
 fn is_hoisted(statement: &Statement<'_>, scope: Scope) -> bool {
     if matches!(
         statement,
@@ -246,8 +264,6 @@ fn is_hoisted(statement: &Statement<'_>, scope: Scope) -> bool {
                 | Statement::Class(_)
                 | Statement::Interface(_)
                 | Statement::Trait(_)
-                | Statement::Enum(_)
-                | Statement::Constant(_)
         )
 }
 
@@ -263,86 +279,10 @@ fn ends_run(statement: &Statement<'_>) -> bool {
     matches!(statement, Statement::Goto(_)) || leaves_block(statement)
 }
 
-/// Whether every path through this statement leaves the enclosing block.
-///
-/// Mirrors the syntactic half of
-/// [`crate::type_engine`]'s `statement_unconditionally_exits`, which answers
-/// the same question with types in hand so it can also recognise a call to a
-/// `never`-returning function.  Sharing one implementation would drag the
-/// resolver into a check that deliberately runs without it.
+/// The structural rules the type engine's narrowing uses too, minus the
+/// `never`-call recognition that needs types.
 fn leaves_block(statement: &Statement<'_>) -> bool {
-    match statement {
-        Statement::Return(_) | Statement::Continue(_) | Statement::Break(_) => true,
-        // `throw`, `exit`, and `die` are expressions in PHP, so they reach
-        // here wrapped in an expression statement.
-        Statement::Expression(expression) => {
-            matches!(
-                expression.expression,
-                Expression::Throw(_)
-                    | Expression::Construct(Construct::Exit(_))
-                    | Expression::Construct(Construct::Die(_))
-            )
-        }
-        Statement::Block(block) => list_leaves_block(block.statements.iter()),
-        Statement::If(if_statement) => if_leaves_block(&if_statement.body),
-        _ => false,
-    }
-}
-
-/// Whether an `if` leaves the block down every branch.
-///
-/// Needs the then-branch, every `elseif`, and an `else` that exists — without
-/// the `else` there is a path that runs none of them and falls through.
-fn if_leaves_block(body: &IfBody<'_>) -> bool {
-    match body {
-        IfBody::Statement(body) => {
-            leaves_block(body.statement)
-                && body
-                    .else_if_clauses
-                    .iter()
-                    .all(|clause| leaves_block(clause.statement))
-                && body
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|clause| leaves_block(clause.statement))
-        }
-        IfBody::ColonDelimited(body) => {
-            list_leaves_block(body.statements.iter())
-                && body
-                    .else_if_clauses
-                    .iter()
-                    .all(|clause| list_leaves_block(clause.statements.iter()))
-                && body
-                    .else_clause
-                    .as_ref()
-                    .is_some_and(|clause| list_leaves_block(clause.statements.iter()))
-        }
-    }
-}
-
-/// Whether control is gone by the end of a statement list.
-///
-/// Not the same question as "does anything in here leave": a `goto` label
-/// after the exit is an entry point, so control can be back in the list and
-/// run out of its end.  The list has to be walked for that to show, and a
-/// list that ends reachable leaves whatever encloses it running — which is
-/// why asking `any` here dims the live code after a block whose exit was
-/// jumped over.
-///
-/// A `goto` itself does not end anything here.  It ends the run it sits in
-/// (see [`ends_run`]), but where its label lives is unknown, so counting it
-/// as an exit would claim the enclosing block never falls through when the
-/// jump may simply land further down the same list.
-fn list_leaves_block<'a>(statements: impl Iterator<Item = &'a Statement<'a>>) -> bool {
-    let mut reachable = true;
-    for statement in statements {
-        if matches!(statement, Statement::Label(_)) {
-            reachable = true;
-        } else if reachable && leaves_block(statement) {
-            reachable = false;
-        }
-    }
-    !reachable
+    statement_leaves_block(statement, &|_| false)
 }
 
 /// Descend into every statement list a statement contains.
@@ -355,7 +295,7 @@ fn descend(statement: &Statement<'_>, runs: &mut Vec<DeadRun>) {
         Statement::Namespace(namespace) => {
             // A namespace declaration does not run, so what it holds is still
             // the top level as far as hoisting is concerned.
-            scan_statements(namespace.statements().iter(), Scope::TopLevel, runs);
+            scan_statements(namespace.statements().as_slice(), Scope::TopLevel, runs);
         }
         Statement::Function(function) => scan_block(&function.body, runs),
         Statement::Class(class) => scan_members(&class.members, runs),
@@ -375,31 +315,31 @@ fn descend(statement: &Statement<'_>, runs: &mut Vec<DeadRun>) {
         Statement::Foreach(foreach) => match &foreach.body {
             ForeachBody::Statement(statement) => descend(statement, runs),
             ForeachBody::ColonDelimited(body) => {
-                scan_statements(body.statements.iter(), Scope::Nested, runs)
+                scan_statements(body.statements.as_slice(), Scope::Nested, runs)
             }
         },
         Statement::For(r#for) => match &r#for.body {
             ForBody::Statement(statement) => descend(statement, runs),
             ForBody::ColonDelimited(body) => {
-                scan_statements(body.statements.iter(), Scope::Nested, runs)
+                scan_statements(body.statements.as_slice(), Scope::Nested, runs)
             }
         },
         Statement::While(r#while) => match &r#while.body {
             WhileBody::Statement(statement) => descend(statement, runs),
             WhileBody::ColonDelimited(body) => {
-                scan_statements(body.statements.iter(), Scope::Nested, runs)
+                scan_statements(body.statements.as_slice(), Scope::Nested, runs)
             }
         },
         Statement::DoWhile(do_while) => descend(do_while.statement, runs),
         Statement::Switch(switch) => {
             for case in switch.body.cases() {
-                scan_statements(case.statements().iter(), Scope::Nested, runs);
+                scan_statements(case.statements(), Scope::Nested, runs);
             }
         }
         Statement::Declare(declare) => match &declare.body {
             DeclareBody::Statement(statement) => descend(statement, runs),
             DeclareBody::ColonDelimited(body) => {
-                scan_statements(body.statements.iter(), Scope::Nested, runs)
+                scan_statements(body.statements.as_slice(), Scope::Nested, runs)
             }
         },
         _ => {}
@@ -407,7 +347,7 @@ fn descend(statement: &Statement<'_>, runs: &mut Vec<DeadRun>) {
 }
 
 fn scan_block(block: &Block<'_>, runs: &mut Vec<DeadRun>) {
-    scan_statements(block.statements.iter(), Scope::Nested, runs);
+    scan_statements(block.statements.as_slice(), Scope::Nested, runs);
 }
 
 /// Walk the bodies of a class-like declaration's methods.
@@ -433,12 +373,12 @@ fn descend_if(if_statement: &If<'_>, runs: &mut Vec<DeadRun>) {
             }
         }
         IfBody::ColonDelimited(body) => {
-            scan_statements(body.statements.iter(), Scope::Nested, runs);
+            scan_statements(body.statements.as_slice(), Scope::Nested, runs);
             for clause in body.else_if_clauses.iter() {
-                scan_statements(clause.statements.iter(), Scope::Nested, runs);
+                scan_statements(clause.statements.as_slice(), Scope::Nested, runs);
             }
             if let Some(clause) = &body.else_clause {
-                scan_statements(clause.statements.iter(), Scope::Nested, runs);
+                scan_statements(clause.statements.as_slice(), Scope::Nested, runs);
             }
         }
     }

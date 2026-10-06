@@ -40,3 +40,6 @@ pub(in crate::type_engine) use resolve::*;
 // The symbol-map extractor builds the same bracket-index text the
 // narrowing keys use, so the two sides cannot drift apart.
 pub(crate) use resolve::array_index_key;
+// The unreachable-code diagnostic asks the same "does control leave this
+// list?" question without types, so it shares the structural rules.
+pub(crate) use guards::{contains_entry_label, statement_leaves_block};

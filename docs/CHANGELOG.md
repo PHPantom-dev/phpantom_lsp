@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Member actions appear when the selection starts in the indentation.** Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.
 - **Imports of non-ASCII class names no longer break a file.** An import such as `use App\Models\Øl;` no longer stops the file's diagnostics and code actions.
 - **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
+- **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
+- **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
 
 ## [0.11.0] - 2026-10-05
 

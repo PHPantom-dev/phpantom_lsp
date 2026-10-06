@@ -184,6 +184,23 @@ class StillDeclared {}
 }
 
 #[test]
+fn a_top_level_const_and_enum_after_a_return_are_dead() {
+    let php = r#"<?php
+return;
+
+const NEVER_DEFINED = 1;
+
+enum NeverDeclared {}
+"#;
+    assert_eq!(
+        dimmed(php),
+        vec!["const NEVER_DEFINED = 1; … enum NeverDeclared {}"],
+        "a top-level `const` runs as a statement and an enum is declared at \
+         runtime, so neither is hoisted"
+    );
+}
+
+#[test]
 fn a_declaration_inside_a_function_after_a_return_is_dead() {
     let php = r#"<?php
 function outer(): void {
@@ -296,6 +313,44 @@ function f(): void {
 }
 
 #[test]
+fn a_label_nested_in_a_branch_after_the_exit_ends_the_dead_run() {
+    let php = r#"<?php
+function f(): void {
+    goto inside;
+    return;
+    if (false) {
+        inside:
+        echo 'reached by the jump';
+    }
+    echo 'reached after the branch';
+}
+"#;
+    assert_eq!(
+        dimmed(php),
+        vec!["return;"],
+        "PHP lets a jump enter an `if` branch, so the branch holding the \
+         label and everything after it can run"
+    );
+}
+
+#[test]
+fn a_label_nested_in_a_branch_that_leaves_keeps_the_rest_dead() {
+    let php = r#"<?php
+function f(): void {
+    return;
+    if (false) {
+        inside:
+        return;
+    } else {
+        return;
+    }
+    echo 'never';
+}
+"#;
+    assert_eq!(dimmed(php), vec!["echo 'never';"]);
+}
+
+#[test]
 fn a_block_with_no_label_after_its_exit_still_kills_what_follows() {
     let php = r#"<?php
 function f(): void {
@@ -366,6 +421,12 @@ fn inline_html_after_a_return_is_dead() {
 }
 
 // ─── Spans ──────────────────────────────────────────────────────────────────
+
+#[test]
+fn whitespace_after_a_closing_tag_is_not_reported() {
+    let php = "<?php\nfunction f() {}\nreturn 1;\n?>\n\n\n";
+    assert!(dimmed(php).is_empty(), "{:?}", dimmed(php));
+}
 
 #[test]
 fn consecutive_dead_statements_are_one_diagnostic() {
@@ -692,4 +753,32 @@ function f(): void {
         diagnostics[0].code,
         Some(NumberOrString::String(ref s)) if s == "unreachable_code"
     ));
+}
+
+// ─── Blade ──────────────────────────────────────────────────────────────────
+
+/// `@break($cond)` only breaks when its condition holds, so the rest of the
+/// loop body runs whenever it does not.
+#[tokio::test]
+async fn a_blade_break_with_a_condition_does_not_kill_the_loop_body() {
+    use crate::common::{LARAVEL_APP_COMPOSER, create_psr4_workspace, open_document};
+    use tower_lsp::LanguageServer;
+
+    let template = "<ul>\n\
+                    @foreach ($rows as $row)\n\
+                    @break($row > 3)\n\
+                    @continue($row === 1)\n\
+                    <li>{{ $row }}</li>\n\
+                    @endforeach\n\
+                    </ul>\n";
+    let relative = "resources/views/page.blade.php";
+    let (backend, dir) = create_psr4_workspace(LARAVEL_APP_COMPOSER, &[(relative, template)]);
+    backend.initialized(InitializedParams {}).await;
+    let uri = Url::from_file_path(dir.path().join(relative)).unwrap();
+    open_document(&backend, &uri, "blade", template).await;
+
+    let effective = backend.blade_virtual_php(uri.as_str()).unwrap();
+    let mut out = Vec::new();
+    backend.collect_unreachable_code_diagnostics(uri.as_str(), &effective, &mut out);
+    assert!(out.is_empty(), "nothing in the loop body is dead: {out:?}");
 }

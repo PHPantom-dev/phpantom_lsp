@@ -637,15 +637,15 @@ fn resolved_receiver_class_names(
 }
 
 /// Check whether an if/elseif/else branch terminates, so its assignments
-/// must not be merged into the post-if scope.  A branch exits if any
-/// statement in it exits, matching `if_body_unconditionally_exits`; a
+/// must not be merged into the post-if scope.  A branch exits when
+/// control is gone by its end (see `statements_unconditionally_exit`); a
 /// braced branch is the one (possibly block) statement it holds.
 ///
 /// The branch's own scope is passed along so that a `never`-returning
 /// method called on a local variable (`$aborter->fail()`) is recognised,
 /// not just `$this->fail()`.
 pub(crate) fn branch_exits_stmts<'s>(
-    mut stmts: impl Iterator<Item = &'s Statement<'s>>,
+    stmts: impl Iterator<Item = &'s Statement<'s>>,
     scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) -> bool {
@@ -660,5 +660,5 @@ pub(crate) fn branch_exits_stmts<'s>(
         var_types: Some(&var_types),
         receiver_resolver: Some(&receiver_resolver),
     };
-    stmts.any(|s| narrowing::statement_unconditionally_exits(s, &exit_ctx))
+    narrowing::statements_unconditionally_exit(stmts, &exit_ctx)
 }

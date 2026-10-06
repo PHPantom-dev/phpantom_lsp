@@ -77,6 +77,24 @@ pub(super) fn open(
                     ": /** @var object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object{index: int, iteration: int, remaining: int, count: int, first: bool, last: bool, even: bool, odd: bool, depth: int, parent: ?object}} $loop */ $loop = (object)[];",
                 );
                 *paren_depth = 0;
+            } else if matches!(directive, "break" | "continue") {
+                // Blade compiles `@break($cond)` to `if ($cond) break;`.
+                // Dropping the condition would make the jump read as
+                // unconditional, and everything after it in the loop
+                // body as dead.
+                let after_dir: String = rest_str[directive.len()..].chars().collect();
+                if after_dir.trim_start().starts_with('(') {
+                    replacement = " if ".to_string();
+                    next_mode = Mode::DirectiveArgs(if directive == "break" {
+                        " break;"
+                    } else {
+                        " continue;"
+                    });
+                    *paren_depth = 0;
+                } else {
+                    replacement = format!(" {directive}; ");
+                    next_mode = Mode::Html;
+                }
             } else if matches!(
                 directive,
                 "if" | "elseif" | "for" | "while" | "switch" | "case"
@@ -204,7 +222,6 @@ pub(super) fn open(
                     | "overwrite"
                     | "else"
                     | "default"
-                    | "break"
                     | "endauth"
                     | "endguest"
                     | "endproduction"
@@ -219,7 +236,6 @@ pub(super) fn open(
                     | "endPrependOnce"
                     | "csrf"
                     | "parent"
-                    | "continue"
                     | "endcan"
                     | "endcannot"
                     | "endcanany"
