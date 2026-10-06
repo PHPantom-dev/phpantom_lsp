@@ -92,6 +92,36 @@ used, and two blocks importing the same alias collapse into one entry.
 It needs to track each block's imports (and their source ranges) and match
 references against the block they are written in.
 
+### B544. `self::` inside a `@param-closure-this` closure names a different class depending on the feature
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param-closure-this Ctx $callback */
+function bindOne(\Closure $callback): void {}
+
+class Host {
+    public function run(): void {
+        bindOne(function () {
+            self::next()->;         // completion offers Ctx members
+            $n = self::next();      // the forward walker types $n as Host
+        });
+    }
+}
+```
+
+The subject resolver (`resolve_self_static_classes` in
+`type_engine/resolver/mod.rs`) treats `self::`/`static::` in a bound
+closure as the bound class, which is what `Closure::call()` and Laravel's
+`Macroable` (`bindTo($this, static::class)`) do at runtime. The forward
+walker's static-call path (`resolve_rhs_static_call` in
+`rhs_resolution/calls.rs`) always uses the lexical class, which is what
+PHPStan does, and resolves to nothing in a closure outside any class. So
+`self::next()->` and `$n = self::next(); $n->` disagree, and diagnostics
+follow the walker. Pick one model and make both paths share it; if the
+bound class wins, the walker needs the binding in its scope rather than an
+AST walk per `self::` call.
+
 ## Array types
 
 No outstanding items.

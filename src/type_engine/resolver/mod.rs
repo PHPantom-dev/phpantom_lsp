@@ -349,23 +349,33 @@ fn resolve_target_classes_expr_inner(
             // `test()` parameter declares `@param-closure-this TestCase`
             // means `$this` is the subclass.  The scope only wins when it is
             // strictly narrower; otherwise it holds the lexically captured
-            // `$this` the tag is there to replace.
+            // `$this` the tag is there to replace.  Against a union binding,
+            // keeping only some of its alternatives (`instanceof` picking one
+            // of `A|B`) is narrower too.
             if let Some(bound) = super::variable::closure_resolution::find_closure_this_types(ctx) {
                 let narrowed = from_scope.filter(|types| {
+                    let mut strictly_narrower = types.len() < bound.len();
                     !types.is_empty()
                         && types.iter().all(|rt| {
                             rt.class_info.as_ref().is_some_and(|ci| {
                                 bound.iter().any(|b| {
                                     b.class_info.as_ref().is_some_and(|bound_cls| {
-                                        crate::class_lookup::is_subclass_of(
+                                        let bound_fqn = bound_cls.fqn();
+                                        if crate::class_lookup::is_subclass_of(
                                             &ci.fqn(),
-                                            &bound_cls.fqn(),
+                                            &bound_fqn,
                                             class_loader,
-                                        )
+                                        ) {
+                                            strictly_narrower = true;
+                                            true
+                                        } else {
+                                            ci.fqn().eq_ignore_ascii_case(&bound_fqn)
+                                        }
                                     })
                                 })
                             })
                         })
+                        && strictly_narrower
                 });
                 return narrowed.unwrap_or(bound);
             }

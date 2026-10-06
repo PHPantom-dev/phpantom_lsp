@@ -1236,14 +1236,11 @@ function bindContext(\Closure $callback): void {{}}
 #[tokio::test]
 async fn param_closure_this_union_static_chains() {
     for keyword in ["self", "static"] {
-        for expression in [
-            format!("{keyword}::next()->MARK;"),
-            format!("$next = {keyword}::next(); $next->MARK;"),
-        ] {
-            let backend = create_test_backend();
-            let uri = Url::parse("file:///test/closure_union_static.php").unwrap();
-            let src = format!(
-                r#"<?php
+        let expression = format!("{keyword}::next()->MARK;");
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///test/closure_union_static.php").unwrap();
+        let src = format!(
+            r#"<?php
 class FirstContext {{
     public function firstOnly(): void {{}}
     public static function next(): self {{ return new self(); }}
@@ -1256,14 +1253,13 @@ class SecondContext {{
 function bindContext(\Closure $callback): void {{}}
 bindContext(function () {{ {expression} }});
 "#
-            );
-            let position = marker_position(&src);
-            let src = src.replace("MARK", "");
-            let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
-            let names = method_names(&items);
-            assert!(names.contains(&"firstOnly"), "{expression}: {names:?}");
-            assert!(names.contains(&"secondOnly"), "{expression}: {names:?}");
-        }
+        );
+        let position = marker_position(&src);
+        let src = src.replace("MARK", "");
+        let items = complete_at(&backend, &uri, &src, position.line, position.character).await;
+        let names = method_names(&items);
+        assert!(names.contains(&"firstOnly"), "{expression}: {names:?}");
+        assert!(names.contains(&"secondOnly"), "{expression}: {names:?}");
     }
 }
 

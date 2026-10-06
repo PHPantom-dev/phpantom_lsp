@@ -358,7 +358,7 @@ impl Backend {
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
                 rctx.current_class
-                    .and_then(|child| crate::inheritance::extends_type_args(child, &owner))
+                    .and_then(|child| crate::inheritance::extends_type_args(child, owner))
             } else {
                 None
             };
