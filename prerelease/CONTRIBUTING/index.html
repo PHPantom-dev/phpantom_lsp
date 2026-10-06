@@ -1506,20 +1506,31 @@
 </ul>
 <p>See <a href="../BUILDING/">BUILDING.md</a> for more on running tests and manual LSP testing.</p>
 <h2 id="changelog">Changelog<a class="headerlink" href="#changelog" title="Permanent link">&para;</a></h2>
-<p>Update <a href="../CHANGELOG/">CHANGELOG.md</a> when your PR adds, changes, or fixes something a user would notice. Add entries under <code>## [Unreleased]</code> in the appropriate subsection (<code>### Added</code>, <code>### Fixed</code>, <code>### Changed</code>, or <code>### Removed</code>). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched. See the existing entries for the style and level of detail expected.</p>
+<p>Update <a href="../CHANGELOG/">CHANGELOG.md</a> when your PR adds, changes, or fixes something a user would notice. Add entries under <code>## [Unreleased]</code> in the appropriate subsection (<code>### Added</code>, <code>### Fixed</code>, <code>### Changed</code>, or <code>### Removed</code>). Write for end users, not developers: describe what changed in the editor, not which internal modules were touched.</p>
+<p>Keep entries short and easy to scan:</p>
+<ul>
+<li>Start with a bolded one-line summary, then one or two plain sentences (three at most for a large feature). For a feature, say what the user gets and how to use it. For a fix, say what went wrong from the user's point of view and what happens now.</li>
+<li>Leave out how the code worked before or why the bug happened. That belongs in the commit message.</li>
+<li>Keep the details a user acts on: config keys, CLI flags, and a short code example when it makes the change concrete. One headline number is enough for a performance entry.</li>
+<li>If a section groups its entries under <code>####</code> headings (Laravel, Blade templates, Type inference, Diagnostics, Performance and memory, and so on), put your entry under the matching one. Related fixes can share one entry.</li>
+<li>End with <code>Contributed by @username</code> if you are not the maintainer, and <code>Closes #N</code> when the change fixes an issue.</li>
+</ul>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="k">-</span><span class="w"> </span><span class="gs">**`analyze` takes more than one path.**</span> <span class="sb">`phpantom_lsp analyze app/ lib/Helper.php tests/`</span> checks everything named, so a pre-commit hook or CI step can pass only the changed files.
+</code></pre></div>
 <h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
 <p>The documentation site is built with <a href="https://zensical.org/">Zensical</a>.
 The only dependency you need is <a href="https://docs.astral.sh/uv/getting-started/installation/">uv</a>.</p>
 <p>Preview the docs locally with live reload:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve
 </code></pre></div>
 <p>Then open <code>http://127.0.0.1:8000</code> in your browser. Changes to files in
 <code>docs/</code> and <code>zensical.toml</code> are reflected immediately. If port 8000 is
 already in use, pick a different one:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>serve<span class="w"> </span>-a<span class="w"> </span><span class="m">127</span>.0.0.1:8200
 </code></pre></div>
 <p>Build the docs for offline use:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a>uv<span class="w"> </span>run<span class="w"> </span>zensical<span class="w"> </span>build
 </code></pre></div>
 <p>The output is written to <code>site/</code> (gitignored). <code>uv</code> handles creating
 a virtual environment and installing all Python dependencies
