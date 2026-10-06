@@ -2131,16 +2131,14 @@ $foo;
 "#;
     let cursor_offset = content.rfind("$foo;").unwrap() as u32;
 
-    let results = super::resolve_variable_types(
+    let results = super::resolve_variable_types(query(
         "$foo",
-        &ClassInfo::default(),
-        &[],
         content,
         cursor_offset,
+        &ClassInfo::default(),
+        &[],
         &|_| None,
-        None,
-        Loaders::default(),
-    );
+    ));
 
     assert!(!results.is_empty(), "Should resolve $foo to a type");
     let ts = ResolvedType::types_joined(&results).to_string();

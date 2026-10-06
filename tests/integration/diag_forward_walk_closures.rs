@@ -1931,3 +1931,111 @@ final class ByRefClosure
     );
     assert_eq!(errors.len(), 1, "got: {errors:?}");
 }
+
+/// A by-value capture holds what the variable held where the closure was
+/// written, not what it holds where the closure is called.
+#[test]
+fn by_value_capture_of_an_invoked_closure_keeps_its_definition_value() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function byValue(): int
+    {
+        $source = 'written';
+        $out = null;
+        $write = static function () use ($source, &$out): void {
+            $out = $source;
+        };
+        $source = 42;
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
+/// A callee that takes the closure variable by reference may put another
+/// closure in it, so a later call no longer runs the one assigned.
+#[test]
+fn by_ref_capture_of_a_closure_passed_by_reference_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+function swap(&$cb): void { $cb = static function (): void {}; }
+final class ByRefClosure
+{
+    public function swapped(): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        swap($write);
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}
+
+/// A closure that calls itself through a by-reference capture of its own
+/// variable must not be walked forever.
+#[test]
+fn by_ref_capture_of_a_self_calling_closure_terminates() {
+    argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    public function recursive(int $n): int
+    {
+        $out = null;
+        $write = static function () use (&$out, &$write, &$n): void {
+            $out = 'written';
+            if ($n-- > 0) {
+                $write();
+            }
+        };
+        $write();
+        return \strlen($out);
+    }
+}
+"#,
+    );
+}
+
+/// A loop may run its body no times, so a call inside it only maybe ran.
+#[test]
+fn by_ref_capture_of_a_closure_invoked_in_a_loop_stays_a_union() {
+    let errors = argument_type_errors(
+        r#"<?php
+declare(strict_types=1);
+namespace Repro;
+final class ByRefClosure
+{
+    /** @param list<int> $items */
+    public function looped(array $items): int
+    {
+        $out = null;
+        $write = static function () use (&$out): void {
+            $out = 'written';
+        };
+        foreach ($items as $item) {
+            $write();
+        }
+        return \strlen($out);
+    }
+}
+"#,
+    );
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+}

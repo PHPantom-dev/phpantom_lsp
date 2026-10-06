@@ -338,6 +338,13 @@ pub(crate) fn process_assignment_expr<'b>(
         let condition_proofs =
             condition_implications(&lhs_name, assignment.rhs, &rhs_types, scope, ctx);
         let ternary_proofs = ternary_arm_implications(&lhs_name, assignment.rhs, scope, ctx);
+        // `$write = function () use (&$out) { … };` — remember which
+        // closure `$write` holds, so `$write();` can run its body.  Read
+        // before the write: `use ($write)` copies the old value.
+        let held_closure = match crate::parser::unwrap_parens(assignment.rhs) {
+            Expression::Closure(closure) => held_closure_of(closure, scope),
+            _ => None,
+        };
         // Reassigning the variable replaces its object identity, so any
         // property/array-access key rooted at it (seeded by an earlier
         // assignment or condition narrowing) is now stale.  Drop them
@@ -379,12 +386,8 @@ pub(crate) fn process_assignment_expr<'b>(
             // entry is the plain unknown a join treats as top.
             scope.set_untyped(&lhs_name);
         }
-        // `$write = function () use (&$out) { … };` — remember which
-        // closure `$write` holds, so `$write();` can run its body.
-        if let Expression::Closure(closure) = crate::parser::unwrap_parens(assignment.rhs)
-            && !by_ref_captured_names(closure).is_empty()
-        {
-            scope.set_closure_literal(&lhs_name, closure.span().start.offset);
+        if let Some(held) = held_closure {
+            scope.set_held_closure(&lhs_name, held);
         }
         // `$isHtml = $raw instanceof HtmlString` makes `$isHtml` stand
         // for the check, so testing it later narrows `$raw`.

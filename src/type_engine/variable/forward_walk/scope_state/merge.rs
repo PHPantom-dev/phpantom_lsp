@@ -171,7 +171,7 @@ impl ScopeState {
         }
         if !self.closure_literals.is_empty() {
             self.closure_literals
-                .retain(|name, offset| other.closure_literals.get(name) == Some(offset));
+                .retain(|name, held| other.closure_literals.get(name) == Some(held));
         }
 
         // A key fact holds past the join only where every path left it
