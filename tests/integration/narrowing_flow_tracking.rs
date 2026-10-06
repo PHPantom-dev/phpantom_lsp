@@ -2501,3 +2501,156 @@ class Test
 "#,
     );
 }
+
+// ─── A `finally` block after an early `return` ─────────────────────────────
+
+/// A `finally` block runs on the way out of a `return` in its `try` body as
+/// well, so a guard that returns early leaves both of its paths to the
+/// block: the tool is set on one of them, and a check in the block that
+/// only passes there is not dead.
+#[test]
+fn a_finally_block_sees_the_paths_that_returned_early_from_its_try() {
+    let messages = member_access_diagnostics(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Repro;
+
+enum Mode
+{
+    case Diff;
+    case Merge;
+}
+
+final class Tool
+{
+    public function __construct(public readonly Mode $mode) {}
+
+    public function editable(): bool
+    {
+        return true;
+    }
+}
+
+final class App
+{
+    private int $exitCode = 0;
+
+    public function __construct(private readonly ?Tool $tool = null) {}
+
+    public function run(): void
+    {
+        try {
+            if (null !== $this->tool) {
+                echo 'tool';
+
+                return;
+            }
+            echo 'editor';
+        } finally {
+            if (Mode::Merge === $this->tool?->mode) {
+                $this->exitCode = $this->tool->editable() ? 0 : 1;
+            }
+        }
+    }
+
+    public function local(?Tool $tool): void
+    {
+        try {
+            if (null !== $tool) {
+                return;
+            }
+            echo 'editor';
+        } finally {
+            if (null !== $tool) {
+                echo $tool->editable() ? 'yes' : 'no';
+            }
+        }
+    }
+}
+"#,
+    );
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The code after the statement is only reached by the paths that did not
+/// return, so there the guard still leaves the tool `null`.
+#[test]
+fn the_code_after_a_try_with_an_early_return_sees_only_the_paths_that_carry_on() {
+    let messages = member_access_diagnostics(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Repro;
+
+final class Tool
+{
+    public function editable(): bool
+    {
+        return true;
+    }
+}
+
+final class After
+{
+    public function after(?Tool $tool): bool
+    {
+        try {
+            if (null !== $tool) {
+                return true;
+            }
+        } finally {
+            echo 'done';
+        }
+
+        return $tool->editable();
+    }
+}
+"#,
+    );
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("on type 'null'"), "{messages:?}");
+}
+
+/// A closure's by-reference capture written just before a `return` inside
+/// a `try` still reaches the caller: walking the `finally` block with the
+/// paths that returned must not keep them from the closure's exit state.
+#[test]
+fn a_capture_written_before_a_return_inside_a_try_reaches_the_caller() {
+    let messages = type_diagnostics(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Repro;
+
+final class Capture
+{
+    private static function takeInt(int $value): void {}
+
+    public function run(bool $early): void
+    {
+        $out = 1;
+        $write = static function () use (&$out, $early): void {
+            try {
+                if ($early) {
+                    $out = 'early';
+
+                    return;
+                }
+            } finally {
+                echo 'done';
+            }
+            $out = 2;
+        };
+        $write();
+        self::takeInt($out);
+    }
+}
+"#,
+    );
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'early'"), "{messages:?}");
+}

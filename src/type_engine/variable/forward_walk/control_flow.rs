@@ -147,7 +147,11 @@ pub(crate) fn process_try<'b>(
     // merge all catch scopes.
     let mut throws = ThrowPoints::default();
     let collect = (!try_stmt.catch_clauses.is_empty()).then_some(&mut throws);
+    // A `finally` block also runs on the way out of a `return` in the try
+    // body, so what each one carries out is collected for it.
+    let return_frame = try_stmt.finally_clause.is_some().then(push_return_frame);
     let catch_entry = walk_try_body(try_stmt, scope, ctx, collect);
+    let returned = return_frame.and_then(ReturnFrameGuard::finish);
     let try_scope = scope.clone();
 
     let mut all_scopes = vec![try_scope];
@@ -177,7 +181,21 @@ pub(crate) fn process_try<'b>(
 
     // Walk the finally block if present.
     if let Some(ref finally) = try_stmt.finally_clause {
+        let before_finally = scope.clone();
         walk_body_forward(finally.block.statements.iter(), scope, ctx);
+        // Those `return`s never reach the statement after the `try`, so the
+        // block's own statements are walked once more with them joined in —
+        // last, so theirs are the snapshots the block is read with — while
+        // the code after the statement carries on from `scope`.
+        if let Some(returned) = &returned {
+            let mut leaving = before_finally;
+            leaving.merge_branch(returned);
+            walk_body_forward(finally.block.statements.iter(), &mut leaving, ctx);
+        }
+    }
+    // The try body's `return`s still leave the enclosing body.
+    if let Some(returned) = &returned {
+        record_return_edge(returned);
     }
 }
 
