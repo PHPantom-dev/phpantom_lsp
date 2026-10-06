@@ -69,7 +69,7 @@ use property_access::resolve_rhs_property_access;
 
 pub(crate) use arithmetic::{
     ArithmeticOpKind, infer_addition_result_type, infer_arithmetic_result_type,
-    infer_modulo_result_type,
+    infer_bitwise_assignment_result_type, infer_modulo_result_type,
 };
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union, offset_read_type};
@@ -670,11 +670,18 @@ fn resolve_assignment_as_value<'b>(
                 &lhs_types, &rhs_types,
             ))]
         }
-        AssignmentOperator::LeftShift(_)
-        | AssignmentOperator::RightShift(_)
-        | AssignmentOperator::BitwiseAnd(_)
+        AssignmentOperator::LeftShift(_) | AssignmentOperator::RightShift(_) => {
+            vec![ResolvedType::from_type_string(PhpType::int())]
+        }
+        AssignmentOperator::BitwiseAnd(_)
         | AssignmentOperator::BitwiseOr(_)
-        | AssignmentOperator::BitwiseXor(_) => vec![ResolvedType::from_type_string(PhpType::int())],
+        | AssignmentOperator::BitwiseXor(_) => {
+            let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
+            let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);
+            vec![ResolvedType::from_type_string(
+                infer_bitwise_assignment_result_type(&lhs_types, &rhs_types),
+            )]
+        }
         AssignmentOperator::Addition(_) => {
             let lhs_types = resolve_rhs_expression(assignment.lhs, ctx);
             let rhs_types = resolve_rhs_expression(assignment.rhs, ctx);

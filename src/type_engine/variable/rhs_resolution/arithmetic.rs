@@ -112,15 +112,7 @@ pub(super) fn resolve_binary_result_type<'b>(
         // `&`, `|` and `^` are the ones PHP overloads for strings; a shift
         // always produces an int.
         if matches!(op, BitwiseOp::And | BitwiseOp::Or | BitwiseOp::Xor) {
-            let both_strings = !lhs_types.is_empty()
-                && !rhs_types.is_empty()
-                && lhs_types
-                    .iter()
-                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()))
-                && rhs_types
-                    .iter()
-                    .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()));
-            if both_strings {
+            if both_string_operands(&lhs_types, &rhs_types) {
                 return Some(vec![ResolvedType::from_type_string(PhpType::string())]);
             }
             // Two operands nobody typed decide nothing: the same operator
@@ -411,6 +403,31 @@ pub(crate) fn infer_modulo_result_type(
             .map(literal_int)
             .unwrap_or_else(PhpType::int),
         _ => PhpType::int(),
+    }
+}
+
+/// Whether `&`, `|` or `^` works byte by byte here, which PHP does only
+/// when both operands are strings — and the result is then a string too.
+fn both_string_operands(lhs_types: &[ResolvedType], rhs_types: &[ResolvedType]) -> bool {
+    let all_strings = |types: &[ResolvedType]| {
+        !types.is_empty()
+            && types
+                .iter()
+                .all(|rt| rt.type_string.is_subtype_of(&PhpType::string()))
+    };
+    all_strings(lhs_types) && all_strings(rhs_types)
+}
+
+/// Infer what `&=`, `|=` or `^=` leaves in its target: a string when both
+/// sides are strings, as for the binary operator, and an int otherwise.
+pub(crate) fn infer_bitwise_assignment_result_type(
+    lhs_types: &[ResolvedType],
+    rhs_types: &[ResolvedType],
+) -> PhpType {
+    if both_string_operands(lhs_types, rhs_types) {
+        PhpType::string()
+    } else {
+        PhpType::int()
     }
 }
 
