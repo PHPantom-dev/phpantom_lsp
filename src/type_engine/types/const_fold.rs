@@ -141,7 +141,8 @@ pub(crate) fn fold_int_expression(text: &str, resolve: TextResolver<'_>) -> Opti
 /// keep one: the bitwise operators, `+`, `-`, `*` and `%` do, while a `/`
 /// is a float unless it comes out even, which only the values can decide.
 /// Like the AST resolver, an overflow into a float is not modelled. Callers
-/// check [`has_top_level_int_operator`] first, for the reason given there.
+/// check [`has_top_level_int_operator`] first: a single term would ask the
+/// resolver about the same text again.
 pub(crate) fn is_int_expression(text: &str, resolve: TextResolver<'_>) -> bool {
     let text = strip_wrapping_parens(text.trim());
     match split_point(text) {

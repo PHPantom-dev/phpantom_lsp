@@ -78,17 +78,6 @@ impl<'a, 'ctx> TextArrayFuncArgs<'a, 'ctx> {
             .get(index)
             .map(|arg| crate::call_args::text_arg_value(arg))
     }
-
-    /// `int` for an operator expression over integers that keeps them
-    /// integers, though its value is unknown; see
-    /// [`is_int_expression`](crate::type_engine::types::const_fold::is_int_expression).
-    fn int_expression_type(&self, text: &str) -> Option<PhpType> {
-        use crate::type_engine::types::const_fold::{
-            has_top_level_int_operator, is_int_expression,
-        };
-        let resolve = |term: &str| Backend::resolve_arg_text_to_type(term, self.ctx);
-        (has_top_level_int_operator(text) && is_int_expression(text, &resolve)).then(PhpType::int)
-    }
 }
 
 impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
@@ -97,12 +86,9 @@ impl ArrayFuncArgs for TextArrayFuncArgs<'_, '_> {
         // The inline resolver only answers for array-like arguments, but
         // some rules read a scalar one too: `range()`'s bounds and step,
         // `explode()`'s limit. Like the AST counterpart, anything it
-        // leaves open falls back to the general expression resolver, and
-        // what that leaves open to the integer arithmetic the AST
-        // resolver types from its operands (`range(0, $n - 1)`).
+        // leaves open falls back to the general expression resolver.
         Backend::resolve_inline_arg_raw_type(text, self.ctx)
             .or_else(|| Backend::resolve_arg_text_to_type(text, self.ctx))
-            .or_else(|| self.int_expression_type(text))
     }
 
     fn bool_literal(&self, index: usize) -> Option<bool> {
