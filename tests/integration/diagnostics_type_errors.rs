@@ -3911,10 +3911,10 @@ final class Ratio {
     assert_eq!(
         msgs.len(),
         1,
-        "asserted to be `1.5`, `$r` is a float: only the int parameter objects, got: {msgs:?}"
+        "asserted to be `1.5`, `$r` is that float: only the int parameter objects, got: {msgs:?}"
     );
     assert!(
-        msgs[0].contains("($n)") && msgs[0].ends_with("got float"),
+        msgs[0].contains("($n)") && msgs[0].ends_with("got 1.5"),
         "got: {msgs:?}"
     );
 }
@@ -3936,7 +3936,7 @@ final class WidthTest extends TestCase {{
     let diags = collect_with_full_stubs(&php);
     let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
-        msgs.iter().any(|m| m.ends_with("got string")),
+        msgs.iter().any(|m| m.ends_with("got 'four'")),
         "a value asserted to be a string does not satisfy an int parameter, got: {msgs:?}"
     );
 }
@@ -3986,7 +3986,7 @@ final class NameTest extends TestCase {{
     let diags = collect_with_full_stubs(&php);
     let msgs = messages_with_code(&diags, "type_mismatch_argument");
     assert!(
-        msgs.iter().any(|m| m.ends_with("got string")),
+        msgs.iter().any(|m| m.ends_with("got class-string<Dog>")),
         "a class name is a string, not an instance, got: {msgs:?}"
     );
 }
@@ -16786,6 +16786,30 @@ abstract class Request
 }
 
 #[test]
+fn equality_assertion_narrows_to_the_literal_value() {
+    // The same thing `$width === 4` proves: the value itself, not just
+    // its scalar category.
+    let php = format!(
+        r#"<?php
+{ASSERT_SAME}
+final class WidthTest extends TestCase {{
+    public function testWidth(int|string $width): void {{
+        $this->assertSame(4, $width);
+        $this->label($width);
+    }}
+    private function label(\stdClass $s): void {{}}
+}}
+"#
+    );
+    let diags = collect_with_full_stubs(&php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().any(|m| m.ends_with("got 4")),
+        "`assertSame(4, $width)` proves `$width` is 4, got: {msgs:?}"
+    );
+}
+
+#[test]
 fn array_udiff_family_accepts_trailing_callback() {
     let php = r#"<?php
 function test(array $a, array $b, array $c): void {
@@ -16944,4 +16968,31 @@ function test(string $name): void {
         "only the plain string should be reported: {msgs:?}"
     );
     assert!(msgs[0].ends_with("got string"), "{msgs:?}");
+}
+
+#[test]
+fn conditional_equality_assertion_binds_its_template_from_the_arguments() {
+    let php = r#"<?php
+/**
+ * @template T
+ * @param T $expected
+ * @phpstan-assert-if-true =T $actual
+ */
+function same(mixed $expected, mixed $actual): bool { return $expected === $actual; }
+
+final class Width {
+    public function run(int|string|null $width): void {
+        if (same(4, $width)) {
+            $this->label($width);
+        }
+    }
+    private function label(\stdClass $s): void {}
+}
+"#;
+    let diags = collect_with_full_stubs(php);
+    let msgs = messages_with_code(&diags, "type_mismatch_argument");
+    assert!(
+        msgs.iter().any(|m| m.ends_with("got 4")),
+        "inside `if (same(4, $width))`, `$width` is 4, got: {msgs:?}"
+    );
 }

@@ -7,7 +7,9 @@ use std::sync::Arc;
 use crate::atom::{Atom, AtomMap, atom, bytes_to_str};
 use crate::class_lookup::{Fqn, ResolvedClassLoader};
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
-use crate::types::{AssertionKind, ClassInfo, ParameterInfo, SharedVec, TypeAssertion};
+use crate::types::{
+    AssertionKind, ClassInfo, ParameterInfo, ResolvedType, SharedVec, TypeAssertion,
+};
 
 use mago_span::HasSpan;
 use mago_syntax::cst::*;
@@ -27,9 +29,9 @@ use super::*;
 ///
 /// The callee metadata is owned rather than borrowed: the callee is a
 /// clone produced by the loader (or by the trait/parent chain walk), so
-/// there is nothing outliving the call to borrow from. Moving the four
-/// fields out of that clone keeps the cost to an `Arc` bump plus three
-/// `Vec` moves, and lets the rest of the clone drop immediately.
+/// there is nothing outliving the call to borrow from. Moving the fields
+/// out of that clone keeps the cost to an `Arc` bump plus a few moves,
+/// and lets the rest of the clone drop immediately.
 pub(in crate::type_engine) struct CallAssertionInfo<'a> {
     /// The `@phpstan-assert` / `@psalm-assert` annotations on the callee.
     pub(in crate::type_engine) assertions: Vec<TypeAssertion>,
@@ -421,16 +423,46 @@ pub(in crate::type_engine) fn scalar_inclusion_guard_kind(ty: &PhpType) -> Optio
     }
 }
 
+/// Narrow `results` to the one value a positive assertion pinned them to.
+///
+/// [`scalar_inclusion_guard_kind`] keeps only the subject's members of a
+/// literal's category; this tightens what survived to the value itself,
+/// the way `$x === 4` does, so `assertSame(4, $x)` leaves `$x` as `4`.  A
+/// subject that could not have held the value keeps what the guard left.
+pub(in crate::type_engine) fn narrow_to_asserted_value(
+    asserted: &PhpType,
+    results: &mut Vec<ResolvedType>,
+) {
+    let exact = asserted.as_literal().is_some()
+        || matches!(
+            asserted.kind(),
+            TypeKind::ClassString(Some(_)) | TypeKind::InterfaceString(Some(_))
+        );
+    if !exact {
+        return;
+    }
+    let admits = results.iter().any(|rt| {
+        rt.type_string
+            .union_members()
+            .iter()
+            .any(|member| asserted.is_subtype_of(member))
+    });
+    if admits {
+        *results = vec![ResolvedType::from_type_string(asserted.clone())];
+    }
+}
+
 /// Scalar and pseudo-type assertions (PHPUnit's `assertIsString`,
 /// `assertIsObject`, `assertIsArray`, and their negations) name no class, so
 /// they cannot be narrowed through `apply_instanceof_*`.  When one is
 /// detected, `*type_guard` is set to `(kind, exclude)` and the caller applies
 /// [`apply_type_guard_inclusion`] / [`apply_type_guard_exclusion`] on the full
 /// resolved types instead, matching how the corresponding `is_*()` guard
-/// narrows.  The same channel carries the `object` fallback for a template
-/// assertion whose bound `class-string` argument could not be resolved
-/// (e.g. `assertInstanceOf($variableClass, $x)`): the subject is still known
-/// to be an object, so it is narrowed to `object` rather than cleared.
+/// narrows.  The same channel carries a template assertion the call's
+/// arguments left unbound, narrowed to the template's declared bound
+/// (`object` for `assertInstanceOf($variableClass, $x)`).  When the guard
+/// came from a single value (`assertSame(4, $x)`), `*asserted_value` holds
+/// it for [`narrow_to_asserted_value`] to apply after the guard.
 ///
 /// `*intersected` is set when the assertion proved a class the subject
 /// does not nominally implement — PHPUnit's `assertInstanceOf(Node::class,
@@ -449,6 +481,7 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
     ctx: &VarResolutionCtx<'_>,
     results: &mut Vec<Arc<ClassInfo>>,
     type_guard: &mut Option<(TypeGuardKind, bool)>,
+    asserted_value: &mut Option<PhpType>,
     intersected: &mut bool,
 ) -> bool {
     let expr = match expr {
@@ -509,6 +542,9 @@ pub(in crate::type_engine) fn try_apply_custom_assert_narrowing(
             };
             if let Some(kind) = guard_kind {
                 *type_guard = Some((kind, assertion.negated));
+                if !assertion.negated {
+                    *asserted_value = Some(effective_type);
+                }
                 continue;
             }
 
@@ -858,7 +894,7 @@ fn template_argument_at_call(
             let arg_texts =
                 crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
                     argument_list,
-                    ctx.content,
+                    ctx.file.content,
                 );
             let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
             let walker_types =
@@ -916,18 +952,6 @@ fn class_string_template_argument(
         Argument::Positional(pos) => pos.value,
         Argument::Named(named) => named.value,
     };
-
-    // `@param T $value` binds the template to the argument's own type, not
-    // to a class the argument names.
-    if parameters[param_idx]
-        .type_hint
-        .as_ref()
-        .is_some_and(|hint| matches!(hint.kind(), TypeKind::Named(n) if n == tpl_name))
-    {
-        let resolved =
-            crate::type_engine::variable::rhs_resolution::resolve_rhs_expression(arg_expr, ctx);
-        return (!resolved.is_empty()).then(|| crate::types::ResolvedType::types_joined(&resolved));
-    }
 
     // Try to extract a class name from the argument expression.
     if let Some(class_name) = extract_class_string_from_expr(arg_expr) {
