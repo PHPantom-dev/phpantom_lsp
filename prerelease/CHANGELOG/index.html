@@ -5004,7 +5004,7 @@ and this project adheres to <a href="https://semver.org/spec/v2.0.0.html">Semant
 <ul>
 <li><strong>Indexing Blade templates with no DocBlock is now much faster.</strong> Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.</li>
 <li><strong>Faster reference counts and hover in untyped code.</strong> Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.</li>
-<li><strong>Code that calls undefined functions is analyzed much faster.</strong> A function call that resolves to nothing (a missing helper, a function from a package that isn't installed) re-ran the full lookup, including a scan over every Composer-autoloaded file, each time analysis passed over it. Legacy files full of such calls could take minutes; the failed lookup is now remembered, and forgotten again the moment a file declaring the function is indexed or opened.</li>
+<li><strong>Code that calls undefined functions is analyzed much faster.</strong> Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.</li>
 </ul>
 <h3 id="fixed">Fixed<a class="headerlink" href="#fixed" title="Permanent link">&para;</a></h3>
 <ul>
