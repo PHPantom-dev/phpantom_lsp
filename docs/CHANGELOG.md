@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Morph aliases resolve in column comparisons.** Comparing a model's polymorphic type column with a registered alias now offers completion, hover, go-to-definition, and find-references, and reports unknown aliases when the morph map is enforced. Query filters and property comparisons recognize the columns declared by the model's relationships, including custom names and inherited relations. Contributed by @shuvroroy.
+
 ### Changed
 
 #### Performance and memory

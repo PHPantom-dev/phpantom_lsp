@@ -206,6 +206,7 @@ pub(super) fn extract_from_expression<'a>(
 
         // ── Binary operations ──
         Expression::Binary(bin) => {
+            record_morph_column_comparison(bin, ctx.content, &mut ctx.morph_column_sites);
             extract_from_expression(bin.lhs, ctx, scope_start);
             // Tag the RHS of `instanceof` with the Instanceof context.
             if bin.operator.is_instanceof() {

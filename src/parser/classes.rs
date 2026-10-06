@@ -547,6 +547,11 @@ impl Backend {
                         &trait_def.attribute_lists,
                         doc_ctx,
                     );
+                    let laravel = crate::virtual_members::laravel::extract_laravel_trait_metadata(
+                        trait_def,
+                        &methods,
+                        doc_ctx.map_or("", |ctx| ctx.content),
+                    );
                     classes.push(ClassInfo {
                         kind: ClassLikeKind::Trait,
                         name: trait_name,
@@ -583,6 +588,7 @@ impl Backend {
                         trait_aliases,
                         class_docblock: doc_info.raw_docblock,
                         doc_members: doc_info.doc_members,
+                        laravel,
                         ..Default::default()
                     });
 

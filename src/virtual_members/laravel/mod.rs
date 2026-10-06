@@ -126,6 +126,7 @@ mod higher_order_proxy;
 mod macros;
 mod magic_uses;
 mod model_extraction;
+mod morph_columns;
 pub(crate) mod morph_map;
 pub(crate) mod patches;
 mod path_helpers;
@@ -139,6 +140,7 @@ mod scopes;
 mod storage;
 mod string_keys;
 mod trans_keys;
+pub(crate) mod typed_morph_columns;
 mod unique_ids;
 pub(crate) mod validated_shape;
 pub(crate) mod validation_rules;
@@ -170,9 +172,10 @@ pub(crate) use macros::{
     synthesize_mixin_macros,
 };
 pub(crate) use model_extraction::{
-    extract_laravel_metadata, has_inheritable_model_metadata, has_scope_attribute,
-    inherit_model_metadata, relationship_return_type,
+    extract_laravel_metadata, extract_laravel_trait_metadata, has_inheritable_model_metadata,
+    has_scope_attribute, inherit_model_metadata, relationship_return_type,
 };
+pub(crate) use morph_columns::is_morph_type_column;
 pub(crate) use morph_map::{LaravelMorphMapIndex, MorphMapEntry, MorphMapScan, scan_morph_map};
 pub(crate) use patches::STORAGE_FACADE_FQN;
 pub(crate) use path_helpers::{

@@ -11,10 +11,11 @@ use super::docblock::{
     class_ref_span, class_ref_span_ctx, extract_docblock_symbols,
     extract_docblock_symbols_covering, get_docblock_text_with_offset, is_navigable_type,
 };
+use super::morph_columns::{record_morph_column_call, record_morph_column_comparison};
 use super::{
-    CallSite, ClassRefContext, DocblockMemberRef, SelfStaticParentKind, SubjectText, SymbolKind,
-    SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite, VarDefKind, VarDefSite,
-    ViewReceiverClass, ViewReceiverSite,
+    CallSite, ClassRefContext, DocblockMemberRef, MorphColumnSite, SelfStaticParentKind,
+    SubjectText, SymbolKind, SymbolMap, SymbolSpan, TemplateParamDef, UntypedClosureSite,
+    VarDefKind, VarDefSite, ViewReceiverClass, ViewReceiverSite,
 };
 use crate::atom::{bytes_to_str, literal_bytes_to_str};
 use crate::names::OwnedResolvedNames;
@@ -84,6 +85,8 @@ struct ExtractionCtx<'a> {
     /// Render sites whose receiver only a type settles, left for
     /// `Backend::typed_receiver_view_spans` to confirm.
     view_receiver_sites: Vec<ViewReceiverSite>,
+    /// Possible morph aliases whose model and type column are resolved lazily.
+    morph_column_sites: Vec<MorphColumnSite>,
     /// The model argument of each authorization check that named one.
     gate_subjects: Vec<crate::symbol_map::GateSubject>,
     /// Current conditional nesting depth (if/else, switch, while, for, etc.).
@@ -232,6 +235,7 @@ fn extract_symbol_map_inner(
         conditional_laravel_spans: Vec::new(),
         untyped_closure_sites: Vec::new(),
         view_receiver_sites: Vec::new(),
+        morph_column_sites: Vec::new(),
         gate_subjects: Vec::new(),
         cond_nesting_depth: 0,
         cond_block_end_stack: Vec::new(),
@@ -329,6 +333,7 @@ fn extract_symbol_map_inner(
     ctx.switch_scopes.sort_by_key(|s| s.0);
     ctx.static_method_scopes.sort_by_key(|s| s.0);
     ctx.view_receiver_sites.sort_by_key(|s| s.start);
+    ctx.morph_column_sites.sort_by_key(|s| s.start);
 
     let mut member_access_indices: crate::atom::AtomMap<Vec<usize>> =
         crate::atom::AtomMap::default();
@@ -360,6 +365,7 @@ fn extract_symbol_map_inner(
         instance_method_scopes: ctx.instance_method_scopes,
         untyped_closure_sites: ctx.untyped_closure_sites,
         view_receiver_sites: ctx.view_receiver_sites,
+        morph_column_sites: ctx.morph_column_sites,
         gate_subjects: ctx.gate_subjects,
         source_len: u32::try_from(content.len()).unwrap_or(u32::MAX),
     }

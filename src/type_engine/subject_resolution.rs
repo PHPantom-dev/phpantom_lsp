@@ -65,8 +65,7 @@ pub(crate) fn resolve_subject_type(
         "parent" => {
             let cls = find_class_at_offset(ctx.local_classes, access_offset)?;
             let parent = cls.parent_class.as_ref()?;
-            let fqn = resolve_to_fqn(parent, ctx.use_map, ctx.namespace);
-            Some(PhpType::named(atom(&fqn)))
+            Some(PhpType::named(*parent))
         }
         _ if is_static && !trimmed.starts_with('$') => {
             let fqn = resolve_to_fqn(trimmed, ctx.use_map, ctx.namespace);

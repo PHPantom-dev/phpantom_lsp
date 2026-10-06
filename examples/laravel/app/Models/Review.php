@@ -13,6 +13,9 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 #[UsePolicy(ReviewModerationPolicy::class)]
 class Review extends Model
 {
+    /** @var array<string, string> */
+    protected $casts = ['reviewable_type' => 'string'];
+
     public function getTitle(): string { return ''; }
     public function getRating(): int { return 0; }
 

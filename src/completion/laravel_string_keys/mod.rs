@@ -15,6 +15,7 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::symbol_map::{LaravelConfigResource, LaravelStringKind};
+use crate::text_position::position_to_offset;
 use crate::types::FileContext;
 
 mod context;
@@ -45,6 +46,50 @@ fn string_key_item_kind(kind: &LaravelStringKind) -> CompletionItemKind {
 }
 
 impl Backend {
+    /// Complete aliases in confirmed morph-column comparisons using the same
+    /// model and column evidence as hover, navigation, and diagnostics.
+    pub(crate) fn try_morph_column_completion(
+        &self,
+        uri: &str,
+        content: &str,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let offset = position_to_offset(content, position);
+        let map = self.symbol_map_for(uri)?;
+        if !map.matches_source(content)
+            || !map
+                .morph_column_sites
+                .iter()
+                .any(|site| site.start <= offset && offset <= site.end)
+        {
+            return None;
+        }
+        let spans = self.morph_column_spans_for(uri, &map);
+        let span = spans
+            .iter()
+            .find(|span| span.start <= offset && offset <= span.end)?;
+        let prefix = content.get(span.start as usize..offset as usize)?;
+        let range = Range::new(
+            crate::text_position::offset_to_position(content, span.start as usize),
+            crate::text_position::offset_to_position(content, span.end as usize),
+        );
+        let candidates = self.string_key_candidates(&LaravelStringKind::MorphAlias, None, prefix);
+        let items = candidates
+            .iter()
+            .filter(|alias| alias.starts_with(prefix))
+            .map(|alias| CompletionItem {
+                label: alias.clone(),
+                kind: Some(CompletionItemKind::ENUM_MEMBER),
+                text_edit: Some(CompletionTextEdit::Edit(TextEdit {
+                    range,
+                    new_text: alias.clone(),
+                })),
+                ..Default::default()
+            })
+            .collect();
+        Some(CompletionResponse::Array(items))
+    }
+
     /// Every name a string key of `kind` could be, unfiltered.
     ///
     /// Three kinds have no list to offer. A Blade section or stack name is

@@ -268,6 +268,7 @@ fn extract_call<'a>(
     scope_start: u32,
     visit_receiver: bool,
 ) {
+    record_morph_column_call(call, ctx.content, &mut ctx.morph_column_sites);
     match call {
         Call::Function(func_call) => {
             match func_call.function {
