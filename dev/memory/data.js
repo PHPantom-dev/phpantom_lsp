@@ -1,5 +1,5 @@
 window.BENCHMARK_DATA = {
-  "lastUpdate": 1791280251972,
+  "lastUpdate": 1791281347587,
   "repoUrl": "https://github.com/PHPantom-dev/phpantom_lsp",
   "entries": {
     "PHPantom Memory Usage": [
@@ -34640,6 +34640,40 @@ window.BENCHMARK_DATA = {
           {
             "name": "memory_hello_world",
             "value": 39.1,
+            "unit": "MiB"
+          },
+          {
+            "name": "memory_laravel_model",
+            "value": 83,
+            "unit": "MiB"
+          }
+        ]
+      },
+      {
+        "commit": {
+          "author": {
+            "email": "juliardi@users.noreply.github.com",
+            "name": "Juliardi",
+            "username": "juliardi"
+          },
+          "committer": {
+            "email": "anders@jenbo.dk",
+            "name": "Anders Jenbo",
+            "username": "AJenbo"
+          },
+          "distinct": true,
+          "id": "9b12c9090c94611bfe2c552414aaf0bebdb4ede0",
+          "message": "Add Pragtical plugin setup instructions\n\nAdded instructions for setting up the Pragtical plugin with LSP for PHP.",
+          "timestamp": "2026-10-06T11:55:15+02:00",
+          "tree_id": "15769f2d614b30072100231f492d99938e48ee8e",
+          "url": "https://github.com/PHPantom-dev/phpantom_lsp/commit/9b12c9090c94611bfe2c552414aaf0bebdb4ede0"
+        },
+        "date": 1791281336746,
+        "tool": "customSmallerIsBetter",
+        "benches": [
+          {
+            "name": "memory_hello_world",
+            "value": 38.7,
             "unit": "MiB"
           },
           {
