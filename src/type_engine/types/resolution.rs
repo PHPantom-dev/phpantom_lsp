@@ -241,6 +241,7 @@ fn type_hint_to_classes_typed_depth(
         // ── Union type ─────────────────────────────────────────────
         TypeKind::Union(members) => {
             let mut results: Vec<Arc<ClassInfo>> = Vec::new();
+            let mut generic_members = Vec::new();
             for member in members {
                 let resolved = type_hint_to_classes_typed_depth(
                     member,
@@ -250,7 +251,16 @@ fn type_hint_to_classes_typed_depth(
                     depth,
                     produced,
                 );
-                ClassInfo::extend_unique_arc(&mut results, resolved);
+                if matches!(member.kind(), TypeKind::Generic(_)) {
+                    // Different arguments can instantiate the same class with
+                    // different members. FQN-only deduplication loses a branch.
+                    if !generic_members.contains(&member) {
+                        generic_members.push(member);
+                        results.extend(resolved);
+                    }
+                } else {
+                    ClassInfo::extend_unique_arc(&mut results, resolved);
+                }
             }
             results
         }

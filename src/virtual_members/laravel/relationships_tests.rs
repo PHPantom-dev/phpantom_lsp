@@ -805,3 +805,171 @@ fn with_pivot_absent_returns_empty() {
     let body = "{ return $this->belongsToMany(Role::class); }";
     assert!(extract_with_pivot_columns(body).is_empty());
 }
+
+#[test]
+fn relation_type_preserves_unresolved_models_and_parent_bindings() {
+    let mut child = make_class("Child");
+    child.parent_class = Some(atom("ParentModel"));
+    for (name, return_type) in [
+        ("unparameterized", "HasMany"),
+        ("missing", "HasMany<Missing, $this>"),
+        ("parentModel", "HasOne<parent, $this>"),
+    ] {
+        child
+            .methods
+            .push(Arc::new(make_method(name, Some(return_type))));
+    }
+    let classes = [Arc::new(child), Arc::new(make_class("ParentModel"))];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    for (path, expected) in [
+        ("unparameterized", PhpType::parse("HasMany")),
+        (
+            "missing",
+            PhpType::generic(
+                "HasMany",
+                vec![PhpType::parse("Missing"), PhpType::this_type(atom("Child"))],
+            ),
+        ),
+    ] {
+        assert_eq!(
+            resolve_relation_type(&classes[0], path, &loader, None),
+            Some(expected),
+        );
+        assert!(resolve_relation_chain_details(&classes[0], path, &loader, None).is_none());
+    }
+    let relation =
+        resolve_relation_chain_details(&classes[0], "parentModel", &loader, None).unwrap();
+    assert_eq!(relation.models[0].fqn(), "ParentModel");
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("HasOne<ParentModel, Child>")
+    );
+}
+
+#[test]
+fn relation_chain_projects_custom_relations_in_the_declaring_namespace() {
+    let mut owner = make_class("Owner");
+    owner.file_namespace = Some(atom("App"));
+    owner.methods.push(Arc::new(make_method(
+        "children",
+        Some("SpecialHasMany<string, Child>"),
+    )));
+    let mut child = make_class("Child");
+    child.file_namespace = Some(atom("App"));
+    child.methods.push(Arc::new(make_method(
+        "owner",
+        Some("BelongsTo<Owner, $this>"),
+    )));
+    let mut custom = make_class("SpecialHasMany");
+    custom.file_namespace = Some(atom("App"));
+    custom.parent_class = Some(atom("Illuminate\\Database\\Eloquent\\Relations\\HasMany"));
+    custom.template_params = vec![atom("TKey"), atom("TChild")];
+    custom.extends_generics = vec![(
+        atom("Illuminate\\Database\\Eloquent\\Relations\\HasMany"),
+        vec![PhpType::parse("TChild")],
+    )];
+    let classes = [
+        Arc::new(owner),
+        Arc::new(child),
+        Arc::new(custom),
+        Arc::new(make_class(
+            "Illuminate\\Database\\Eloquent\\Relations\\HasMany",
+        )),
+    ];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let relation = resolve_relation_chain_details(&classes[0], "children", &loader, None).unwrap();
+    assert_eq!(relation.models[0].fqn(), "App\\Child");
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "children.owner", &loader, None).as_deref(),
+        Some("App\\Owner"),
+    );
+}
+
+#[test]
+fn relation_chain_details_keep_the_terminal_declaring_model() {
+    let mut team = make_class("Team");
+    for (name, return_type) in [
+        ("stocks", Some("HasMany<Stock, $this>")),
+        ("scalar", Some("string")),
+        ("untyped", None),
+        ("unknown", Some("HasMany<Missing, $this>")),
+    ] {
+        team.methods.push(Arc::new(make_method(name, return_type)));
+    }
+    let mut stock = make_class("Stock");
+    stock.methods.push(Arc::new(make_method(
+        "warehouse",
+        Some("BelongsTo<Warehouse, $this>"),
+    )));
+    let mut warehouse = make_class("Warehouse");
+    warehouse.methods.push(Arc::new(make_method(
+        "parent",
+        Some("HasOne<$this, static>"),
+    )));
+    let classes = [Arc::new(team), Arc::new(stock), Arc::new(warehouse)];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let relation =
+        resolve_relation_chain_details(&classes[0], " stocks . warehouse ", &loader, None).unwrap();
+    assert_eq!(relation.models[0].fqn(), "Warehouse");
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("BelongsTo<Warehouse, Stock>")
+    );
+    let relation =
+        resolve_relation_chain_details(&classes[0], "stocks.warehouse.parent", &loader, None)
+            .unwrap();
+    assert_eq!(
+        relation.relation_type,
+        PhpType::parse("HasOne<Warehouse, Warehouse>")
+    );
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "stocks.warehouse", &loader, None).as_deref(),
+        Some("Warehouse")
+    );
+    for chain in [
+        "",
+        ".stocks",
+        "stocks.",
+        "stocks..warehouse",
+        "stocks.missing",
+        "scalar",
+        "untyped",
+        "unknown",
+    ] {
+        assert!(
+            resolve_relation_chain_details(&classes[0], chain, &loader, None).is_none(),
+            "{chain}"
+        );
+    }
+}
+
+#[test]
+fn relation_chain_instantiates_generic_related_models() {
+    let mut owner = make_class("Owner");
+    owner.methods.push(Arc::new(make_method(
+        "holder",
+        Some("HasOne<Holder<Item>, $this>"),
+    )));
+    let mut holder = make_class("Holder");
+    holder.template_params = vec!["TItem".into()];
+    holder
+        .methods
+        .push(Arc::new(make_method("item", Some("HasOne<TItem, $this>"))));
+    let classes = [
+        Arc::new(owner),
+        Arc::new(holder),
+        Arc::new(make_class("Item")),
+    ];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+    let cache = crate::virtual_members::new_resolved_class_cache();
+    let relation =
+        resolve_relation_chain_details(&classes[0], "holder", &loader, Some(&cache)).unwrap();
+    assert_eq!(
+        relation.models[0].get_method("item").unwrap().return_type,
+        Some(PhpType::parse("HasOne<Item, $this>"))
+    );
+    assert_eq!(
+        resolve_relation_chain(&classes[0], "holder.item", &loader, Some(&cache)).as_deref(),
+        Some("Item")
+    );
+}

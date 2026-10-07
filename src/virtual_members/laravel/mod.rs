@@ -227,7 +227,8 @@ pub(crate) use relationships::classify_relationship_typed;
 pub(crate) use relationships::count_property_to_relationship_method;
 pub use relationships::infer_relationship_from_body;
 pub(crate) use relationships::{
-    RELATION_QUERY_METHODS, resolve_relation_chain, resolve_relation_type,
+    RELATION_QUERY_METHODS, related_model_type, resolve_relation_chain,
+    resolve_relation_chain_details, resolve_relation_type,
 };
 use relationships::{
     RelationshipKind, build_property_type, count_property_name, extract_pivot_accessor_typed,
@@ -247,7 +248,7 @@ use std::sync::Arc;
 
 use crate::inheritance::ancestors;
 use builder::build_builder_forwarded_methods;
-pub(crate) use builder::custom_builder_fqn;
+pub(crate) use builder::{custom_builder_fqn, model_builder_type};
 use casts::cast_type_to_php_type;
 pub(crate) use casts::qualify_cast_type;
 pub use facade::LaravelFacadeProvider;

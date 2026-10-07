@@ -3,6 +3,62 @@ use crate::atom::{AtomMap, atom};
 use crate::php_type::PhpType;
 use crate::types::{ClassLikeKind, MethodInfo};
 
+#[test]
+fn inherited_return_docblocks_preserve_covariant_native_classes() {
+    use crate::test_fixtures::{make_class, make_method};
+
+    let base = Arc::new(make_class("BaseResult"));
+    let mut specific = make_class("SpecificResult");
+    specific.parent_class = Some(atom("BaseResult"));
+    let classes = [base, Arc::new(specific)];
+    let loader = |name: &str| classes.iter().find(|class| class.fqn() == name).cloned();
+
+    for (native, own_return, inherited, expected) in [
+        (
+            "SpecificResult",
+            "SpecificResult",
+            "BaseResult<Model>",
+            "SpecificResult",
+        ),
+        (
+            "BaseResult",
+            "BaseResult",
+            "BaseResult<Model>",
+            "BaseResult<Model>",
+        ),
+        (
+            "BaseResult",
+            "BaseResult",
+            "SpecificResult",
+            "SpecificResult",
+        ),
+        (
+            "SpecificResult",
+            "SpecificResult<Model>",
+            "BaseResult<OtherModel>",
+            "SpecificResult<Model>",
+        ),
+        (
+            "array",
+            "array",
+            "array<int, string>|string",
+            "array<int, string>",
+        ),
+        ("never", "never", "BaseResult<Model>", "never"),
+    ] {
+        let mut method = make_method("getResult", Some(own_return));
+        method.native_return_type = Some(PhpType::parse(native));
+        let mut method = Arc::new(method);
+        let ancestor = make_method("getResult", Some(inherited));
+        enrich_method_arc_from_ancestor(&mut method, &ancestor, &loader);
+        assert_eq!(
+            method.return_type,
+            Some(PhpType::parse(expected)),
+            "native {native}, own {own_return}, inherited {inherited}",
+        );
+    }
+}
+
 /// Helper to build a `HashMap<String, PhpType>` from `(&str, &str)` pairs.
 fn make_subs(pairs: &[(&str, &str)]) -> HashMap<String, PhpType> {
     pairs

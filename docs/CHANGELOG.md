@@ -11,7 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Eloquent query examples and inference coverage.** The Laravel playground demonstrates custom builders surviving query chains and callbacks following dotted relationships. An audit against the PHPStan Laravel extensions now guards these behaviours with editor and runtime assertions; the remaining inference gaps are tracked as focused follow-up work. Contributed by @shuvroroy.
+
 ### Fixed
+
+- **Overridden methods keep their narrower return types.** Hover, completion, and diagnostics retain the concrete return class an override declares when inherited PHPDoc names a parent class. Contributed by @shuvroroy.
+- **Relation callbacks keep their full context.** Completion, navigation, and diagnostics retain generic model alternatives through custom relationships and eager-loading arrays. Application-defined callback signatures take precedence, and relation query methods work regardless of letter case. Contributed by @shuvroroy.
+- **Relation callbacks follow their argument types.** Completion and diagnostics keep related model types when constraints use relation-name variables, unions, or relation objects. Relation shortcuts and direct eager-loading callbacks now retain their concrete builder or relation too. Contributed by @shuvroroy.
+- **Eager relation constraints keep both callback types.** `withWhereHas()` and `withWhereRelation()` now retain the related builder and relation through fluent calls, including dotted paths and explicit union hints. Contributed by @shuvroroy.
+- **Morph relation callbacks infer their candidate models.** Completion and diagnostics retain custom builders for polymorphic constraints, including unions and class-string variables, while unknown candidates use the relation’s declared model. Contributed by @shuvroroy.
+- **Named relation callbacks keep their model types.** Completion and diagnostics now resolve relationship constraints when named arguments are reordered or optional arguments are omitted. Contributed by @shuvroroy.
+- **Relation callbacks retain custom builders.** Constraints on related models now offer their custom builder methods, including through custom-builder query chains and bare `Builder` parameter hints. Contributed by @shuvroroy.
+- **Model instance queries keep custom builders.** Starting a query with `newQuery()`, `newModelQuery()`, or `newQueryWithoutScopes()` now retains the model’s custom builder and its model type through subsequent calls. Contributed by @shuvroroy.
 
 ## [0.11.1] - 2026-10-07
 

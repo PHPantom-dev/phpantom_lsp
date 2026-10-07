@@ -157,7 +157,8 @@ pub trait VirtualMemberProvider {
 /// first `$query` parameter stripped, which is what callers actually see.
 /// The `query` / `newQuery` / `newModelQuery` methods are also replaced,
 /// so a model with a custom builder returns that builder rather than the
-/// base one from the framework declaration.
+/// base one from the framework declaration. The Laravel provider also
+/// refines the real `newQueryWithoutScopes` declaration in place.
 ///
 /// Properties are deduplicated by name.  When a property with the same
 /// name already exists, the **more specific** type wins regardless of
@@ -199,6 +200,7 @@ pub fn merge_virtual_members(class: &mut ClassInfo, virtual_members: VirtualMemb
         if let Some(&idx) = method_index.get(&key) {
             if class.methods[idx].has_scope_attribute
                 || matches!(method.name.as_str(), "query" | "newQuery" | "newModelQuery")
+                || (method.name == "newQueryWithoutScopes" && !method.is_virtual)
             {
                 // Replace the original with the synthesized virtual method.
                 // For scope attributes, the original is an implementation detail.

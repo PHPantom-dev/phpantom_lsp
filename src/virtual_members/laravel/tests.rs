@@ -11,6 +11,16 @@ use std::sync::Arc;
 // ── applies_to ──────────────────────────────────────────────────────
 
 #[test]
+fn model_builder_type_survives_missing_framework_and_custom_stubs() {
+    let mut model = make_class("App\\Models\\Product");
+    model.parent_class = Some(atom(ELOQUENT_MODEL_FQN));
+    let expected = PhpType::parse("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\Product>");
+    assert_eq!(model_builder_type(&model, &no_loader), expected);
+    model.laravel_mut().custom_builder = Some(PhpType::parse("App\\MissingBuilder"));
+    assert_eq!(model_builder_type(&model, &no_loader), expected);
+}
+
+#[test]
 fn applies_to_model_subclass() {
     let provider = LaravelModelProvider;
     let mut user = make_class("App\\Models\\User");

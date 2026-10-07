@@ -16,7 +16,7 @@
 use std::sync::Arc;
 
 use crate::inheritance::{ancestors, apply_substitution_to_conditional};
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::{ClassInfo, MethodInfo, Visibility};
 use crate::virtual_members::ResolvedClassCache;
 
@@ -42,6 +42,31 @@ pub(crate) fn custom_builder_fqn(
         .or_else(|| ancestors(class, class_loader).find_map(|(_, parent)| declared(&parent)))
 }
 
+/// Select a model's builder using the same inherited configuration as
+/// static forwarding. Missing custom classes fall back to Eloquent's builder.
+fn model_builder_class(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<Arc<ClassInfo>> {
+    custom_builder_fqn(model, class_loader)
+        .and_then(|name| class_loader(&name))
+        .or_else(|| class_loader(ELOQUENT_BUILDER_FQN))
+}
+
+/// The concrete query type constructed for a model, including custom builders
+/// that do not declare their own template parameter.
+pub(crate) fn model_builder_type(
+    model: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> PhpType {
+    let builder = model_builder_class(model, class_loader);
+    let name = builder.as_ref().map_or_else(
+        || crate::atom::atom(ELOQUENT_BUILDER_FQN),
+        |builder| builder.fqn(),
+    );
+    PhpType::generic_atom(name, vec![PhpType::named(model.fqn())])
+}
+
 /// Build static virtual methods by forwarding Eloquent Builder's public
 /// instance methods onto the model class. See the module docs for the
 /// return-type mapping.
@@ -50,21 +75,10 @@ pub(super) fn build_builder_forwarded_methods(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     cache: Option<&ResolvedClassCache>,
 ) -> Vec<Arc<MethodInfo>> {
-    let requested_builder_fqn =
-        custom_builder_fqn(class, class_loader).unwrap_or_else(|| ELOQUENT_BUILDER_FQN.to_string());
-
-    // Load the Eloquent Builder class (or custom builder).
-    let (builder_class, builder_fqn) = match class_loader(&requested_builder_fqn) {
-        Some(c) => (c, requested_builder_fqn),
-        // Fallback to standard builder if custom builder fails to load.
-        None if requested_builder_fqn != ELOQUENT_BUILDER_FQN => {
-            match class_loader(ELOQUENT_BUILDER_FQN) {
-                Some(c) => (c, ELOQUENT_BUILDER_FQN.to_string()),
-                None => return Vec::new(),
-            }
-        }
-        None => return Vec::new(),
+    let Some(builder_class) = model_builder_class(class, class_loader) else {
+        return Vec::new();
     };
+    let builder_fqn = builder_class.fqn();
 
     // Fully resolve Builder (own + traits + parents + virtual members
     // including @mixin Query\Builder).  This is safe because Builder
@@ -84,7 +98,7 @@ pub(super) fn build_builder_forwarded_methods(
 
     // Build a substitution map: TModel → concrete model class name,
     // and static/$this/self → Builder<ConcreteModel>.
-    let builder_self_type = PhpType::generic(&builder_fqn, vec![PhpType::named(class.fqn())]);
+    let builder_self_type = PhpType::generic(builder_fqn, vec![PhpType::named(class.fqn())]);
     let mut subs = super::self_ref_subs(builder_self_type.clone());
     insert_builder_template_substitutions(
         &mut subs,
@@ -180,14 +194,42 @@ pub(super) fn build_builder_forwarded_methods(
         methods.push(forwarded);
     }
 
-    // ── query() / newQuery() / newModelQuery() ──────────────────────
-    // When a model has a custom builder, User::query() should return
-    // UserBuilder<User> instead of the default Builder<User>.
-    for name in ["query", "newQuery", "newModelQuery"] {
-        methods.push(Arc::new(MethodInfo {
-            is_static: true,
-            ..MethodInfo::virtual_method_typed(name, Some(&builder_self_type))
-        }));
+    let query_fp = crate::virtual_members::TransformFingerprint::new(
+        Some(&subs),
+        Some("model-query-factory"),
+        0,
+    );
+    for name in [
+        "query",
+        "newQuery",
+        "newModelQuery",
+        "newQueryWithoutScopes",
+    ] {
+        if let Some(original) = class.get_method_arc(name) {
+            // A user override returning a different builder owns its type.
+            // Refine only the framework's base-builder declaration, keeping
+            // its parameters, visibility and instance/static distinction.
+            if let Some(ret) = original.return_type.as_ref()
+                && (ret.base_name() != Some(ELOQUENT_BUILDER_FQN)
+                    || matches!(ret.kind(), TypeKind::Generic(g) if g.args.first().is_some_and(|model| !model.is_self_ref())))
+            {
+                continue;
+            }
+            methods.push(crate::virtual_members::intern_transformed_method(
+                &original,
+                query_fp,
+                || {
+                    let mut method = (*original).clone();
+                    method.return_type = Some(builder_self_type.clone());
+                    method
+                },
+            ));
+        } else {
+            methods.push(Arc::new(MethodInfo {
+                is_static: name == "query",
+                ..MethodInfo::virtual_method_typed(name, Some(&builder_self_type))
+            }));
+        }
     }
 
     methods

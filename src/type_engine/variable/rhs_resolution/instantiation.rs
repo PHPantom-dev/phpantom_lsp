@@ -225,15 +225,6 @@ pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<St
     })
 }
 
-/// Extract a generic type argument from a class's ancestor chain.
-///
-/// Given an argument type (e.g. `FooContainer`) and a target wrapper class
-/// (e.g. `Container`), walks the `@extends` chain to find where the argument
-/// type (or one of its ancestors) extends the wrapper class, then extracts the
-/// generic argument at `tpl_position`.
-///
-/// For example, if `FooContainer` has `@extends Container<Foo>`, calling
-/// `extract_generic_arg_from_ancestor(FooContainer, "Container", 0, ...)` returns `Foo`.
 /// Bind a template a `class-string<Wrapper<T>>` hint names, from the class
 /// the argument names: `T` is whatever that class's `Wrapper` ancestor was
 /// given at `tpl_position`.
@@ -244,18 +235,12 @@ pub(crate) fn class_string_generic_binding(
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let class = class_string_inner_binding(arg_text, rctx)?;
-    extract_generic_arg_from_ancestor(&class, wrapper_name, tpl_position, rctx)
-}
-
-pub(crate) fn extract_generic_arg_from_ancestor(
-    arg_type: &PhpType,
-    wrapper_name: &str,
-    tpl_position: usize,
-    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
-) -> Option<PhpType> {
-    extract_generic_args_from_ancestor(arg_type, wrapper_name, rctx)?
-        .into_iter()
-        .nth(tpl_position)
+    crate::inheritance::extract_generic_arg_from_ancestor(
+        &class,
+        wrapper_name,
+        tpl_position,
+        rctx.class_loader,
+    )
 }
 
 /// Every generic argument `arg_type` hands its `wrapper_name` ancestor, for
@@ -266,103 +251,11 @@ pub(crate) fn extract_generic_args_from_ancestor(
     wrapper_name: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<Vec<PhpType>> {
-    let class_name = match arg_type.kind() {
-        TypeKind::Named(n) => n.as_str(),
-        TypeKind::Generic(g) => g.name.as_str(),
-        _ => return None,
-    };
-
-    // If the arg type itself is already generic with the wrapper name,
-    // extract directly.  E.g. argument type is `Container<Foo>`.
-    if let TypeKind::Generic(g) = arg_type.kind() {
-        let n_short = crate::util::short_name(&g.name);
-        let wrapper_short = crate::util::short_name(wrapper_name);
-        if n_short.eq_ignore_ascii_case(wrapper_short) {
-            return Some(g.args.clone());
-        }
-    }
-
-    let class_loader = rctx.class_loader;
-    let cls = class_loader(class_name)?;
-
-    // The argument's own type arguments are what its `@extends`/
-    // `@implements` names stand for: `ClassStringType<class-string<Foo>>`
-    // with `@implements Type<class-string<T>>` hands `Type` a
-    // `class-string<Foo>`, not a `class-string<T>`.
-    let subs = match arg_type.kind() {
-        TypeKind::Generic(g) => crate::inheritance::build_generic_subs(&cls, &g.args),
-        _ => HashMap::new(),
-    };
-    let wrapper_short = crate::util::short_name(wrapper_name);
-    let mut visited = Vec::new();
-    ancestor_generic_args(&cls, wrapper_short, &subs, &mut visited, class_loader)
-}
-
-/// Maximum ancestry depth walked while looking for an ancestor's generic
-/// argument.  A backstop against an `extends`/`implements` cycle the
-/// loader hands back; the `visited` set is what actually bounds the work.
-const MAX_ANCESTOR_GENERIC_DEPTH: usize = 15;
-
-/// The type arguments `ancestor_short` receives, as seen from `cls`.
-///
-/// Walks the parent chain **and** the interface list, threading each
-/// level's `@extends`/`@implements` arguments into the next, so a class
-/// that reaches the ancestor only through an intermediate generic
-/// interface still reports concrete arguments.
-/// `X implements CollectorWithPaths<never, array{…}>` together with
-/// `CollectorWithPaths extends Collector<TNodeType, TValue>` is what says
-/// `Collector`'s value argument is that `array{…}`.
-fn ancestor_generic_args(
-    cls: &ClassInfo,
-    ancestor_short: &str,
-    subs: &HashMap<String, PhpType>,
-    visited: &mut Vec<crate::atom::Atom>,
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
-) -> Option<Vec<PhpType>> {
-    if visited.len() > MAX_ANCESTOR_GENERIC_DEPTH {
-        return None;
-    }
-    let fqn = cls.fqn();
-    if visited.contains(&fqn) {
-        return None;
-    }
-    visited.push(fqn);
-
-    if let Some(args) = find_extends_generic_args(cls, ancestor_short) {
-        return Some(if subs.is_empty() {
-            args.to_vec()
-        } else {
-            args.iter().map(|arg| arg.substitute(subs)).collect()
-        });
-    }
-
-    for ancestor_name in cls.parent_class.iter().chain(cls.interfaces.iter()) {
-        let Some(ancestor) = class_loader(ancestor_name) else {
-            continue;
-        };
-        let next_subs = crate::inheritance::build_substitution_map(
-            &crate::inheritance::ClassRef::Borrowed(cls),
-            &ancestor,
-            subs,
-        );
-        if let Some(args) =
-            ancestor_generic_args(&ancestor, ancestor_short, &next_subs, visited, class_loader)
-        {
-            return Some(args);
-        }
-    }
-
-    None
-}
-
-/// The generic args of a class's `@extends`/`@implements` clause matching
-/// a target short name.
-fn find_extends_generic_args<'c>(cls: &'c ClassInfo, target_short: &str) -> Option<&'c [PhpType]> {
-    cls.extends_generics
-        .iter()
-        .chain(cls.implements_generics.iter())
-        .find(|(name, _)| crate::util::short_name(name) == target_short)
-        .map(|(_, args)| args.as_slice())
+    crate::inheritance::extract_generic_args_from_ancestor(
+        arg_type,
+        wrapper_name,
+        rctx.class_loader,
+    )
 }
 
 /// Remap constructor template substitutions from ancestor param names to child

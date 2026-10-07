@@ -17,6 +17,49 @@ fn make_builder(methods: Vec<MethodInfo>) -> ClassInfo {
 // ── build_builder_forwarded_methods ─────────────────────────────
 
 #[test]
+fn model_query_factories_preserve_declaration_metadata() {
+    let builder = Arc::new(make_builder(vec![]));
+    let mut model = make_class("App\\Team");
+    let mut original = make_method_with_params(
+        "newQueryWithoutScopes",
+        Some(ELOQUENT_BUILDER_FQN),
+        vec![make_param("$connection", Some("string"), false)],
+    );
+    original.is_static = false;
+    original.is_virtual = false;
+    original.name_offset = 42;
+    original.native_return_type = original.return_type.clone();
+    model.methods.push(Arc::new(original));
+    let loader = |name: &str| (name == ELOQUENT_BUILDER_FQN).then(|| Arc::clone(&builder));
+    let methods = build_builder_forwarded_methods(&model, &loader, None);
+    let factory = methods
+        .iter()
+        .find(|m| m.name == "newQueryWithoutScopes")
+        .unwrap();
+    assert!(!factory.is_static);
+    assert!(!factory.is_virtual);
+    assert_eq!(factory.name_offset, 42);
+    assert_eq!(factory.parameters[0].name, "$connection");
+    assert_eq!(
+        factory.native_return_type,
+        Some(PhpType::named(atom(ELOQUENT_BUILDER_FQN)))
+    );
+    assert_eq!(
+        factory.return_type,
+        Some(PhpType::generic(
+            ELOQUENT_BUILDER_FQN,
+            vec![PhpType::named(atom("App\\Team"))]
+        ))
+    );
+    for name in ["query", "newQuery", "newModelQuery"] {
+        assert_eq!(
+            methods.iter().find(|m| m.name == name).unwrap().is_static,
+            name == "query"
+        );
+    }
+}
+
+#[test]
 fn builder_forwarding_returns_empty_when_builder_not_found() {
     let class = make_class("App\\Models\\User");
     let result = build_builder_forwarded_methods(&class, &no_loader, None);
@@ -39,8 +82,8 @@ fn builder_forwarding_converts_instance_to_static() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    // 1 real + 3 synthesized (query, newQuery, newModelQuery)
-    assert_eq!(result.len(), 4);
+    // 1 real + 4 synthesized query factories
+    assert_eq!(result.len(), 5);
     assert!(result[0].is_static, "Forwarded method should be static");
     assert_eq!(result[0].name, "where");
 }
@@ -59,7 +102,7 @@ fn builder_forwarding_maps_static_to_builder_self_type() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\User>"),
@@ -81,7 +124,7 @@ fn builder_forwarding_maps_this_to_builder_self_type() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\User>"),
@@ -103,7 +146,7 @@ fn builder_forwarding_maps_self_to_builder_self_type() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\User>"),
@@ -125,7 +168,7 @@ fn builder_forwarding_maps_tmodel_to_concrete_class() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("App\\Models\\User|null"),
@@ -213,7 +256,7 @@ fn builder_forwarding_maps_generic_collection_return() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("Illuminate\\Database\\Eloquent\\Collection<int, App\\Models\\User>"),
@@ -235,7 +278,7 @@ fn builder_forwarding_maps_static_in_union() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].return_type_str().as_deref(),
         Some("Illuminate\\Database\\Eloquent\\Builder<App\\Models\\User>|null"),
@@ -263,7 +306,7 @@ fn builder_forwarding_skips_magic_methods() {
     let result = build_builder_forwarded_methods(&user, &loader, None);
     assert_eq!(
         result.len(),
-        4,
+        5,
         "Only non-magic methods should be forwarded"
     );
     assert_eq!(result[0].name, "where");
@@ -287,7 +330,7 @@ fn builder_forwarding_skips_non_public_methods() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4, "Only public methods should be forwarded");
+    assert_eq!(result.len(), 5, "Only public methods should be forwarded");
     assert_eq!(result[0].name, "where");
 }
 
@@ -314,7 +357,7 @@ fn builder_forwarding_skips_methods_already_on_model() {
     let result = build_builder_forwarded_methods(&user, &loader, None);
     assert_eq!(
         result.len(),
-        4,
+        5,
         "Should skip 'myMethod' because the model already has it as static"
     );
     assert_eq!(result[0].name, "where");
@@ -342,7 +385,7 @@ fn builder_forwarding_does_not_skip_instance_method_with_same_name() {
     let result = build_builder_forwarded_methods(&user, &loader, None);
     assert_eq!(
         result.len(),
-        4,
+        5,
         "Static forwarded method should be added even when an instance method with the same name exists"
     );
     assert!(result[0].is_static);
@@ -366,7 +409,7 @@ fn builder_forwarding_maps_parameter_types() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert_eq!(
         result[0].parameters[0].type_hint_str().as_deref(),
         Some("App\\Models\\User"),
@@ -398,7 +441,7 @@ fn builder_forwarding_preserves_method_metadata() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert!(
         result[0].deprecation_message.is_some(),
         "Deprecated flag should be preserved"
@@ -430,13 +473,13 @@ fn builder_forwarding_multiple_methods() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 7);
+    assert_eq!(result.len(), 8);
     let names: Vec<&str> = result.iter().map(|m| m.name.as_str()).collect();
     assert!(names.contains(&"where"));
     assert!(names.contains(&"orderBy"));
     assert!(names.contains(&"get"));
     assert!(names.contains(&"first"));
-    assert!(result.iter().all(|m| m.is_static));
+    assert!(result[..4].iter().all(|m| m.is_static));
 }
 
 #[test]
@@ -507,7 +550,7 @@ fn builder_forwarding_with_no_return_type() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 4);
+    assert_eq!(result.len(), 5);
     assert!(
         result[0].return_type.is_none(),
         "None return type should stay None"
@@ -531,7 +574,7 @@ fn builder_forwarding_preserves_non_template_return_types() {
     };
 
     let result = build_builder_forwarded_methods(&user, &loader, None);
-    assert_eq!(result.len(), 5);
+    assert_eq!(result.len(), 6);
     assert_eq!(result[0].return_type_str().as_deref(), Some("string"));
     assert_eq!(result[1].return_type_str().as_deref(), Some("bool"));
 }

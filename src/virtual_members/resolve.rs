@@ -912,7 +912,12 @@ fn apply_post_merge_stages(
             // right input for the substituted case too.
             let resolved_iface = resolve_class_fully_inner(&iface, class_loader, Some(cache));
 
-            merge_interface_members_into(merged, ClassInfo::clone(&resolved_iface), &iface_subs);
+            merge_interface_members_into(
+                merged,
+                ClassInfo::clone(&resolved_iface),
+                &iface_subs,
+                class_loader,
+            );
         }
     }
 
@@ -961,6 +966,7 @@ fn merge_interface_members_into(
     merged: &mut ClassInfo,
     mut resolved_iface: ClassInfo,
     iface_subs: &HashMap<String, PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) {
     // Apply @implements generic substitutions to the resolved
     // interface members before merging.  Only the members that actually
@@ -1037,7 +1043,7 @@ fn merge_interface_members_into(
 
         if let Some(idx) = existing_idx {
             let existing = &mut merged.methods.make_mut()[idx];
-            enrich_method_arc_from_ancestor(existing, &iface_method);
+            enrich_method_arc_from_ancestor(existing, &iface_method, class_loader);
         } else {
             merged.methods.push(iface_method);
         }

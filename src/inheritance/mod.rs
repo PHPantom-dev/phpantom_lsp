@@ -17,6 +17,9 @@
 //! properties have their template parameter references replaced with the
 //! concrete types.
 
+mod ancestor;
+pub(crate) use ancestor::{extract_generic_arg_from_ancestor, extract_generic_args_from_ancestor};
+
 pub mod ancestry;
 pub mod enrichment;
 pub mod generics;
@@ -384,9 +387,9 @@ pub(crate) fn resolve_class_with_inheritance(
                             apply_substitution_to_method(&mut m, &level_subs);
                             m
                         });
-                        enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                        enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                     } else {
-                        enrich_method_arc_from_ancestor(existing, method);
+                        enrich_method_arc_from_ancestor(existing, method, class_loader);
                     }
                 }
                 continue;
@@ -545,9 +548,9 @@ pub(crate) fn resolve_class_with_inheritance(
                         apply_substitution_to_method(&mut m, &iface_subs);
                         m
                     });
-                    enrich_method_arc_from_ancestor(existing, &ancestor_method);
+                    enrich_method_arc_from_ancestor(existing, &ancestor_method, class_loader);
                 } else {
-                    enrich_method_arc_from_ancestor(existing, method);
+                    enrich_method_arc_from_ancestor(existing, method, class_loader);
                 }
             }
         }
