@@ -730,10 +730,15 @@ pub(crate) fn seed_closure_params(
         // type says (`bool $a = null` is `?bool`).
         let default_is_null = crate::parser::param_default_is_null(param);
         let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
-        let native_type = param
-            .hint
-            .as_ref()
-            .map(|h| accept_default(extract_hint_type(h)));
+        // Qualify the hint against this file's imports, as in `seed_params`.
+        let native_type = param.hint.as_ref().map(|h| {
+            accept_default(crate::util::resolve_source_php_type_names(
+                &extract_hint_type(h),
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
+                ctx.class_loader,
+            ))
+        });
 
         // Check the `@param` docblock annotation.
         //

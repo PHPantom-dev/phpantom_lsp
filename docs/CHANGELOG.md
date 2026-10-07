@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A caller's imports no longer change what another file's types mean.** A function declared with `function is_enrolled(context $context)` in the global namespace means the global `\context` wherever it is called from, but a caller that imported an unrelated class of the same short name (`use App\context;`), or sat in a namespace that declares one, had the argument checked against that class instead and was told a perfectly valid argument was the wrong type. The same happened to a value returned from such a function. Parameter and return types are now read as their declaring file wrote them, which also means an argument of the imported class passed where the global one is expected is now reported rather than waved through. Contributed by @arcticfulmar.
+- **A parameter's class type hint names the class its own file means.** Inside `namespace Illuminate\Console\Scheduling`, a method or closure declared with `Event $event` takes that namespace's `Event`, but it was read as a global class of the same name, so every use of `$event` reported members that do exist as not found, and passing it on was reported as the wrong type. Type hints on parameters are now read through the file's imports and namespace the way PHP reads them, just as `@param` tags already were. Contributed by @arcticfulmar.
+
 ## [0.11.1] - 2026-10-07
 
 ### Added

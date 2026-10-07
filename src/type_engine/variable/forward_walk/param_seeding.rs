@@ -39,7 +39,15 @@ pub(crate) fn seed_params<'b>(
     for (index, param) in parameters.enumerate() {
         let pname = bytes_to_str(param.variable.name).to_string();
         let is_variadic = param.ellipsis.is_some();
-        let native_type = param.hint.as_ref().map(|h| extract_hint_type(h));
+        // Qualify the hint against this file's imports, as `@param` tags are.
+        let native_type = param.hint.as_ref().map(|h| {
+            crate::util::resolve_source_php_type_names(
+                &extract_hint_type(h),
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
+                ctx.class_loader,
+            )
+        });
 
         // For promoted constructor properties, check for an inline
         // `/** @var Type */` docblock on the parameter itself.  The
@@ -291,7 +299,15 @@ pub(crate) fn resolve_param_type(
     // says (`bool $a = null` is `?bool`).
     let default_is_null = crate::parser::param_default_is_null(param);
     let accept_default = |ty: PhpType| if default_is_null { ty.or_null() } else { ty };
-    let native_type = raw_native.clone().map(accept_default);
+    // Qualify the hint against this file's imports, as `@param` tags are.
+    let native_type = raw_native.as_ref().map(|ty| {
+        accept_default(crate::util::resolve_source_php_type_names(
+            ty,
+            ctx.current_class.file_namespace.as_deref(),
+            ctx.all_classes,
+            ctx.class_loader,
+        ))
+    });
     let native_type = native_type.as_ref();
     // Eloquent scope Builder enrichment: when the enclosing class
     // extends Eloquent Model and this is a scope method (convention
